@@ -93,6 +93,9 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
 
 
+> ⚠️ **DES 채번 스킵 조건**: `--edit`, `--alt`, `--redesign`, `--list`, `--init` 플래그가 있으면
+> 이 섹션(Step A~C-2)을 건너뛰고 해당 프로토콜로 직접 진행한다.
+
 > ⚠️ 이 단계는 화면 생성 이전에 실행된다.
 
 1. **Step A: DES 채번**
@@ -786,6 +789,7 @@ variants 생성 시:
 
 `--edit SCREEN_ID "편집 프롬프트"`로 기존 화면을 단일 결과로 수정한다.
 
+> **DES 채번 스킵**: Edit는 DES 채번/프로젝트 생성을 건너뛰고, `SCREEN_ID`가 속한 DES의 `design.json`에서 `stitch_project_id`를 읽어 사용한다.
 > **project_id 해석**: Edit는 `config.stitch.project_id`를 사용하지 않는다. `SCREEN_ID`가 속한 DES의 `design.json`에서 `stitch_project_id`를 읽어 사용한다.
 > **화면 ID 해석**: 입력 `SCREEN_ID`는 로컬 ID(`screen-001`) 기준이며, `design.json`의 `screens[]`에서 매칭 후 `stitch_screen_id`를 실제 SDK 호출 ID로 사용한다.
 
@@ -842,13 +846,23 @@ variants 생성 시:
 
 > **기본 모드**: EXPLORE + variant 2개
 > **재설계 모드**: `--alt SCREEN_ID --reimagine`이면 Redesign 프로토콜로 위임
+> **DES 채번 스킵**: Alt는 DES 채번/프로젝트 생성을 건너뛰고, `SCREEN_ID`가 속한 DES의 `design.json`에서 `stitch_project_id`를 읽어 사용한다.
 > **project_id 해석**: 기본 Alt는 Edit와 동일하게 대상 DES의 `stitch_project_id`를 사용한다.
 
 1. **reimagine 분기**:
    - `--reimagine`이 있으면 즉시 `## Redesign 프로토콜`을 실행한다 (`--redesign`과 동일).
 
 2. **대상 DES + 화면 식별**:
-   - Edit 프로토콜 Step 1과 동일하게 `{SCREEN_ID}`를 로컬 ID로 해석한다.
+   - 활성 DES(`design.json`) 중 `screens[].id == {SCREEN_ID}` 항목을 찾는다.
+   - 미발견 시: "[Stitch] 화면을 찾을 수 없습니다 — screen_id: {SCREEN_ID}" 출력 후 종료
+   - `stitch_project_id`가 없으면: "[Stitch] DES stitch_project_id가 없습니다 — Alt 실행 불가" 출력 후 종료
+   - 매칭 화면의 `stitch_screen_id`를 `{SOURCE_STITCH_SCREEN_ID}`로 보관
+
+2.5. **대상 화면 유효성 확인**:
+   ```
+   Bash(command: "node {PLUGIN_ROOT}/scripts/stitch-sdk.mjs get-screen --project-id {stitch_project_id} --screen-id {SOURCE_STITCH_SCREEN_ID}")
+   ```
+   - 실패 시: "[Stitch] 원본 화면 조회 실패 — stitch_screen_id: {SOURCE_STITCH_SCREEN_ID}" 출력 후 종료
 
 3. **variants 생성** (EXPLORE, 2개):
    ```
