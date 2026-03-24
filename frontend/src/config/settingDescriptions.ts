@@ -217,6 +217,11 @@ export const SETTING_DESCRIPTIONS: Record<string, string | SettingMeta> = {
     options: ['ask', 'default_pass', 'convergence', 'fixed_n'],
   },
   'plan_qa_presets.loop_exit_n': '고정 반복 횟수 (loop_exit=fixed_n 시 사용)',
+  'test_enforcement.enabled': '소스 코드 수정 시 테스트 작성/실행 강제 여부 (true=강제, false=권장)',
+  'test_enforcement.backend_tdd': '백엔드 태스크에 TDD 순서 (테스트 먼저 → 구현) 강제',
+  'test_enforcement.web_execution_test': '웹/프론트엔드 태스크에 실행 테스트 (playwright/browser) 강제',
+  'test_enforcement.exempt_patterns': '테스트 면제 파일 패턴 (이 패턴에 100% 매칭되면 테스트 면제)',
+  'test_enforcement.require_exemption_reason': '테스트 면제 시 사유 기록 필수 여부',
 };
 
 export const getDescription = (

@@ -101,6 +101,7 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
   intent_fidelity: ['enabled', 'mode', 'exclude_dirs'],
   plan_qa_presets: ['test_strategy', 'loop_exit', 'loop_exit_n'],
   reference: ['cache_ttl_days', 'cutoff_threshold_months', 'auto_search', 'max_searches_per_step'],
+  test_enforcement: ['enabled', 'backend_tdd', 'web_execution_test', 'exempt_patterns', 'require_exemption_reason'],
 };
 
 const WORKFLOW_PHASES: WorkflowPhase[] = [
@@ -186,6 +187,14 @@ const WORKFLOW_PHASES: WorkflowPhase[] = [
         description: '외부 참조 검색/캐싱 설정',
         kind: 'info',
         configPath: ['reference'],
+      },
+      {
+        id: 'test_enforcement',
+        label: 'test_enforcement',
+        description: '테스트 강제화 설정 (request/review 단계에서 사용)',
+        kind: 'info',
+        enabledPath: ['test_enforcement', 'enabled'],
+        configPath: ['test_enforcement'],
       },
       {
         id: 'prereview',
