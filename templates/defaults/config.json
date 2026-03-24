@@ -422,6 +422,20 @@
     "loop_exit": "ask",
     "loop_exit_n": 3
   },
+  "test_enforcement": {
+    "enabled": true,
+    "backend_tdd": true,
+    "web_execution_test": true,
+    "exempt_patterns": [
+      "*.md",
+      "*.json",
+      "*.yml",
+      "*.yaml",
+      "*.txt",
+      "*.css"
+    ],
+    "require_exemption_reason": true
+  },
   "d3": {
     "enabled": true,
     "agents": {

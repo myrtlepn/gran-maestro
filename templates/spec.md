@@ -98,7 +98,7 @@ Step 3: 에이전트 확정
   ③ 빌드 성공: 빌드 스크립트가 존재하는 프로젝트 변경 시 [automatable]
   ④ 린트/포맷: 린터·포맷터 설정이 있는 프로젝트 변경 시 [automatable]
   ⑤ 기존 테스트: 테스트 스위트가 존재하는 프로젝트 변경 시 [automatable]
-  ⑥ 신규 테스트: 새 로직 추가 시 (해당 시) [automatable]
+  ⑥ 신규 테스트: 소스 코드 변경 시 필수 (test_enforcement.enabled=true일 때) [automatable]
   ⑦ 런타임 에러 없음: UI/서버 변경 시 [manual]
   ⑧ 하위 호환성: 공개 인터페이스 변경 시 [manual]
   해당 없는 카테고리는 생략 가능.

@@ -538,8 +538,19 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - §3.5 Constraints에 반영
    1.9. **테스트 전략 게이트 (Test Strategy Gate)** (Step 1.8 완료 직후, Step h-0 이전):
       - **실행 조건**:
-        - plan.md에 `## 테스트 전략` 섹션이 존재하고 `적용 여부: 적용`인 경우에만 실행한다.
-        - 섹션이 없거나 `적용 여부: 적용 안 함`이면 이 단계 전체를 skip하고 Step h-0으로 진행한다 (하위 호환 유지).
+        - 먼저 `test_enforcement`를 로드한다.
+          - 1순위: `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `test_enforcement`
+          - 2순위 fallback: `templates/defaults/config.json`의 `test_enforcement`
+          - 둘 다 없으면 기본값 사용:
+            - `enabled=true`
+            - `backend_tdd=true`
+            - `web_execution_test=true`
+            - `exempt_patterns=["*.md","*.json","*.yml","*.yaml","*.txt","*.css"]`
+            - `require_exemption_reason=true`
+        - `test_enforcement.enabled=true`이면 plan의 `## 테스트 전략` 섹션 유무와 무관하게 **항상 실행**한다.
+        - `test_enforcement.enabled=false`이면 기존 동작을 유지한다:
+          - plan.md에 `## 테스트 전략` 섹션이 존재하고 `적용 여부: 적용`인 경우에만 실행
+          - 섹션이 없거나 `적용 여부: 적용 안 함`이면 skip
       - **코드베이스 탐색 (Glob/Grep, MANDATORY)**:
         - `package.json`에서 test runner를 감지한다 (`jest`, `vitest`, `mocha`, `pytest` 등).
         - `tsconfig.json`, `.eslintrc*`, `eslint.config.*`, `prettier.config.*`, `.prettierrc*` 존재 여부를 확인한다.
@@ -573,10 +584,21 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - **사용자 확인**:
         - `AUTO_APPROVE=false`: AskUserQuestion으로 추천 목록을 제시하고 사용자 확인/수정을 반영한다.
         - `AUTO_APPROVE=true`: PM이 추천 목록을 자율 확정한다.
+      - **test_enforcement 강제 규칙 (MANDATORY)**:
+        - `test_enforcement.enabled=true`일 때:
+          - 변경 파일이 `exempt_patterns`에 100% 매칭되면 테스트 면제를 적용하고 사유를 기록한다.
+            - 기본 사유: `"비코드 수정(exempt_patterns 매칭)"`
+            - `require_exemption_reason=true`이면 spec 본문 또는 내부 메모에 사유 기록이 없을 경우 에러로 처리한다.
+          - 테스트 러너 미감지 시 테스트 면제를 적용하고 사유를 기록한다.
+            - 사유: `"테스트 프레임워크 미존재"`
+          - 위 두 면제 조건이 아니면 테스트 AC를 반드시 포함한다.
+        - `test_enforcement.enabled=false`일 때는 기존 권장 정책(면제 기록 강제 없음)을 유지한다.
       - **spec AC 반영 규칙**:
         - 확정된 테스트 항목을 spec.md AC에 테스트 유형 보조 태그로 부여한다.
         - 보조 태그는 기존 `[automatable]`/`[manual]`/`[browser-test]` 뒤에 추가한다.
         - 각 유형별 원칙은 해당 태그가 부여된 AC에만 2~3줄로 선별 주입한다 (전체 AC 일괄 주입 금지).
+        - `test_enforcement.backend_tdd=true`이고 백엔드 도메인 태스크이면 핵심 테스트 AC에 `[tdd-required]`를 부여하고 구현 지시문에 `"테스트를 먼저 작성한 후 구현하세요 (TDD)"`를 반드시 포함한다.
+        - `test_enforcement.web_execution_test=true`이고 웹/프론트엔드 도메인 태스크이면 최소 1개 AC에 `[e2e-browser]` 또는 `[browser-test]`를 부여하고 구현 지시문에 `"실행 테스트를 작성하고 통과시킨 후 구현 완료로 판단하세요"`를 반드시 포함한다.
       - **유형별 원칙 (하드코딩, MANDATORY)**:
         - `[build-check]`: "빌드 명령어 성공(exit 0) 확인. 빌드 오류 시 구현 실패로 간주."
         - `[lint-check]`: "린터/포맷터 규칙 위반 0건 확인. --fix 자동 수정 허용."
@@ -589,6 +611,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - **도구 미설치 시 처리**:
         - 추천된 테스트 도구가 미설치면 graceful skip 처리 후 설치 명령어를 안내한다.
         - 사용자에게 `"LLM이 설치를 도와드릴까요?"` 옵션을 제공한다.
+        - `test_enforcement.enabled=true`에서 test runner 자체가 미감지인 경우는 도구 설치 안내와 별개로 `"테스트 프레임워크 미존재"` 면제 사유를 반드시 기록한다.
         - 도구 미설치로 인해 request 워크플로우를 차단하지 않는다.
    h-0. **Stitch 트리거 감지** (config.stitch.enabled=true인 경우):
       - 명시적 디자인 요청("화면 디자인해줘", "Stitch로", "목업", "시안" 등):
@@ -677,10 +700,12 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - AC 헤더 타입 태그는 `[automatable]`, `[manual]`, `[browser-test]` 3가지를 허용한다.
         - `browser-test`는 실제 브라우저 상호작용 검증이 필요한 AC에 사용한다 (UI 흐름, 클릭/입력, 화면 렌더링, 시각적 회귀 확인 등).
         - plan의 `## 인수 기준 초안` 또는 대화 컨텍스트에 `브라우저 테스트`, `실제 브라우저`, `스크린샷 검증`, `Playwright`, `Claude in Chrome` 신호가 있으면 AC를 `[browser-test]`로 분류한다.
+        - `test_enforcement.web_execution_test=true`이고 웹/프론트엔드 태스크이면 위 신호가 약해도 `[browser-test]` 또는 `[e2e-browser]` AC를 최소 1개 포함한다.
         - `[browser-test]` AC도 기존 Given/When/Then/Test 형식을 그대로 유지한다.
         - `Test:`는 실행 대상 URL/화면 + 핵심 사용자 동작 + 기대 결과를 포함해 작성한다 (예: `Playwright 또는 Claude in Chrome으로 /settings 진입 후 Save 클릭 시 성공 토스트 표시 확인`).
       - **[tdd-required] 보조 태그 규칙 (MANDATORY)**:
         - h-0.6에서 로드한 `pac_preflight_checklist` 기준으로 `pac_tier="TIER-A"`인 PAC에 매핑된 Spec AC 헤더에는 `[tdd-required]`를 자동 부여한다.
+        - `test_enforcement.backend_tdd=true`이고 백엔드 도메인 태스크이면 핵심 테스트 AC에도 `[tdd-required]`를 자동 부여한다 (PAC tier와 무관).
         - `pac_tier="TIER-B"`인 PAC는 `[tdd-required]`를 자동 부여하지 않는다.
         - `[tdd-required]`는 기존 보조 태그(`impact-check`, `regression-test` 등)와 독립적으로 공존하며 기존 라우팅/검증 규칙을 변경하지 않는다.
       - **[impact-check] 보조 태그 변환 규칙 (MANDATORY)**:

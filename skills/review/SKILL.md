@@ -184,6 +184,16 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `auto_mode.max_review_iterations` 키 경로: `config.auto_mode.max_review_iterations`
      - `AUTO_MODE=true` 이고 값이 설정되어 있으며 `> 0`이면 `max_iterations`를 이 값으로 override
      - `0` 이하이면 무시하고 `config.review.max_iterations` 값을 사용
+   - `test_enforcement` 로드 (테스트 강제화, 하위 호환 MANDATORY):
+     - 1순위: `config.resolved.json.test_enforcement`
+     - 2순위 fallback: `templates/defaults/config.json.test_enforcement`
+     - 둘 다 없으면 기본값 사용:
+       - `enabled=true`
+       - `backend_tdd=true`
+       - `web_execution_test=true`
+       - `exempt_patterns=["*.md","*.json","*.yml","*.yaml","*.txt","*.css"]`
+       - `require_exemption_reason=true`
+     - 키가 미설정인 기존 프로젝트도 에러 없이 동작해야 하며(미설정 fallback), 기존 review 플로우는 유지한다.
    - 우선순위:
      - `AUTO_MODE`: CLI `--auto` 플래그 > `config.auto_mode.review` > 기본값(false)
      - `max_iterations`: (`AUTO_MODE=true`일 때) `config.auto_mode.max_review_iterations` > `config.review.max_iterations` > 기본값(10)
@@ -231,6 +241,32 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 - 호환성 보장(변경 금지):
   - 기존 Pass A 판정 로직(`pass_a_result`, `failed_ac_ids`, `failure_class`, `evidence`)은 변경하지 않는다.
   - `evidence-ledger.md` 생성은 기존 흐름에 추가되는 부가 산출물이며 `pass-a-result.md`를 대체하지 않는다.
+
+#### test_enforcement 게이트 (Pass A 내부, MANDATORY)
+
+- 목적: `test_enforcement.enabled=true`일 때 소스 코드 변경에 테스트 AC가 누락되면 자동으로 `"테스트 미작성"` gap을 생성한다.
+- 소스 코드 변경 판정:
+  - Step 2의 변경 파일 목록 중 `test_enforcement.exempt_patterns`에 매칭되지 않는 파일이 1개라도 있으면 `source_code_changed=true`.
+  - 변경 파일이 모두 `exempt_patterns`에 매칭되면 테스트 면제 적용 (`reason: "비코드 수정(exempt_patterns 매칭)"`).
+  - `require_exemption_reason=true`이면 면제 사유를 `ac-results.md` 또는 `review-report.md`에 반드시 기록한다.
+- 테스트 프레임워크 판정:
+  - Step 2 탐색에서 test runner 감지 결과를 재사용한다 (`jest|vitest|mocha|pytest` 등).
+  - test runner 미감지면 테스트 면제 적용 (`reason: "테스트 프레임워크 미존재"`; `no test framework`).
+  - 면제는 워크플로우를 차단하지 않는다.
+- 테스트 AC 존재 판정(면제 아님 + `source_code_changed=true`일 때):
+  - 아래 중 하나라도 만족하면 테스트 AC가 존재한다고 본다.
+    - `ac_type == browser-test`
+    - `ac_test_type`이 `[unit-test]`, `[integration]`, `[api-test]`, `[e2e-browser]`, `[regression-test]`
+    - AC `Test:`에 테스트 실행 명령이 명시됨 (`test`, `vitest`, `jest`, `pytest`, `playwright` 등)
+  - 모두 미충족이면 Pass A에서 즉시 gap 생성:
+    - `pass_a_result = fail`
+    - `failure_class = implementation`
+    - `failed_ac_ids`에 `AC-TEST-ENFORCEMENT` 추가
+    - `evidence`에 `"gap: 테스트 미작성 (test_enforcement)"`를 기록
+  - 이 규칙은 기존 MUST/SHOULD 판정 전에 선행 적용한다.
+- 하위 호환:
+  - `test_enforcement.enabled=false`이면 본 게이트를 건너뛰고 기존 Pass A 동작을 그대로 유지한다.
+  - `test_enforcement` 키 자체가 없는 프로젝트는 위 fallback 기본값으로 해석하며, 파싱 실패 시 경고 후 기존 동작으로 graceful fallback한다.
 
 #### browser-test AC 실행 분기 (Pass A 내부, MANDATORY)
 
