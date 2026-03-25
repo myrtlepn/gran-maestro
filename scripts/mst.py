@@ -39,6 +39,14 @@ Subcommands:
   reference search   --keyword TEXT [--json]
   reference update   <REF-ID> [--topic TEXT] [--url URL] [--summary TEXT] [--content TEXT] [--json]
 
+  agile init         [--steering-every N] [--json]
+  agile status       <AGI-ID> [--json]
+  agile update       <AGI-ID> [--status TEXT] [--current-sprint N] [--steering-every N] [--objective-version N] [--json]
+  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--json]
+  agile objective-transition <AGI-ID> --story STORY-ID --status TEXT [--json]
+  agile objective-check <AGI-ID> [--json]
+  agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
+
   archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap] [--max N] [--dir PATH]
   archive run-all     [--max N]
   archive list        [--type TYPE]
@@ -47,8 +55,8 @@ Subcommands:
   capture ttl-check
   capture mark-consumed --caps <CAP-ID[,CAP-ID...]> --plan <PLN-ID> [--json]
 
-  counter next        [--type req|idn|dsc|dbg|exp|pln|des|cap|fc|ref|intent] [--dir PATH]
-  counter peek        [--type req|idn|dsc|dbg|exp|pln|des|cap|fc|ref|intent]
+  counter next        [--type req|idn|dsc|dbg|exp|pln|des|cap|fc|ref|intent|agi] [--dir PATH]
+  counter peek        [--type req|idn|dsc|dbg|exp|pln|des|cap|fc|ref|intent|agi]
 
   version get
   version check
@@ -91,7 +99,7 @@ import sys
 import glob
 import tarfile
 import time
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -1614,6 +1622,619 @@ def cmd_reference_update(args):
     return 0
 
 
+def agile_dir() -> Path:
+    return BASE_DIR / "agile"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_agi_id(value: str) -> str:
+    agi_id = (value or "").strip().upper()
+    if not re.fullmatch(r"AGI-\d+", agi_id):
+        raise ValueError(f"Invalid AGI id: {value}")
+    return agi_id
+
+
+def _normalize_story_id(value: str) -> str:
+    story_id = (value or "").strip().upper()
+    if not re.fullmatch(r"STORY-[A-Z0-9_-]+", story_id):
+        raise ValueError(f"Invalid story id: {value}")
+    return story_id
+
+
+def _normalize_link_id(value: str, prefix: str) -> str:
+    token = (value or "").strip().upper()
+    if not token:
+        raise ValueError(f"Invalid {prefix} id: {value}")
+    if not token.startswith(f"{prefix}-"):
+        raise ValueError(f"Invalid {prefix} id: {value}")
+    return token
+
+
+def _split_csv_values(raw_values) -> List[str]:
+    if not raw_values:
+        return []
+    if isinstance(raw_values, str):
+        raw_values = [raw_values]
+    values = []
+    for raw_value in raw_values:
+        for token in str(raw_value).split(","):
+            cleaned = token.strip()
+            if cleaned:
+                values.append(cleaned)
+    return values
+
+
+def _agi_session_dir(agi_id: str) -> Path:
+    return agile_dir() / agi_id
+
+
+def _agi_session_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "session.json"
+
+
+def _agi_events_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "events.ndjson"
+
+
+def _agi_objective_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "objective" / "objective.md"
+
+
+def _agi_objective_changelog_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "objective" / "changelog.ndjson"
+
+
+def _agi_links_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "index" / "links.json"
+
+
+def _append_ndjson(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False))
+        f.write("\n")
+
+
+def _append_agile_event(agi_id: str, event: str, payload=None):
+    event_data = {
+        "timestamp": _now_iso(),
+        "event": event,
+    }
+    if isinstance(payload, dict):
+        event_data.update(payload)
+    _append_ndjson(_agi_events_path(agi_id), event_data)
+
+
+def _load_agile_session(agi_id: str):
+    session_path = _agi_session_path(agi_id)
+    data = load_json(session_path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{agi_id} session not found")
+    return data, session_path
+
+
+def _save_agile_session(agi_id: str, data):
+    payload = dict(data)
+    payload["id"] = agi_id
+    payload["updated_at"] = _now_iso()
+    save_json(_agi_session_path(agi_id), payload)
+    return payload
+
+
+def _next_agile_id() -> str:
+    counter_path = get_counter_path("agi")
+    scan_root = BASE_DIR / TYPE_DIRS["agi"][0]
+    disk_max = 0
+    for path in scan_root.glob("AGI-*"):
+        if not path.is_dir():
+            continue
+        try:
+            n = int(path.name.split("-")[1])
+        except (IndexError, ValueError):
+            continue
+        if n > disk_max:
+            disk_max = n
+
+    scan_root.mkdir(parents=True, exist_ok=True)
+    data = load_json(counter_path) or {}
+    last_id = max(data.get("last_id", 0), disk_max)
+    next_id = last_id + 1
+    save_json(counter_path, {"last_id": next_id})
+    return f"AGI-{next_id:03d}"
+
+
+def _extract_objective_frontmatter(content: str):
+    if not content.startswith("---"):
+        return None
+
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return lines, idx
+    return None
+
+
+def _extract_yaml_story_statuses(content: str) -> dict[str, str]:
+    extracted = _extract_objective_frontmatter(content)
+    if extracted is None:
+        return {}
+
+    lines, end_index = extracted
+    frontmatter_lines = lines[1:end_index]
+    story_id_re = re.compile(r"^\s*-\s*id:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$")
+    status_re = re.compile(r"^\s*status:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$")
+
+    statuses = {}
+    current_story = None
+    current_status = None
+    for line in frontmatter_lines:
+        story_match = story_id_re.match(line.strip("\r\n"))
+        if story_match:
+            if current_story:
+                statuses[current_story] = (current_status or "todo").lower()
+            current_story = story_match.group(1).upper()
+            current_status = None
+            continue
+
+        if current_story:
+            status_match = status_re.match(line.strip("\r\n"))
+            if status_match:
+                current_status = status_match.group(1)
+
+    if current_story:
+        statuses[current_story] = (current_status or "todo").lower()
+    return statuses
+
+
+def _extract_marker_story_statuses(content: str) -> dict[str, str]:
+    pattern = re.compile(r"story:(?P<story>[A-Za-z0-9_-]+)\s+status:(?P<status>[A-Za-z0-9_-]+)")
+    statuses = {}
+    for match in pattern.finditer(content):
+        story_id = match.group("story").upper()
+        statuses[story_id] = match.group("status").lower()
+    return statuses
+
+
+def _update_yaml_story_status(content: str, story_id: str, new_status: str):
+    extracted = _extract_objective_frontmatter(content)
+    if extracted is None:
+        return content, False, False
+
+    lines, end_index = extracted
+    frontmatter_lines = lines[1:end_index]
+    story_id_re = re.compile(r"^(\s*)-\s*id:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$")
+    status_re = re.compile(r"^(\s*)status:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$")
+
+    story_start_indexes = []
+    for idx, line in enumerate(frontmatter_lines):
+        if story_id_re.match(line.strip("\r\n")):
+            story_start_indexes.append(idx)
+    story_start_indexes.append(len(frontmatter_lines))
+
+    found = False
+    changed = False
+
+    for pos in range(len(story_start_indexes) - 1):
+        start = story_start_indexes[pos]
+        end = story_start_indexes[pos + 1]
+        story_line = frontmatter_lines[start].strip("\r\n")
+        story_match = story_id_re.match(story_line)
+        if not story_match:
+            continue
+        current_story_id = story_match.group(2).upper()
+        if current_story_id != story_id:
+            continue
+
+        found = True
+        status_found = False
+        for line_idx in range(start + 1, end):
+            status_line = frontmatter_lines[line_idx].strip("\r\n")
+            status_match = status_re.match(status_line)
+            if not status_match:
+                continue
+
+            status_found = True
+            if status_match.group(2).lower() != new_status:
+                indent = status_match.group(1)
+                line_ending = "\r\n" if frontmatter_lines[line_idx].endswith("\r\n") else "\n"
+                frontmatter_lines[line_idx] = f"{indent}status: {new_status}{line_ending}"
+                changed = True
+            break
+
+        if not status_found:
+            indent = f"{story_match.group(1)}  "
+            line_ending = "\r\n" if frontmatter_lines[start].endswith("\r\n") else "\n"
+            frontmatter_lines.insert(start + 1, f"{indent}status: {new_status}{line_ending}")
+            changed = True
+            for i in range(pos + 1, len(story_start_indexes)):
+                story_start_indexes[i] += 1
+            end_index += 1
+        break
+
+    if not found:
+        return content, False, False
+
+    updated_lines = [lines[0]] + frontmatter_lines + lines[end_index:]
+    return "".join(updated_lines), True, changed
+
+
+def _update_marker_story_status(content: str, story_id: str, new_status: str):
+    pattern = re.compile(r"(story:(?P<story>[A-Za-z0-9_-]+)\s+status:)(?P<status>[A-Za-z0-9_-]+)")
+    found = False
+    changed = False
+
+    def _replace(match):
+        nonlocal found, changed
+        if match.group("story").upper() != story_id:
+            return match.group(0)
+        found = True
+        if match.group("status").lower() != new_status:
+            changed = True
+        return f"{match.group(1)}{new_status}"
+
+    updated = pattern.sub(_replace, content)
+    return updated, found, changed
+
+
+def _update_objective_story_status(content: str, story_id: str, new_status: str):
+    updated_content, marker_found, marker_changed = _update_marker_story_status(content, story_id, new_status)
+    updated_content, yaml_found, yaml_changed = _update_yaml_story_status(updated_content, story_id, new_status)
+
+    found = marker_found or yaml_found
+    changed = marker_changed or yaml_changed
+    return updated_content, found, changed
+
+
+def _collect_objective_story_statuses(content: str) -> dict[str, str]:
+    statuses = _extract_yaml_story_statuses(content)
+    marker_statuses = _extract_marker_story_statuses(content)
+    statuses.update(marker_statuses)
+    return statuses
+
+
+def cmd_agile_init(args):
+    if args.steering_every < 1:
+        print("Error: --steering-every must be >= 1", file=sys.stderr)
+        return 1
+
+    try:
+        agi_id = _next_agile_id()
+    except RuntimeError as exc:
+        print(f"Error: failed to allocate AGI id ({exc})", file=sys.stderr)
+        return 1
+
+    session_dir = _agi_session_dir(agi_id)
+    if session_dir.exists():
+        print(f"Error: {agi_id} already exists", file=sys.stderr)
+        return 1
+
+    (session_dir / "objective" / "history").mkdir(parents=True, exist_ok=True)
+    (session_dir / "sprints").mkdir(parents=True, exist_ok=True)
+    (session_dir / "index").mkdir(parents=True, exist_ok=True)
+
+    objective_content = """# Objective
+
+<!-- story:STORY-001 status:todo -->
+- [ ] STORY-001: Define first executable objective item.
+"""
+    objective_path = _agi_objective_path(agi_id)
+    objective_path.write_text(objective_content, encoding="utf-8")
+    save_json(_agi_links_path(agi_id), {"agi_id": agi_id, "pln": [], "req": []})
+    _agi_objective_changelog_path(agi_id).touch()
+    _agi_events_path(agi_id).touch()
+
+    now = _now_iso()
+    payload = {
+        "id": agi_id,
+        "status": "active",
+        "current_sprint": 0,
+        "steering_every": args.steering_every,
+        "objective": {
+            "path": "objective/objective.md",
+            "version": 1,
+        },
+        "queue": [],
+        "refs": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    save_json(_agi_session_path(agi_id), payload)
+    _append_agile_event(agi_id, "agile.init", {"steering_every": args.steering_every})
+
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(agi_id)
+    return 0
+
+
+def cmd_agile_status(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        session, _ = _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(session, ensure_ascii=False, indent=2))
+        return 0
+
+    objective = session.get("objective", {}) if isinstance(session.get("objective"), dict) else {}
+    print(f"id: {session.get('id', agi_id)}")
+    print(f"status: {session.get('status', '')}")
+    print(f"current_sprint: {session.get('current_sprint', 0)}")
+    print(f"steering_every: {session.get('steering_every', 0)}")
+    print(f"objective.version: {objective.get('version', 0)}")
+    return 0
+
+
+def cmd_agile_update(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        session, _ = _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    changed_fields = {}
+    if args.status is not None:
+        session["status"] = str(args.status)
+        changed_fields["status"] = str(args.status)
+    if args.current_sprint is not None:
+        session["current_sprint"] = int(args.current_sprint)
+        changed_fields["current_sprint"] = int(args.current_sprint)
+    if args.steering_every is not None:
+        if args.steering_every < 1:
+            print("Error: --steering-every must be >= 1", file=sys.stderr)
+            return 1
+        session["steering_every"] = int(args.steering_every)
+        changed_fields["steering_every"] = int(args.steering_every)
+    if args.objective_version is not None:
+        objective_data = session.get("objective")
+        if not isinstance(objective_data, dict):
+            objective_data = {"path": "objective/objective.md"}
+            session["objective"] = objective_data
+        objective_data["version"] = int(args.objective_version)
+        changed_fields["objective_version"] = int(args.objective_version)
+
+    if not changed_fields:
+        print("Error: no fields to update", file=sys.stderr)
+        return 1
+
+    saved = _save_agile_session(agi_id, session)
+    _append_agile_event(agi_id, "agile.update", {"fields": changed_fields})
+
+    if args.json:
+        print(json.dumps(saved, ensure_ascii=False, indent=2))
+    else:
+        print(agi_id)
+    return 0
+
+
+def cmd_agile_result(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+
+    planned = _split_csv_values(args.planned)
+    completed = _split_csv_values(args.completed)
+    pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
+    req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    sprint_id = f"S{args.sprint:02d}"
+    timestamp = _now_iso()
+
+    payload = {
+        "sprint_id": sprint_id,
+        "status": str(args.status),
+        "planned": planned,
+        "completed": completed,
+        "generated": {
+            "pln": pln_ids,
+            "req": req_ids,
+        },
+        "timestamp": timestamp,
+    }
+    sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
+    sprint_dir.mkdir(parents=True, exist_ok=True)
+    save_json(sprint_dir / "result.json", payload)
+
+    result_md_path = sprint_dir / "result.md"
+    if not result_md_path.exists():
+        result_md_path.write_text(
+            "\n".join(
+                [
+                    f"# {sprint_id} Result",
+                    "",
+                    f"- status: {payload['status']}",
+                    f"- planned: {', '.join(planned) if planned else '-'}",
+                    f"- completed: {', '.join(completed) if completed else '-'}",
+                    f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
+                    f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+                    f"- timestamp: {timestamp}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    _append_agile_event(
+        agi_id,
+        "agile.result",
+        {
+            "sprint_id": sprint_id,
+            "status": payload["status"],
+        },
+    )
+
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(str(sprint_dir / "result.json"))
+    return 0
+
+
+def cmd_agile_objective_transition(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        story_id = _normalize_story_id(args.story)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    objective_path = _agi_objective_path(agi_id)
+    if not objective_path.exists():
+        print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
+        return 1
+
+    current_content = objective_path.read_text(encoding="utf-8")
+    before_statuses = _collect_objective_story_statuses(current_content)
+    updated_content, found, changed = _update_objective_story_status(
+        current_content,
+        story_id,
+        str(args.status).strip().lower(),
+    )
+    if not found:
+        print(f"Error: story not found ({story_id})", file=sys.stderr)
+        return 1
+
+    if changed:
+        objective_path.write_text(updated_content, encoding="utf-8")
+
+    after_statuses = _collect_objective_story_statuses(updated_content)
+    from_status = before_statuses.get(story_id)
+    to_status = after_statuses.get(story_id)
+    _append_ndjson(
+        _agi_objective_changelog_path(agi_id),
+        {
+            "timestamp": _now_iso(),
+            "event": "objective-transition",
+            "story": story_id,
+            "from_status": from_status,
+            "to_status": to_status,
+            "changed": changed,
+        },
+    )
+    _append_agile_event(
+        agi_id,
+        "agile.objective-transition",
+        {
+            "story": story_id,
+            "from_status": from_status,
+            "to_status": to_status,
+            "changed": changed,
+        },
+    )
+
+    output = {
+        "agi_id": agi_id,
+        "story": story_id,
+        "status": to_status,
+        "changed": changed,
+    }
+    if args.json:
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(output, ensure_ascii=False))
+    return 0
+
+
+def cmd_agile_objective_check(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    objective_path = _agi_objective_path(agi_id)
+    if not objective_path.exists():
+        print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
+        return 1
+
+    content = objective_path.read_text(encoding="utf-8")
+    statuses = _collect_objective_story_statuses(content)
+    if not statuses:
+        print("Error: no story statuses found in objective.md", file=sys.stderr)
+        return 1
+
+    incomplete = sorted([
+        story_id for story_id, status in statuses.items()
+        if status.lower() not in {"done", "completed"}
+    ])
+    output = {
+        "agi_id": agi_id,
+        "all_done": len(incomplete) == 0,
+        "incomplete": incomplete,
+        "stories": statuses,
+    }
+    if args.json:
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(output, ensure_ascii=False))
+    return 0 if not incomplete else 1
+
+
+def cmd_agile_link(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
+    req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    if not pln_ids and not req_ids:
+        print("Error: provide at least one --pln or --req", file=sys.stderr)
+        return 1
+
+    links_path = _agi_links_path(agi_id)
+    links = load_json(links_path) or {}
+    if not isinstance(links, dict):
+        links = {}
+    links["agi_id"] = agi_id
+    links.setdefault("pln", [])
+    links.setdefault("req", [])
+
+    for plan_id in pln_ids:
+        if plan_id not in links["pln"]:
+            links["pln"].append(plan_id)
+    for req_id in req_ids:
+        if req_id not in links["req"]:
+            links["req"].append(req_id)
+
+    links["updated_at"] = _now_iso()
+    save_json(links_path, links)
+    _append_agile_event(
+        agi_id,
+        "agile.link",
+        {
+            "pln": pln_ids,
+            "req": req_ids,
+        },
+    )
+
+    if args.json:
+        print(json.dumps(links, ensure_ascii=False, indent=2))
+    else:
+        print(agi_id)
+    return 0
+
+
 def cmd_intent_add(args):
     store, store_error = _create_intent_store()
     if store is None:
@@ -1902,6 +2523,7 @@ TYPE_DIRS = {
     "fc": ("fact-checks", "FC"),
     "ref": ("references", "REF"),
     "intent": ("intent", "INTENT"),
+    "agi": ("agile", "AGI"),
 }
 JSON_FILE_MAP = {
     "req": "request.json",
@@ -4661,6 +5283,52 @@ def build_parser():
     reference_update.add_argument("--content")
     reference_update.add_argument("--json", action="store_true")
 
+    # --- agile ---
+    agile = sub.add_parser("agile")
+    agile_sub = agile.add_subparsers(dest="subcommand")
+
+    agile_init = agile_sub.add_parser("init")
+    agile_init.add_argument("--steering-every", type=int, default=3)
+    agile_init.add_argument("--json", action="store_true")
+
+    agile_status = agile_sub.add_parser("status")
+    agile_status.add_argument("agi_id")
+    agile_status.add_argument("--json", action="store_true")
+
+    agile_update = agile_sub.add_parser("update")
+    agile_update.add_argument("agi_id")
+    agile_update.add_argument("--status")
+    agile_update.add_argument("--current-sprint", type=int)
+    agile_update.add_argument("--steering-every", type=int)
+    agile_update.add_argument("--objective-version", type=int)
+    agile_update.add_argument("--json", action="store_true")
+
+    agile_result = agile_sub.add_parser("result")
+    agile_result.add_argument("agi_id")
+    agile_result.add_argument("--sprint", type=int, required=True)
+    agile_result.add_argument("--status", required=True)
+    agile_result.add_argument("--planned")
+    agile_result.add_argument("--completed")
+    agile_result.add_argument("--pln", action="append")
+    agile_result.add_argument("--req", action="append")
+    agile_result.add_argument("--json", action="store_true")
+
+    agile_objective_transition = agile_sub.add_parser("objective-transition")
+    agile_objective_transition.add_argument("agi_id")
+    agile_objective_transition.add_argument("--story", required=True)
+    agile_objective_transition.add_argument("--status", required=True)
+    agile_objective_transition.add_argument("--json", action="store_true")
+
+    agile_objective_check = agile_sub.add_parser("objective-check")
+    agile_objective_check.add_argument("agi_id")
+    agile_objective_check.add_argument("--json", action="store_true")
+
+    agile_link = agile_sub.add_parser("link")
+    agile_link.add_argument("agi_id")
+    agile_link.add_argument("--pln", action="append")
+    agile_link.add_argument("--req", action="append")
+    agile_link.add_argument("--json", action="store_true")
+
     # --- counter ---
     ctr = sub.add_parser("counter")
     ctr_sub = ctr.add_subparsers(dest="subcommand")
@@ -4668,7 +5336,7 @@ def build_parser():
     ctr_next = ctr_sub.add_parser("next")
     ctr_next.add_argument(
         "--type",
-        choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap", "fc", "ref", "intent"],
+        choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap", "fc", "ref", "intent", "agi"],
         default="req",
     )
     ctr_next.add_argument("--dir")
@@ -4676,7 +5344,7 @@ def build_parser():
     ctr_peek = ctr_sub.add_parser("peek")
     ctr_peek.add_argument(
         "--type",
-        choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap", "fc", "ref", "intent"],
+        choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap", "fc", "ref", "intent", "agi"],
         default="req",
     )
     ctr_peek.add_argument("--dir")
@@ -4902,6 +5570,13 @@ def main():
         ("reference", "list"): cmd_reference_list,
         ("reference", "search"): cmd_reference_search,
         ("reference", "update"): cmd_reference_update,
+        ("agile", "init"): cmd_agile_init,
+        ("agile", "status"): cmd_agile_status,
+        ("agile", "update"): cmd_agile_update,
+        ("agile", "result"): cmd_agile_result,
+        ("agile", "objective-transition"): cmd_agile_objective_transition,
+        ("agile", "objective-check"): cmd_agile_objective_check,
+        ("agile", "link"): cmd_agile_link,
         ("counter", "next"): cmd_counter_next,
         ("counter", "peek"): cmd_counter_peek,
         ("version", "get"):    cmd_version_get,
