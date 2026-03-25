@@ -47,7 +47,7 @@ Subcommands:
   agile objective-check <AGI-ID> [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
 
-  archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap] [--max N] [--dir PATH]
+  archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap|agi] [--max N] [--dir PATH]
   archive run-all     [--max N]
   archive list        [--type TYPE]
   archive restore     <ARCHIVE-ID>
@@ -1988,6 +1988,9 @@ def cmd_agile_update(args):
         session["status"] = str(args.status)
         changed_fields["status"] = str(args.status)
     if args.current_sprint is not None:
+        if args.current_sprint < 0:
+            print("Error: current_sprint must be >= 0", file=sys.stderr)
+            return 1
         session["current_sprint"] = int(args.current_sprint)
         changed_fields["current_sprint"] = int(args.current_sprint)
     if args.steering_every is not None:
@@ -2032,8 +2035,12 @@ def cmd_agile_result(args):
 
     planned = _split_csv_values(args.planned)
     completed = _split_csv_values(args.completed)
-    pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
-    req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    try:
+        pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
+        req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     sprint_id = f"S{args.sprint:02d}"
     timestamp = _now_iso()
 
@@ -2196,8 +2203,12 @@ def cmd_agile_link(args):
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
-    req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    try:
+        pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
+        req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     if not pln_ids and not req_ids:
         print("Error: provide at least one --pln or --req", file=sys.stderr)
         return 1
@@ -5354,7 +5365,7 @@ def build_parser():
     arc_sub = arc.add_subparsers(dest="subcommand")
 
     arc_run = arc_sub.add_parser("run")
-    arc_run.add_argument("--type", choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap"], default="req")
+    arc_run.add_argument("--type", choices=["req", "idn", "dsc", "dbg", "exp", "pln", "des", "cap", "agi"], default="req")
     arc_run.add_argument("--max", type=int)
     arc_run.add_argument("--dir")
 
