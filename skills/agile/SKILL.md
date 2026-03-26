@@ -206,21 +206,195 @@ Q&A 결과를 `templates/objective.md` 형식으로 구조화하여 아래 경�
 
 ---
 
-### Step 2: 스프린트 루프 (PLACEHOLDER — REQ-480)
+### Step 2: 스프린트 루프
 
 `[MST skill=agile step=2/3 return_to=null]`
 
-> ⚠️ **이 Step은 REQ-480에서 구현됩니다.**
+#### 2.0 재개 분기 결정
 
-현재 구현 범위:
-- Step 0 (세션 초기화) + Step 1 (objective 생성/검토) 까지만 구현됨
-- Step 2 진입 시: `[안내] 스프린트 루프는 REQ-480 구현 후 사용 가능합니다.` 출력 후 종료
+세션 초기화(Step 0)에서 전달된 `CURRENT_SPRINT` 값으로 진입 경로를 결정한다.
 
-REQ-480 구현 예정 내용:
-- Sprint 0: 테스트 환경 구축 (smoke test 통과 검증)
-- Sprint N 자율 루프: 작업 선택(deps+priority) → `mst:plan -a` → 실행 → 테스트 → `mst.py agile result` 기록 → 반복
-- 스티어링 체크포인트: `--steering-every N`에 따라 진행 보고서 제시
-- 루프 종료: `mst.py agile objective-check {AGI_ID}`로 모든 Story status=done 확인 시 자동 종료
+- `--resume AGI-NNN`으로 진입한 경우: 세션 초기화에서 session.json을 로드하여 `CURRENT_SPRINT`가 이미 설정되어 있어야 한다.
+  - session.json 손상 또는 `current_sprint` 필드 누락 시:
+    - `[오류] AGI-{AGI_ID} session.json 손상 — current_sprint 값을 읽을 수 없습니다.` 출력
+    - 복구 안내: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/session.json`을 직접 점검하거나 삭제 후 신규 세션으로 재시작
+    - 실행 중단
+  - 정상 로드 시: `[재개] AGI-{AGI_ID} — 스프린트 {CURRENT_SPRINT}부터 재시작` 출력
+- 신규 세션(Step 1에서 진입): `CURRENT_SPRINT=0` 으로 시작
+
+분기:
+- `CURRENT_SPRINT == 0` 또는 Sprint 0 미완료 → **2.1 (Sprint 0)** 으로 진행
+- `CURRENT_SPRINT >= 1` 및 Sprint 0 완료 → **2.2 (Sprint N 루프)** 로 직접 진행
+
+---
+
+#### 2.1 Sprint 0: 테스트 환경 구축
+
+**목표**: 프로젝트의 테스트 러너/프레임워크를 감지하고, smoke test 1개 이상이 통과한 것을 확인한 후 Sprint 1로 진입한다.
+
+##### 2.1.1 테스트 러너 감지
+
+아래 파일을 순서대로 확인하여 테스트 러너를 감지한다:
+
+1. `package.json` — `scripts.test` 필드 확인 (jest, vitest, mocha 등)
+2. `Makefile` — `test` 타깃 확인
+3. `pyproject.toml` / `setup.cfg` / `pytest.ini` — pytest 감지
+4. `Cargo.toml` — `cargo test` (Rust)
+5. `go.mod` — `go test ./...` (Go)
+6. `.github/workflows/` — CI 설정에서 테스트 명령어 추출
+
+감지 결과를 `TEST_RUNNER` 변수에 저장하고 출력:
+
+```
+[Sprint 0] 테스트 러너 감지: {TEST_RUNNER}
+```
+
+##### 2.1.2 테스트 환경 미존재 시
+
+테스트 러너 감지 실패 시:
+
+1. `[Sprint 0] 테스트 환경 없음 — 기본 환경 구축 시작` 출력
+2. 아래 서브스킬 호출로 기본 테스트 환경 자동 구축:
+
+```
+Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개를 포함한 테스트 환경을 구축한다. 테스트 러너를 선택하고 설정 파일을 작성하며, 항상 통과하는 smoke test 1개를 작성한다.")
+```
+
+3. 완료 후 2.1.1로 재시도 (최대 1회). 재시도 실패 시 사용자 안내 후 중단.
+
+##### 2.1.3 Smoke Test 실행 및 Sprint 1 진입 조건
+
+1. 감지된 `TEST_RUNNER`로 smoke test 실행하여 **최소 1개 테스트 통과** 확인
+2. 통과 시:
+   - `[Sprint 0] smoke test 통과 — Sprint 1 진입 조건 충족` 출력
+   - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --current-sprint 1 --json` 실행
+   - `CURRENT_SPRINT=1` 설정 후 Sprint N 루프(2.2)로 진입
+3. 실패 시:
+   - `[Sprint 0] smoke test 실패 — 원인 분석 후 수동 확인 필요` 출력 + 실패 로그 요약
+   - `AskUserQuestion`으로 사용자에게 확인 요청 후 재시도 또는 중단
+
+---
+
+#### 2.2 Sprint N 자율 루프
+
+**목표**: objective.md의 모든 story가 완료될 때까지 스프린트를 반복한다.
+
+##### 2.2.1 루프 진입 조건 확인
+
+반복 시작 전 매번 수행:
+
+```
+python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
+```
+
+- `all_done: true` → 루프 종료 (2.3 최종 보고서로 이동)
+- `all_done: false` → 다음 story 선택 (2.2.2)
+
+> ⚠️ 스티어링 체크포인트는 REQ-481에서 구현됩니다.
+
+##### 2.2.2 작업(Story) 선택
+
+`objective-check` 출력에서 아래 기준으로 story를 선택한다:
+
+1. **deps 필터**: 모든 `deps` story가 `status=done`인 story만 후보
+2. **priority 정렬**: `high → medium → low` 순서 (`mst.py agile objective-check` 활용)
+3. 첫 번째 후보 story를 `SELECTED_STORY`로 선정
+4. 후보가 없는 경우 (모든 후보가 blocked 또는 deps 미해소):
+   - `[경고] 선택 가능한 story가 없습니다. blocked story를 확인하세요.` 출력
+   - 루프 중단 후 사용자 안내
+
+선정된 story 정보 출력:
+
+```
+[Sprint {CURRENT_SPRINT}] 선택된 story: {STORY_ID} — {story 제목} (priority: {priority})
+```
+
+##### 2.2.3 컨텍스트 전달 3계층 구성 (DSC-044)
+
+plan -a 호출 전 3계층 컨텍스트를 구성한다:
+
+| 계층 | 내용 | 출처 |
+|------|------|------|
+| **고정층** | objective.md의 JTBD(목표·제약·성공 지표·DoD) 요약 | 파일 경로 참조: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
+| **활성층** | 이번 스프린트 대상 story + AC + 선행/후행 deps story 목록 | `objective-check` 결과 |
+| **변화층** | 직전 1~2 스프린트 결과 요약 (완료 항목, 실패 원인) | 파일 경로 참조: `sprints/S{N-1}/result.md`, `sprints/S{N-2}/result.md` |
+
+**규칙**:
+- 전체 히스토리 전달 금지 — 변화층은 직전 1~2 스프린트만 참조
+- 원문은 파일 경로로 참조 (인라인 삽입 금지)
+
+##### 2.2.4 plan -a 호출
+
+구성한 3계층 컨텍스트를 포함하여 plan을 자율 실행한다:
+
+```
+Skill(skill: "mst:plan", args: "-a {STORY_DESCRIPTION}
+[고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+[활성층] 대상: {STORY_ID} — {STORY_TITLE} | deps: {DEPS_LIST} | AC: {AC_LIST}
+[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md")
+```
+
+서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
+
+##### 2.2.5 결과 기록
+
+plan -a 실행 완료 후 아래 순서로 처리한다:
+
+**① 스프린트 결과 기록** (`agile result`):
+
+```
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status done|failed \
+  --planned "{STORY_ID}" \
+  --completed "{STORY_ID_IF_DONE}" \
+  --pln {PLN_ID} \
+  --req {REQ_ID} \
+  --json
+```
+
+**② story 상태 업데이트**:
+- 성공 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status done`
+- 실패 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status blocked`
+
+**③ session.json 업데이트**:
+
+```
+python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
+  --current-sprint {CURRENT_SPRINT + 1} \
+  --json
+```
+
+**④ 반복**: `CURRENT_SPRINT = CURRENT_SPRINT + 1` 설정 후 루프 상단(2.2.1)으로 반복
+
+---
+
+#### 2.3 루프 종료 및 최종 보고서
+
+**종료 조건**: `mst.py agile objective-check {AGI_ID} --json` 결과에서 `all_done: true` 반환.
+
+최종 보고서를 출력한다:
+
+```
+========================================
+[완료] AGI-{AGI_ID} 자율 스프린트 루프 종료
+========================================
+
+총 스프린트 수: {TOTAL_SPRINTS}
+완료된 story 수: {DONE_STORIES} / {TOTAL_STORIES}
+생성된 PLN 목록: {PLN_IDS}
+생성된 REQ 목록: {REQ_IDS}
+
+스프린트 결과 요약:
+- 성공: {SUCCESS_COUNT}회
+- 실패: {FAIL_COUNT}회
+
+결과 디렉토리: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/
+목표 달성 여부: {JTBD_SUCCESS_SUMMARY}
+========================================
+```
+
+`python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --json` 실행 후 종료.
 
 ---
 
