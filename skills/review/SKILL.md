@@ -442,6 +442,132 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 ---
 
+### Step 3.5: Full Backend Test Gate (MANDATORY)
+
+> 이 Step의 목적: Pass A 완료 후 Pass B 진입 전에 외부 프로젝트 worktree의 **백엔드 전체 테스트**를 강제 실행한다 / 핵심 출력물: `full_backend_test_gate_result`, `full-backend-test-report.md`, 보강-재테스트 이력
+
+- 진입 조건:
+  - `pass_a_result == pass`일 때만 실행한다.
+  - `pass_a_result == fail`이면 본 Step을 skip하고 기존 Step 6(e) 경로를 그대로 따른다.
+- 차단 규칙:
+  - 전체 테스트가 100% PASS(또는 "테스트 없음" 사용자 확인)되기 전에는 **Step 4(Pass B) 진입 금지**.
+- 범위 제한:
+  - Node 기반 백엔드 테스트만 대상.
+  - 프론트엔드/E2E 테스트(`playwright`, `cypress`, `selenium`, `puppeteer` 등)는 본 게이트 판정 대상에서 제외한다.
+- 기존 흐름 호환성:
+  - 기존 Pass A/Pass B/Step 5 구조는 유지한다.
+  - 게이트 실패 시 신규 분기를 만들지 않고 Step 6(c)/(d)의 기존 갭 처리 경로를 재사용한다(`gap_source: "ac_gap"` 유지).
+
+#### package.json `scripts.test` 자동 탐지 (MANDATORY)
+
+1. 대상 worktree 루트의 `package.json`을 확인한다.
+2. `scripts.test`를 자동 탐지한다.
+   - 최소 실행 기준(동등 명령 허용):
+     ```bash
+     grep -q '"test"' package.json && npm test
+     ```
+3. `scripts.test`가 아래 npm init 기본값과 논리적으로 동일하면 `"테스트 없음"`으로 판단한다.
+   - 기준 문자열(공백/따옴표 차이는 normalize 후 비교):
+     - `echo "Error: no test specified" && exit 1`
+4. `scripts.test`가 없거나 빈 문자열이어도 `"테스트 없음"`으로 동일 처리한다.
+
+#### "테스트 없음" 분기 (MANDATORY)
+
+- `"테스트 없음"`으로 판정되면 `full-backend-test-report.md`에 `status: NO_TESTS_DETECTED`를 기록한다.
+- 사용자에게 아래를 반드시 확인한다.
+  - 안내: "백엔드 전체 테스트 스크립트가 없어 자동 검증을 수행하지 못했습니다."
+  - 질문: "현재 상태로 Pass B/머지 진행을 허용할지"
+- `AUTO_MODE=true`여도 `AskUserQuestion`을 생략하지 않는다.
+- 사용자 선택:
+  - 허용: `full_backend_test_gate_result = pass_with_warning`으로 처리하고 Step 4로 진행.
+  - 비허용: `full_backend_test_gate_result = fail`로 처리하고 Step 6(c)/(d) 경로로 이동.
+
+#### 실행/실패 분석 프로토콜 (MANDATORY)
+
+1. 전체 백엔드 테스트 실행:
+   - 기본 명령: `npm test`
+   - 실행 로그 저장: `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV-NNN}/full-backend-test.log`
+2. 실패 테스트가 1개 이상이면 각 실패 항목에 대해 `explore` 기반 원인 분석을 수행한다.
+   - 예시:
+     ```bash
+     omx explore --prompt "실패 테스트 {TEST_NAME}의 원인(변경 파일, 호출 경로, 부수효과)을 추적"
+     ```
+3. 각 실패 항목을 아래 3중 문맥과 비교해 의도성을 판정한다.
+   - `intent`: request/plan의 JTBD 의도
+   - `plan`: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`
+   - `spec`: 현재 태스크 `spec.md`의 §1/§2/§3 및 Intent Trace
+4. 판정 규칙:
+   - `INTENTIONAL`: 실패가 plan/spec에 명시된 의도적 동작 변경과 일치
+   - `UNINTENTIONAL`: 명시되지 않은 회귀/부수효과
+   - `UNCERTAIN`: 증거 불충분. 기본값은 `UNINTENTIONAL`로 처리하고 리포트에 불확실성 표시
+
+#### 의도/비의도 분기 처리 (MANDATORY)
+
+- `INTENTIONAL` 실패:
+  - 테스트 기대값/fixture/assertion을 새 동작에 맞게 수정하는 태스크를 자동 디스패치한다.
+  - 원칙: 소스 동작 변경 없이 테스트 정합성 회복을 우선한다.
+- `UNINTENTIONAL` 실패:
+  - 소스 코드 + 테스트 보강 태스크를 자동 디스패치한다.
+  - 원칙: 회귀 원인 제거와 재발 방지 테스트 추가를 한 번에 수행한다.
+- 공통:
+  - 생성 태스크는 기존 review 갭 태스크 생성 규약(`generated_by: "review"`)을 재사용한다.
+  - 태스크 완료 후 전체 백엔드 테스트를 즉시 재실행한다.
+
+#### 보강-재테스트 루프 (최대 10회, MANDATORY)
+
+- 루프 카운터: `full_backend_test_retry_count` (현재 RV 기준, 1부터 시작).
+- 반복 규칙:
+  1. 테스트 실행
+  2. 실패 시 explore 분석 + 의도 판정
+  3. 분기별 태스크 자동 디스패치
+  4. 보강 완료 후 전체 재테스트
+- 종료 규칙:
+  - 10회 이내 100% PASS: `full_backend_test_gate_result = pass` → Step 4 진입 허용
+  - 10회 반복 후에도 FAIL: `full_backend_test_gate_result = limit_reached`로 기록하고 사용자 에스컬레이션
+  - 11회째 자동 시도는 금지한다(즉시 에스컬레이션)
+
+#### 결과 리포트 + `evidence-ledger.md` 연계 (MANDATORY)
+
+- 리포트 파일:
+  - `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV-NNN}/full-backend-test-report.md`
+- 리포트 포맷:
+  ```markdown
+  # Full Backend Test Report — RV-NNN
+
+  - status: PASS | PASS_WITH_WARNING | FAIL | LIMIT_REACHED | NO_TESTS_DETECTED
+  - attempts: N/10
+  - command: npm test
+  - summary: total=<N>, passed=<N>, failed=<N>, skipped=<N>
+
+  ## Failed Tests
+  | Test | Intent Verdict | Classification | Root Cause (explore) | Action |
+  |------|----------------|----------------|----------------------|--------|
+  | <name> | INTENTIONAL \| UNINTENTIONAL \| UNCERTAIN | test-only \| source+test | <요약> | <dispatch task id> |
+
+  ## Escalation
+  - escalated: true|false
+  - reason: <10회 초과 / 사용자 선택 / 없음>
+  ```
+- `evidence-ledger.md` 연계:
+  - 각 테스트 실행 직후 `Spec AC 검증 증거` 표에 아래 형식으로 append한다.
+    - `ID`: `AC-FULL-BACKEND-TEST-GATE`
+    - `Type`: `automatable`
+    - `Command`: `npm test`
+    - `Expected`: `전체 백엔드 테스트 100% PASS`
+    - `Actual`: `pass/fail 카운트 + 주요 실패 테스트명`
+    - `Exit Code`: 실제 종료 코드
+
+#### Step 4/5 연결 규칙 (호환성 보장)
+
+- Step 4 진입 허용 조건:
+  - `full_backend_test_gate_result in {pass, pass_with_warning}`
+- Step 4 진입 차단 조건:
+  - `full_backend_test_gate_result in {fail, limit_reached}`
+  - 이 경우 Pass B를 생략하고 Step 6(c)/(d) 기존 경로로 진행한다.
+- Step 5 취합 시 `full-backend-test-report.md`가 존재하면 `review-report.md`에 요약을 포함한다.
+
+---
+
 ### Step 4: Pass B — 코드 품질 검증
 
 > 이 Step의 목적: Pass A 통과 산출물을 기반으로 코드/설계/UI/의도 충실도/영향 범위 갭을 찾는다 / 핵심 출력물: `ac-results.md`, `review-code.md`, `review-arch.md`, `review-ui.md`, `review-intent-fidelity.md`, `review-impact.md`
@@ -643,7 +769,7 @@ Agent(
    - fallback (FILE_NOT_FOUND 처리): 각 `review-*.md` 파일이 FILE_NOT_FOUND이면 해당 background Agent 반환값(`TaskOutput`)에서 전체 텍스트를 추출한다.
      - 추출 텍스트가 빈 문자열이 아니고 `# ` 또는 `## ` 마크다운 헤더를 1개 이상 포함하면 유효한 리뷰 결과로 간주하고 PM이 해당 `review-*.md` 경로에 Write한다.
      - 추출 텍스트가 비어있거나 헤더가 없으면 해당 역할을 "에이전트 실패"로 표시하고 나머지 취합을 계속 진행한다.
-2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` (skip 시 미생성).
+2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `full-backend-test-report.md`(선택, Step 3.5 실행 시 생성).
 3. **review-report.md 작성**: `reviews/RV-NNN/review-report.md`
    ```markdown
    # 리뷰 리포트 — RV-NNN (REQ-NNN 반복 N)
@@ -658,6 +784,13 @@ Agent(
    - ✅ 충족 PAC N개
    - ❌ 미충족 PAC N개
      - PAC-X: <설명>
+
+   ## Full Backend Test Gate 결과
+   - 상태: PASS | PASS_WITH_WARNING | FAIL | LIMIT_REACHED | NO_TESTS_DETECTED
+   - 시도 횟수: N/10
+   - 테스트 요약: total/passed/failed/skipped
+   - 실패 테스트 목록 + 의도 판정(INTENTIONAL/UNINTENTIONAL/UNCERTAIN)
+   - 상세: `full-backend-test-report.md` (없으면 "Step 3.5 skip")
 
    ## 코드 리뷰 주요 발견 사항
    <review-code.md 핵심 항목>
