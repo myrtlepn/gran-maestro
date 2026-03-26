@@ -45,6 +45,7 @@ Subcommands:
   agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--json]
   agile objective-transition <AGI-ID> --story STORY-ID --status TEXT [--json]
   agile objective-check <AGI-ID> [--json]
+  agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
 
   archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap|agi] [--max N] [--dir PATH]
@@ -2193,6 +2194,79 @@ def cmd_agile_objective_check(args):
     else:
         print(json.dumps(output, ensure_ascii=False))
     return 0 if not incomplete else 1
+
+
+def cmd_agile_objective_snapshot(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        session, _ = _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    objective_path = _agi_objective_path(agi_id)
+    if not objective_path.exists():
+        print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
+        return 1
+
+    history_dir = objective_path.parent / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    highest_version = 0
+    for candidate in history_dir.glob("v*.md"):
+        match = re.fullmatch(r"v(\d+)\.md", candidate.name)
+        if not match:
+            continue
+        highest_version = max(highest_version, int(match.group(1)))
+
+    snapshot_version = highest_version + 1
+    snapshot_path = history_dir / f"v{snapshot_version}.md"
+    shutil.copyfile(objective_path, snapshot_path)
+
+    _append_ndjson(
+        _agi_objective_changelog_path(agi_id),
+        {
+            "timestamp": _now_iso(),
+            "version": snapshot_version,
+            "reason": str(args.reason),
+        },
+    )
+
+    objective_data = session.get("objective")
+    if not isinstance(objective_data, dict):
+        objective_data = {"path": "objective/objective.md", "version": 0}
+        session["objective"] = objective_data
+
+    try:
+        current_objective_version = int(objective_data.get("version", 0))
+    except (TypeError, ValueError):
+        current_objective_version = 0
+    objective_data["version"] = current_objective_version + 1
+
+    saved_session = _save_agile_session(agi_id, session)
+    _append_agile_event(
+        agi_id,
+        "agile.objective-snapshot",
+        {
+            "version": snapshot_version,
+            "reason": str(args.reason),
+            "objective_version": objective_data["version"],
+        },
+    )
+
+    output = {
+        "agi_id": agi_id,
+        "version": snapshot_version,
+        "reason": str(args.reason),
+        "snapshot": str(snapshot_path),
+        "objective_version": objective_data["version"],
+        "updated_at": saved_session.get("updated_at"),
+    }
+    if args.json:
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        print(agi_id)
+    return 0
 
 
 def cmd_agile_link(args):
@@ -5334,6 +5408,11 @@ def build_parser():
     agile_objective_check.add_argument("agi_id")
     agile_objective_check.add_argument("--json", action="store_true")
 
+    agile_objective_snapshot = agile_sub.add_parser("objective-snapshot")
+    agile_objective_snapshot.add_argument("agi_id")
+    agile_objective_snapshot.add_argument("--reason", required=True)
+    agile_objective_snapshot.add_argument("--json", action="store_true")
+
     agile_link = agile_sub.add_parser("link")
     agile_link.add_argument("agi_id")
     agile_link.add_argument("--pln", action="append")
@@ -5587,6 +5666,7 @@ def main():
         ("agile", "result"): cmd_agile_result,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
+        ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,
         ("agile", "link"): cmd_agile_link,
         ("counter", "next"): cmd_counter_next,
         ("counter", "peek"): cmd_counter_peek,

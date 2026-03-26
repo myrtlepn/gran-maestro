@@ -36,7 +36,7 @@ argument-hint: "{프로젝트 목표 또는 --resume AGI-NNN | --doc 파일경�
 - 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
 - C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
 - 예시:
-  - `[MST skill=agile step=0/3 return_to=null]`
+  - `[MST skill=agile step=0/4 return_to=null]`
   - `[MST skill=plan step=returned return_to=agile/2]`
 
 
@@ -67,13 +67,14 @@ argument-hint: "{프로젝트 목표 또는 --resume AGI-NNN | --doc 파일경�
 > ```bash
 > PROJECT_ROOT=$(pwd)
 > ```
+> `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 절대경로입니다.
 
 
 ---
 
 ### Step 0: 세션 초기화
 
-`[MST skill=agile step=0/3 return_to=null]`
+`[MST skill=agile step=0/4 return_to=null]`
 
 #### 0.1 인자 파싱
 
@@ -92,7 +93,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile status AGI-NNN --json` 실행
 2. session.json 로드 성공 시: `AGI_ID`, `CURRENT_SPRINT`, `STEERING_EVERY`를 메모리에 보관
 3. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status}`
-4. Step 1 건너뜀 → 스프린트 루프(REQ-480)로 진행 *(현재: 재개 안내 출력 후 종료)*
+4. Step 1 건너뜀 → 스프린트 루프(REQ-480)로 진행
 5. session.json 로드 실패 또는 AGI-NNN 미존재 시:
    - 에러 메시지 출력: `[오류] AGI-{NNN} 세션을 찾을 수 없습니다.`
    - 복구 안내: `.gran-maestro/agile/` 디렉토리 확인 방법 안내 후 중단
@@ -108,7 +109,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 
 ### Step 1: Objective 문서 생성/검토
 
-`[MST skill=agile step=1/3 return_to=null]`
+`[MST skill=agile step=1/4 return_to=null]`
 
 #### 분기 결정
 
@@ -158,7 +159,7 @@ Q&A 결과를 `templates/objective.md` 형식으로 구조화하여 아래 경�
 저장 완료 후:
 - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
 - 생성된 objective.md 요약 출력
-- Step 2(스프린트 루프 — REQ-480)로 진입 *(현재: 생성 완료 안내 후 종료)*
+- Step 2(스프린트 루프 — REQ-480)로 진입
 
 ---
 
@@ -202,13 +203,13 @@ Q&A 결과를 `templates/objective.md` 형식으로 구조화하여 아래 경�
 저장 완료 후:
 - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
 - 정규화 요약 출력 (원본 대비 변경/추가된 항목 목록)
-- Step 2(스프린트 루프 — REQ-480)로 진입 *(현재: 검토 완료 안내 후 종료)*
+- Step 2(스프린트 루프 — REQ-480)로 진입
 
 ---
 
 ### Step 2: 스프린트 루프
 
-`[MST skill=agile step=2/3 return_to=null]`
+`[MST skill=agile step=2/4 return_to=null]`
 
 #### 2.0 재개 분기 결정
 
@@ -400,7 +401,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 ### Step 3: 스티어링 체크포인트
 
-`[MST skill=agile step=3/3 return_to=null]`
+`[MST skill=agile step=3/4 return_to=null]`
 
 **목표**: 정기 또는 비상 트리거 시 현재 진행 상황을 사용자에게 보고하고, objective 방향 변경 여부를 확인한 뒤 루프를 계속 진행한다.
 
@@ -575,6 +576,13 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 ---
 
 ## 상태 전이 규칙 (CRITICAL)
+
+### 유효 상태 전이
+
+| 엔티티 | 유효 전이 |
+|--------|----------|
+| Story | `todo → in_progress → done`, `todo → blocked → in_progress → done` |
+| Session | `active → paused → completed`, `active → completed` |
 
 **LLM은 objective.md를 절대 직접 편집하지 않습니다.**
 
