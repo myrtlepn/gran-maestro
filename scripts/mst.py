@@ -1639,10 +1639,10 @@ def _normalize_agi_id(value: str) -> str:
 
 
 def _normalize_story_id(value: str) -> str:
-    story_id = (value or "").strip().upper()
-    if not re.fullmatch(r"STORY-[A-Z0-9_-]+", story_id):
+    story_id = (value or "").strip()
+    if not re.fullmatch(r"STORY-[A-Z0-9_-]+", story_id, flags=re.IGNORECASE):
         raise ValueError(f"Invalid story id: {value}")
-    return story_id
+    return story_id.upper()
 
 
 def _normalize_link_id(value: str, prefix: str) -> str:
@@ -1933,6 +1933,7 @@ def cmd_agile_init(args):
     now = _now_iso()
     payload = {
         "id": agi_id,
+        "agi_id": agi_id,
         "status": "active",
         "current_sprint": 0,
         "steering_every": args.steering_every,
@@ -2061,23 +2062,22 @@ def cmd_agile_result(args):
     save_json(sprint_dir / "result.json", payload)
 
     result_md_path = sprint_dir / "result.md"
-    if not result_md_path.exists():
-        result_md_path.write_text(
-            "\n".join(
-                [
-                    f"# {sprint_id} Result",
-                    "",
-                    f"- status: {payload['status']}",
-                    f"- planned: {', '.join(planned) if planned else '-'}",
-                    f"- completed: {', '.join(completed) if completed else '-'}",
-                    f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
-                    f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
-                    f"- timestamp: {timestamp}",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
+    result_md_path.write_text(
+        "\n".join(
+            [
+                f"# {sprint_id} Result",
+                "",
+                f"- status: {payload['status']}",
+                f"- planned: {', '.join(planned) if planned else '-'}",
+                f"- completed: {', '.join(completed) if completed else '-'}",
+                f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
+                f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+                f"- timestamp: {timestamp}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     _append_agile_event(
         agi_id,
         "agile.result",
@@ -2176,7 +2176,17 @@ def cmd_agile_objective_check(args):
     content = objective_path.read_text(encoding="utf-8")
     statuses = _collect_objective_story_statuses(content)
     if not statuses:
-        print("Error: no story statuses found in objective.md", file=sys.stderr)
+        output = {
+            "agi_id": agi_id,
+            "all_done": False,
+            "incomplete": [],
+            "stories": {},
+            "warning": "no stories found",
+        }
+        if args.json:
+            print(json.dumps(output, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(output, ensure_ascii=False))
         return 1
 
     incomplete = sorted([
