@@ -288,9 +288,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 ```
 
 - `all_done: true` → 루프 종료 (2.3 최종 보고서로 이동)
-- `all_done: false` → 다음 story 선택 (2.2.2)
+- `all_done: false` → 스티어링 체크포인트 확인 후 다음 story 선택 (2.2.2)
 
-> ⚠️ 스티어링 체크포인트는 REQ-481에서 구현됩니다.
+**스티어링 체크포인트 확인**: `CURRENT_SPRINT > 0` 이고 `CURRENT_SPRINT % STEERING_EVERY == 0` 이면 **Step 3(스티어링 체크포인트)** 로 분기하고, 완료 후 루프를 계속 진행.
 
 ##### 2.2.2 작업(Story) 선택
 
@@ -395,6 +395,182 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 ```
 
 `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --json` 실행 후 종료.
+
+---
+
+### Step 3: 스티어링 체크포인트
+
+`[MST skill=agile step=3/3 return_to=null]`
+
+**목표**: 정기 또는 비상 트리거 시 현재 진행 상황을 사용자에게 보고하고, objective 방향 변경 여부를 확인한 뒤 루프를 계속 진행한다.
+
+#### 3.1 트리거 조건
+
+| 유형 | 조건 |
+|------|------|
+| **정기** | `CURRENT_SPRINT > 0` AND `CURRENT_SPRINT % STEERING_EVERY == 0` |
+| **비상** | 안전장치 섹션의 비상 스티어링 트리거 조건 충족 시 즉시 진입 |
+
+`steering_every` 값은 session.json에서 로드하며 기본값은 3이다.
+
+#### 3.2 진행 보고서 출력
+
+아래 형식으로 **진행 보고서**를 출력한다:
+
+```
+========================================
+[스티어링 체크포인트] AGI-{AGI_ID} — Sprint {CURRENT_SPRINT}
+========================================
+
+목표 진행률
+- metric 달성률: {METRICS_PROGRESS} (성공 지표 기준)
+- Epic burnup: {EPIC_DONE}/{EPIC_TOTAL} 완료 ({STORY_DONE}/{STORY_TOTAL} story)
+
+최근 {STEERING_EVERY} 스프린트 요약
+| 스프린트 | 계획 | 완료 | 미완료 | 블로커 |
+|----------|------|------|--------|--------|
+| S{N}     | ...  | ...  | ...    | ...    |
+
+리스크 Top3
+1. {RISK_1} — 영향도: {high|medium|low}
+2. {RISK_2} — 영향도: {high|medium|low}
+3. {RISK_3} — 영향도: {high|medium|low}
+
+다음 추천 경로
+- 추천: {RECOMMENDED_PATH}
+- 근거: {RATIONALE}
+- 대안: {ALTERNATIVE_PATH}
+========================================
+```
+
+#### 3.3 방향 수정 (Objective 변경)
+
+진행 보고서 출력 후 `AskUserQuestion`으로 사용자에게 확인:
+
+> "현재 방향을 유지할까요? 수정이 필요하면 변경 사항을 설명해주세요."
+
+- **유지**: 루프로 복귀 (2.2.1)
+- **변경**: 아래 순서로 **버전 스냅샷** 저장 + **changelog** 기록 후 업데이트 진행
+
+**① 버전 스냅샷 저장** (`objective/history/v{N}.md`에 복사):
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} \
+  --reason "{사용자 입력 요약}" --json
+```
+
+이 명령은 아래를 수행한다:
+- 현재 `objective.md`를 `objective/history/v{N}.md`에 저장 (버전 스냅샷)
+- `objective/changelog.ndjson`에 변경 이력 append:
+  ```
+  {"timestamp": "...", "version_from": N, "version_to": N+1, "reason": "...", "impact_scope": "..."}
+  ```
+- `objective.md` 최신본 업데이트
+
+#### 3.4 변경 후 정합성 정책
+
+objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용한다:
+
+| 레벨 | 조건 | 처리 방식 |
+|------|------|-----------|
+| **Level A** (경미) | 용어 정정, 성공 지표 소폭 조정 | 완료 스프린트 유지, 루프 계속 |
+| **Level B** (중간) | Story 범위 변경, 우선순위 재조정 | 영향받는 Story만 부분 재검증 후 루프 계속 |
+| **Level C** (중대) | JTBD 목표 변경, Epic 추가/삭제 | 영향 Epic 재계산, 필요 시 부분 롤백 task 생성 |
+
+**원칙**: 완료 기록 삭제 금지. 변경된 story는 `superseded` 또는 `revalidated` 상태로 보존한다.
+
+레벨 결정 후 `AskUserQuestion`으로 처리 방식 확인하고 루프로 복귀.
+
+---
+
+## 안전장치
+
+### 4단계 복구 전략
+
+작업 실패 발생 시 아래 레벨 순서로 복구를 시도한다. Level N 실패 시 Level N+1로 에스컬레이션.
+
+| 레벨 | 이름 | 조건 | 처리 |
+|------|------|------|------|
+| **Level 0** | 자동 재시도 | transient failure (네트워크, 타임아웃 등 일시적 오류) | 동일 작업 1회 자동 재시도 |
+| **Level 1** | 작업 분해 | scope 과대 (story 범위가 너무 큼) | plan -a에 더 작은 단위로 분해 요청 후 재시도 |
+| **Level 2** | 스킵 + blocked | 외부 의존성 미해소 | story를 `blocked` 상태로 마킹하고 다음 story로 이동 |
+| **Level 3** | 비상 스티어링 | Level 0~2로 해결 불가 또는 자동 중단 트리거 발동 | 사용자 개입 요청 → Step 3 강제 진입 |
+
+복구 절차:
+1. 실패 감지 → 실패 유형 분류 (transient / scope / external / unknown)
+2. 해당 Level 복구 시도
+3. 복구 성공 시: 결과 기록 후 루프 재진입
+4. 복구 실패 시: 다음 Level로 에스컬레이션
+
+### Drift 감지
+
+**정의**: 스프린트 결과물이 objective.md의 목표 항목과 **관련성**이 없는 경우.
+
+**감지 시점**: 매 스프린트 완료(2.2.5 결과 기록) 직후 수행.
+
+**감지 절차**:
+
+1. 스프린트에서 변경된 파일 목록 추출 (`git diff --name-only`)
+2. objective.md의 활성 Epic/Story 항목과 변경 파일의 관련성 및 **정합성** 확인
+   - 관련 없는 변경이 80% 이상인 경우: **drift 경고**
+3. drift 감지 시 아래 메시지 출력:
+   ```
+   [drift 감지] Sprint {N}
+   - 변경 파일: {파일 목록}
+   - 목표 story: {STORY_ID} — {story 제목}
+   - 관련성: 관련|무관
+   - 판정: 정상|경고|비상
+   ```
+4. **연속 2회 이상** drift 경고 발생 시: 비상 스티어링 트리거 → Step 3 즉시 진입
+
+### 자동 중단 트리거
+
+아래 조건 중 하나 이상 충족 시 루프를 즉시 중단하고 비상 스티어링을 실행한다:
+
+| 조건 | 기준 |
+|------|------|
+| **연속 실패** | 동일 story에 대해 **연속 2회 실패** |
+| **누적 실패율** | 전체 스프린트 중 실패율 **50%** 이상 (최소 4 스프린트 이후 적용) |
+| **무의미 루프** | **diff 없음** **2회 연속** (plan 실행 후 변경 파일 없음) |
+| **비용 cap** | 누적 **비용**/토큰 사용량이 session.json의 `cost_cap` 값 초과 |
+
+자동 중단 발생 시:
+
+```
+[자동 중단] AGI-{AGI_ID} — 중단 조건 충족: {REASON}
+현재까지 결과: {DONE_STORIES}/{TOTAL_STORIES} story 완료
+재개하려면: /mst:agile --resume {AGI_ID}
+```
+
+`python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status paused --json` 실행 후 종료.
+
+### 비상 스티어링 트리거
+
+정기 체크포인트 외에 아래 조건에서 **Step 3을 즉시 강제 트리거**한다:
+
+| 트리거 조건 | 설명 |
+|-------------|------|
+| 연속 실패 2회 (자동 중단 이전) | 자동 중단 직전 사용자 개입 기회 제공 |
+| blocked story 누적 50% 이상 | 절반 이상의 story가 blocked 상태 |
+| drift 감지 연속 2회 | 변경 파일과 objective 관련성 80% 미달 연속 |
+| Level 3 복구 에스컬레이션 도달 | 4단계 복구 최상위 레벨 도달 |
+
+비상 스티어링 진입 시:
+1. `[비상 스티어링] 조건: {TRIGGER_REASON}` 출력 후 Step 3으로 진입
+2. Step 3.2 진행 보고서 즉시 출력
+3. `AskUserQuestion`으로 사용자 개입 요청:
+   ```
+   [비상 스티어링] 자동 진행이 중단되었습니다. 트리거: {TRIGGER_REASON}
+
+   선택:
+   1) 계속 진행 (해당 story blocked 처리 후 다음 story)
+   2) objective 수정 (Step 3.3 방향 전환)
+   3) 완전 중단
+   ```
+4. 사용자 응답에 따라 분기:
+   - **계속 진행**: 해당 story `blocked` 처리 후 다음 story로 진행
+   - **objective 수정**: Step 3.3 수행 후 루프 재진입
+   - **완전 중단**: session을 `paused` 상태로 저장 후 종료
 
 ---
 
