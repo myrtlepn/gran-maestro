@@ -208,6 +208,26 @@ export class WorktreeManager {
       }
 
       info.state = 'active';
+      try {
+        const sourceHooksDir = resolve(this.projectRoot, '.claude/hooks');
+        const targetHooksDir = resolve(worktreePath, '.claude/hooks');
+        const denoFs = Deno as typeof Deno & {
+          copyFile: (src: string, dest: string) => Promise<void>;
+          chmod: (path: string, mode: number) => Promise<void>;
+        };
+        await Deno.mkdir(targetHooksDir, { recursive: true });
+
+        for await (const entry of Deno.readDir(sourceHooksDir)) {
+          if (!entry.isFile) continue;
+
+          const sourcePath = resolve(sourceHooksDir, entry.name);
+          const targetPath = resolve(targetHooksDir, entry.name);
+          await denoFs.copyFile(sourcePath, targetPath);
+          await denoFs.chmod(targetPath, 0o755);
+        }
+      } catch {
+        // Non-fatal: hook copy failure should not block worktree creation.
+      }
       await this.persistMeta(taskId, info);
       return worktreePath;
     } catch (err) {
