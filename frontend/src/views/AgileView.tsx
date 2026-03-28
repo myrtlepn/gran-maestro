@@ -10,7 +10,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer';
-import { ArrowRight, FileText, GitBranch, ListChecks } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
 
 interface AgileSessionSummary {
   id: string;
@@ -31,6 +31,12 @@ interface AgileSessionMeta {
 interface AgileSprint {
   sprint_id: string;
   status?: string;
+  stories?: string[];
+  period?: string;
+  started_at?: string;
+  ended_at?: string;
+  start_date?: string;
+  end_date?: string;
   planned?: string[];
   completed?: string[];
   generated?: {
@@ -184,6 +190,29 @@ function formatRate(rate: number | undefined): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+function formatSprintPeriod(sprint: AgileSprint): string {
+  if (typeof sprint.period === 'string' && sprint.period.trim().length > 0) {
+    return sprint.period;
+  }
+
+  const start = sprint.started_at ?? sprint.start_date;
+  const end = sprint.ended_at ?? sprint.end_date;
+  if (start || end) {
+    return `${formatTime(start)} ~ ${formatTime(end)}`;
+  }
+
+  return formatTime(sprint.timestamp);
+}
+
+function getSprintStories(sprint: AgileSprint): string[] {
+  const directStories = toArray(sprint.stories).filter(Boolean);
+  if (directStories.length > 0) {
+    return directStories;
+  }
+
+  return [...new Set([...toArray(sprint.planned), ...toArray(sprint.completed)])];
+}
+
 function buildFallbackResultMarkdown(sprint: AgileSprint): string {
   const planned = toArray(sprint.planned);
   const completed = toArray(sprint.completed);
@@ -262,6 +291,18 @@ export function AgileView() {
     maxWidth: 560,
     storageKey: 'agile-sidebar-width',
   });
+  const {
+    sidebarWidth: sprintPanelWidth,
+    isResizing: isSprintPanelResizing,
+    startResizing: startSprintPanelResizing,
+    sidebarRef: sprintPanelRef,
+  } = useResizableSidebar({
+    defaultWidth: 340,
+    minWidth: 280,
+    maxWidth: 560,
+    storageKey: 'agile-sprint-panel-width',
+  });
+  const [isSprintPanelCollapsed, setIsSprintPanelCollapsed] = useState(false);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -271,6 +312,10 @@ export function AgileView() {
   const selectedSprint = useMemo(
     () => sessionDetail?.sprints.find((sprint) => sprint.sprint_id === selectedSprintId) ?? null,
     [sessionDetail, selectedSprintId],
+  );
+  const selectedSprintStories = useMemo(
+    () => (selectedSprint ? getSprintStories(selectedSprint) : []),
+    [selectedSprint],
   );
 
   const requestSessions = useCallback(async (): Promise<AgileSessionSummary[]> => {
@@ -610,42 +655,127 @@ export function AgileView() {
             )}
           </div>
         </ScrollArea>
-        <div className="p-3 border-y bg-muted/10 text-xs font-medium text-muted-foreground">스프린트</div>
-        <ScrollArea className="h-56">
-          <div className="p-3 space-y-2">
-            {detailLoading && (
-              <div className="space-y-2">
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            )}
-            {!detailLoading && sessionDetail?.sprints.map((sprint) => (
-              <button
-                key={sprint.sprint_id}
-                type="button"
-                onClick={() => setSelectedSprintId(sprint.sprint_id)}
-                className={`w-full text-left rounded-md border p-3 transition-colors ${
-                  selectedSprintId === sprint.sprint_id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:bg-accent/40'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs">{sprint.sprint_id}</span>
-                  <StatusBadge status={sprint.status ?? 'unknown'} />
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1.5">
-                  planned {toArray(sprint.planned).length} · completed {toArray(sprint.completed).length}
-                </p>
-              </button>
-            ))}
-            {!detailLoading && (!sessionDetail || sessionDetail.sprints.length === 0) && (
-              <p className="text-xs text-muted-foreground px-1 py-2">스프린트가 없습니다.</p>
-            )}
-          </div>
-        </ScrollArea>
       </div>
       <ResizableHandle isResizing={isResizing} onMouseDown={startResizing} />
+      {isSprintPanelCollapsed ? (
+        <div className="w-11 border-r bg-muted/10 shrink-0 flex items-start justify-center pt-3">
+          <button
+            type="button"
+            onClick={() => setIsSprintPanelCollapsed(false)}
+            className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
+            aria-label="스프린트 패널 펼치기"
+            title="스프린트 패널 펼치기"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <>
+          <div
+            ref={sprintPanelRef}
+            style={{ width: sprintPanelWidth }}
+            className="border-r flex flex-col min-h-0 shrink-0"
+          >
+            <div className="p-3 border-b bg-muted/10 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium text-muted-foreground">스프린트</h3>
+              <button
+                type="button"
+                onClick={() => setIsSprintPanelCollapsed(true)}
+                className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
+                aria-label="스프린트 패널 접기"
+                title="스프린트 패널 접기"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            </div>
+
+            {detailError && (
+              <div className="px-3 py-2 text-xs text-red-600 border-b border-red-200 bg-red-50">
+                {detailError}
+              </div>
+            )}
+
+            <div className="p-3 border-b bg-muted/10 text-xs font-medium text-muted-foreground">목록</div>
+            <ScrollArea className="h-56 border-b">
+              <div className="p-3 space-y-2">
+                {detailLoading && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                )}
+                {!detailLoading && sessionDetail?.sprints.map((sprint) => (
+                  <button
+                    key={sprint.sprint_id}
+                    type="button"
+                    onClick={() => setSelectedSprintId(sprint.sprint_id)}
+                    className={`w-full text-left rounded-md border p-3 transition-colors ${
+                      selectedSprintId === sprint.sprint_id
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:bg-accent/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs">{sprint.sprint_id}</span>
+                      <StatusBadge status={sprint.status ?? 'unknown'} />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      planned {toArray(sprint.planned).length} · completed {toArray(sprint.completed).length}
+                    </p>
+                  </button>
+                ))}
+                {!detailLoading && (!sessionDetail || sessionDetail.sprints.length === 0) && (
+                  <p className="text-xs text-muted-foreground px-1 py-2">스프린트가 없습니다.</p>
+                )}
+              </div>
+            </ScrollArea>
+
+            <div className="p-3 border-b bg-muted/10 text-xs font-medium text-muted-foreground">세부 정보</div>
+            <ScrollArea className="flex-1 min-h-0">
+              <div className="p-3 space-y-3">
+                {!selectedSession && (
+                  <p className="text-sm text-muted-foreground">먼저 세션을 선택하세요.</p>
+                )}
+                {selectedSession && detailLoading && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-20 w-full" />
+                    <Skeleton className="h-24 w-full" />
+                  </div>
+                )}
+                {selectedSession && !detailLoading && !selectedSprint && (
+                  <p className="text-sm text-muted-foreground">스프린트를 선택하세요.</p>
+                )}
+                {selectedSession && !detailLoading && selectedSprint && (
+                  <>
+                    <div className="rounded-md border p-3 space-y-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
+                        <StatusBadge status={selectedSprint.status ?? 'unknown'} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">이름: {selectedSprint.sprint_id}</p>
+                      <p className="text-xs text-muted-foreground">기간: {formatSprintPeriod(selectedSprint)}</p>
+                    </div>
+
+                    <div className="rounded-md border p-3">
+                      <div className="text-xs font-semibold text-muted-foreground mb-2">스토리 목록</div>
+                      {selectedSprintStories.length > 0 ? (
+                        <ul className="list-disc pl-5 text-sm space-y-1">
+                          {selectedSprintStories.map((story, index) => (
+                            <li key={`${story}-${index}`}>{story}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">스토리 정보가 없습니다.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+          <ResizableHandle isResizing={isSprintPanelResizing} onMouseDown={startSprintPanelResizing} />
+        </>
+      )}
       <div className="flex-1 min-h-0 flex flex-col bg-card overflow-hidden">
         {!selectedSession ? (
           <EmptyState
@@ -664,12 +794,6 @@ export function AgileView() {
               </div>
               <StatusBadge status={selectedSession.status} />
             </div>
-
-            {detailError && (
-              <div className="mx-4 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                {detailError}
-              </div>
-            )}
 
             <ScrollArea className="flex-1 min-h-0">
               <div className="p-4 space-y-4">
