@@ -573,9 +573,16 @@ async function runGetScreen(stitch, args) {
     }),
   );
 
+  const screen = isObject(raw)
+    ? cleanObject({
+        ...raw,
+        html: await resolveScreenHtml(raw.html, raw.id ?? screenId),
+      })
+    : raw;
+
   return {
     projectId,
-    screen: raw,
+    screen,
     source: "sdk.callTool:get_screen",
   };
 }

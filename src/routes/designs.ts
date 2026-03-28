@@ -1484,7 +1484,10 @@ projectDesignsApi.get("/designs/:desId/styles/:styleName/screens/:screenFile/htm
   if (content === null) {
     return c.html("<html><body></body></html>", 404);
   }
-  return c.html(content);
+  const htmlContent = extractDownloadUrl(content)
+    ? await resolveArtifactHtmlContent(content, htmlFile)
+    : content;
+  return c.html(htmlContent);
 });
 
 projectDesignsApi.get("/designs/:desId/screens/:screenFile", async (c) => {
@@ -1529,7 +1532,10 @@ projectDesignsApi.get("/designs/:desId/screens/:screenFile/html", async (c) => {
   if (content === null) {
     return c.html("<html><body></body></html>", 404);
   }
-  return c.html(content);
+  const htmlContent = extractDownloadUrl(content)
+    ? await resolveArtifactHtmlContent(content, htmlFile)
+    : content;
+  return c.html(htmlContent);
 });
 
 export { projectDesignsApi };
