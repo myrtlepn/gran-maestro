@@ -500,7 +500,8 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 > 이 단계는 테스트 방법론 적용 의도만 수집한다. 코드베이스 탐색·구현 수준 결정은 수행하지 않는다.
 
 **AUTO_MODE=false**:
-- `templates/defaults/config.json`의 `plan_qa_presets.test_strategy` 값을 먼저 확인한다.
+- `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.test_strategy` 값을 먼저 확인한다.
+  - 키가 없으면 `templates/defaults/config.json`의 `plan_qa_presets.test_strategy`에서 fallback한다.
 - 값이 `"ask"`가 아니면 AskUserQuestion을 생략하고 preset을 자동 적용한다.
   - `"apply-80"` → 테스트 방법론 `"적용"`, 목표 커버리지 `"80%"`
   - `"apply-90"` → 테스트 방법론 `"적용"`, 목표 커버리지 `"90%"`
@@ -528,7 +529,8 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 > 이 단계는 review 반복 루프의 추가 종료 조건을 수집한다. 조건 미설정 시 기존 종료 조건(AC 통과 + max_iterations)을 유지한다.
 
 **AUTO_MODE=false**:
-- `templates/defaults/config.json`의 `plan_qa_presets.loop_exit` 값을 먼저 확인한다.
+- `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.loop_exit` 값을 먼저 확인한다.
+  - 키가 없으면 `templates/defaults/config.json`의 `plan_qa_presets.loop_exit`에서 fallback한다.
 - 값이 `"ask"`가 아니면 AskUserQuestion을 생략하고 preset을 자동 적용한다.
   - `"default_pass"` → 기존 종료 조건(AC 통과 + max_iterations) 유지
   - `"convergence"` → 연속 무변경 수렴 조건 적용
