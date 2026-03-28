@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SessionStart hook — 새 세션 시작 시 콜스택 + Stop 카운터 + pending 플래그 초기화
-# 이전 세션에서 강제 중단(Ctrl+C, 세션 종료) 시 잔여 상태 정리
-
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
+STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
+DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 mkdir -p "$MST_TMP"
 
-STACK_FILE="${MST_TMP}/mst-call-stack-${PPID}.json"
-COUNTER_FILE="${MST_TMP}/mst-stop-hook-count-${PPID}"
-PENDING_FILE="${MST_TMP}/mst-pending-continuation-${PPID}"
-NEXT_ACTION_FILE="${MST_TMP}/mst-next-action-${PPID}.json"
-NEXT_ACTION_COUNTER_FILE="${MST_TMP}/mst-next-action-count-${PPID}"
-NEXT_ACTION_STATE_FILE="${MST_TMP}/mst-next-action-state-${PPID}"
-DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
@@ -100,42 +92,120 @@ print(f"ok\t{cleared}\t{scanned}\t{failed}")
   debug_log "session_init_plan_cleanup" "status=$clear_status cleared=$clear_count scanned=$clear_scanned failed=$clear_failed project_root=$PROJECT_ROOT"
 }
 
-cleanup_session_stale_state() {
-  # 1) /tmp marker 정리 (hook-check-done 제외)
+read_plugin_version() {
+  python3 - "$PROJECT_ROOT" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+project_root = sys.argv[1]
+paths = [
+    os.path.join(project_root, ".claude-plugin", "plugin.json"),
+]
+
+for path in paths:
+    if not os.path.isfile(path):
+        continue
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        continue
+
+    version = data.get("version") if isinstance(data, dict) else ""
+    if isinstance(version, str) and version.strip():
+        print(version.strip())
+        raise SystemExit(0)
+
+print("")
+PY
+}
+
+read_hook_version() {
+  local version_file="${PROJECT_ROOT}/.claude/hooks/.mst-hook-version"
+  if [ -f "$version_file" ]; then
+    tr -d '[:space:]' < "$version_file" 2>/dev/null || true
+    return 0
+  fi
+  printf ''
+}
+
+check_hook_version_mismatch() {
+  local plugin_version hook_version
+  plugin_version="$(read_plugin_version)"
+  hook_version="$(read_hook_version)"
+
+  if [ -n "$plugin_version" ] && [ "$plugin_version" != "$hook_version" ]; then
+    local hook_display
+    hook_display="${hook_version:-missing}"
+    echo "[mst-session-init] warning: hook version mismatch (hook=$hook_display plugin=$plugin_version). Run /mst:on to sync hooks." >&2
+    debug_log "session_init_version_mismatch" "hook=$hook_display plugin=$plugin_version"
+  fi
+}
+
+cleanup_stale_markers() {
   rm -f \
-    "$NEXT_ACTION_FILE" \
-    "${NEXT_ACTION_FILE}.tmp" \
-    "$PENDING_FILE" \
-    "${PENDING_FILE}.tmp" \
+    "${MST_TMP}/mst-call-stack-"*.json \
+    "${MST_TMP}/mst-call-stack-"*.json.tmp \
+    "${MST_TMP}/mst-pending-continuation-"* \
+    "${MST_TMP}/mst-pending-continuation-"*.tmp \
     "${MST_TMP}/mst-next-action-"*.json \
     "${MST_TMP}/mst-next-action-"*.json.tmp \
     "${MST_TMP}/mst-next-action-count-"* \
     "${MST_TMP}/mst-next-action-count-"*.tmp \
     "${MST_TMP}/mst-next-action-state-"* \
     "${MST_TMP}/mst-next-action-state-"*.tmp \
-    "${MST_TMP}/mst-pending-continuation-"* \
-    "${MST_TMP}/mst-pending-continuation-"*.tmp \
-    "${STACK_FILE}.tmp" \
-    "${COUNTER_FILE}.tmp" \
-    "$NEXT_ACTION_COUNTER_FILE" \
-    "${NEXT_ACTION_COUNTER_FILE}.tmp" \
-    "$NEXT_ACTION_STATE_FILE" \
-    "${NEXT_ACTION_STATE_FILE}.tmp" \
+    "${MST_TMP}/mst-stop-hook-count-"* \
+    "${MST_TMP}/mst-stop-hook-count-"*.tmp \
+    "${MST_TMP}/mst-hook-debug-"*.log \
+    "${MST_TMP}/mst-hook-check-done-"* \
+    "${MST_TMP}/mst-transcript-"*.path \
+    "${MST_TMP}/mst-state-"*.json \
+    "${MST_TMP}/mst-state-"*.json.tmp \
     2>/dev/null || true
 
   debug_log "session_init_tmp_cleanup" "tmp_dir=$MST_TMP"
-
-  # 2) plan.json next_action 정리 (best-effort)
-  clear_next_action_from_plan_json
 }
 
-# 콜스택 초기화 (빈 배열)
-printf '[]' > "$STACK_FILE"
+write_initial_state() {
+  python3 - "$STATE_FILE" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
 
-# Stop hook 연속 block 카운터 초기화
-printf '0' > "$COUNTER_FILE"
+path = sys.argv[1]
+now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+payload = {
+    "workflow_active": False,
+    "next_action": {
+        "skill": "",
+        "source": "",
+        "auto": False,
+        "expected_skill": "",
+        "source_skill": "",
+        "source_id": "",
+        "auto_mode": False,
+    },
+    "current_skill": "",
+    "active_req": "",
+    "iteration": 0,
+    "updated_at": now,
+}
 
-# pending/next_action 잔여 마커 + plan.json next_action 정리
-cleanup_session_stale_state
+with open(path + ".tmp", "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+
+import os
+os.replace(path + ".tmp", path)
+PY
+
+  debug_log "session_init_state_initialized" "state_file=$STATE_FILE"
+}
+
+cleanup_stale_markers
+clear_next_action_from_plan_json
+check_hook_version_mismatch
+write_initial_state
 
 exit 0

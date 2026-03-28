@@ -128,18 +128,23 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 
    **6a. Hook 파일 복사**: `{PLUGIN_ROOT}/hooks/` → `{PROJECT_ROOT}/.claude/hooks/`
    - 원본 위치: `{PLUGIN_ROOT}/hooks/` (플러그인 소유 원본)
-   - 대상 파일 4개:
-     - `mst-continuation-guard.sh` (Stop hook — 서브스킬 반환 후 워크플로우 연속 실행 보장)
-     - `mst-skill-push.sh` (PreToolUse hook — Skill 호출 시 콜스택 push)
-     - `mst-skill-pop.sh` (PostToolUse hook — Skill 완료 시 콜스택 pop)
-     - `mst-session-init.sh` (SessionStart hook — 세션 초기화)
+   - 대상 파일 2개:
+     - `mst-stop-hook.sh` (Stop hook — ralph-loop 스타일 re-feed로 워크플로우 연속 실행 보장)
+     - `mst-session-init.sh` (SessionStart hook — 세션 초기화 + 버전 게이트)
    - `{PROJECT_ROOT}/.claude/hooks/` 디렉토리가 없으면 생성
    - 각 파일을 복사하고 실행 권한 부여 (`chmod +x`)
    - 기존 파일이 있으면 **덮어쓰기** (플러그인 버전 업데이트 반영)
+   - **레거시 hook 정리** (기존 설치에서 업그레이드 시):
+     ```bash
+     # 레거시 4파일 구조 → 2파일 구조 마이그레이션
+     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-continuation-guard.sh"
+     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-skill-push.sh"
+     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-skill-pop.sh"
+     ```
    - 복사 완료 후 **버전 마커 기록**:
      ```bash
      mkdir -p "{PROJECT_ROOT}/.claude/hooks"
-     for f in mst-continuation-guard.sh mst-skill-push.sh mst-skill-pop.sh mst-session-init.sh; do
+     for f in mst-stop-hook.sh mst-session-init.sh; do
        cp "{PLUGIN_ROOT}/hooks/$f" "{PROJECT_ROOT}/.claude/hooks/$f"
        chmod +x "{PROJECT_ROOT}/.claude/hooks/$f"
      done
@@ -149,27 +154,22 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      ```
 
    **6b. Hook 등록**: `{PROJECT_ROOT}/.claude/settings.local.json`에 hook 이벤트 바인딩 등록
-   - 아래 4개 이벤트에 대해 hook이 등록되어 있는지 확인하고, 미등록 시 추가:
+   - 아래 2개 이벤트에 대해 hook이 등록되어 있는지 확인하고, 미등록 시 추가:
      ```json
      {
        "hooks": {
          "SessionStart": [
            { "matcher": "", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-session-init.sh" }] }
          ],
-         "PreToolUse": [
-           { "matcher": "Skill", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-skill-push.sh" }] }
-         ],
-         "PostToolUse": [
-           { "matcher": "Skill", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-skill-pop.sh" }] }
-         ],
          "Stop": [
-           { "matcher": "", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-continuation-guard.sh" }] }
+           { "matcher": "", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-stop-hook.sh" }] }
          ]
        }
      }
      ```
    - 등록 시 기존 `settings.local.json`의 다른 필드(`env`, `permissions` 등)를 보존한 상태로 병합
    - 각 이벤트에 동일 `command`가 이미 등록되어 있으면 건너뜀 (중복 방지)
+   - **레거시 hook 참조 정리**: 기존 `PreToolUse`, `PostToolUse` 이벤트와 `mst-continuation-guard.sh` 참조를 제거
    - `settings.local.json` 파일이 없으면 새로 생성
    - 설정 파일 파싱/수정은 `python3`로 수행:
      ```bash
@@ -189,11 +189,26 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      hooks = settings.setdefault("hooks", {})
      prefix = '$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks'
 
+     # 레거시 hook 참조 정리 (4파일 → 2파일 마이그레이션)
+     legacy_events = ["PreToolUse", "PostToolUse"]
+     for event in legacy_events:
+         hooks.pop(event, None)
+
+     # 레거시 Stop hook 참조 정리 (mst-continuation-guard.sh → mst-stop-hook.sh)
+     if "Stop" in hooks:
+         stop_entries = hooks["Stop"]
+         hooks["Stop"] = [
+             e for e in stop_entries
+             if not (isinstance(e, dict) and any(
+                 isinstance(h, dict) and "mst-continuation-guard.sh" in h.get("command", "")
+                 for h in (e.get("hooks") or [])
+             ))
+         ]
+
+     # 새 hook 등록
      hook_map = {
          "SessionStart": {"matcher": "", "file": "mst-session-init.sh"},
-         "PreToolUse": {"matcher": "Skill", "file": "mst-skill-push.sh"},
-         "PostToolUse": {"matcher": "Skill", "file": "mst-skill-pop.sh"},
-         "Stop": {"matcher": "", "file": "mst-continuation-guard.sh"},
+         "Stop": {"matcher": "", "file": "mst-stop-hook.sh"},
      }
 
      for event, cfg in hook_map.items():
@@ -219,7 +234,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      os.replace(tmp, settings_path)
      HOOKEOF
      ```
-   - 완료 메시지: `"✓ 워크플로우 Hook 4개 설치 완료"`
+   - 완료 메시지: `"✓ 워크플로우 Hook 2개 설치 완료 (레거시 hook 정리됨)"`
 
    **6c. 버전 알림 스크립트 설치**:
    - `check-version.sh`를 `~/.claude/scripts/`에 복사; `settings.json`의 `hooks.UserPromptSubmit`에 아래 hook 추가(미존재 시):

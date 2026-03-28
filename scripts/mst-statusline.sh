@@ -46,15 +46,15 @@ if command:
   printf '%s' "$DEFAULT_HUD_COMMAND"
 }
 
-resolve_stack_file() {
+resolve_state_file() {
   local by_ppid latest
-  by_ppid="${MST_TMP}/mst-call-stack-${PPID}.json"
+  by_ppid="${MST_TMP}/mst-state-${PPID}.json"
   if [ -f "$by_ppid" ]; then
     printf '%s' "$by_ppid"
     return 0
   fi
 
-  latest="$(ls -1t "${MST_TMP}"/mst-call-stack-*.json 2>/dev/null | head -n 1 || true)"
+  latest="$(ls -1t "${MST_TMP}"/mst-state-*.json 2>/dev/null | head -n 1 || true)"
   printf '%s' "$latest"
 }
 
@@ -91,18 +91,17 @@ save_transcript_bridge() {
 }
 
 build_mst_line() {
-  local stack_file="$1"
+  local state_file="$1"
   local transcript_path="${2:-}"
-  local stack_source="${3:-auto}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
-stack_path = sys.argv[1] if len(sys.argv) > 1 else ""
+state_path = sys.argv[1] if len(sys.argv) > 1 else ""
 transcript_path = sys.argv[2] if len(sys.argv) > 2 else ""
-stack_source = (sys.argv[3] if len(sys.argv) > 3 else "auto").strip().lower()
 MAX_TAIL_BYTES = 512 * 1024
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
+
 
 def parse_iso(ts: str):
     if not isinstance(ts, str) or not ts:
@@ -115,6 +114,7 @@ def parse_iso(ts: str):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
 
 def format_elapsed(ts: str):
     started = parse_iso(ts)
@@ -132,6 +132,7 @@ def format_elapsed(ts: str):
         return f"{total // 3600}h"
     return f"{total // 86400}d"
 
+
 def clean_skill(name, strip_namespace=False):
     if not isinstance(name, str):
         return ""
@@ -139,6 +140,7 @@ def clean_skill(name, strip_namespace=False):
     if strip_namespace and ":" in value:
         value = value.rsplit(":", 1)[-1]
     return value
+
 
 def extract_context_id(args):
     if not isinstance(args, str):
@@ -148,6 +150,7 @@ def extract_context_id(args):
         return match.group(1).upper()
     return ""
 
+
 def render_line(labels, context_id):
     if not labels:
         return "MST idle"
@@ -156,37 +159,53 @@ def render_line(labels, context_id):
         line += f" ({context_id})"
     return line
 
-def render_from_stack(path):
-    frames = []
-    if path:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-                if isinstance(raw, list):
-                    frames = raw
-        except Exception:
-            frames = []
 
-    labels = []
-    context_id = ""
+def render_from_state(path):
+    if not path or not os.path.isfile(path):
+        return None
 
-    for frame in reversed(frames):
-        if isinstance(frame, dict):
-            candidate = frame.get("context_id")
-            if isinstance(candidate, str) and candidate.strip():
-                context_id = candidate.strip()
-                break
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
 
-    for frame in frames:
-        if not isinstance(frame, dict):
-            continue
-        skill = clean_skill(frame.get("skill"))
-        if not skill:
-            continue
-        started_at = frame.get("started_at") or frame.get("pushed_at") or ""
-        labels.append(f"{skill}({format_elapsed(started_at)})")
+    if not isinstance(data, dict):
+        return None
 
-    return render_line(labels, context_id)
+    current_skill = clean_skill(data.get("current_skill"))
+    if not current_skill:
+        return None
+
+    updated_at = ""
+    for field in ("updated_at", "started_at"):
+        value = data.get(field)
+        if isinstance(value, str) and value.strip():
+            updated_at = value.strip()
+            break
+
+    label = f"{current_skill}({format_elapsed(updated_at)})"
+
+    active_req = data.get("active_req")
+    if isinstance(active_req, str):
+        active_req = active_req.strip().upper()
+    else:
+        active_req = ""
+
+    if not re.match(r"^(REQ|PLN)-\d+$", active_req):
+        active_req = ""
+
+    if not active_req:
+        next_action = data.get("next_action")
+        if isinstance(next_action, dict):
+            for key in ("source_id", "source"):
+                value = next_action.get(key)
+                if isinstance(value, str) and re.match(r"^(REQ|PLN)-\d+$", value.strip().upper()):
+                    active_req = value.strip().upper()
+                    break
+
+    return render_line([label], active_req)
+
 
 def load_transcript_lines(path):
     if not path or not os.path.isfile(path):
@@ -213,6 +232,7 @@ def load_transcript_lines(path):
     except Exception:
         return None
 
+
 def schema_detected(lines):
     scanned = 0
     for line in lines:
@@ -237,6 +257,7 @@ def schema_detected(lines):
             if block.get("type") in ("tool_use", "tool_result"):
                 return True
     return False
+
 
 def render_from_transcript(path):
     lines = load_transcript_lines(path)
@@ -299,14 +320,13 @@ def render_from_transcript(path):
             context_id = candidate_context_id
 
     if not labels:
-        return None  # Empty stack from transcript → fallback to call-stack
+        return None
     return render_line(labels, context_id)
 
-if stack_source not in ("hook", "transcript", "auto"):
-    stack_source = "auto"
 
-if stack_source == "hook":
-    print(render_from_stack(stack_path))
+state_line = render_from_state(state_path)
+if state_line is not None:
+    print(state_line)
     sys.exit(0)
 
 transcript_line = render_from_transcript(transcript_path)
@@ -314,17 +334,16 @@ if transcript_line is not None:
     print(transcript_line)
     sys.exit(0)
 
-print(render_from_stack(stack_path))
-' "$stack_file" "$transcript_path" "$stack_source" 2>/dev/null || printf 'MST idle\n'
+print("MST idle")
+' "$state_file" "$transcript_path" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
-STACK_FILE="$(resolve_stack_file)"
+STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_STACK_SOURCE="${MST_STACK_SOURCE:-auto}"
-MST_LINE="$(build_mst_line "$STACK_FILE" "$TRANSCRIPT_PATH" "$MST_STACK_SOURCE")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
