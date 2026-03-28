@@ -243,7 +243,7 @@ export function AgileView() {
   const [sessions, setSessions] = useState<AgileSessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<AgileSessionDetail | null>(null);
-  const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null);
+  const [selectedSprintId, setSelectedSprintId] = useState<string | null | undefined>(undefined);
   const [resultMarkdown, setResultMarkdown] = useState<string | null>(null);
   const [retrospective, setRetrospective] = useState<AgileRetrospective | null>(null);
 
@@ -325,7 +325,7 @@ export function AgileView() {
       setSessions([]);
       setSelectedSessionId(null);
       setSessionDetail(null);
-      setSelectedSprintId(null);
+      setSelectedSprintId(undefined);
       setResultMarkdown(null);
       setRetrospective(null);
       setSessionsError(null);
@@ -366,7 +366,7 @@ export function AgileView() {
   useEffect(() => {
     if (!projectId || !selectedSessionId) {
       setSessionDetail(null);
-      setSelectedSprintId(null);
+      setSelectedSprintId(undefined);
       setResultMarkdown(null);
       setRetrospective(null);
       setDetailLoading(false);
@@ -381,7 +381,11 @@ export function AgileView() {
         if (cancelled) return;
         setSessionDetail(data);
         setDetailError(null);
-        setSelectedSprintId((prev) => resolveDefaultSprintId(data.sprints, data.session?.current_sprint, prev));
+        setSelectedSprintId((prev) => (
+          prev === null
+            ? null
+            : resolveDefaultSprintId(data.sprints, data.session?.current_sprint, prev)
+        ));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -464,7 +468,11 @@ export function AgileView() {
         .then((data) => {
           setSessionDetail(data);
           setDetailError(null);
-          setSelectedSprintId((prev) => resolveDefaultSprintId(data.sprints, data.session?.current_sprint, prev));
+          setSelectedSprintId((prev) => (
+            prev === null
+              ? null
+              : resolveDefaultSprintId(data.sprints, data.session?.current_sprint, prev)
+          ));
         })
         .catch((err) => {
           console.error('SSE re-fetch agile session detail failed:', err);
@@ -489,7 +497,7 @@ export function AgileView() {
 
       if (!resolvedSessionId) {
         setSessionDetail(null);
-        setSelectedSprintId(null);
+        setSelectedSprintId(undefined);
         setResultMarkdown(null);
         setRetrospective(null);
         return;
@@ -499,7 +507,9 @@ export function AgileView() {
       setSessionDetail(detail);
       setDetailError(null);
 
-      const nextSprintId = resolveDefaultSprintId(detail.sprints, detail.session?.current_sprint, selectedSprintId);
+      const nextSprintId = selectedSprintId === null
+        ? null
+        : resolveDefaultSprintId(detail.sprints, detail.session?.current_sprint, selectedSprintId);
       setSelectedSprintId(nextSprintId);
 
       if (!nextSprintId) {
@@ -678,18 +688,20 @@ export function AgileView() {
                     ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
                       <div className="overflow-x-auto pb-2">
                         <div className="inline-flex min-w-max gap-3">
-                          {sessionDetail.sprints.map((sprint) => {
+                          {(selectedSprintId ? sessionDetail.sprints.filter(s => s.sprint_id === selectedSprintId) : sessionDetail.sprints).map((sprint) => {
                             const sprintStatus = toFlowStatus(sprint.status);
                             const planStatus = getPlanStatus(sprint);
                             const resultStatus = getResultStatus(sprint);
 
                             return (
-                              <div
+                              <button
                                 key={sprint.sprint_id}
-                                className={`rounded-lg border p-3 ${
+                                type="button"
+                                onClick={() => setSelectedSprintId(sprint.sprint_id)}
+                                className={`rounded-lg border p-3 cursor-pointer transition-colors text-left flex-shrink-0 ${
                                   selectedSprintId === sprint.sprint_id
-                                    ? 'border-primary/60 bg-primary/5'
-                                    : 'border-border bg-background'
+                                    ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                                    : 'border-border bg-background hover:bg-accent/40'
                                 }`}
                               >
                                 <div className="inline-flex items-center gap-2">
@@ -707,7 +719,7 @@ export function AgileView() {
                                     status={resultStatus}
                                   />
                                 </div>
-                              </div>
+                              </button>
                             );
                           })}
                         </div>
