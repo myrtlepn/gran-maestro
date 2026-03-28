@@ -12,7 +12,7 @@ interface KeyboardShortcutsModalProps {
 }
 
 const SHORTCUTS = [
-  { category: 'Navigation', key: '0', action: 'Overview 뷰로 전환' },
+  { category: 'Navigation', key: '`', action: 'Overview 뷰로 전환' },
   { category: 'Navigation', key: '1', action: 'Picks 뷰로 전환' },
   { category: 'Navigation', key: '2', action: 'Plans 뷰로 전환' },
   { category: 'Navigation', key: '3', action: 'Workflow 뷰로 전환' },
@@ -61,4 +61,3 @@ export function KeyboardShortcutsModal({ open, onOpenChange }: KeyboardShortcuts
     </Dialog>
   );
 }
-

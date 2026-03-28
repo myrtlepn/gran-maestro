@@ -15,7 +15,7 @@ import { useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 
 export const TABS = [
-  { id: 'overview', label: 'Overview', icon: Gauge, key: '0', path: '/overview' },
+  { id: 'overview', label: 'Overview', icon: Gauge, key: '`', path: '/overview' },
   { id: 'picks', label: 'Picks', icon: Crosshair, key: '1', path: '/picks' },
   { id: 'plans', label: 'Plans', icon: ClipboardList, key: '2', path: '/plans' },
   { id: 'workflow', label: 'Workflow', icon: GitBranch, key: '3', path: '/workflow' },
