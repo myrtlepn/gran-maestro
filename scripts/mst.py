@@ -42,7 +42,8 @@ Subcommands:
   agile init         [--steering-every N] [--json]
   agile status       <AGI-ID> [--json]
   agile update       <AGI-ID> [--status TEXT] [--current-sprint N] [--steering-every N] [--objective-version N] [--json]
-  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--json]
+  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--json]
+  agile retrospective <AGI-ID> --sprint N --status TEXT --succeeded IDS --failed JSON [--failed JSON ...] --velocity-planned N --velocity-completed N --limitations TEXT --lessons TEXT --direction TEXT [--json]
   agile objective-transition <AGI-ID> --story STORY-ID --status TEXT [--json]
   agile objective-check <AGI-ID> [--json]
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
@@ -1668,6 +1669,39 @@ def _split_csv_values(raw_values) -> List[str]:
     return values
 
 
+def _parse_agile_failed_items(raw_values) -> List[dict]:
+    if not raw_values:
+        return []
+    if isinstance(raw_values, str):
+        raw_values = [raw_values]
+
+    parsed_items = []
+    for raw_value in raw_values:
+        try:
+            decoded = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid --failed JSON: {exc}")
+
+        entries = decoded if isinstance(decoded, list) else [decoded]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("invalid --failed JSON: each item must be an object")
+
+            tried_approach = str(entry.get("tried_approach", "")).strip()
+            failure_reason = str(entry.get("failure_reason", "")).strip()
+            if not tried_approach:
+                raise ValueError("invalid --failed JSON: missing tried_approach")
+            if not failure_reason:
+                raise ValueError("invalid --failed JSON: missing failure_reason")
+
+            normalized = dict(entry)
+            normalized["tried_approach"] = tried_approach
+            normalized["failure_reason"] = failure_reason
+            parsed_items.append(normalized)
+
+    return parsed_items
+
+
 def _agi_session_dir(agi_id: str) -> Path:
     return agile_dir() / agi_id
 
@@ -2057,6 +2091,10 @@ def cmd_agile_result(args):
         },
         "timestamp": timestamp,
     }
+    if args.summary is not None:
+        payload["summary"] = str(args.summary)
+    if args.outcome is not None:
+        payload["outcome"] = str(args.outcome)
     sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
     save_json(sprint_dir / "result.json", payload)
@@ -2072,6 +2110,8 @@ def cmd_agile_result(args):
                 f"- completed: {', '.join(completed) if completed else '-'}",
                 f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
                 f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+                f"- summary: {payload.get('summary', '-')}",
+                f"- outcome: {payload.get('outcome', '-')}",
                 f"- timestamp: {timestamp}",
                 "",
             ]
@@ -2091,6 +2131,80 @@ def cmd_agile_result(args):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(str(sprint_dir / "result.json"))
+    return 0
+
+
+def cmd_agile_retrospective(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+    if args.velocity_planned < 0:
+        print("Error: --velocity-planned must be >= 0", file=sys.stderr)
+        return 1
+    if args.velocity_completed < 0:
+        print("Error: --velocity-completed must be >= 0", file=sys.stderr)
+        return 1
+
+    succeeded = _split_csv_values(args.succeeded)
+    if not succeeded:
+        print("Error: --succeeded is required", file=sys.stderr)
+        return 1
+
+    try:
+        failed = _parse_agile_failed_items(args.failed)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if not failed:
+        print("Error: --failed is required", file=sys.stderr)
+        return 1
+
+    sprint_id = f"S{args.sprint:02d}"
+    velocity_rate = 0 if args.velocity_planned == 0 else round(
+        args.velocity_completed / args.velocity_planned,
+        4,
+    )
+    payload = {
+        "sprint_id": sprint_id,
+        "status": str(args.status),
+        "succeeded": succeeded,
+        "failed": failed,
+        "velocity": {
+            "planned": int(args.velocity_planned),
+            "completed": int(args.velocity_completed),
+            "rate": velocity_rate,
+        },
+        "known_limitations": str(args.limitations),
+        "lessons_learned": str(args.lessons),
+        "direction": str(args.direction),
+        "timestamp": _now_iso(),
+    }
+
+    sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
+    sprint_dir.mkdir(parents=True, exist_ok=True)
+    retrospective_path = sprint_dir / "retrospective.json"
+    save_json(retrospective_path, payload)
+
+    _append_agile_event(
+        agi_id,
+        "agile.retrospective",
+        {
+            "sprint_id": sprint_id,
+            "status": payload["status"],
+        },
+    )
+
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(str(retrospective_path))
     return 0
 
 
@@ -5406,7 +5520,22 @@ def build_parser():
     agile_result.add_argument("--completed")
     agile_result.add_argument("--pln", action="append")
     agile_result.add_argument("--req", action="append")
+    agile_result.add_argument("--summary")
+    agile_result.add_argument("--outcome")
     agile_result.add_argument("--json", action="store_true")
+
+    agile_retrospective = agile_sub.add_parser("retrospective")
+    agile_retrospective.add_argument("agi_id")
+    agile_retrospective.add_argument("--sprint", type=int, required=True)
+    agile_retrospective.add_argument("--status", required=True)
+    agile_retrospective.add_argument("--succeeded", action="append", required=True)
+    agile_retrospective.add_argument("--failed", action="append", required=True)
+    agile_retrospective.add_argument("--velocity-planned", type=int, required=True)
+    agile_retrospective.add_argument("--velocity-completed", type=int, required=True)
+    agile_retrospective.add_argument("--limitations", required=True)
+    agile_retrospective.add_argument("--lessons", required=True)
+    agile_retrospective.add_argument("--direction", required=True)
+    agile_retrospective.add_argument("--json", action="store_true")
 
     agile_objective_transition = agile_sub.add_parser("objective-transition")
     agile_objective_transition.add_argument("agi_id")
@@ -5674,6 +5803,7 @@ def main():
         ("agile", "status"): cmd_agile_status,
         ("agile", "update"): cmd_agile_update,
         ("agile", "result"): cmd_agile_result,
+        ("agile", "retrospective"): cmd_agile_retrospective,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
         ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,

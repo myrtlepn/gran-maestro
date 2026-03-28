@@ -223,6 +223,17 @@ export function classifyFsEvent(
     };
   }
 
+  // Pattern: .gran-maestro/agile/AGI-***
+  const agileMatch = normPath.match(/\.gran-maestro\/agile\/(AGI-[^/]+)/);
+  if (agileMatch) {
+    return {
+      type: "agile_update",
+      projectId,
+      sessionId: agileMatch[1],
+      data: { path, kind, agiId: agileMatch[1], timestamp: new Date().toISOString() },
+    };
+  }
+
   // Pattern: .gran-maestro/debug/DBG-***
   const debugMatch = normPath.match(/\.gran-maestro\/debug\/(DBG-[^/]+)/);
   if (debugMatch) {
