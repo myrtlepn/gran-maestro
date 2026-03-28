@@ -162,9 +162,11 @@ async function main() {
     Deno.addSignalListener("SIGINT", () => {
       void shutdown();
     });
-    Deno.addSignalListener("SIGTERM", () => {
-      void shutdown();
-    });
+    if (Deno.build.os !== "windows") {
+      Deno.addSignalListener("SIGTERM", () => {
+        void shutdown();
+      });
+    }
   }
 
   const config = await loadConfig();

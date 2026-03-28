@@ -36,7 +36,7 @@ projectRegistryApi.post("/", async (c) => {
     return c.json({ error: "Invalid project path" }, 400);
   }
 
-  if (!resolvedPath.endsWith("/.gran-maestro")) {
+  if (!/[\\/]\.gran-maestro$/.test(resolvedPath)) {
     const grandMaestroPath = `${resolvedPath}/.gran-maestro`;
     if (await dirExists(grandMaestroPath)) {
       resolvedPath = grandMaestroPath;
