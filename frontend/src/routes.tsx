@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { OverviewView } from './views/OverviewView';
+import { AgileView } from './views/AgileView';
 import { PlansView } from './views/PlansView';
 import { WorkflowView } from './views/WorkflowView';
 import { PicksView } from './views/PicksView';
@@ -23,6 +24,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<Navigate to="/overview" replace />} />
       <Route path="/overview" element={<OverviewView />} />
+      <Route path="/agile" element={<AgileView />} />
       <Route path="/plans" element={<PlansView />} />
       <Route path="/plans/:planId" element={<PlansView />} />
       <Route path="/plans/:planId/tasks" element={<PlansView />} />
