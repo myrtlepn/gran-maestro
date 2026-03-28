@@ -13,6 +13,7 @@ interface KeyboardShortcutsModalProps {
 
 const SHORTCUTS = [
   { category: 'Navigation', key: '`', action: 'Overview 뷰로 전환' },
+  { category: 'Navigation', key: '9', action: 'Agile 뷰로 전환' },
   { category: 'Navigation', key: '1', action: 'Picks 뷰로 전환' },
   { category: 'Navigation', key: '2', action: 'Plans 뷰로 전환' },
   { category: 'Navigation', key: '3', action: 'Workflow 뷰로 전환' },
@@ -20,6 +21,7 @@ const SHORTCUTS = [
   { category: 'Navigation', key: '5', action: 'Debug 뷰로 전환' },
   { category: 'Navigation', key: '6', action: 'Designs 뷰로 전환' },
   { category: 'Navigation', key: '7', action: 'Documents 뷰로 전환' },
+  { category: 'Navigation', key: 'i', action: 'Memory 뷰로 전환' },
   { category: 'Navigation', key: '8', action: 'Settings 뷰로 전환' },
   { category: 'UI', key: 'T', action: '테마 토글 (Light ↔ Dark)' },
   { category: 'Help', key: '?', action: '단축키 도움말 열기/닫기' },
