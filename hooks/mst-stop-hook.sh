@@ -190,7 +190,7 @@ if [ "$WORKFLOW_ACTIVE" != "true" ]; then
   exit 0
 fi
 
-REASON="MST workflow is still active. Restore context and continue without stopping."
+REASON="Workflow active, continue current skill and context without stopping."
 if [ -n "$CURRENT_SKILL" ]; then
   REASON="$REASON Current skill: $CURRENT_SKILL."
 fi
@@ -213,7 +213,7 @@ if [ "$NEXT_AUTO" = "true" ] && [ -n "$NEXT_SKILL" ]; then
   fi
   REASON="$REASON immediately."
 elif [ -n "$NEXT_SKILL" ]; then
-  REASON="$REASON Suggested next skill: $NEXT_SKILL."
+  REASON="$REASON Workflow active, continue current skill before transitioning to $NEXT_SKILL."
 fi
 REASON="$REASON Do not stop; emit the next tool call now."
 

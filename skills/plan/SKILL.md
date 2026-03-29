@@ -204,6 +204,21 @@ Step 0.5 처리 완료 후, `--from-picks` 유무와 무관하게 사용자 입�
      (최초 실행 시 자동으로 plans/PLN-* 디렉토리 스캔해 counter.json 초기화)
    - **Fallback**: `plans/PLN-*/plan.json` 스캔 → 최대 번호 `+1` (최초: `001`); 파일은 아직 작성 안 함
 3. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/` 디렉토리 생성
+3.5. `AUTO_MODE=true`이면 워크플로우 state를 즉시 기록한다 (non-blocking):
+
+   ```bash
+   MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+     --active true \
+     --skill mst:plan \
+     --req "" \
+     --next-skill mst:request \
+     --next-source PLN-NNN \
+     --source-skill mst:plan \
+     --auto true \
+   || echo "[mst:plan] warning: failed to update workflow state" >&2
+   ```
+
+   - `AUTO_MODE=false`에서는 이 호출을 실행하지 않는다.
 4. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/plan.json` 먼저 작성:
 
    > ⏱️ **타임스탬프 취득 (MANDATORY)**:

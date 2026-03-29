@@ -212,6 +212,20 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
      - `false`(기본): 현재 REQ만 실행 (기존 동작)
      - `true`: 같은 plan의 연결된 REQ를 DAG 순서로 자동 연쇄 실행
      - (레거시) 필드 부재: `false`로 간주
+   - `AUTO_APPROVE=true`이면(= 자율 모드 경로) workflow state를 기록한다 (non-blocking):
+     - `ACTIVE_REQ_ID`는 재개 분기에서는 `RESUME_REQ_ID`, 신규 생성 분기에서는 `REQ-NNN`을 사용
+     ```bash
+     MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+       --active true \
+       --skill mst:request \
+       --req "${ACTIVE_REQ_ID}" \
+       --next-skill mst:approve \
+       --next-source "${ACTIVE_REQ_ID}" \
+       --source-skill mst:request \
+       --auto true \
+     || echo "[mst:request] warning: failed to update workflow state" >&2
+     ```
+   - `AUTO_APPROVE=false`에서는 이 호출을 실행하지 않는다.
 4. PM Conductor 역할로 Phase 1 분석 수행 (`agents/pm-conductor.md`의 `<phase1_protocol>` 준수):
    a. 요청 파싱 및 복잡도 분류 (simple | standard | complex)
    b. Simple → 단독 분석 / Standard·Complex → Analysis Squad 팀 소환
@@ -401,7 +415,8 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
            - 조건: 후속 REQ가 1개 이상 (`pending_dependency`)
            - `AUTO_APPROVE=true`:
              - 명시 동의 원칙상 AskUserQuestion 생략
-             - 1단계 `request.json`의 `dag_auto_chain`은 기본값 `false` 유지
+             - 1단계 `request.json`의 `dag_auto_chain`을 `true`로 자동 설정 (AUTO_MODE 분기 오버라이드)
+             - 기존 기본값(`dag_auto_chain=false`) 유지 규칙은 `AUTO_APPROVE=false` 경로에서만 적용한다.
            - `AUTO_APPROVE=false`:
              - AskUserQuestion:
                - 질문: `"연결된 REQ {N}개({REQ-ID 목록})를 자동으로 연이어 실행할까요?"`

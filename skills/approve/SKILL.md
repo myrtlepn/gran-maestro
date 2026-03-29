@@ -205,6 +205,22 @@ approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 
 `AUTO_MODE = ($ARGUMENTS에 --auto 또는 -a 포함) OR (request.json.auto_approve == true)`
 이후 모든 Step에서 이 변수를 사용한다.
 
+`AUTO_MODE=true`이면 단건 프로토콜 진입 직후 workflow state를 기록한다 (non-blocking):
+
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active true \
+  --skill mst:approve \
+  --req "{REQ-ID}" \
+  --next-skill mst:accept \
+  --next-source "{REQ-ID}" \
+  --source-skill mst:approve \
+  --auto true \
+|| echo "[mst:approve] warning: failed to update workflow state" >&2
+```
+
+- `AUTO_MODE=false`에서는 이 호출을 실행하지 않는다.
+
 **세션 중 자율 모드 전환**: `AskUserQuestion` 대기 중 사용자가 다음 패턴을 입력하면 즉시 `AUTO_MODE=true`로 전환합니다:
 - 자연어 예시: "auto로 해줘", "자율 모드로", "-a로", "지금부터 자동으로", "이제 auto로"
 - 전환 즉시 `[자율 모드 전환] 이제부터 -a 모드로 진행합니다.` 출력 후 현재 Step부터 AUTO_MODE=true 적용하여 재개

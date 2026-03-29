@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STOP_SCRIPT="$SCRIPT_DIR/hooks/mst-stop-hook.sh"
 SESSION_INIT_SCRIPT="$SCRIPT_DIR/hooks/mst-session-init.sh"
 STATUSLINE_SCRIPT="$SCRIPT_DIR/scripts/mst-statusline.sh"
+MST_SCRIPT="$SCRIPT_DIR/scripts/mst.py"
 
 PASS=0
 FAIL=0
@@ -78,6 +79,20 @@ assert_empty() {
   fi
 }
 
+assert_not_contains() {
+  local test_name="$1" needle="$2" haystack="$3"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$haystack" | grep -qF "$needle"; then
+    echo "  FAIL: $test_name"
+    echo "    expected to not contain: $needle"
+    echo "    actual: $haystack"
+    FAIL=$((FAIL + 1))
+  else
+    echo "  PASS: $test_name"
+    PASS=$((PASS + 1))
+  fi
+}
+
 run_stop() {
   local input="$1"
   printf '%s' "$input" > "$INFILE"
@@ -91,6 +106,16 @@ run_session_init() {
   set +e
   bash "$SESSION_INIT_SCRIPT" > "$OUTFILE" 2> "$ERRFILE"
   SESSION_EXIT=$?
+  set -e
+}
+
+run_set_workflow() {
+  set +e
+  (
+    cd "$SCRIPT_DIR" || exit 1
+    MST_STATE_PPID="$MY_PID" python3 "$MST_SCRIPT" state set-workflow "$@"
+  ) > "$OUTFILE" 2> "$ERRFILE"
+  SET_WORKFLOW_EXIT=$?
   set -e
 }
 
@@ -127,6 +152,8 @@ write_state '{"workflow_active":true,"current_skill":"mst:plan","active_req":"RE
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_contains "block reason includes updated_at timestamp" '2026-03-28T10:30:45Z' "$output"
+assert_contains "workflow_active=true + next_auto=false includes continue guidance" 'Workflow active, continue current skill' "$output"
+assert_not_contains "workflow_active=true + next_auto=false does not suggest next skill" 'Suggested next skill' "$output"
 
 cleanup
 write_state '{"workflow_active":false,"current_skill":"","active_req":"","iteration":0,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
@@ -153,6 +180,28 @@ write_state '{"workflow_active":true,"current_skill":"plan","active_req":"REQ-00
 statusline_output="$(printf '{}' | bash "$STATUSLINE_SCRIPT" 2>/dev/null || true)"
 assert_contains "statusline includes skill" "plan" "$statusline_output"
 assert_contains "statusline includes REQ" "REQ-001" "$statusline_output"
+
+# ------------------------------------------------------------
+echo ""
+echo "=== Test Suite: state set-workflow ==="
+
+cleanup
+run_set_workflow --active true --skill mst:plan --req "" --next-skill mst:request --next-source PLN-377 --source-skill mst:plan --auto true
+assert_eq "state set-workflow(active=true) exits 0" "0" "$SET_WORKFLOW_EXIT"
+state_payload="$(cat "$STATE_FILE" 2>/dev/null || true)"
+assert_contains "state set-workflow(active=true) sets workflow_active" '"workflow_active": true' "$state_payload"
+assert_contains "state set-workflow(active=true) sets current_skill" '"current_skill": "mst:plan"' "$state_payload"
+assert_contains "state set-workflow(active=true) sets expected_skill" '"expected_skill": "mst:request"' "$state_payload"
+assert_contains "state set-workflow(active=true) sets source_id" '"source_id": "PLN-377"' "$state_payload"
+assert_contains "state set-workflow(active=true) sets auto_mode" '"auto_mode": true' "$state_payload"
+
+run_set_workflow --active false
+assert_eq "state set-workflow(active=false) exits 0" "0" "$SET_WORKFLOW_EXIT"
+state_payload="$(cat "$STATE_FILE" 2>/dev/null || true)"
+assert_contains "state set-workflow(active=false) clears workflow_active" '"workflow_active": false' "$state_payload"
+assert_contains "state set-workflow(active=false) clears expected_skill" '"expected_skill": ""' "$state_payload"
+assert_contains "state set-workflow(active=false) clears source_id" '"source_id": ""' "$state_payload"
+assert_contains "state set-workflow(active=false) clears auto_mode" '"auto_mode": false' "$state_payload"
 
 # ------------------------------------------------------------
 echo ""

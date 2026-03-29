@@ -68,6 +68,8 @@ Subcommands:
 
   context gather      [--diff N] [--skills] [--agents] [--format text|json]
   state set          --skill NAME --step N --total M [--return-to SKILL/STEP]
+  state set-workflow --active true|false [--skill NAME] [--req REQ-NNN]
+                     [--next-skill NAME] [--next-source ID] [--source-skill NAME] [--auto true|false]
   state get
   state clear
   measure stop-rate   [--snapshots-dir PATH] [--pretty]
@@ -566,6 +568,120 @@ def _skill_state_base_dir() -> Path:
     if BASE_DIR and os.access(BASE_DIR, os.W_OK):
         return BASE_DIR
     return local_base_dir
+
+
+def _parse_bool_arg(value):
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    raise argparse.ArgumentTypeError("Expected true/false.")
+
+
+def _workflow_state_timestamp() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _workflow_state_default_payload(now: str):
+    return {
+        "workflow_active": False,
+        "next_action": {
+            "skill": "",
+            "source": "",
+            "auto": False,
+            "expected_skill": "",
+            "source_skill": "",
+            "source_id": "",
+            "auto_mode": False,
+        },
+        "current_skill": "",
+        "active_req": "",
+        "iteration": 0,
+        "updated_at": now,
+    }
+
+
+def _workflow_state_file(base_dir: Path) -> Path:
+    parent_pid = os.getenv("MST_STATE_PPID")
+    if not (isinstance(parent_pid, str) and parent_pid.isdigit()):
+        parent_pid = str(os.getppid())
+    return base_dir / "tmp" / f"mst-state-{parent_pid}.json"
+
+
+def _workflow_state_load(path: Path):
+    payload = load_json(path)
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _workflow_state_atomic_write(path: Path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, path)
+
+
+def cmd_state_set_workflow(args):
+    state_base_dir = _skill_state_base_dir()
+    state_path = _workflow_state_file(state_base_dir)
+    now = _workflow_state_timestamp()
+
+    try:
+        payload = _workflow_state_load(state_path)
+        if not isinstance(payload, dict):
+            payload = _workflow_state_default_payload(now)
+
+        next_action = payload.get("next_action")
+        if not isinstance(next_action, dict):
+            next_action = {}
+
+        payload["workflow_active"] = bool(args.active)
+        payload["current_skill"] = args.skill if args.active else ""
+        payload["active_req"] = args.req if args.active else ""
+        payload["iteration"] = payload.get("iteration") if isinstance(payload.get("iteration"), int) else 0
+        payload["updated_at"] = now
+
+        if args.active:
+            expected_skill = args.next_skill or ""
+            source_id = args.next_source or ""
+            source_skill = args.source_skill or args.skill or ""
+            auto_mode = bool(args.auto)
+            next_action.update(
+                {
+                    "skill": expected_skill,
+                    "source": source_id,
+                    "auto": auto_mode,
+                    "expected_skill": expected_skill,
+                    "source_skill": source_skill,
+                    "source_id": source_id,
+                    "auto_mode": auto_mode,
+                }
+            )
+        else:
+            next_action.update(
+                {
+                    "skill": "",
+                    "source": "",
+                    "auto": False,
+                    "expected_skill": "",
+                    "source_skill": "",
+                    "source_id": "",
+                    "auto_mode": False,
+                }
+            )
+
+        payload["next_action"] = next_action
+        _workflow_state_atomic_write(state_path, payload)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(f"[mst] warning: failed to update workflow state: {exc}", file=sys.stderr)
+        return 0
+
+    return 0
 
 
 def cmd_state_set(args):
@@ -5526,6 +5642,15 @@ def build_parser():
     state_set.add_argument("--total", type=int, required=True)
     state_set.add_argument("--return-to", dest="return_to")
 
+    state_set_workflow = state_sub.add_parser("set-workflow")
+    state_set_workflow.add_argument("--active", type=_parse_bool_arg, required=True)
+    state_set_workflow.add_argument("--skill", default="")
+    state_set_workflow.add_argument("--req", default="")
+    state_set_workflow.add_argument("--next-skill", dest="next_skill", default="")
+    state_set_workflow.add_argument("--next-source", dest="next_source", default="")
+    state_set_workflow.add_argument("--source-skill", dest="source_skill", default="")
+    state_set_workflow.add_argument("--auto", type=_parse_bool_arg, default=False)
+
     state_sub.add_parser("get")
     state_sub.add_parser("clear")
 
@@ -5980,6 +6105,7 @@ def main():
         ("set-status", None): cmd_set_status,
         ("set-field", None): cmd_set_field,
         ("state", "set"): cmd_state_set,
+        ("state", "set-workflow"): cmd_state_set_workflow,
         ("state", "get"): cmd_state_get,
         ("state", "clear"): cmd_state_clear,
         ("measure", "stop-rate"): cmd_measure_stop_rate,
