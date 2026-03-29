@@ -317,12 +317,15 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - `--plan PLN-NNN` 또는 자연어 `PLN-NNN` 또는 `resolved_plan_id` 감지 시 `plans/PLN-NNN/plan.json` + `plan.md` Read
       - plan Read 성공 시: `request.json`에 `source_plan: "PLN-NNN"` 기록; `plan.json`의 `linked_requests`에 REQ-NNN 추가, `status` `active` → `in_progress`
       - plan.md 결정사항·범위·제약을 Phase 1 인풋으로 사용
-      - **plan type 감지 (MANDATORY, plan.json Read 직후)**:
-        - `plan_type = plan.json.type` (`type` 필드 미존재 시 `null`)
-        - `plan_type == "doc"`:
+      - **plan type 전략 감지 (MANDATORY, plan.json Read 직후)**:
+        - `plan_type = plan.json.type` (`type` 필드 미존재 시 `"code"`)
+        - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
+        - `plan_strategy = type_strategies[plan_type] || type_strategies["code"]`
+        - `type-strategies.json` Read 실패/파싱 실패/키 누락 시 `plan_strategy = {"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback한다.
+        - `plan_strategy.template == "templates/doc-request.md"`:
           - `DOC_SPEC_MODE=true` 설정
           - 즉시 `§ Doc Spec Flow` 섹션 규칙을 적용한다.
-        - `plan_type != "doc"` 또는 `plan_type` 미존재:
+        - 그 외:
           - `DOC_SPEC_MODE=false` 설정
           - 기존 코드 개발 경로(Step e~h)를 변경 없이 그대로 유지한다.
       - **§0 Context Manifest 후보 수집 (MANDATORY)**:
@@ -409,7 +412,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         4. 사용자에게 생성 결과 요약 표시; spec 생성은 **REQ-NNN (1단계)에만** 수행
       - plan.json/plan.md 미존재 시 경고 후 사일런트 모드로 전환 (`source_plan`은 기존 값 유지: 기본 `null`)
    d-doc. **§ Doc Spec Flow** (`DOC_SPEC_MODE=true`일 때만 실행):
-      - 진입 조건: Step d에서 `plan_type == "doc"` 감지
+      - 진입 조건: Step d에서 `plan_strategy.template == "templates/doc-request.md"` 감지
       - 비진입 조건: `DOC_SPEC_MODE=false` (기존 로직 유지, 이 섹션 전체 skip)
       - 문서 plan 입력 수집:
         - `plan.md`에서 `## TOC 초안`, `## 소스 조사 결과`, `## 검증 계획` 섹션을 각각 Read하여 `doc_toc`, `doc_sources`, `doc_verification_plan` 변수로 보관한다.

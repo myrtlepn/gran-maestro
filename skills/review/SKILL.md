@@ -131,10 +131,12 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `plan.ids.json` 미존재 시(레거시 호환): `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`의 `## 인수 기준 초안`을 추출해 `PLAN-AC-N` 임시 ID를 부여한다.
    - `source_plan` 미존재 또는 인수 기준 섹션 자체가 없으면 이 단계 skip (경고 없이 무시).
    - 수집된 Plan AC/PAC는 Spec AC와 **분리하여 관리** (Pass A에서 별도 섹션으로 검증).
-1-b-1. **리뷰 타입 결정 (source_plan → plan.json.type 체인, MANDATORY)**:
+1-b-1. **리뷰 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.
-   - `plan.json.type == "doc"`이면 `REVIEW_TYPE = "doc"`로 설정한다.
-   - 그 외(미존재/Read 실패/type 누락/type!="doc")는 `REVIEW_TYPE = "code"`로 처리해 기존 코드 리뷰 경로를 유지한다.
+   - `plan_type = plan.json.type` (`type` 누락 또는 Read 실패 시 `"code"` fallback)
+   - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
+   - `strategy = type_strategies[plan_type] || type_strategies["code"]`
+   - `type-strategies.json` Read 실패/파싱 실패/키 누락 시 `strategy = {"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback해 기존 코드 리뷰 경로를 유지한다.
 1-c. **Spec AC 타입 태그 파싱**: 각 AC 헤더의 타입 태그(`[automatable]`, `[manual]`, `[browser-test]`)를 파싱하여 `ac_type`으로 보관한다.
    - 태그 누락 시 기본값은 `manual`.
    - `[browser-test]`는 Pass A에서 실제 브라우저 실행 분기 대상으로 표시한다.
@@ -209,10 +211,10 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 #### Pass A 타입 분기 (if 1개, MANDATORY)
 
-- `if REVIEW_TYPE == "doc"`:
+- `if strategy.review_mode == "fulltext"`:
   - 코드 중심 AC 해석 대신 문서 품질 AC 기준(정확성/완결성/독자적합성)으로 판정한다.
   - 근거는 문서 본문/구조/팩트 확인 결과를 `evidence-ledger.md`에 기록한다.
-- `else` (`REVIEW_TYPE != "doc"`):
+- `else` (`strategy.review_mode != "fulltext"`):
   - 기존 Pass A 절차를 그대로 적용한다. (변경 금지)
 
 #### evidence-ledger.md 생성 프로토콜 (Pass A 내부, MANDATORY)
@@ -586,15 +588,15 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 #### Pass B 타입 분기 (if 1개, MANDATORY)
 
-- `if REVIEW_TYPE == "doc"`:
+- `if strategy.review_mode == "fulltext"`:
   - 코드 리뷰 프롬프트 대신 문서 구조/품질 리뷰 프롬프트를 사용한다.
   - 검토 기준은 정확성, 완결성, 독자적합성, 구조/가독성으로 고정한다.
   - 입력은 `git diff`가 아니라 문서 전문(full text)이며, 신규 문서(diff 없음)도 동일하게 전문 리뷰를 수행한다.
   - 결과 산출 경로는 기존과 동일하게 유지한다 (`review-code.md` 재사용).
-- `else` (`REVIEW_TYPE != "doc"`):
+- `else` (`strategy.review_mode != "fulltext"`):
   - 기존 Pass B 절차를 그대로 적용한다. (변경 금지)
 
-##### REVIEW_TYPE=="doc" Pass B 전문 리뷰 규칙 (MANDATORY)
+##### strategy.review_mode=="fulltext" Pass B 전문 리뷰 규칙 (MANDATORY)
 
 1. 입력 데이터
    - 리뷰 대상 문서는 `spec §2 변경 범위`에 명시된 파일 기준으로 식별한다.
@@ -681,7 +683,7 @@ arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에
 - `{{SPEC_PATH}}`: 해당 태스크의 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{NN}/spec.md` 절대 경로
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
 - `{{REFERENCE_CONTEXT}}`: Step 2에서 생성한 `[REFERENCE_CONTEXT]` 블록 (`references: none` 포함). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입.
-- `if REVIEW_TYPE == "doc"`:
+- `if strategy.review_mode == "fulltext"`:
   - 프롬프트 본문에 문서 전문(full text)을 직접 포함하고, diff 요약은 참고 정보로만 사용한다.
   - `code_reviewer`의 검토 포커스를 문서 품질(정확성/완결성/독자적합성/구조) 체크리스트로 고정한다.
 

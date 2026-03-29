@@ -262,7 +262,7 @@ preflight 검사가 통과된 경우에만 아래 Step 3(worktree 생성 및 구
 
 3. 승인 실행:
    - **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 2 phase2_execution`; 실패 시 fallback으로 `request.json`의 `current_phase`=2, `status`=`phase2_execution` 직접 업데이트
-   - `EXECUTION_TYPE == "doc"`이면 worktree 생성을 스킵하고 `{PROJECT_ROOT}`에서 직접 작업, 그렇지 않으면 각 태스크에 대해 git worktree 생성
+   - `strategy.worktree_policy == "skip"`이면 worktree 생성을 스킵하고 `{PROJECT_ROOT}`에서 직접 작업, 그렇지 않으면 각 태스크에 대해 git worktree 생성
    - **Phase 2 (외주 실행) 프로토콜** 실행
 
 ---
@@ -468,21 +468,31 @@ OMX_AUTOPILOT = (config.omx.enabled == true && config.omx.autopilot == true)
 
 Phase 2에서 Claude(PM)는 **절대 코드를 직접 작성하지 않습니다**. 모든 구현은 `/mst:codex` 또는 `/mst:gemini`로 외주합니다.
 
-#### 실행 타입 결정 (Phase 2 진입 시 1회, MANDATORY)
+#### 실행 전략 결정 (Phase 2 진입 시 1회, MANDATORY)
 
-`request.json.source_plan -> plan.json.type` 체인으로 실행 타입을 결정한다.
+`request.json.source_plan -> plan.json.type -> type-strategies.json` 체인으로 실행 전략을 결정한다.
 
 ```pseudo
 source_plan = request.json.source_plan
+plan_type = "code"
 if source_plan exists:
   plan = Read({PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json)
-  EXECUTION_TYPE = "doc" if plan.type == "doc" else "code"
-else:
-  EXECUTION_TYPE = "code"  # 하위 호환
+  plan_type = plan.type if plan.type exists else "code"
+
+type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)
+strategy = type_strategies[plan_type] || type_strategies["code"]
+
+if Read/parse/key lookup failed:
+  strategy = {
+    "template": "templates/impl-request.md",
+    "worktree_policy": "required",
+    "review_mode": "code",
+    "accept_mode": "squash-merge"
+  }  # 하위 호환
 ```
 
-- `plan.json` Read 실패, `type` 누락, `type != "doc"`는 모두 `EXECUTION_TYPE="code"`로 처리해 기존 코드 경로를 유지한다.
-- `EXECUTION_TYPE="doc"`이면 DocExecutor 전략(문서 초안 생성 → 구조 검증 → 팩트체크)을 사용한다.
+- `plan.json` Read 실패, `type` 누락, type-strategies Read 실패/키 누락은 모두 code 전략 fallback으로 처리해 기존 코드 경로를 유지한다.
+- `strategy.worktree_policy == "skip"`이면 DocExecutor 전략(문서 초안 생성 → 구조 검증 → 팩트체크)을 사용한다.
 
 #### Step 1: 전체 태스크 스펙 일괄 검증 (외주 전 필수)
 
@@ -554,14 +564,14 @@ git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
 **태스크가 1개인 경우**: 기존 순차 실행과 동일 처리.
 
 **실행 타입 분기 (if 1개, MANDATORY)**:
-- `if EXECUTION_TYPE == "doc"`:
+- `if strategy.worktree_policy == "skip"`:
   - 4a worktree 생성 단계는 스킵하고 `{PROJECT_ROOT}`에서 직접 작업한다.
   - 4b 브리프는 `templates/doc-request.md` 템플릿을 사용한다.
   - 4c 외주 지시는 코드 구현 대신 문서 작성 흐름(문서 초안 생성 → 구조 검증 → 팩트체크)으로 작성한다.
-- `else` (`EXECUTION_TYPE != "doc"`):
+- `else` (`strategy.worktree_policy != "skip"`):
   - 아래 4a~4c 기존 절차를 그대로 수행한다. (변경 금지)
 
-**태스크가 2개 이상이고 독립 태스크가 존재하는 경우 (`EXECUTION_TYPE != "doc"`)**:
+**태스크가 2개 이상이고 독립 태스크가 존재하는 경우 (`strategy.worktree_policy != "skip"`)**:
 
 ##### 4a. Worktree 일괄 생성
 
@@ -581,7 +591,7 @@ git worktree add {worktree_path} -b gran-maestro/REQ-NNN-T01 gran-maestro/REQ-NN
 Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase2-impl.md
 ```
 
-브리프는 `templates/impl-request.md` 템플릿 사용. (`EXECUTION_TYPE != "doc"` 경로)
+브리프는 `templates/impl-request.md` 템플릿 사용. (`strategy.worktree_policy != "skip"` 경로)
 - `{{IMPL_CONTEXT}}`: PM 작성 — 3~5줄 자유 형식 (무엇을, 왜, 어떻게 + 주의사항)
   - Step 4b 시작 시 `Reference Lookup Protocol`을 먼저 실행하고, 생성된 `[REFERENCE_CONTEXT]` 블록을 `{{IMPL_CONTEXT}}` 끝에 주입한다.
   - `reference.auto_search != true`이면 자동 WebSearch 없이 기존 REF 캐시 조회 결과만 주입한다.
@@ -775,7 +785,7 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
 Step 5 FAIL 시, PM이 직접 코드를 수정하지 않고 외주 에이전트에게 에러 컨텍스트와 함께 재요청합니다. 최대 재시도 소진 후 PM 직접 개입.
 
 **실행 타입 분기 (if 1개, MANDATORY)**:
-- `if EXECUTION_TYPE == "doc"`:
+- `if strategy.worktree_policy == "skip"`:
   - Step 5 FAIL을 문서 검증 실패(특히 팩트체크 실패)로 해석하고, 아래 DocExecutor 재실행 루프를 우선 적용한다.
   - 최대 재시도는 고정 `2회`이며, 루프는 `팩트체크 실패 → 소스 재확인 프롬프트 생성 → 재작성` 순서를 따른다.
 
@@ -796,7 +806,7 @@ Step 5 FAIL 시, PM이 직접 코드를 수정하지 않고 외주 에이전트�
 
 ##### 5b-doc-3. DocExecutor 재실행 (동일 태스크 경로)
 
-- 동일 에이전트로 재외주를 실행한다. (`EXECUTION_TYPE=="doc"` 경로이므로 `{PROJECT_ROOT}` 기준 실행)
+- 동일 에이전트로 재외주를 실행한다. (`strategy.worktree_policy=="skip"` 경로이므로 `{PROJECT_ROOT}` 기준 실행)
 - `request.json`에 `doc_factcheck_retries`(없으면 0)를 +1 저장한다.
 - 재작성 완료 후 즉시 문서 검증(구조 검증 + 팩트체크)을 다시 실행하고 Step 5로 복귀한다.
 
@@ -805,7 +815,7 @@ Step 5 FAIL 시, PM이 직접 코드를 수정하지 않고 외주 에이전트�
 - `doc_factcheck_retries >= 2`이면 루프를 종료한다.
 - PM이 소스 원문을 재확인해 문서를 직접 보정한 뒤, 문서 검증(구조 검증 + 팩트체크)만 재실행한다.
 
-- `else` (`EXECUTION_TYPE != "doc"`):
+- `else` (`strategy.worktree_policy != "skip"`):
   - 아래 `5b-1 ~ 5b-5` 기존 코드 경로를 **그대로** 수행한다. (변경 금지)
 
 ##### 5b-1. 에러 출력 캡처

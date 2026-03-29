@@ -79,16 +79,18 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
         - 누락 PAC가 1개 이상이면 accept를 **즉시 블로킹**하고 아래 메시지를 출력한 뒤 중단한다.
           - `증거 미첨부 PAC: {PAC-ID 목록}`
         - 누락이 없으면 다음 단계 진행.
-2.6. **수락 타입 결정 (source_plan → plan.json.type 체인, MANDATORY)**:
+2.6. **수락 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.
-   - `plan.json.type == "doc"`이면 `ACCEPT_TYPE = "doc"`로 설정한다.
-   - 그 외(미존재/Read 실패/type 누락/type!="doc")는 `ACCEPT_TYPE = "code"`로 처리해 기존 수락 경로를 유지한다.
-3. **Worktree → REQ 브랜치 → master squash-merge** (기본: `ACCEPT_TYPE != "doc"`)
-   - `if ACCEPT_TYPE == "doc"`:
+   - `plan_type = plan.json.type` (`type` 누락 또는 Read 실패 시 `"code"` fallback)
+   - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
+   - `strategy = type_strategies[plan_type] || type_strategies["code"]`
+   - `type-strategies.json` Read 실패/파싱 실패/키 누락 시 `strategy = {"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback해 기존 수락 경로를 유지한다.
+3. **Worktree → REQ 브랜치 → master squash-merge** (기본: `strategy.accept_mode != "file-placement"`)
+   - `if strategy.accept_mode == "file-placement"`:
      - squash-merge를 실행하지 않고 문서 파일을 대상 경로로 배치(복사/이동)한다.
      - 배치 대상 경로는 각 태스크 spec/doc-spec에 정의된 문서 산출 경로를 따른다.
      - 아래 3-1~3-3 git merge 절차는 건너뛴다.
-   - `else` (`ACCEPT_TYPE != "doc"`):
+   - `else` (`strategy.accept_mode != "file-placement"`):
      - 아래 3-1~3-3 기존 절차를 그대로 수행한다. (변경 금지)
    - approve 단계(Step 4a)에서 생성된 `gran-maestro/REQ-NNN` 브랜치를 사용합니다.
    - 단일 태스크 REQ도 동일한 플로우를 적용합니다.
@@ -138,7 +140,7 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
    > ⚠️ **squash merge 후 브랜치 삭제 규칙**: REQ 브랜치를 master에 squash merge하면 merge ancestor가
    > 생성되지 않으므로 `git branch -d`(soft delete)는 "not fully merged" 오류로 실패합니다.
    > 브랜치 삭제는 `git branch -D`를 사용하세요.
-   - `ACCEPT_TYPE == "doc"`이면 worktree가 없을 수 있으므로 worktree 제거 단계는 "없으면 skip"으로 처리한다 (graceful skip, 비차단).
+   - `strategy.accept_mode == "file-placement"`이면 worktree가 없을 수 있으므로 worktree 제거 단계는 "없으면 skip"으로 처리한다 (graceful skip, 비차단).
    - `git worktree remove --force "{worktree_path}" || true` — 태스크 worktree 제거 (이미 제거된 경우 오류 무시)
    - `git branch -D "gran-maestro/REQ-NNN-T01" || true` — 태스크 브랜치 강제 삭제 (`gran-maestro/REQ-NNN-T02` 등 반복)
    - `git branch -D "gran-maestro/REQ-NNN" || true` — REQ 브랜치 강제 삭제 (기본은 Step 3-3에서 처리, 정리 단계에서는 중복 방지 확인용)
