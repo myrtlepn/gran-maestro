@@ -49,10 +49,16 @@ export function ReferenceView() {
     storageKey: 'references-sidebar-width',
   });
 
+  const sortedReferences = useMemo(() => {
+    return [...references].sort((a, b) =>
+      (b.searched_at ?? '').localeCompare(a.searched_at ?? ''),
+    );
+  }, [references]);
+
   const selectedRefId = useMemo(() => {
     if (refId) return refId;
-    return references[0]?.id ?? null;
-  }, [refId, references]);
+    return sortedReferences[0]?.id ?? null;
+  }, [refId, sortedReferences]);
 
   const fetchReferences = useCallback(async (filters?: { query?: string }) => {
     const params = new URLSearchParams();
@@ -137,6 +143,7 @@ export function ReferenceView() {
     }
   };
 
+  const displayReferences = sortedReferences;
   const hasActiveFilters = Boolean(searchValue.trim());
 
   if (!projectId) {
@@ -173,7 +180,7 @@ export function ReferenceView() {
     <div className="flex h-full overflow-hidden">
       <div ref={sidebarRef} style={{ width: sidebarWidth }} className="border-r flex flex-col min-h-0 shrink-0">
         <div className="p-4 border-b bg-muted/30 flex justify-between items-center gap-2">
-          <h2 className="font-semibold">References ({references.length})</h2>
+          <h2 className="font-semibold">References ({displayReferences.length})</h2>
           <div className="flex items-center gap-2">
             <RefreshButton onClick={handleRefresh} isRefreshing={isRefreshing} />
           </div>
@@ -199,7 +206,7 @@ export function ReferenceView() {
 
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-1.5">
-            {references.map((ref) => (
+            {displayReferences.map((ref) => (
               <SessionCard
                 key={ref.id}
                 id={ref.id}
@@ -212,7 +219,7 @@ export function ReferenceView() {
               />
             ))}
 
-            {references.length === 0 && (
+            {displayReferences.length === 0 && (
               <div className="pt-8">
                 <EmptyState
                   icon={<BookOpen className="h-8 w-8" />}
