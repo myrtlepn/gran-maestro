@@ -1646,6 +1646,22 @@ def _normalize_story_id(value: str) -> str:
     return story_id.upper()
 
 
+def _normalize_epic_dod_id(value: str) -> str:
+    dod_id = (value or "").strip()
+    if not re.fullmatch(r"DOD-[A-Z0-9_-]+", dod_id, flags=re.IGNORECASE):
+        raise ValueError(f"Invalid DoD id: {value}")
+    return dod_id.upper()
+
+
+def _resolve_objective_mode(session: dict) -> str:
+    raw_mode = session.get("objective_mode") if isinstance(session, dict) else None
+    if isinstance(raw_mode, str):
+        normalized = raw_mode.strip().lower()
+        if normalized in {"epic", "story"}:
+            return normalized
+    return "story"
+
+
 def _normalize_link_id(value: str, prefix: str) -> str:
     token = (value or "").strip().upper()
     if not token:
@@ -1933,6 +1949,37 @@ def _collect_objective_story_statuses(content: str) -> dict[str, str]:
     return statuses
 
 
+def _collect_epic_dod_statuses(content: str) -> dict[str, str]:
+    pattern = re.compile(
+        r"epic:(?P<epic>[A-Za-z0-9_-]+)\s+dod:(?P<dod>[A-Za-z0-9_-]+)\s+status:(?P<status>[A-Za-z0-9_-]+)"
+    )
+    statuses = {}
+    for match in pattern.finditer(content):
+        dod_id = match.group("dod").upper()
+        statuses[dod_id] = match.group("status").lower()
+    return statuses
+
+
+def _update_epic_dod_status(content: str, dod_id: str, new_status: str):
+    pattern = re.compile(
+        r"(epic:[A-Za-z0-9_-]+\s+dod:(?P<dod>[A-Za-z0-9_-]+)\s+status:)(?P<status>[A-Za-z0-9_-]+)"
+    )
+    found = False
+    changed = False
+
+    def _replace(match):
+        nonlocal found, changed
+        if match.group("dod").upper() != dod_id:
+            return match.group(0)
+        found = True
+        if match.group("status").lower() != new_status:
+            changed = True
+        return f"{match.group(1)}{new_status}"
+
+    updated = pattern.sub(_replace, content)
+    return updated, found, changed
+
+
 def cmd_agile_init(args):
     if args.steering_every < 1:
         print("Error: --steering-every must be >= 1", file=sys.stderr)
@@ -1968,6 +2015,7 @@ def cmd_agile_init(args):
     payload = {
         "id": agi_id,
         "agi_id": agi_id,
+        "objective_mode": "epic",
         "status": "active",
         "current_sprint": 0,
         "steering_every": args.steering_every,
@@ -2211,8 +2259,18 @@ def cmd_agile_retrospective(args):
 def cmd_agile_objective_transition(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
-        story_id = _normalize_story_id(args.story)
-        _load_agile_session(agi_id)
+        session, _ = _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    objective_mode = _resolve_objective_mode(session)
+    try:
+        story_id = (
+            _normalize_epic_dod_id(args.story)
+            if objective_mode == "epic"
+            else _normalize_story_id(args.story)
+        )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -2223,20 +2281,32 @@ def cmd_agile_objective_transition(args):
         return 1
 
     current_content = objective_path.read_text(encoding="utf-8")
-    before_statuses = _collect_objective_story_statuses(current_content)
-    updated_content, found, changed = _update_objective_story_status(
-        current_content,
-        story_id,
-        str(args.status).strip().lower(),
-    )
+    if objective_mode == "epic":
+        before_statuses = _collect_epic_dod_statuses(current_content)
+        updated_content, found, changed = _update_epic_dod_status(
+            current_content,
+            story_id,
+            str(args.status).strip().lower(),
+        )
+    else:
+        before_statuses = _collect_objective_story_statuses(current_content)
+        updated_content, found, changed = _update_objective_story_status(
+            current_content,
+            story_id,
+            str(args.status).strip().lower(),
+        )
     if not found:
-        print(f"Error: story not found ({story_id})", file=sys.stderr)
+        missing_label = "DoD item" if objective_mode == "epic" else "story"
+        print(f"Error: {missing_label} not found ({story_id})", file=sys.stderr)
         return 1
 
     if changed:
         objective_path.write_text(updated_content, encoding="utf-8")
 
-    after_statuses = _collect_objective_story_statuses(updated_content)
+    if objective_mode == "epic":
+        after_statuses = _collect_epic_dod_statuses(updated_content)
+    else:
+        after_statuses = _collect_objective_story_statuses(updated_content)
     from_status = before_statuses.get(story_id)
     to_status = after_statuses.get(story_id)
     _append_ndjson(
@@ -2277,25 +2347,30 @@ def cmd_agile_objective_transition(args):
 def cmd_agile_objective_check(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
-        _load_agile_session(agi_id)
+        session, _ = _load_agile_session(agi_id)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    objective_mode = _resolve_objective_mode(session)
     objective_path = _agi_objective_path(agi_id)
     if not objective_path.exists():
         print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
         return 1
 
     content = objective_path.read_text(encoding="utf-8")
-    statuses = _collect_objective_story_statuses(content)
+    statuses = (
+        _collect_epic_dod_statuses(content)
+        if objective_mode == "epic"
+        else _collect_objective_story_statuses(content)
+    )
     if not statuses:
         output = {
             "agi_id": agi_id,
             "all_done": False,
             "incomplete": [],
             "stories": {},
-            "warning": "no stories found",
+            "warning": "no Epic DoD items found" if objective_mode == "epic" else "no stories found",
         }
         if args.json:
             print(json.dumps(output, ensure_ascii=False, indent=2))
