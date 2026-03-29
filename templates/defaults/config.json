@@ -21,6 +21,16 @@
     "spec_prereview_minor_escalation_threshold": 3,
     "auto_approve_on_unblock": false
   },
+  "agile": {
+    "steering_every": 3,
+    "drift_threshold": 80,
+    "drift_count_trigger": 2,
+    "no_diff_count_trigger": 2,
+    "epic_count_min": 2,
+    "epic_count_max": 5,
+    "dod_per_epic_min": 3,
+    "dod_per_epic_max": 7
+  },
   "concurrency": {
     "max_parallel_tasks": 5,
     "max_parallel_reviews": 3,

@@ -100,6 +100,7 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
   auto_mode: ['plan', 'request', 'review', 'confidence_threshold', 'max_review_iterations'],
   intent_fidelity: ['enabled', 'mode', 'exclude_dirs'],
   plan_qa_presets: ['test_strategy', 'loop_exit', 'loop_exit_n'],
+  agile: ['steering_every', 'drift_threshold', 'drift_count_trigger', 'no_diff_count_trigger', 'epic_count_min', 'epic_count_max', 'dod_per_epic_min', 'dod_per_epic_max'],
   reference: ['cache_ttl_days', 'cutoff_threshold_months', 'auto_search', 'max_searches_per_step'],
   test_enforcement: ['enabled', 'backend_tdd', 'web_execution_test', 'exempt_patterns', 'require_exemption_reason'],
 };
@@ -180,6 +181,13 @@ const WORKFLOW_PHASES: WorkflowPhase[] = [
         description: 'Plan Q&A 자동화 프리셋',
         kind: 'info',
         configPath: ['plan_qa_presets'],
+      },
+      {
+        id: 'agile',
+        label: 'agile',
+        description: 'Agile 실행/플래닝 파라미터',
+        kind: 'info',
+        configPath: ['agile'],
       },
       {
         id: 'reference',
