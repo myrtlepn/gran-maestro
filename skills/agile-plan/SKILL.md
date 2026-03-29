@@ -116,6 +116,9 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
    - `목표`: Epic이 달성해야 할 관찰 가능한 결과
    - `DoD 체크리스트`: Epic당 **3~7개**
    - `ODI 템플릿`: DoD는 반드시 `방향(Direction) + 측정(Measure) + 대상(Object) + 맥락(Context)` 4요소를 포함해 작성
+
+> **Agile config fallback (MANDATORY)**: epic_count_min/max, dod_per_epic_min/max는 `config.resolved.json`의 `agile.{key}` 값을 우선 사용하고, 없으면 기본값(2, 5, 3, 7)을 사용한다.
+
 3. DoD 작성 시 아래 ODI 가이드를 적용한다.
    - 방향: 최소화/최대화/유지 등 개선 방향
    - 측정: 관찰/측정 가능한 지표

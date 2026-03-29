@@ -86,7 +86,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 | `--doc 파일경로` | 기존 문서 지정 (파싱 모드) | `--doc docs/goals.md` |
 | `--steering-every N` | 스티어링 체크포인트 간격 (기본값: 3) | `--steering-every 5` |
 
-- `--steering-every` 미지정 시: `STEERING_EVERY=3` 기본값 설정
+- `--steering-every` 미지정 시: `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.steering_every` 값을 사용한다. config에도 없으면 기본값 `3`.
 
 #### 0.2 분기: --resume 있는 경우
 
@@ -518,6 +518,8 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 **정의**: 스프린트 결과물이 objective.md의 목표 항목과 **관련성**이 없는 경우.
 
 **감지 시점**: 매 스프린트 완료(2.2-E.3 또는 2.2-S.4 결과 기록) 직후 수행.
+
+> **Agile config fallback (MANDATORY)**: drift_threshold, drift_count_trigger, no_diff_count_trigger는 `config.resolved.json`의 `agile.{key}` 값을 우선 사용하고, 없으면 기본값(80, 2, 2)을 사용한다.
 
 **감지 절차**:
 
