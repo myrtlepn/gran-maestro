@@ -115,7 +115,41 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 2. 각 Epic에 대해 아래를 확정
    - `목표`: Epic이 달성해야 할 관찰 가능한 결과
    - `DoD 체크리스트`: Epic당 **3~7개**
-3. Story 생성은 하지 않는다. 실행 단위 Story는 후속 Sprint 단계에서 JIT로 결정한다.
+   - `ODI 템플릿`: DoD는 반드시 `방향(Direction) + 측정(Measure) + 대상(Object) + 맥락(Context)` 4요소를 포함해 작성
+3. DoD 작성 시 아래 ODI 가이드를 적용한다.
+   - 방향: 최소화/최대화/유지 등 개선 방향
+   - 측정: 관찰/측정 가능한 지표
+   - 대상: 측정 대상 엔티티
+   - 맥락: 측정이 이루어지는 상황/조건
+   - 예시
+     - 나쁜 예: "사용자 경험이 좋아야 한다"
+     - 좋은 예: "[최소화] 설정 변경 후 저장까지의 [클릭 횟수]를 [설정 화면에서] [3회 이내로]"
+4. Story 생성은 하지 않는다. 실행 단위 Story는 후속 Sprint 단계에서 JIT로 결정한다.
+
+##### 1A.2.5 DoD 품질 게이트 (MANDATORY)
+
+Step 1A.2 완료 직후, 4중 가드레일(1A.3) 전에 DoD 품질 게이트를 반드시 실행한다.
+
+1. PM이 각 DoD 항목을 아래 9개 통합 품질 기준으로 자동 판정(pass/fail)한다.
+
+| # | 기준명 | 출처 | PM 판정 질문 |
+|---|--------|------|-------------|
+| 1 | 정확성 (Correctness) | IEEE 830 | 이 DoD가 프로젝트 목표(JTBD)와 일치하는가? |
+| 2 | 비모호성 (Unambiguity) | IEEE+IREB | 해석 분기 없이 단 하나의 의미만 가지는가? |
+| 3 | 완전성 (Completeness) | IEEE+IREB | 정상/에러/경계 조건이 모두 정의되었는가? |
+| 4 | 일관성 (Consistency) | IEEE 830 | 다른 DoD/Epic 항목과 모순되지 않는가? |
+| 5 | 검증가능성 (Verifiability) | IEEE+IREB | 관찰/측정으로 완료 여부를 판정할 수 있는가? |
+| 6 | 필요성 (Necessity) | IREB | 이 DoD 없이는 Epic 목표 달성이 불가능한가? |
+| 7 | 이해가능성 (Understandability) | IREB | 비기술 이해관계자도 의미를 이해할 수 있는가? |
+| 8 | 중요도 순위 (Ranked) | IEEE 830 | 우선순위(필수/선택)가 부여되었는가? |
+| 9 | ODI 구조 (Outcome Format) | ODI | 방향+측정+대상+맥락 4요소가 포함되었는가? |
+
+2. pass/fail 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/quality-gate-log.md`에 마크다운 표로 기록한다.
+3. 로그 필드(컬럼)는 반드시 아래 5개를 사용한다: `DoD ID`, `기준명`, `pass/fail`, `미충족 사유`, `타임스탬프`
+4. 미충족 항목만 추려서 사용자에게 보완 질문을 요청한다.
+   - AskUserQuestion은 최대 4개씩 일괄로 묶어 호출한다.
+5. 사용자 답변을 DoD에 반영한 뒤 같은 9개 기준으로 재검증한다.
+6. 모든 DoD가 9개 기준 전체 pass일 때만 품질 게이트를 통과하고 1A.3으로 진행한다.
 
 ##### 1A.3 4중 가드레일 검증 (MANDATORY)
 
@@ -123,6 +157,16 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 2. **5-7 rule**: Epic당 DoD 항목은 3~7개 유지, 8개 이상이면 Epic 분할 안내
 3. **So-that 검증**: 각 DoD가 "X한다, so that 사용자는 Y할 수 있다"로 연결 가능한지 확인
 4. **Sprint 간 동결**: 진행 중 Sprint의 체크리스트 변경 금지, 변경은 스티어링 체크포인트에서만 반영
+
+##### 1A.3.5 DoR 준비도 게이트 (MANDATORY)
+
+Step 1A.3 완료 후, objective 저장(1A.4) 전에 아래 5개 체크리스트를 모두 확인한다.
+
+1. `Epic 목표 정의`: 모든 Epic에 관찰 가능한 목표가 명시됨
+2. `DoD 수량 범위`: Epic당 DoD 3~7개 범위 내
+3. `DoD 품질 게이트 통과`: 9개 기준 전체 pass
+4. `JTBD 완전성`: 5개 필드(Job/목표/결과/지표/완료정의) 누락 없음
+5. `측정 가능 성공 지표`: 1개 이상의 정량적 성공 지표 존재
 
 ##### 1A.4 objective.md 저장
 
@@ -162,7 +206,19 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 1. JTBD 누락 필드를 AskUserQuestion으로 보완
 2. Epic 목표가 모호하면 "관찰 가능한 결과" 기준으로 재질문
 3. Epic별 DoD 개수가 3개 미만이면 보강 질문, 7개 초과면 Epic 분할 질문
-4. 4중 가드레일(How-free/5-7/So-that/동결) 재검증
+4. DoD 보완 시 Step 1A.2 ODI 템플릿(`방향+측정+대상+맥락`)을 동일하게 적용
+5. 4중 가드레일(How-free/5-7/So-that/동결) 재검증
+
+##### 1B.2.5 DoD 품질 게이트 (MANDATORY)
+
+Step 1A.2.5의 DoD 품질 게이트를 1B 경로에도 동일하게 적용한다.
+
+1. 9개 통합 기준(pass/fail), 미충족만 AskUserQuestion(최대 4개 일괄), 답변 반영 후 재검증 루프를 그대로 수행한다.
+2. 게이트 로그는 동일하게 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/quality-gate-log.md`에 누적 기록한다.
+
+##### 1B.2.6 DoR 준비도 게이트 (MANDATORY)
+
+Step 1B.2 및 1B.2.5 완료 후, objective 저장(1B.3) 전에 Step 1A.3.5와 동일한 5개 DoR 체크리스트를 모두 확인한다.
 
 ##### 1B.3 objective.md 저장
 
@@ -209,4 +265,3 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set \
 1. Epic DoD 체크리스트가 완료 판정의 유일한 게이트다(LLM override 금지).
 2. Sprint 완료 시 체크 갱신은 "제안"만 가능하며 `evidence_ref`를 반드시 포함한다.
 3. 최종 approve/reject는 스티어링 체크포인트에서 사용자가 수행한다.
-
