@@ -262,10 +262,12 @@
     }
   },
   "reference": {
-    "cache_ttl_days": 7,
-    "cutoff_threshold_months": 1,
+    "cache_ttl_days": 2,
+    "cutoff_threshold_months": 0.5,
     "auto_search": true,
-    "max_searches_per_step": 3,
+    "max_searches_per_step": 5,
+    "llm_auto_trigger": true,
+    "auto_fact_check": true,
     "keywords_whitelist": [
       "library",
       "framework",
@@ -274,6 +276,15 @@
       "protocol",
       "version",
       "dependency",
+      "config",
+      "pattern",
+      "best practice",
+      "standard",
+      "migration",
+      "deprecation",
+      "breaking change",
+      "release",
+      "update",
       "react",
       "next.js",
       "typescript",
@@ -282,7 +293,12 @@
       "라이브러리",
       "프레임워크",
       "의존성",
-      "버전"
+      "버전",
+      "설정",
+      "마이그레이션",
+      "업데이트",
+      "릴리스",
+      "패치"
     ]
   },
   "cleanup": {

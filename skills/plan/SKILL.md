@@ -102,11 +102,13 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 0. **자동 트리거 게이트**:
    - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search`를 확인한다.
    - `reference.auto_search == true`일 때만 자동 WebSearch를 허용한다.
-   - 설정이 없으면 기본값: `cache_ttl_days=7`, `cutoff_threshold_months=1`, `max_searches_per_step=3`.
+   - 설정이 없으면 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
    - 현재 plan 텍스트(사용자 요청, 주제, 미결 항목, discussion/ideation 입력 후보)에서 아래 계열 키워드를 감지한다.
    - 계열: `library/framework/api/sdk/protocol/version/dependency` 및 한국어 동의어(라이브러리/프레임워크/의존성/버전).
-   - 감지 키워드가 없으면 검색을 생략하고 `references: none` 컨텍스트만 유지한다.
+   - `reference.llm_auto_trigger == true`이면 키워드 매칭과 별도로 PM이 "인터넷에 최신 정보가 있을 법한 내용"이라고 판단할 때 자율적으로 WebSearch를 트리거한다.
+   - `reference.llm_auto_trigger == false`이면 기존 키워드 매칭 기반 동작만 유지한다.
+   - 감지 키워드가 없고 `reference.llm_auto_trigger == false`이면 검색을 생략하고 `references: none` 컨텍스트만 유지한다.
 2. **3단계 신선도 체크** (키워드별 반복):
    - (a) 캐시 존재 확인: `.gran-maestro/references/`에서 `python3 {PLUGIN_ROOT}/scripts/mst.py reference search --keyword "{keyword}" --json`으로 후보 REF를 조회한다.
    - (b) TTL 확인: `searched_at` 기준 `cache_ttl_days` 이내면 `fresh`, 초과면 `stale`.
@@ -114,6 +116,8 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 3. **WebSearch 트리거**:
    - 캐시 없음 또는 freshness가 `stale/expired`인 항목만 검색 대상으로 선정한다.
    - `reference.auto_search == true`일 때만 `WebSearch`를 실행하며, Step당 `max_searches_per_step`를 넘기지 않는다.
+   - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
+   - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
 4. **REF 저장**:
    - 유효한 검색 결과는 즉시 `mst.py reference add`로 저장한다.
    - 예시: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`

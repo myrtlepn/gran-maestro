@@ -74,9 +74,11 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 0. **자동 트리거 게이트**:
    - `config.resolved.json`의 `reference.auto_search`가 `true`일 때만 자동 WebSearch 허용.
-   - 미설정 기본값: `cache_ttl_days=7`, `cutoff_threshold_months=1`, `max_searches_per_step=3`.
+   - 미설정 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
    - spec AC, Plan AC, 변경 파일 설명, 리뷰 이슈 텍스트에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜 계열)를 감지한다.
+   - `reference.llm_auto_trigger == true`이면 키워드 매칭과 별도로 PM이 "인터넷에 최신 정보가 있을 법한 내용"이라고 판단할 때 자율적으로 WebSearch를 트리거한다.
+   - `reference.llm_auto_trigger == false`이면 기존 키워드 매칭 기반 동작만 유지한다.
 2. **3단계 신선도 체크**:
    - (a) `.gran-maestro/references/` 캐시 존재 확인 (`mst.py reference search --keyword ... --json`)
    - (b) TTL 기준 `fresh/stale` 판정 (`cache_ttl_days`)
@@ -84,6 +86,8 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 3. **WebSearch 트리거**:
    - 캐시 없음 또는 `stale/expired`인 항목만 검색.
    - 자동 검색은 `reference.auto_search == true`일 때만 실행.
+   - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
+   - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
 4. **REF 저장**:
    - 신규 검색 결과는 `mst.py reference add`로 저장하고 REF-ID를 확보한다.
 5. **프롬프트 주입**:

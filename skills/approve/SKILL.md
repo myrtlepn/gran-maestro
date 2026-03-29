@@ -64,9 +64,11 @@ approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 
 
 0. **자동 트리거 게이트**:
    - `config.resolved.json`의 `reference.auto_search == true`일 때만 자동 WebSearch 허용.
-   - 미설정 기본값: `cache_ttl_days=7`, `cutoff_threshold_months=1`, `max_searches_per_step=3`.
+   - 미설정 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
    - 태스크 spec(`§1/§2/§3`), 이전 피드백, plan 요약, IMPL_CONTEXT 초안에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜)를 감지한다.
+   - `reference.llm_auto_trigger == true`이면 키워드 매칭과 별도로 PM이 "인터넷에 최신 정보가 있을 법한 내용"이라고 판단할 때 자율적으로 WebSearch를 트리거한다.
+   - `reference.llm_auto_trigger == false`이면 기존 키워드 매칭 기반 동작만 유지한다.
 2. **3단계 신선도 체크**:
    - (a) `.gran-maestro/references/` 캐시 존재 확인
    - (b) TTL(`cache_ttl_days`) 기준 `fresh/stale` 판정
@@ -74,6 +76,8 @@ approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 
 3. **WebSearch 트리거**:
    - 캐시 없음 또는 `stale/expired` 항목만 검색 대상으로 선정.
    - 자동 검색은 `reference.auto_search == true`일 때만 수행.
+   - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
+   - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
 4. **REF 저장**:
    - 검색 결과는 `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`로 저장.
 5. **프롬프트 주입**:
