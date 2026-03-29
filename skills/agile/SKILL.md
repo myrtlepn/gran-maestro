@@ -93,6 +93,14 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile status AGI-NNN --json` 실행
 2. session.json 로드 성공 시: `AGI_ID`, `CURRENT_SPRINT`, `STEERING_EVERY`, `OBJECTIVE_MODE`를 메모리에 보관
    - `OBJECTIVE_MODE` 필드가 없거나 비정상이면 `story`로 간주한다(하위 호환).
+   - 아래 workflow state를 활성화한다 (non-blocking):
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active true \
+  --skill mst:agile \
+  --auto true \
+|| echo "[mst:agile] warning: failed to update workflow state" >&2
+```
 3. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status} (mode: {OBJECTIVE_MODE})`
 4. Step 1 건너뜀 → 스프린트 루프(REQ-480)로 진행
 5. session.json 로드 실패 또는 AGI-NNN 미존재 시:
@@ -104,6 +112,13 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 1. 신규 세션 생성과 objective 초기화는 Step 1의 `agile-plan` 서브스킬에서 수행한다.
 2. Step 1 호출을 위해 사용자 입력 목표(`PROJECT_GOAL`)와 선택 플래그(`DOC_PATH`, `STEERING_EVERY`)를 메모리에 보관한다.
 3. `[신규 세션 준비] agile-plan 위임 예정 (steering-every: {STEERING_EVERY})` 출력
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active true \
+  --skill mst:agile \
+  --auto true \
+|| echo "[mst:agile] warning: failed to update workflow state" >&2
+```
 4. Step 1로 진행
 
 ---
@@ -210,6 +225,12 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 반복 시작 전 매번 수행:
 
 ```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active true \
+  --skill mst:agile \
+  --auto true \
+|| echo "[mst:agile] warning: failed to update workflow state" >&2
+
 python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 ```
 
@@ -376,6 +397,12 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 결과 디렉토리: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/
 목표 달성 여부: {JTBD_SUCCESS_SUMMARY}
 ========================================
+```
+
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active false \
+|| echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 
 `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --json` 실행 후 종료.
@@ -553,6 +580,12 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 [자동 중단] AGI-{AGI_ID} — 중단 조건 충족: {REASON}
 현재까지 결과: {DONE_ITEMS}/{TOTAL_ITEMS} 항목 완료
 재개하려면: /mst:agile --resume {AGI_ID}
+```
+
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active false \
+|| echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 
 `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status paused --json` 실행 후 종료.
