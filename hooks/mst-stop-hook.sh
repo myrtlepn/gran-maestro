@@ -137,7 +137,7 @@ if isinstance(next_action, dict):
             break
 
 print(
-    "valid\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+    "valid\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
         "true" if workflow_active else "false",
         current_skill,
         active_req,

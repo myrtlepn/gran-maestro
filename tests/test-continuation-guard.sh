@@ -123,6 +123,12 @@ assert_contains "workflow_active=true -> block" '"decision": "block"' "$output"
 assert_contains "block reason includes next skill" 'mst:request' "$output"
 
 cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:plan","active_req":"REQ-500","iteration":1,"updated_at":"2026-03-28T10:30:45Z","next_action":{"skill":"mst:request","source":"PLN-400","auto":false}}'
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_contains "block reason includes updated_at timestamp" '2026-03-28T10:30:45Z' "$output"
+
+cleanup
 write_state '{"workflow_active":false,"current_skill":"","active_req":"","iteration":0,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
