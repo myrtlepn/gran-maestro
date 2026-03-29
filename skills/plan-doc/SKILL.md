@@ -158,13 +158,21 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
 
 아래 3개 축을 모두 확정합니다.
 
-- 문서 목적: 설명 / 참조 / 튜토리얼 / 의사결정 기록(ADR)
+- 문서 목적: 설명(Explanation) / 참조(Reference) / 튜토리얼(Tutorial) / How-to Guide / 의사결정 기록(ADR) / 운영(Operational)
 - 대상 독자: 초보자/중급/전문가 + 역할(개발자/운영자/PM 등)
 - 기대 결과물: 형식, 분량, 톤, 언어, 완료 기준
 
 `AUTO_MODE=false`:
 
 - 최소 1회 이상 `AskUserQuestion` 실행 (최대 4옵션)
+- 문서 목적 선택은 6개 유형이 모두 보이도록 질문한다.
+  - 설명(Explanation)
+  - 참조(Reference)
+  - 튜토리얼(Tutorial)
+  - How-to Guide
+  - 의사결정 기록(ADR)
+  - 운영(Operational)
+  - `AskUserQuestion` 옵션 제한(최대 4개) 때문에 문서 목적 질문은 여러 번 분할해도 된다. 단, 최종적으로 6개 유형을 모두 제시해야 한다.
 - 모호성이 남으면 반복 질문
 
 `AUTO_MODE=true`:
@@ -195,6 +203,10 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
    - `Glob`/`Grep`으로 관련 파일, README, docs, 주석, API 시그니처 탐색
 2. 웹 검색
    - `WebSearch`로 업계 표준, 공식 레퍼런스, 유사 문서 사례, 최신 권고 수집
+   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search`를 확인
+   - `reference.auto_search == true`일 때만 WebSearch 유효 결과를 REF로 자동 저장
+     - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
+   - `reference.auto_search != true`면 WebSearch 결과 자동 저장을 생략하고 기존 수집 흐름만 유지
 3. 프로젝트 기존 문서 스캔
    - 현재 저장소 문서와 중복/충돌/폐기 예정 정보 확인
 
