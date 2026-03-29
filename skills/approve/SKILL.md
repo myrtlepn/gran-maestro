@@ -774,6 +774,40 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
 
 Step 5 FAIL 시, PM이 직접 코드를 수정하지 않고 외주 에이전트에게 에러 컨텍스트와 함께 재요청합니다. 최대 재시도 소진 후 PM 직접 개입.
 
+**실행 타입 분기 (if 1개, MANDATORY)**:
+- `if EXECUTION_TYPE == "doc"`:
+  - Step 5 FAIL을 문서 검증 실패(특히 팩트체크 실패)로 해석하고, 아래 DocExecutor 재실행 루프를 우선 적용한다.
+  - 최대 재시도는 고정 `2회`이며, 루프는 `팩트체크 실패 → 소스 재확인 프롬프트 생성 → 재작성` 순서를 따른다.
+
+##### 5b-doc-1. 팩트체크 실패 항목 수집
+
+- 직전 문서 검증 결과에서 실패 claim 목록(`failed_claims`)과 근거 부족 항목(`unverified_claims`)을 추출한다.
+- 각 항목에 대해 "현재 서술 / 실패 사유 / 필요한 근거(source)"를 정리한다.
+
+##### 5b-doc-2. 소스 재확인 프롬프트 생성
+
+`Write → {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase2-doc-fix-R{N}.md`
+
+포함 내용:
+- spec.md §3 수락 조건 (문서 품질 관련 AC 포함)
+- 실패/미검증 claim 목록 + 실패 사유
+- `§0 Context Manifest` 및 문서 소스 목록 재확인 지시
+- "실패 claim이 포함된 섹션만 재작성 후 구조 검증 + 팩트체크를 다시 실행" 지시
+
+##### 5b-doc-3. DocExecutor 재실행 (동일 태스크 경로)
+
+- 동일 에이전트로 재외주를 실행한다. (`EXECUTION_TYPE=="doc"` 경로이므로 `{PROJECT_ROOT}` 기준 실행)
+- `request.json`에 `doc_factcheck_retries`(없으면 0)를 +1 저장한다.
+- 재작성 완료 후 즉시 문서 검증(구조 검증 + 팩트체크)을 다시 실행하고 Step 5로 복귀한다.
+
+##### 5b-doc-4. 재시도 한도 도달 시 PM 직접 개입
+
+- `doc_factcheck_retries >= 2`이면 루프를 종료한다.
+- PM이 소스 원문을 재확인해 문서를 직접 보정한 뒤, 문서 검증(구조 검증 + 팩트체크)만 재실행한다.
+
+- `else` (`EXECUTION_TYPE != "doc"`):
+  - 아래 `5b-1 ~ 5b-5` 기존 코드 경로를 **그대로** 수행한다. (변경 금지)
+
 ##### 5b-1. 에러 출력 캡처
 
 - tsc 에러: 전체 stderr/stdout 캡처

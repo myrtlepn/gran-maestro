@@ -589,9 +589,24 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 - `if REVIEW_TYPE == "doc"`:
   - 코드 리뷰 프롬프트 대신 문서 구조/품질 리뷰 프롬프트를 사용한다.
   - 검토 기준은 정확성, 완결성, 독자적합성, 구조/가독성으로 고정한다.
+  - 입력은 `git diff`가 아니라 문서 전문(full text)이며, 신규 문서(diff 없음)도 동일하게 전문 리뷰를 수행한다.
   - 결과 산출 경로는 기존과 동일하게 유지한다 (`review-code.md` 재사용).
 - `else` (`REVIEW_TYPE != "doc"`):
   - 기존 Pass B 절차를 그대로 적용한다. (변경 금지)
+
+##### REVIEW_TYPE=="doc" Pass B 전문 리뷰 규칙 (MANDATORY)
+
+1. 입력 데이터
+   - 리뷰 대상 문서는 `spec §2 변경 범위`에 명시된 파일 기준으로 식별한다.
+   - 각 문서 파일은 `Read`로 원문 전체를 로드해 프롬프트에 전달한다 (요약본/부분 diff 사용 금지).
+2. 체크리스트 (모든 항목 필수)
+   - 정확성(소스 대비): claim이 소스/근거와 일치하는지, 과장/추정 서술이 없는지 확인
+   - 완결성(TOC 대비): plan/spec의 TOC 항목이 누락 없이 반영됐는지 확인
+   - 독자적합성(plan 대비): plan의 목적/독자/결과물 조건에 맞는 설명 깊이와 톤인지 확인
+   - 구조(헤딩 체계): H1/H2/H3 계층, 섹션 순서, 문단 흐름이 일관적인지 확인
+3. 산출 형식
+   - `review-code.md`에 위 4개 축별 `PASS|FAIL`과 근거를 표 형태로 기록한다.
+   - FAIL 항목은 반드시 수정 권고(어떤 섹션을 어떻게 고칠지)를 포함한다.
 
 Pass B는 Claude(인컨텍스트)와 background 에이전트 5개를 동시 시작합니다.
 
@@ -666,6 +681,9 @@ arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에
 - `{{SPEC_PATH}}`: 해당 태스크의 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{NN}/spec.md` 절대 경로
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
 - `{{REFERENCE_CONTEXT}}`: Step 2에서 생성한 `[REFERENCE_CONTEXT]` 블록 (`references: none` 포함). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입.
+- `if REVIEW_TYPE == "doc"`:
+  - 프롬프트 본문에 문서 전문(full text)을 직접 포함하고, diff 요약은 참고 정보로만 사용한다.
+  - `code_reviewer`의 검토 포커스를 문서 품질(정확성/완결성/독자적합성/구조) 체크리스트로 고정한다.
 
 #### impact_reviewer dispatch 입력 규칙
 
