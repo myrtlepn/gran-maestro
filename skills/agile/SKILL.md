@@ -1,13 +1,13 @@
 ---
 name: agile
-description: "프로젝트 목표를 제공하면 애자일 마스터가 스프린트 단위로 작업을 분해하여 자율 실행합니다. 목적 문서(objective.md) 생성/검토 → Sprint 0 → Sprint N 루프 → 스티어링 체크포인트."
+description: "프로젝트 목표를 제공하면 JTBD+Epic(DoD 체크리스트) 기반 자율 실행을 수행합니다. Step 1은 agile-plan 서브스킬로 objective.md를 준비하고 Sprint 0 → Sprint N 루프 → 스티어링 체크포인트를 반복합니다."
 user-invocable: true
-argument-hint: "{프로젝트 목표 또는 --resume AGI-NNN | --doc 파일경로 | --steering-every N}"
+argument-hint: "{프로젝트 목표(JTBD+Epic(DoD 체크리스트) 기반) 또는 --resume AGI-NNN | --doc 파일경로 | --steering-every N}"
 ---
 
 # maestro:agile
 
-**목적**: 프로젝트 목표를 받아 JTBD+Epic/Story+Checklist 구조의 목적 문서를 생성/검토하고, 스프린트 단위 자율 실행 루프를 진행합니다.
+**목적**: 프로젝트 목표를 받아 JTBD+Epic(DoD 체크리스트) 기반 objective 흐름을 `agile-plan`으로 초기화하고, 스프린트 단위 자율 실행 루프를 진행합니다.
 
 핵심 우회 금지 규칙은 아래 Gate/체크리스트 섹션을 따른다.
 
@@ -50,8 +50,8 @@ argument-hint: "{프로젝트 목표 또는 --resume AGI-NNN | --doc 파일경�
 
 ### Exit
 
-- Step 1 완료(objective.md 확정) 후 스프린트 루프(REQ-480)로 진입한다.
-- 스프린트 루프는 REQ-480에서 구현 예정이며, 이 스킬은 현재 Step 0~1까지만 구현한다.
+- Step 1에서 `agile-plan` 서브스킬 반환 마커 확인 후 Step 2로 진입한다.
+- Step 2/3 루프는 `objective_mode`(`epic|story`)에 따라 분기 실행한다.
 
 ### 금지 패턴
 
@@ -91,8 +91,9 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 #### 0.2 분기: --resume 있는 경우
 
 1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile status AGI-NNN --json` 실행
-2. session.json 로드 성공 시: `AGI_ID`, `CURRENT_SPRINT`, `STEERING_EVERY`를 메모리에 보관
-3. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status}`
+2. session.json 로드 성공 시: `AGI_ID`, `CURRENT_SPRINT`, `STEERING_EVERY`, `OBJECTIVE_MODE`를 메모리에 보관
+   - `OBJECTIVE_MODE` 필드가 없거나 비정상이면 `story`로 간주한다(하위 호환).
+3. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status} (mode: {OBJECTIVE_MODE})`
 4. Step 1 건너뜀 → 스프린트 루프(REQ-480)로 진행
 5. session.json 로드 실패 또는 AGI-NNN 미존재 시:
    - 에러 메시지 출력: `[오류] AGI-{NNN} 세션을 찾을 수 없습니다.`
@@ -100,110 +101,27 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 
 #### 0.3 분기: 신규 세션 (--resume 없는 경우)
 
-1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile init --steering-every {STEERING_EVERY} --json` 실행
-2. 출력에서 `agi_id` 파싱하여 `AGI_ID`에 저장
-3. `[신규 세션] AGI-{NNN} 생성됨 (steering-every: {STEERING_EVERY})` 출력
-4. Step 1으로 진행
+1. 신규 세션 생성과 objective 초기화는 Step 1의 `agile-plan` 서브스킬에서 수행한다.
+2. Step 1 호출을 위해 사용자 입력 목표(`PROJECT_GOAL`)와 선택 플래그(`DOC_PATH`, `STEERING_EVERY`)를 메모리에 보관한다.
+3. `[신규 세션 준비] agile-plan 위임 예정 (steering-every: {STEERING_EVERY})` 출력
+4. Step 1로 진행
 
 ---
 
-### Step 1: Objective 문서 생성/검토
+### Step 1: Objective 준비 (agile-plan 서브스킬 위임)
 
 `[MST skill=agile step=1/4 return_to=null]`
 
-#### 분기 결정
+신규 세션(`--resume` 없음)은 Step 1 전체를 아래 1줄 호출로 수행한다:
 
-`--doc 파일경로`가 있으면 **1B (기존 문서 파싱 모드)**, 없으면 **1A (Q&A 생성 모드)**로 진행한다.
-
----
-
-#### Step 1A: Q&A로 Objective 신규 생성 (--doc 없는 경우)
-
-**목표**: 대화형 Q&A로 JTBD+Epic/Story+Checklist 3계층 구조의 objective.md를 생성한다.
-
-##### 1A.1 JTBD 레이어 Q&A
-
-아래 질문을 순서대로 진행한다. 각 질문은 `AskUserQuestion`으로 하나씩 진행한다:
-
-1. **Job Statement**: "어떤 상황에서 이 프로젝트를 진행하게 되었나요? (When I ... )"
-2. **핵심 목표**: "이 프로젝트를 통해 무엇을 달성하고 싶으신가요? (I want to ... )"
-3. **기대 결과**: "성공했을 때 얻게 되는 가치는 무엇인가요? (So I can ... )"
-4. **성공 지표**: "완료를 어떻게 측정할 수 있을까요? (측정 가능한 지표)"
-5. **완료 정의(DoD)**: "모든 작업이 완료됐다고 판단하는 구체적인 기준은 무엇인가요?"
-
-##### 1A.2 Epic/Story 레이어 Q&A
-
-JTBD 답변을 기반으로 Epic 후보를 제안하고 확인:
-
-1. 수집된 JTBD를 기반으로 **Epic 2~5개** 초안 생성 및 제안
-2. 사용자 피드백으로 Epic 확정
-3. 각 Epic에 대해 **Story 2~5개** 초안 생성 및 제안
-4. 각 Story의 우선순위(priority: high/medium/low)와 의존성(deps) 확인
-
-##### 1A.3 Checklist 레이어 Q&A
-
-1. 테스트 요건: "각 Story 완료 전 필요한 테스트가 있나요? (예: 단위 테스트, E2E 테스트)"
-2. 문서화 요건: "완료 시 작성해야 할 문서가 있나요?"
-3. 리뷰 요건: "완료 전 리뷰가 필요한 항목이 있나요?"
-
-##### 1A.4 Objective.md 생성
-
-Q&A 결과를 `templates/objective.md` 형식으로 구조화하여 아래 경로에 저장:
-
-```
-{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+```text
+Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --steering-every {STEERING_EVERY} --return-to agile/1")
 ```
 
-> ⚠️ 신규 생성 시에만 Write 허용. 이후 모든 수정은 `mst.py agile objective-transition` / `objective-check` 사용.
-
-저장 완료 후:
-- `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
-- 생성된 objective.md 요약 출력
-- Step 2(스프린트 루프 — REQ-480)로 진입
-
----
-
-#### Step 1B: 기존 문서 파싱 및 검토 (--doc 있는 경우)
-
-**목표**: 기존 문서를 파싱하여 JTBD/Epic/Story/Checklist로 정규화하고, 누락/모호 항목에 대해 Q&A로 보완한다.
-
-##### 1B.1 기존 문서 파싱
-
-1. `Read({PROJECT_ROOT}/{--doc 경로})` 실행 (절대경로로 변환)
-2. 아래 구조로 파싱 시도:
-   - **JTBD 레이어**: "When I", "I want to", "So I can", DoD, 성공 지표 추출
-   - **Epic 레이어**: 제목/섹션/그룹 추출 → Epic 후보 식별
-   - **Story 레이어**: Epic 하위 항목 추출 → Story 후보 식별
-   - **Checklist 레이어**: 체크리스트/완료 기준/테스트/리뷰 항목 추출
-3. 파싱 결과를 `PARSED_CONTEXT`에 저장
-
-##### 1B.2 정규화 및 모호성 제거 Q&A
-
-파싱 결과를 기반으로 누락/모호 항목에 대해 추가 Q&A 진행:
-
-1. **JTBD 누락 항목**: 파싱되지 않은 JTBD 필드에 대해 각각 질문
-   - 예: "파싱된 문서에서 'So I can' 항목을 찾을 수 없었습니다. 이 프로젝트를 통해 얻게 되는 가치는 무엇인가요?"
-2. **모호한 Epic/Story**: 범위가 불명확하거나 완료 기준이 없는 항목 확인
-   - 예: "{Epic명}의 완료 기준이 명시되지 않았습니다. 어떤 상태가 되면 완료로 볼 수 있나요?"
-3. **누락된 Story 필드**: priority, deps, sprint_target이 없는 Story에 대해 확인
-4. **Checklist 누락**: 테스트/문서/리뷰 게이트가 없는 Story에 대해 확인
-
-파싱 후 Q&A가 불필요한 경우(모든 필드 충족): "기존 문서가 완전합니다. 확인 후 스프린트 루프로 진행할까요?" 확인 요청
-
-##### 1B.3 정규화된 Objective.md 저장
-
-파싱 + Q&A 보완 결과를 `templates/objective.md` 형식으로 정규화하여 저장:
-
-```
-{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
-```
-
-> ⚠️ 신규 생성 시에만 Write 허용. 이후 모든 수정은 `mst.py agile objective-transition` / `objective-check` 사용.
-
-저장 완료 후:
-- `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
-- 정규화 요약 출력 (원본 대비 변경/추가된 항목 목록)
-- Step 2(스프린트 루프 — REQ-480)로 진입
+규칙:
+- `--doc` 입력이 있으면 `DOC_FLAG_IF_ANY`에 `--doc {DOC_PATH}`를 포함하여 그대로 전달한다.
+- `--doc` 입력이 없으면 `{PROJECT_GOAL_OR_DOC}`에 사용자 목표 문장을 전달한다.
+- 서브스킬 종료 마커 `[MST skill=agile-plan step=returned return_to=agile/1]` 확인 후 stop-hook re-feed로 Step 2에 자동 진입한다.
 
 ---
 
@@ -211,21 +129,26 @@ Q&A 결과를 `templates/objective.md` 형식으로 구조화하여 아래 경�
 
 `[MST skill=agile step=2/4 return_to=null]`
 
-#### 2.0 재개 분기 결정
+#### 2.0 상태 복원 + objective_mode 분기
 
-세션 초기화(Step 0)에서 전달된 `CURRENT_SPRINT` 값으로 진입 경로를 결정한다.
+세션 초기화(Step 0) 또는 Step 1 복귀 결과로 `CURRENT_SPRINT`, `STEERING_EVERY`, `OBJECTIVE_MODE`를 복원한다.
 
-- `--resume AGI-NNN`으로 진입한 경우: 세션 초기화에서 session.json을 로드하여 `CURRENT_SPRINT`가 이미 설정되어 있어야 한다.
+- `--resume AGI-NNN` 진입:
+  - session.json에서 `current_sprint`를 복원하고, `objective_mode`를 확인한다.
+  - `objective_mode=epic`이면 Epic 기반 루프(2.2-E), `objective_mode=story`이면 기존 Story 기반 루프(2.2-S)로 분기한다.
+  - `objective_mode` 필드가 없거나 비정상이면 `story`로 간주한다(하위 호환).
   - session.json 손상 또는 `current_sprint` 필드 누락 시:
     - `[오류] AGI-{AGI_ID} session.json 손상 — current_sprint 값을 읽을 수 없습니다.` 출력
     - 복구 안내: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/session.json`을 직접 점검하거나 삭제 후 신규 세션으로 재시작
     - 실행 중단
-  - 정상 로드 시: `[재개] AGI-{AGI_ID} — 스프린트 {CURRENT_SPRINT}부터 재시작` 출력
-- 신규 세션(Step 1에서 진입): `CURRENT_SPRINT=0` 으로 시작
+- 신규 세션(Step 1에서 복귀):
+  - `agile-plan` 생성 결과의 `AGI_ID`를 사용한다.
+  - `CURRENT_SPRINT=0`, `OBJECTIVE_MODE=epic`으로 시작한다.
 
 분기:
 - `CURRENT_SPRINT == 0` 또는 Sprint 0 미완료 → **2.1 (Sprint 0)** 으로 진행
-- `CURRENT_SPRINT >= 1` 및 Sprint 0 완료 → **2.2 (Sprint N 루프)** 로 직접 진행
+- `CURRENT_SPRINT >= 1` 및 Sprint 0 완료 + `OBJECTIVE_MODE=epic` → **2.2-E (Epic 루프)** 로 진행
+- `CURRENT_SPRINT >= 1` 및 Sprint 0 완료 + `OBJECTIVE_MODE=story` → **2.2-S (기존 Story 루프)** 로 진행
 
 ---
 
@@ -276,24 +199,91 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 
 ---
 
-#### 2.2 Sprint N 자율 루프
+#### 2.2 Sprint N 자율 루프 (objective_mode 분기)
 
-**목표**: objective.md의 모든 story가 완료될 때까지 스프린트를 반복한다.
+**목표**: `objective_mode`에 따라 Sprint 실행 단위를 결정한다.
+- `epic` 모드: Epic 미완료 DoD 기반 JIT Story 1개를 매 Sprint 도출
+- `story` 모드: 기존 Story 선택 로직 유지 (하위 호환)
 
-##### 2.2.1 루프 진입 조건 확인
+##### 2.2.1 공통 루프 게이트
 
 반복 시작 전 매번 수행:
 
-```
+```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 ```
 
 - `all_done: true` → 루프 종료 (2.3 최종 보고서로 이동)
-- `all_done: false` → 스티어링 체크포인트 확인 후 다음 story 선택 (2.2.2)
+- `all_done: false` → 스티어링 체크포인트 확인 후 모드별 루프로 진행
 
 **스티어링 체크포인트 확인**: `CURRENT_SPRINT > 0` 이고 `CURRENT_SPRINT % STEERING_EVERY == 0` 이면 **Step 3(스티어링 체크포인트)** 로 분기하고, 완료 후 루프를 계속 진행.
 
-##### 2.2.2 작업(Story) 선택
+##### 2.2-E Epic 기반 루프 (OBJECTIVE_MODE=epic)
+
+**목표**: Epic의 미완료 required DoD 항목을 Sprint마다 JIT Story 1개로 전환하여 점진 완료한다.
+
+###### 2.2-E.1 JIT Story 도출 (Sprint 시작)
+
+직전 result + Epic 현재 상태를 사용해 이번 Sprint의 Story 1개를 도출한다.
+
+| 계층 | 내용 | 출처 |
+|------|------|------|
+| **고정층** | objective.md의 JTBD + Epic DoD 전체 맥락 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
+| **활성층** | 현재 Epic + 미완료 required DoD 항목 | `objective-check --json`의 `incomplete` + objective 파싱 |
+| **변화층** | 직전 Sprint 결과 요약 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md` |
+
+도출 규칙:
+1. `objective-check` 결과의 `incomplete`(DoD ID 목록)에서 이번 Sprint 대상 DoD 묶음을 선택한다.
+2. 변화층(result.md)에서 직전 실패/미완료 원인을 반영한다.
+3. 위 두 입력으로 이번 Sprint의 Story 1개를 즉시 도출하고 `JIT_STORY_ID`, `JIT_STORY_DESC`를 선언한다.
+4. 출력: `[Sprint {CURRENT_SPRINT}] JIT Story 도출: {JIT_STORY_ID} — {JIT_STORY_DESC}`
+
+###### 2.2-E.2 plan -a 호출 (컨텍스트 3계층 유지)
+
+```text
+Skill(skill: "mst:plan", args: "-a {JIT_STORY_DESC}
+[고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+[활성층] 현재 Epic: {EPIC_ID} | 미완료 DoD: {INCOMPLETE_DOD_LIST} | 이번 JIT Story: {JIT_STORY_ID}
+[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md")
+```
+
+서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
+
+###### 2.2-E.3 Sprint 결과 기록 + DoD 갱신 제안 기록
+
+plan -a 실행 완료 후 아래 순서로 처리한다:
+
+1. 스프린트 결과 기록:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status done|failed \
+  --planned "{JIT_STORY_ID}" \
+  --completed "{JIT_STORY_ID_IF_DONE}" \
+  --pln {PLN_ID} \
+  --req {REQ_ID} \
+  --json
+```
+2. DoD 체크리스트 갱신 "제안" 생성(확정 아님):
+   - Sprint result 기반으로 제안 목록을 만든다: `{dod_id, suggested_status, evidence_ref, reason}`
+   - `evidence_ref`에는 근거 파일 절대경로를 반드시 포함한다 (`result.md`, 테스트 로그, diff 요약 등).
+3. 제안 기록 (`objective-transition` 사용, 확정은 Step 3):
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status proposed_done --json
+```
+4. session.json 업데이트:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
+  --current-sprint {CURRENT_SPRINT + 1} \
+  --json
+```
+5. 반복: `CURRENT_SPRINT = CURRENT_SPRINT + 1` 설정 후 루프 상단(2.2.1)으로 복귀
+
+##### 2.2-S Story 기반 루프 (OBJECTIVE_MODE=story, 하위 호환)
+
+**목표**: 기존 Story 기반 Sprint 로직을 유지한다.
+
+###### 2.2-S.1 작업(Story) 선택
 
 `objective-check` 출력에서 아래 기준으로 story를 선택한다:
 
@@ -306,11 +296,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 
 선정된 story 정보 출력:
 
-```
+```text
 [Sprint {CURRENT_SPRINT}] 선택된 story: {STORY_ID} — {story 제목} (priority: {priority})
 ```
 
-##### 2.2.3 컨텍스트 전달 3계층 구성 (DSC-044)
+###### 2.2-S.2 컨텍스트 전달 3계층 구성 (DSC-044)
 
 plan -a 호출 전 3계층 컨텍스트를 구성한다:
 
@@ -324,11 +314,9 @@ plan -a 호출 전 3계층 컨텍스트를 구성한다:
 - 전체 히스토리 전달 금지 — 변화층은 직전 1~2 스프린트만 참조
 - 원문은 파일 경로로 참조 (인라인 삽입 금지)
 
-##### 2.2.4 plan -a 호출
+###### 2.2-S.3 plan -a 호출
 
-구성한 3계층 컨텍스트를 포함하여 plan을 자율 실행한다:
-
-```
+```text
 Skill(skill: "mst:plan", args: "-a {STORY_DESCRIPTION}
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 대상: {STORY_ID} — {STORY_TITLE} | deps: {DEPS_LIST} | AC: {AC_LIST}
@@ -337,13 +325,10 @@ Skill(skill: "mst:plan", args: "-a {STORY_DESCRIPTION}
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
-##### 2.2.5 결과 기록
+###### 2.2-S.4 결과 기록
 
-plan -a 실행 완료 후 아래 순서로 처리한다:
-
-**① 스프린트 결과 기록** (`agile result`):
-
-```
+1. 스프린트 결과 기록:
+```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --sprint {CURRENT_SPRINT} \
   --status done|failed \
@@ -353,26 +338,24 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --req {REQ_ID} \
   --json
 ```
-
-**② story 상태 업데이트**:
-- 성공 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status done`
-- 실패 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status blocked`
-
-**③ session.json 업데이트**:
-
-```
+2. story 상태 업데이트:
+   - 성공 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status done`
+   - 실패 시: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {STORY_ID} --status blocked`
+3. session.json 업데이트:
+```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
   --current-sprint {CURRENT_SPRINT + 1} \
   --json
 ```
-
-**④ 반복**: `CURRENT_SPRINT = CURRENT_SPRINT + 1` 설정 후 루프 상단(2.2.1)으로 반복
+4. 반복: `CURRENT_SPRINT = CURRENT_SPRINT + 1` 설정 후 루프 상단(2.2.1)으로 반복
 
 ---
 
 #### 2.3 루프 종료 및 최종 보고서
 
 **종료 조건**: `mst.py agile objective-check {AGI_ID} --json` 결과에서 `all_done: true` 반환.
+- `OBJECTIVE_MODE=epic`: 모든 Epic의 required DoD 항목이 `done|completed`이면 `all_done=true`
+- `OBJECTIVE_MODE=story`: 기존 Story 완료 집계 기준 유지
 
 최종 보고서를 출력한다:
 
@@ -382,7 +365,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 ========================================
 
 총 스프린트 수: {TOTAL_SPRINTS}
-완료된 story 수: {DONE_STORIES} / {TOTAL_STORIES}
+완료된 항목 수: {DONE_ITEMS} / {TOTAL_ITEMS} (mode: {OBJECTIVE_MODE})
 생성된 PLN 목록: {PLN_IDS}
 생성된 REQ 목록: {REQ_IDS}
 
@@ -403,7 +386,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 `[MST skill=agile step=3/4 return_to=null]`
 
-**목표**: 정기 또는 비상 트리거 시 현재 진행 상황을 사용자에게 보고하고, objective 방향 변경 여부를 확인한 뒤 루프를 계속 진행한다.
+**목표**: 정기 또는 비상 트리거 시 현재 진행 상황과 DoD 제안을 사용자에게 보고하고, approve/reject 및 objective 변경 여부를 반영한 뒤 루프를 계속 진행한다.
 
 #### 3.1 트리거 조건
 
@@ -413,6 +396,10 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 | **비상** | 안전장치 섹션의 비상 스티어링 트리거 조건 충족 시 즉시 진입 |
 
 `steering_every` 값은 session.json에서 로드하며 기본값은 3이다.
+
+모드 분기:
+- `OBJECTIVE_MODE=epic`이면 3.2/3.3 DoD 제안 보고 및 approve/reject 절차를 수행한다.
+- `OBJECTIVE_MODE=story`이면 기존 Story 기반 스티어링 보고/방향 수정 절차를 유지하고 3.3 DoD 제안 단계는 생략한다.
 
 #### 3.2 진행 보고서 출력
 
@@ -425,12 +412,17 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 목표 진행률
 - metric 달성률: {METRICS_PROGRESS} (성공 지표 기준)
-- Epic burnup: {EPIC_DONE}/{EPIC_TOTAL} 완료 ({STORY_DONE}/{STORY_TOTAL} story)
+- Epic burnup: {EPIC_DONE}/{EPIC_TOTAL} 완료 ({DOD_DONE}/{DOD_TOTAL} DoD)
 
 최근 {STEERING_EVERY} 스프린트 요약
 | 스프린트 | 계획 | 완료 | 미완료 | 블로커 |
 |----------|------|------|--------|--------|
 | S{N}     | ...  | ...  | ...    | ...    |
+
+DoD 체크 갱신 제안 (pending)
+| DOD-ID | 제안 상태 | evidence_ref | 근거 요약 |
+|--------|-----------|--------------|-----------|
+| DOD-... | proposed_done | .../sprints/S{N}/result.md | ... |
 
 리스크 Top3
 1. {RISK_1} — 영향도: {high|medium|low}
@@ -444,47 +436,65 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 ========================================
 ```
 
-#### 3.3 방향 수정 (Objective 변경)
+#### 3.3 DoD 제안 approve/reject (MANDATORY)
 
 진행 보고서 출력 후 `AskUserQuestion`으로 사용자에게 확인:
 
-> "현재 방향을 유지할까요? 수정이 필요하면 변경 사항을 설명해주세요."
+> "DoD 제안 목록을 승인/반려해주세요. (예: approve DOD-001,DOD-002 / reject DOD-003)"
 
-- **유지**: 루프로 복귀 (2.2.1)
-- **변경**: 아래 순서로 **버전 스냅샷** 저장 + **changelog** 기록 후 업데이트 진행
+처리 규칙:
+- **approve된 DOD**:
+  - `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status done --json`
+  - authoritative 상태를 `done`으로 확정
+- **reject된 DOD**:
+  - `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status todo --json`
+  - reject 사유 + `evidence_ref`를 Sprint 메모에 기록
+  - 다음 Sprint의 2.2-E.1 JIT Story 도출 시 `REJECTED_DOD_QUEUE`를 활성층 우선 입력으로 반영
 
-**① 버전 스냅샷 저장** (`objective/history/v{N}.md`에 복사):
+#### 3.4 방향 수정 (Objective 변경)
+
+진행 방향 수정이 필요하면 아래 순서로 처리한다:
+
+1. 버전 스냅샷 저장:
 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} \
   --reason "{사용자 입력 요약}" --json
 ```
 
-이 명령은 아래를 수행한다:
-- 현재 `objective.md`를 `objective/history/v{N}.md`에 저장 (버전 스냅샷)
-- `objective/changelog.ndjson`에 변경 이력 append:
-  ```
-  {"timestamp": "...", "version_from": N, "version_to": N+1, "reason": "...", "impact_scope": "..."}
-  ```
-- `objective.md` 최신본 업데이트
+2. objective 재계획 서브스킬 재호출:
 
-#### 3.4 변경 후 정합성 정책
+```text
+Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID}")
+```
+
+3. 재계획 결과 반영 후 2.2 루프로 복귀
+
+#### 3.5 변경 후 정합성 정책
 
 objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용한다:
 
 | 레벨 | 조건 | 처리 방식 |
 |------|------|-----------|
 | **Level A** (경미) | 용어 정정, 성공 지표 소폭 조정 | 완료 스프린트 유지, 루프 계속 |
-| **Level B** (중간) | Story 범위 변경, 우선순위 재조정 | 영향받는 Story만 부분 재검증 후 루프 계속 |
+| **Level B** (중간) | Epic DoD 범위 조정, 우선순위 재조정 | 영향받는 DoD만 부분 재검증 후 루프 계속 |
 | **Level C** (중대) | JTBD 목표 변경, Epic 추가/삭제 | 영향 Epic 재계산, 필요 시 부분 롤백 task 생성 |
 
-**원칙**: 완료 기록 삭제 금지. 변경된 story는 `superseded` 또는 `revalidated` 상태로 보존한다.
+**원칙**: 완료 기록 삭제 금지. 변경된 항목은 `superseded` 또는 `revalidated` 상태로 보존한다.
 
 레벨 결정 후 `AskUserQuestion`으로 처리 방식 확인하고 루프로 복귀.
 
 ---
 
 ## 안전장치
+
+### 카운터 유지 (MANDATORY)
+
+아래 카운터는 기존 임계치/의미를 그대로 유지한다:
+
+- `consecutive_failures`: 동일 작업 단위 연속 실패 횟수
+- `drift_count`: 목표와 무관한 변경 누적 횟수
+- `no_diff_count`: 실행 후 diff 없음 누적 횟수
 
 ### 4단계 복구 전략
 
@@ -493,8 +503,8 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 | 레벨 | 이름 | 조건 | 처리 |
 |------|------|------|------|
 | **Level 0** | 자동 재시도 | transient failure (네트워크, 타임아웃 등 일시적 오류) | 동일 작업 1회 자동 재시도 |
-| **Level 1** | 작업 분해 | scope 과대 (story 범위가 너무 큼) | plan -a에 더 작은 단위로 분해 요청 후 재시도 |
-| **Level 2** | 스킵 + blocked | 외부 의존성 미해소 | story를 `blocked` 상태로 마킹하고 다음 story로 이동 |
+| **Level 1** | 작업 분해 | scope 과대 (story/JIT story 범위가 너무 큼) | plan -a에 더 작은 단위로 분해 요청 후 재시도 |
+| **Level 2** | 스킵 + blocked | 외부 의존성 미해소 | 현재 작업 단위를 `blocked` 상태로 마킹하고 다음 단위로 이동 |
 | **Level 3** | 비상 스티어링 | Level 0~2로 해결 불가 또는 자동 중단 트리거 발동 | 사용자 개입 요청 → Step 3 강제 진입 |
 
 복구 절차:
@@ -507,18 +517,18 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 **정의**: 스프린트 결과물이 objective.md의 목표 항목과 **관련성**이 없는 경우.
 
-**감지 시점**: 매 스프린트 완료(2.2.5 결과 기록) 직후 수행.
+**감지 시점**: 매 스프린트 완료(2.2-E.3 또는 2.2-S.4 결과 기록) 직후 수행.
 
 **감지 절차**:
 
 1. 스프린트에서 변경된 파일 목록 추출 (`git diff --name-only`)
-2. objective.md의 활성 Epic/Story 항목과 변경 파일의 관련성 및 **정합성** 확인
+2. objective.md의 활성 Epic/Story/DoD 항목과 변경 파일의 관련성 및 **정합성** 확인
    - 관련 없는 변경이 80% 이상인 경우: **drift 경고**
 3. drift 감지 시 아래 메시지 출력:
    ```
    [drift 감지] Sprint {N}
    - 변경 파일: {파일 목록}
-   - 목표 story: {STORY_ID} — {story 제목}
+   - 목표 단위: {WORK_ITEM_ID} — {WORK_ITEM_TITLE}
    - 관련성: 관련|무관
    - 판정: 정상|경고|비상
    ```
@@ -530,16 +540,16 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 | 조건 | 기준 |
 |------|------|
-| **연속 실패** | 동일 story에 대해 **연속 2회 실패** |
+| **연속 실패** | 동일 작업 단위에 대해 **연속 2회 실패** (`consecutive_failures`) |
 | **누적 실패율** | 전체 스프린트 중 실패율 **50%** 이상 (최소 4 스프린트 이후 적용) |
-| **무의미 루프** | **diff 없음** **2회 연속** (plan 실행 후 변경 파일 없음) |
+| **무의미 루프** | **diff 없음** **2회 연속** (plan 실행 후 변경 파일 없음, `no_diff_count`) |
 | **비용 cap** | 누적 **비용**/토큰 사용량이 session.json의 `cost_cap` 값 초과 |
 
 자동 중단 발생 시:
 
 ```
 [자동 중단] AGI-{AGI_ID} — 중단 조건 충족: {REASON}
-현재까지 결과: {DONE_STORIES}/{TOTAL_STORIES} story 완료
+현재까지 결과: {DONE_ITEMS}/{TOTAL_ITEMS} 항목 완료
 재개하려면: /mst:agile --resume {AGI_ID}
 ```
 
@@ -551,9 +561,9 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 | 트리거 조건 | 설명 |
 |-------------|------|
-| 연속 실패 2회 (자동 중단 이전) | 자동 중단 직전 사용자 개입 기회 제공 |
+| 연속 실패 2회 (자동 중단 이전) | 자동 중단 직전 사용자 개입 기회 제공 (`consecutive_failures`) |
 | blocked story 누적 50% 이상 | 절반 이상의 story가 blocked 상태 |
-| drift 감지 연속 2회 | 변경 파일과 objective 관련성 80% 미달 연속 |
+| drift 감지 연속 2회 | 변경 파일과 objective 관련성 80% 미달 연속 (`drift_count`) |
 | Level 3 복구 에스컬레이션 도달 | 4단계 복구 최상위 레벨 도달 |
 
 비상 스티어링 진입 시:
@@ -565,12 +575,12 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
    선택:
    1) 계속 진행 (해당 story blocked 처리 후 다음 story)
-   2) objective 수정 (Step 3.3 방향 전환)
+   2) objective 수정 (Step 3.4 방향 전환)
    3) 완전 중단
    ```
 4. 사용자 응답에 따라 분기:
    - **계속 진행**: 해당 story `blocked` 처리 후 다음 story로 진행
-   - **objective 수정**: Step 3.3 수행 후 루프 재진입
+   - **objective 수정**: Step 3.4 수행 후 루프 재진입
    - **완전 중단**: session을 `paused` 상태로 저장 후 종료
 
 ---
@@ -581,6 +591,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 | 엔티티 | 유효 전이 |
 |--------|----------|
+| DoD (epic 모드) | `todo → proposed_done → done`, `proposed_done → todo`(reject) |
 | Story | `todo → in_progress → done`, `todo → blocked → in_progress → done` |
 | Session | `active → paused → completed`, `active → completed` |
 
@@ -590,7 +601,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 | 작업 | 명령어 |
 |------|--------|
-| Story 상태 변경 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {story_id} --status {todo\|in_progress\|done\|blocked}` |
+| DoD/Story 상태 변경 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID_OR_STORY_ID} --status {todo\|proposed_done\|in_progress\|done\|blocked}` |
 | 완료 여부 전체 확인 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json` |
 | 세션 상태 업데이트 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status {active\|paused\|completed}` |
 | 스프린트 결과 기록 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {N} ...` |
@@ -601,6 +612,6 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 ## Anti-Rationalization Checklist
 
-- 합리화 패턴: "간단한 목표니 JTBD Q&A를 생략해도 된다." | 확인 증거: JTBD 5개 필드(When I / I want to / So I can / 성공 지표 / DoD) 모두 수집됨을 Step 1 종료 시 출력.
+- 합리화 패턴: "간단한 목표니 Step 1 절차를 생략해도 된다." | 확인 증거: Step 1에서 `Skill(skill: "mst:agile-plan", ...)` 호출 로그와 반환 마커가 존재.
 - 합리화 패턴: "objective.md가 이미 있으니 직접 편집해도 된다." | 확인 증거: 상태 변경 시 항상 `mst.py agile objective-transition` 실행 로그 존재.
-- 합리화 패턴: "Step 0 없이 바로 Q&A로 진행해도 된다." | 확인 증거: `mst.py agile init` 또는 `mst.py agile status` 실행 로그가 Step 0에서 존재.
+- 합리화 패턴: "Step 0 없이 바로 생성으로 진행해도 된다." | 확인 증거: `mst.py agile status`(resume) 또는 `mst:agile-plan`(신규) 실행 로그가 Step 0~1 흐름에 존재.
