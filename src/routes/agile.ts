@@ -14,6 +14,9 @@ type SessionJson = Record<string, unknown> & {
   current_sprint?: number;
   created_at?: string;
   updated_at?: string;
+  steering_every?: unknown;
+  queue?: unknown;
+  refs?: unknown;
   objective?: unknown;
 };
 
@@ -44,6 +47,20 @@ function asNumberOrNull(value: unknown): number | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+async function toSha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function objectiveEtagFromContent(content: string | null): Promise<string | null> {
+  if (content === null) return null;
+  return `"${await toSha256Hex(content)}"`;
 }
 
 async function listObjectiveSnapshotVersions(historyDir: string): Promise<number[]> {
@@ -83,10 +100,15 @@ projectAgileApi.get("/agile/sessions", async (c) => {
     sessionDirs.map(async (dir) => {
       const session = await readJsonFile<SessionJson>(`${agileDir}/${dir}/session.json`);
       if (!session) return null;
+      const queue = asArray(session.queue);
+      const refs = asArray(session.refs);
       return {
         id: asStringOrNull(session.id) ?? dir,
         status: asStringOrNull(session.status) ?? "unknown",
         current_sprint: asNumberOrNull(session.current_sprint) ?? 0,
+        steering_every: asNumberOrNull(session.steering_every) ?? 0,
+        queue_size: queue.length,
+        refs_count: refs.length,
         created_at: asStringOrNull(session.created_at),
         updated_at: asStringOrNull(session.updated_at),
       };
@@ -144,9 +166,15 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
   const objectiveVersion = asNumberOrNull(objectiveMeta.version);
   const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
   const links = await readJsonFile<Record<string, unknown>>(`${sessionDir}/index/links.json`);
+  const sessionResponse = {
+    ...session,
+    steering_every: asNumberOrNull(session.steering_every) ?? 0,
+    queue: asArray(session.queue),
+    refs: asArray(session.refs),
+  };
 
   return c.json({
-    session,
+    session: sessionResponse,
     sprints: sprints.filter((item): item is NonNullable<typeof item> => item !== null),
     objective: {
       version: objectiveVersion,
@@ -181,6 +209,10 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
   const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
   const content = await readTextFile(`${sessionDir}/${objectivePath}`);
+  const etag = await objectiveEtagFromContent(content);
+  if (etag !== null) {
+    c.header("ETag", etag);
+  }
 
   return c.json({
     content,
@@ -217,9 +249,31 @@ projectAgileApi.put("/agile/sessions/:agiId/objective", async (c) => {
 
     const objectiveMeta = isRecord(session.objective) ? session.objective : {};
     const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+    const objectiveFile = `${sessionDir}/${objectivePath}`;
+    const ifMatch = c.req.header("If-Match");
+
+    if (ifMatch) {
+      const currentContent = await readTextFile(objectiveFile);
+      const currentEtag = await objectiveEtagFromContent(currentContent);
+      if (currentEtag === null || currentEtag !== ifMatch) {
+        return c.json({ error: "Objective has been modified" }, 409);
+      }
+    }
 
     try {
-      await Deno.writeTextFile(`${sessionDir}/${objectivePath}`, body.content);
+      if (ifMatch) {
+        const latestContent = await readTextFile(objectiveFile);
+        const latestEtag = await objectiveEtagFromContent(latestContent);
+        if (latestEtag === null || latestEtag !== ifMatch) {
+          return c.json({ error: "Objective has been modified" }, 409);
+        }
+      }
+
+      await Deno.writeTextFile(objectiveFile, body.content);
+      const newEtag = await objectiveEtagFromContent(body.content);
+      if (newEtag !== null) {
+        c.header("ETag", newEtag);
+      }
       return c.json({ success: true });
     } catch {
       return c.json({ error: "Failed to write objective" }, 500);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppContext } from '@/context/AppContext';
+import { useNavigate } from 'react-router-dom';
 import { ApiFetchError, apiFetch } from '@/hooks/useApi';
 import { useResizableSidebar } from '@/hooks/useResizableSidebar';
 import { ResizableHandle } from '@/components/shared/ResizableHandle';
@@ -27,6 +28,9 @@ interface AgileSessionMeta {
   current_sprint?: number | string;
   created_at?: string;
   updated_at?: string;
+  steering_every?: number;
+  queue?: string[];
+  refs?: string[];
 }
 
 interface AgileSprint {
@@ -78,6 +82,67 @@ interface AgileRetrospective {
 }
 
 type FlowStatus = 'done' | 'in_progress' | 'not_started';
+
+
+function linkify(text: string): string {
+  return text
+    .replace(/(\bPLN-\d+\b)/g, (match, p1, offset, string) => {
+      if (string.slice(Math.max(0, offset - 2), offset).includes('[')) return match;
+      if (string.slice(Math.max(0, offset - 7), offset).includes('/plans/')) return match;
+      return `[${match}](/plans/${match})`;
+    })
+    .replace(/(\bREQ-\d+\b)/g, (match, p1, offset, string) => {
+      if (string.slice(Math.max(0, offset - 2), offset).includes('[')) return match;
+      if (string.slice(Math.max(0, offset - 10), offset).includes('/workflow/')) return match;
+      return `[${match}](/workflow/${match})`;
+    });
+}
+
+function parseDodMarkers(content: string) {
+  const regex = /<!--\s*epic:(EPIC-\d+)\s+dod:(DOD-\d+)\s+status:(todo|proposed_done|done|pending|approved|rejected)\s*-->/gi;
+  const markers = [];
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    markers.push({
+      epic: match[1],
+      dod: match[2],
+      status: match[3]
+    });
+  }
+  return markers;
+}
+
+function renderDodStatus(content: string | null) {
+  if (!content) return null;
+  const markers = parseDodMarkers(content);
+  if (markers.length === 0) return null;
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <ListChecks className="h-4 w-4" /> Steering DoD Status
+        </CardTitle>
+        <CardDescription>
+          스티어링 체크포인트 진행 상태 (읽기 전용)
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {markers.map((marker, idx) => (
+            <div key={idx} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs text-muted-foreground">{marker.epic}</span>
+                <span className="font-medium">{marker.dod}</span>
+              </div>
+              <StatusBadge status={marker.status} />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function toArray<T>(value: T[] | undefined): T[] {
   return Array.isArray(value) ? value : [];
@@ -269,6 +334,19 @@ function TimelineNode({
 }
 
 export function AgileView() {
+  const navigate = useNavigate();
+
+  const handleResultClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const a = target.closest('a');
+    if (a) {
+      const href = a.getAttribute('href');
+      if (href?.startsWith('/')) {
+        e.preventDefault();
+        navigate(href);
+      }
+    }
+  }, [navigate]);
   const { projectId, lastSseEvent } = useAppContext();
   const [sessions, setSessions] = useState<AgileSessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -374,9 +452,24 @@ export function AgileView() {
     }
   }, [projectId]);
 
+  const [objectiveEtag, setObjectiveEtag] = useState<string | null>(null);
+
   const requestObjective = useCallback(async (agiId: string) => {
     try {
-      const data = await apiFetch<{ content: string | null; path: string }>(`/api/agile/sessions/${agiId}/objective`, projectId);
+      const resolvedPath = projectId 
+        ? `/api/projects/${projectId}/agile/sessions/${agiId}/objective`
+        : `/api/agile/sessions/${agiId}/objective`;
+
+      const response = await fetch(resolvedPath);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(`API failed: ${response.status}`);
+      }
+      
+      const etag = response.headers.get('ETag');
+      setObjectiveEtag(etag);
+
+      const data = await response.json();
       return data.content;
     } catch (err) {
       if (err instanceof ApiFetchError && err.status === 404) {
@@ -641,17 +734,27 @@ export function AgileView() {
         ? `/api/projects/${projectId}/agile/sessions/${selectedSessionId}/objective`
         : `/api/agile/sessions/${selectedSessionId}/objective`;
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (objectiveEtag) {
+        headers['If-Match'] = objectiveEtag;
+      }
+
       const response = await fetch(resolvedPath, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ content: objectiveEditValue }),
       });
       
       if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error('다른 프로세스에 의해 Objective가 수정되었습니다. (충돌 발생)');
+        }
         throw new Error(`저장 실패: ${response.status}`);
       }
 
-      setObjectiveContent(objectiveEditValue);
+      // Re-fetch objective to get the new ETag
+      const newContent = await requestObjective(selectedSessionId);
+      setObjectiveContent(newContent ?? objectiveEditValue);
       setIsObjectiveEditMode(false);
       setStatusMessage({ type: 'success', text: '저장 완료' });
       setTimeout(() => setStatusMessage(null), 3000);
@@ -862,9 +965,24 @@ export function AgileView() {
             <div className="p-4 border-b bg-muted/10 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold">{selectedSession.id}</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  current sprint: {toSprintId(selectedSession.current_sprint) ?? `S${String(selectedSession.current_sprint ?? 0).padStart(2, '0')}`}
-                </p>
+                <div className="flex gap-4 items-center mt-1">
+                  <p className="text-xs text-muted-foreground">
+                    current sprint: {toSprintId(selectedSession.current_sprint) ?? `S${String(selectedSession.current_sprint ?? 0).padStart(2, '0')}`}
+                  </p>
+                  {sessionDetail && (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        steering_every: {sessionDetail.session.steering_every ?? 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        queue: {sessionDetail.session.queue?.length ?? 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                        refs: {sessionDetail.session.refs && sessionDetail.session.refs.length > 0 ? sessionDetail.session.refs.join(', ') : '없음'}
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
               <StatusBadge status={selectedSession.status} />
             </div>
@@ -948,9 +1066,12 @@ export function AgileView() {
                             </div>
                           </div>
                         ) : objectiveContent !== null ? (
-                          <div className="rounded-md border p-4 bg-background">
-                            <MarkdownRenderer content={objectiveContent} />
-                          </div>
+                          <>
+                            <div className="rounded-md border p-4 bg-background">
+                              <MarkdownRenderer content={objectiveContent} />
+                            </div>
+                            {renderDodStatus(objectiveContent)}
+                          </>
                         ) : (
                           <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
                             objective.md가 없습니다
@@ -1046,7 +1167,7 @@ export function AgileView() {
 
                             <div className="rounded-md border p-4">
                               <div className="text-sm font-semibold mb-3">result.md</div>
-                              <MarkdownRenderer content={resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint)} />
+                              <div onClick={handleResultClick}><MarkdownRenderer content={linkify(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} /></div>
                             </div>
 
                             <div className="rounded-md border p-4 space-y-4">
