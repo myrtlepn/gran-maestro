@@ -19,7 +19,10 @@
 2. `§2 변경 범위`와 `§3 수락 조건`에서 문서 대상 파일/섹션, TOC, 소스 목록, 검증 계획을 추출하라
 3. 문서 초안 생성: TOC 기준으로 섹션별 본문을 작성하고, 각 섹션의 핵심 claim에 대응하는 근거 소스를 연결하라
 4. 구조 검증: 헤딩 체계(H1/H2/H3), 섹션 순서, TOC 대비 누락 여부를 점검하고 수정하라
-5. 팩트체크: claim 단위로 `verified|failed|unverified`를 판정하고 소스 근거를 기록하라. 실패/미확정 claim은 재작성 후 재검증하라
+5. 팩트체크/검증 분기: `sub_type`(미지정 시 `explanation`)의 `verification` 값에 따라 아래 규칙으로 검증하고, claim 단위로 `verified|failed|unverified`를 판정해 근거를 기록하라. 실패/미확정 claim은 재작성 후 재검증하라
+   - `tutorial` (`verification=execution`): 단계별 실행 가능성 검증 (`step_runnable`, `prerequisites_stated`, `outcome_visible`)
+   - `howto` (`verification=goal_achievement`): 목표 달성 검증 (`problem_stated`, `solution_works`, `edge_cases_noted`)
+   - `explanation` (`verification=source_factcheck`): 소스 대비 팩트체크 (`claims_sourced`, `no_stale_info`, `context_complete`)
 6. [MANDATORY] 최종 응답에 "문서 초안 생성 → 구조 검증 → 팩트체크" 결과를 순서대로 요약해 포함하라 (커밋은 PM이 처리)
 
 ## 이전 피드백 (Phase 4 → 재실행 시)

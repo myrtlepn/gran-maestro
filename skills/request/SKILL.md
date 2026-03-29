@@ -417,15 +417,26 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - 문서 plan 입력 수집:
         - `plan.md`에서 `## TOC 초안`, `## 소스 조사 결과`, `## 검증 계획` 섹션을 각각 Read하여 `doc_toc`, `doc_sources`, `doc_verification_plan` 변수로 보관한다.
         - 셋 중 하나라도 누락되면 경고 후 중단한다 (fallback 없음).
+        - `plan.json`의 `doc_sub_type` 값을 우선 사용해 `doc_sub_type`을 결정한다 (`tutorial|howto|reference|explanation|adr|operational`만 허용).
+        - `doc_sub_type`이 비어있거나 허용 목록 밖이면 `plan.md`의 문서 목적(예: 설명/참조/튜토리얼/How-to/ADR/운영) 텍스트를 읽어 아래 매핑으로 보정한다:
+          - `tutorial`: `tutorial`, `튜토리얼`
+          - `howto`: `howto`, `how-to`, `가이드`, `문제 해결`
+          - `reference`: `reference`, `참조`, `레퍼런스`, `api reference`
+          - `explanation`: `explanation`, `설명`, `개념`, `배경`
+          - `adr`: `adr`, `decision`, `rfc`, `결정`
+          - `operational`: `operational`, `운영`, `runbook`, `sop`, `playbook`
+        - 위 두 단계로도 결정되지 않으면 `doc_sub_type="explanation"`을 기본값으로 사용한다 (기존 doc 기본 동작 유지).
+        - `templates/defaults/type-strategies.json`의 `doc.sub_types[doc_sub_type]`에서 `verification`/`checklist`를 읽어 `doc_subtype_verification`, `doc_subtype_checklist`로 보관한다. 누락 시 `explanation` 전략으로 fallback한다.
       - 문서 spec 변환 규칙 (`templates/spec.md` 재사용):
         - `§1 요약`/`§2 범위`는 코드 구현이 아닌 문서 작성 목적·독자·산출물 기준으로 작성한다.
         - `§3 수락 조건` AC는 Given/When/Then/Test 형식을 유지하되 아래 문서 품질 기준으로 작성한다.
           - 정확성: 주장·명령·예시가 `doc_sources` 근거와 일치해야 한다.
           - 완결성: `doc_toc`의 섹션이 누락 없이 spec 범위와 태스크에 반영되어야 한다.
           - 독자적합성: plan에서 정의한 대상 독자의 수준/역할/톤 요구를 충족해야 한다.
+          - subtype 적용: AC에 `doc_subtype_verification` 검증 방식과 `doc_subtype_checklist` 항목을 반영한다 (미지정 시 explanation 기준 유지).
       - 태스크 분해 규칙 (문서 전용):
         - `doc_toc`의 상위 섹션(기본 `##`, 필요 시 `###`) 1개를 1개 집필 태스크로 분해한다.
-        - 각 태스크 설명에는 해당 섹션에서 참조할 `doc_sources` 근거와 `doc_verification_plan` 검증 항목을 함께 기록한다.
+        - 각 태스크 설명에는 해당 섹션에서 참조할 `doc_sources` 근거와 `doc_verification_plan` + `doc_subtype_checklist` 검증 항목을 함께 기록한다.
         - TOC 순서를 기본 실행 순서로 사용하고, 선행 의존이 있으면 `blockedBy`로 연결한다.
       - 이후 Step 적용:
         - Step h의 spec 작성 시 위 변환 규칙을 우선 적용한다.
