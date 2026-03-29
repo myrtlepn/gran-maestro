@@ -131,6 +131,10 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `plan.ids.json` 미존재 시(레거시 호환): `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`의 `## 인수 기준 초안`을 추출해 `PLAN-AC-N` 임시 ID를 부여한다.
    - `source_plan` 미존재 또는 인수 기준 섹션 자체가 없으면 이 단계 skip (경고 없이 무시).
    - 수집된 Plan AC/PAC는 Spec AC와 **분리하여 관리** (Pass A에서 별도 섹션으로 검증).
+1-b-1. **리뷰 타입 결정 (source_plan → plan.json.type 체인, MANDATORY)**:
+   - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.
+   - `plan.json.type == "doc"`이면 `REVIEW_TYPE = "doc"`로 설정한다.
+   - 그 외(미존재/Read 실패/type 누락/type!="doc")는 `REVIEW_TYPE = "code"`로 처리해 기존 코드 리뷰 경로를 유지한다.
 1-c. **Spec AC 타입 태그 파싱**: 각 AC 헤더의 타입 태그(`[automatable]`, `[manual]`, `[browser-test]`)를 파싱하여 `ac_type`으로 보관한다.
    - 태그 누락 시 기본값은 `manual`.
    - `[browser-test]`는 Pass A에서 실제 브라우저 실행 분기 대상으로 표시한다.
@@ -202,6 +206,14 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 ### Step 3: Pass A — 인수 판정 (AC 충족성 검증)
 
 > 이 Step의 목적: AC 충족 여부를 확정해 Pass B 진입 가능성을 결정한다 / 핵심 출력물: `pass_a_result`, `failed_ac_ids`, `failure_class`, `evidence`
+
+#### Pass A 타입 분기 (if 1개, MANDATORY)
+
+- `if REVIEW_TYPE == "doc"`:
+  - 코드 중심 AC 해석 대신 문서 품질 AC 기준(정확성/완결성/독자적합성)으로 판정한다.
+  - 근거는 문서 본문/구조/팩트 확인 결과를 `evidence-ledger.md`에 기록한다.
+- `else` (`REVIEW_TYPE != "doc"`):
+  - 기존 Pass A 절차를 그대로 적용한다. (변경 금지)
 
 #### evidence-ledger.md 생성 프로토콜 (Pass A 내부, MANDATORY)
 
@@ -568,9 +580,18 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 ---
 
-### Step 4: Pass B — 코드 품질 검증
+### Step 4: Pass B — 코드/문서 품질 검증
 
 > 이 Step의 목적: Pass A 통과 산출물을 기반으로 코드/설계/UI/의도 충실도/영향 범위 갭을 찾는다 / 핵심 출력물: `ac-results.md`, `review-code.md`, `review-arch.md`, `review-ui.md`, `review-intent-fidelity.md`, `review-impact.md`
+
+#### Pass B 타입 분기 (if 1개, MANDATORY)
+
+- `if REVIEW_TYPE == "doc"`:
+  - 코드 리뷰 프롬프트 대신 문서 구조/품질 리뷰 프롬프트를 사용한다.
+  - 검토 기준은 정확성, 완결성, 독자적합성, 구조/가독성으로 고정한다.
+  - 결과 산출 경로는 기존과 동일하게 유지한다 (`review-code.md` 재사용).
+- `else` (`REVIEW_TYPE != "doc"`):
+  - 기존 Pass B 절차를 그대로 적용한다. (변경 금지)
 
 Pass B는 Claude(인컨텍스트)와 background 에이전트 5개를 동시 시작합니다.
 

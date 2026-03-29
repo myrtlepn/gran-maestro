@@ -317,6 +317,14 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - `--plan PLN-NNN` 또는 자연어 `PLN-NNN` 또는 `resolved_plan_id` 감지 시 `plans/PLN-NNN/plan.json` + `plan.md` Read
       - plan Read 성공 시: `request.json`에 `source_plan: "PLN-NNN"` 기록; `plan.json`의 `linked_requests`에 REQ-NNN 추가, `status` `active` → `in_progress`
       - plan.md 결정사항·범위·제약을 Phase 1 인풋으로 사용
+      - **plan type 감지 (MANDATORY, plan.json Read 직후)**:
+        - `plan_type = plan.json.type` (`type` 필드 미존재 시 `null`)
+        - `plan_type == "doc"`:
+          - `DOC_SPEC_MODE=true` 설정
+          - 즉시 `§ Doc Spec Flow` 섹션 규칙을 적용한다.
+        - `plan_type != "doc"` 또는 `plan_type` 미존재:
+          - `DOC_SPEC_MODE=false` 설정
+          - 기존 코드 개발 경로(Step e~h)를 변경 없이 그대로 유지한다.
       - **§0 Context Manifest 후보 수집 (MANDATORY)**:
         - 1차 소스: plan.md의 범위 섹션(`## 범위` 또는 `## 2. 범위`)에서 `시작점 힌트` 파일 목록을 추출하여 `context_manifest_files` 변수에 저장
         - 1차 소스가 비어있으면 fallback: Step 1c 탐색 결과의 핵심 진입 파일 + 요청 분석 결과에서 1~3개 파일 경로를 추론해 채움 (디렉토리 경로는 대표 진입 파일로 정규화)
@@ -400,6 +408,25 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
              - "아니오" 선택 시: `dag_auto_chain: false` 유지
         4. 사용자에게 생성 결과 요약 표시; spec 생성은 **REQ-NNN (1단계)에만** 수행
       - plan.json/plan.md 미존재 시 경고 후 사일런트 모드로 전환 (`source_plan`은 기존 값 유지: 기본 `null`)
+   d-doc. **§ Doc Spec Flow** (`DOC_SPEC_MODE=true`일 때만 실행):
+      - 진입 조건: Step d에서 `plan_type == "doc"` 감지
+      - 비진입 조건: `DOC_SPEC_MODE=false` (기존 로직 유지, 이 섹션 전체 skip)
+      - 문서 plan 입력 수집:
+        - `plan.md`에서 `## TOC 초안`, `## 소스 조사 결과`, `## 검증 계획` 섹션을 각각 Read하여 `doc_toc`, `doc_sources`, `doc_verification_plan` 변수로 보관한다.
+        - 셋 중 하나라도 누락되면 경고 후 중단한다 (fallback 없음).
+      - 문서 spec 변환 규칙 (`templates/spec.md` 재사용):
+        - `§1 요약`/`§2 범위`는 코드 구현이 아닌 문서 작성 목적·독자·산출물 기준으로 작성한다.
+        - `§3 수락 조건` AC는 Given/When/Then/Test 형식을 유지하되 아래 문서 품질 기준으로 작성한다.
+          - 정확성: 주장·명령·예시가 `doc_sources` 근거와 일치해야 한다.
+          - 완결성: `doc_toc`의 섹션이 누락 없이 spec 범위와 태스크에 반영되어야 한다.
+          - 독자적합성: plan에서 정의한 대상 독자의 수준/역할/톤 요구를 충족해야 한다.
+      - 태스크 분해 규칙 (문서 전용):
+        - `doc_toc`의 상위 섹션(기본 `##`, 필요 시 `###`) 1개를 1개 집필 태스크로 분해한다.
+        - 각 태스크 설명에는 해당 섹션에서 참조할 `doc_sources` 근거와 `doc_verification_plan` 검증 항목을 함께 기록한다.
+        - TOC 순서를 기본 실행 순서로 사용하고, 선행 의존이 있으면 `blockedBy`로 연결한다.
+      - 이후 Step 적용:
+        - Step h의 spec 작성 시 위 변환 규칙을 우선 적용한다.
+        - Step h-1의 다중 태스크 분해는 본 섹션의 TOC 기반 분해 규칙을 우선 적용한다.
    e. **모호한 요구사항 처리**:
       - [--plan]: plan.md 결정 사항을 따름
       - [--plan 없음]: PM이 모호함 수준 평가:
