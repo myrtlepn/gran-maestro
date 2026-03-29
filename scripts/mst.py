@@ -2069,7 +2069,14 @@ def _collect_objective_story_statuses(content: str) -> dict[str, str]:
 
 def _collect_epic_dod_statuses(content: str) -> dict[str, str]:
     pattern = re.compile(
-        r"epic:(?P<epic>[A-Za-z0-9_-]+)\s+dod:(?P<dod>[A-Za-z0-9_-]+)\s+status:(?P<status>[A-Za-z0-9_-]+)"
+        (
+            r"<!--\s*"
+            r"epic:\s*(?P<epic>[A-Za-z0-9_-]+)\s+"
+            r"dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+"
+            r"status:\s*(?P<status>[A-Za-z0-9_-]+)\s*"
+            r"-->"
+        ),
+        re.IGNORECASE,
     )
     statuses = {}
     for match in pattern.finditer(content):
@@ -2080,7 +2087,12 @@ def _collect_epic_dod_statuses(content: str) -> dict[str, str]:
 
 def _update_epic_dod_status(content: str, dod_id: str, new_status: str):
     pattern = re.compile(
-        r"(epic:[A-Za-z0-9_-]+\s+dod:(?P<dod>[A-Za-z0-9_-]+)\s+status:)(?P<status>[A-Za-z0-9_-]+)"
+        (
+            r"(?P<head><!--\s*epic:\s*[A-Za-z0-9_-]+\s+dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+status:\s*)"
+            r"(?P<status>[A-Za-z0-9_-]+)"
+            r"(?P<tail>\s*-->)"
+        ),
+        re.IGNORECASE,
     )
     found = False
     changed = False
@@ -2092,7 +2104,7 @@ def _update_epic_dod_status(content: str, dod_id: str, new_status: str):
         found = True
         if match.group("status").lower() != new_status:
             changed = True
-        return f"{match.group(1)}{new_status}"
+        return f"{match.group('head')}{new_status}{match.group('tail')}"
 
     updated = pattern.sub(_replace, content)
     return updated, found, changed

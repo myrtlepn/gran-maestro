@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +7,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+
+
+def _load_mst_module():
+    spec = importlib.util.spec_from_file_location("mst_module", MST_SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+MST_MODULE = _load_mst_module()
 
 
 def _make_workspace(tmp_path: Path) -> Path:
@@ -81,6 +93,59 @@ def test_objective_check_epic_mode_partial(tmp_path):
     assert proc.returncode == 1
     assert payload["all_done"] is False
     assert payload["incomplete"] == ["DOD-001"]
+
+
+def test_collect_epic_dod_statuses_structured_multiline_format():
+    content = (
+        "# Objective\n\n"
+        "### EPIC-001\n\n"
+        "- [ ] DOD-001: API 응답 성능 안정화\n"
+        "  - Direction: 최소화\n"
+        "  - Measure: p95 응답 시간\n"
+        "  - Object: API read endpoint\n"
+        "  - Context: 평시 트래픽(동시 1,000)에서\n"
+        "  - Target: 250ms 이하\n"
+        "  > detail:\n"
+        "  > - PERF-01 시나리오 기준\n"
+        "<!-- epic:EPIC-001 dod:DOD-001 status:todo -->\n"
+        "- [x] DOD-002: 오류율 제어\n"
+        "  - Direction: 보장\n"
+        "  - Measure: 5xx 비율\n"
+        "  - Object: API gateway\n"
+        "  - Context: 일일 배치 실행 구간에서\n"
+        "  - Target: 0.1% 이하\n"
+        "<!-- epic:EPIC-001 dod:DOD-002 status:done -->\n"
+    )
+
+    statuses = MST_MODULE._collect_epic_dod_statuses(content)
+    assert statuses == {"DOD-001": "todo", "DOD-002": "done"}
+
+
+def test_collect_epic_dod_statuses_supports_spaced_marker_tokens():
+    content = (
+        "# Objective\n\n"
+        "- [ ] DOD-010: 한 줄 포맷 호환\n"
+        "<!-- epic: EPIC-001 dod: DOD-010 status: TODO -->\n"
+        "- [ ] DOD-011: 다중행 포맷 호환\n"
+        "<!-- epic:EPIC-001 dod:DOD-011 status:done -->\n"
+    )
+
+    statuses = MST_MODULE._collect_epic_dod_statuses(content)
+    assert statuses == {"DOD-010": "todo", "DOD-011": "done"}
+
+
+def test_update_epic_dod_status_supports_spaced_marker_tokens():
+    content = (
+        "# Objective\n\n"
+        "- [ ] DOD-010: 상태 전이\n"
+        "<!-- epic: EPIC-001 dod: DOD-010 status: todo -->\n"
+    )
+
+    updated, found, changed = MST_MODULE._update_epic_dod_status(content, "DOD-010", "done")
+
+    assert found is True
+    assert changed is True
+    assert "<!-- epic: EPIC-001 dod: DOD-010 status: done -->" in updated
 
 
 def test_objective_check_epic_all_done(tmp_path):

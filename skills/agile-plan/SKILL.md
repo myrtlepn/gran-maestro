@@ -115,7 +115,9 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 2. 각 Epic에 대해 아래를 확정
    - `목표`: Epic이 달성해야 할 관찰 가능한 결과
    - `DoD 체크리스트`: Epic당 **3~7개**
-   - `ODI 템플릿`: DoD는 반드시 `방향(Direction) + 측정(Measure) + 대상(Object) + 맥락(Context)` 4요소를 포함해 작성
+   - `ODI 구조`: DoD는 반드시 아래 다중행 필드를 포함해 작성
+     - `Direction` + `Measure` + `Object` + `Context` + `Target`
+     - `Detail (optional)`은 외부 참조가 부족할 때만 추가
 
 > **Agile config fallback (MANDATORY)**: epic_count_min/max, dod_per_epic_min/max는 `config.resolved.json`의 `agile.{key}` 값을 우선 사용하고, 없으면 기본값(2, 5, 3, 7)을 사용한다.
 
@@ -124,6 +126,8 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
    - 측정: 관찰/측정 가능한 지표
    - 대상: 측정 대상 엔티티
    - 맥락: 측정이 이루어지는 상황/조건
+   - 목표값: 수치 목표 또는 기대 결과
+   - detail(선택): 외부 링크 없이 이해가 어려울 때만 보충 설명
    - 예시
      - 나쁜 예: "사용자 경험이 좋아야 한다"
      - 좋은 예: "[최소화] 설정 변경 후 저장까지의 [클릭 횟수]를 [설정 화면에서] [3회 이내로]"
@@ -145,14 +149,17 @@ Step 1A.2 완료 직후, 4중 가드레일(1A.3) 전에 DoD 품질 게이트를 
 | 6 | 필요성 (Necessity) | IREB | 이 DoD 없이는 Epic 목표 달성이 불가능한가? |
 | 7 | 이해가능성 (Understandability) | IREB | 비기술 이해관계자도 의미를 이해할 수 있는가? |
 | 8 | 중요도 순위 (Ranked) | IEEE 830 | 우선순위(필수/선택)가 부여되었는가? |
-| 9 | ODI 구조 (Outcome Format) | ODI | 방향+측정+대상+맥락 4요소가 포함되었는가? |
+| 9 | ODI 구조 (Outcome Format) | ODI | 방향+측정+대상+맥락+목표값이 포함되었는가? |
 
-2. pass/fail 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/quality-gate-log.md`에 마크다운 표로 기록한다.
-3. 로그 필드(컬럼)는 반드시 아래 5개를 사용한다: `DoD ID`, `기준명`, `pass/fail`, `미충족 사유`, `타임스탬프`
-4. 미충족 항목만 추려서 사용자에게 보완 질문을 요청한다.
+2. pass/fail 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/quality-gate-log.md`에 **DoD별 1행 요약 표**로 기록한다.
+3. 요약 표 컬럼은 반드시 아래 5개를 사용한다: `DoD ID`, `pass/total`, `결과`, `실패 기준 수`, `타임스탬프`
+4. `결과=fail`인 DoD만 `<details>` 블록으로 상세를 추가한다.
+   - 상세 표 컬럼: `기준명`, `미충족 사유`
+   - `결과=pass`인 DoD는 상세를 만들지 않는다.
+5. 미충족 항목만 추려서 사용자에게 보완 질문을 요청한다.
    - AskUserQuestion은 최대 4개씩 일괄로 묶어 호출한다.
-5. 사용자 답변을 DoD에 반영한 뒤 같은 9개 기준으로 재검증한다.
-6. 모든 DoD가 9개 기준 전체 pass일 때만 품질 게이트를 통과하고 1A.3으로 진행한다.
+6. 사용자 답변을 DoD에 반영한 뒤 같은 9개 기준으로 재검증한다.
+7. 모든 DoD가 9개 기준 전체 pass일 때만 품질 게이트를 통과하고 1A.3으로 진행한다.
 
 ##### 1A.3 4중 가드레일 검증 (MANDATORY)
 
@@ -180,8 +187,10 @@ Step 1A.3 완료 후, objective 저장(1A.4) 전에 아래 5개 체크리스트�
 ```
 
 저장 규칙:
-- 섹션은 `JTBD 레이어` + `Epic 레이어 (목표 + DoD 체크리스트)`만 사용
+- 섹션은 최소 `진행 상태 요약` + `JTBD 레이어` + `Epic 의존성 / 순서` + `Epic 레이어`를 포함
 - Story/Checklist 별도 레이어는 만들지 않음
+- 각 DoD는 다중행 구조(`Direction/Measure/Object/Context/Target`)를 사용
+- `Detail (optional)`은 필요한 DoD에만 추가
 - 모든 DoD 항목에 아래 마커를 포함
   - `<!-- epic:EPIC-NNN dod:DOD-NNN status:todo -->`
 
@@ -209,7 +218,7 @@ Step 1A.3 완료 후, objective 저장(1A.4) 전에 아래 5개 체크리스트�
 1. JTBD 누락 필드를 AskUserQuestion으로 보완
 2. Epic 목표가 모호하면 "관찰 가능한 결과" 기준으로 재질문
 3. Epic별 DoD 개수가 3개 미만이면 보강 질문, 7개 초과면 Epic 분할 질문
-4. DoD 보완 시 Step 1A.2 ODI 템플릿(`방향+측정+대상+맥락`)을 동일하게 적용
+4. DoD 보완 시 Step 1A.2 ODI 구조(`Direction/Measure/Object/Context/Target + Detail(optional)`)를 동일하게 적용
 5. 4중 가드레일(How-free/5-7/So-that/동결) 재검증
 
 ##### 1B.2.5 DoD 품질 게이트 (MANDATORY)
@@ -218,6 +227,7 @@ Step 1A.2.5의 DoD 품질 게이트를 1B 경로에도 동일하게 적용한다
 
 1. 9개 통합 기준(pass/fail), 미충족만 AskUserQuestion(최대 4개 일괄), 답변 반영 후 재검증 루프를 그대로 수행한다.
 2. 게이트 로그는 동일하게 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/quality-gate-log.md`에 누적 기록한다.
+   - DoD별 1행 요약 + fail DoD만 `<details>` 상세 규칙을 동일하게 적용한다.
 
 ##### 1B.2.6 DoR 준비도 게이트 (MANDATORY)
 
