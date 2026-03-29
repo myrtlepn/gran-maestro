@@ -941,6 +941,17 @@ else:
         - **`false`**: Phase 3 리뷰 PASS로 간주하고 멈추고, 사용자에게 `/mst:accept {REQ_ID}`를 수동으로 호출하라고 안내
    - `true` 또는 `AUTO_MODE=true`이면 mst:review 호출 진행
 
+#### Step 6.3: 이전 Iteration 결정 로그 복구 (iteration 2+)
+
+> 이 Step의 목적: compaction으로 이전 맥락이 유실되었을 때 파일에서 결정 이력을 복구한다.
+
+1. `iteration_num` = `request.json.review_iterations.length + 1` (다음 iteration 번호)
+2. `iteration_num >= 2`인 경우:
+   - `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/iteration-decisions/iteration-{iteration_num - 1}.md` Read
+   - 파일이 없으면 skip (iteration 1이거나 이전 저장 실패)
+   - 파일이 있으면 내용을 컨텍스트로 보관하여 이후 review 결과 판단 시 참조
+3. `iteration_num < 2`인 경우: skip
+
 2. mst:review 호출:
    ```
    AUTO_MODE=true  -> Skill(skill: "mst:review", args: "{REQ_ID} --auto")
@@ -948,6 +959,31 @@ else:
    ```
    (`AUTO_MODE=true`에서는 `review.auto_review=false`이더라도 항상 호출)
    > ⚠️ **반환 후 즉시 3번으로 진행** — `[TRACE_SAVED]` 텍스트 포함 여부 무관. approve는 Phase 5(mst:accept) 완료 시에만 종료.
+
+#### Step 6.5: PM Iteration 결정 로그 저장 (Compaction 대비)
+
+> 이 Step의 목적: compaction으로 이전 iteration 판단이 유실되어도 파일에서 복구할 수 있도록 매 iteration 끝에 결정 로그를 저장한다.
+
+mst:review 반환 후, review 결과 처리(3번) 진입 전에 실행:
+
+1. `iteration_num` = `request.json.review_iterations.length` (현재 iteration 번호)
+2. `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/iteration-decisions/` 디렉토리 생성 (없으면)
+3. 아래 내용으로 `iteration-{iteration_num}.md` Write:
+
+   ```markdown
+   # Iteration {iteration_num} 결정 로그
+
+   ## AC 상태
+   {각 AC에 대해: AC-NNN: PASS/FAIL + 판단 근거 1줄}
+
+   ## 핵심 판단
+   {리뷰에서 발견된 주요 이슈에 대한 PM의 severity 동의/이의 + 결정 이유}
+
+   ## 다음 iteration 방향
+   {다음 iteration에서 집중할 AC 목록 + 추가 태스크 방향}
+   ```
+
+- Write 실패 시 warn만 출력하고 워크플로우를 차단하지 않는다 (graceful).
 
 3. review 결과 처리:
 

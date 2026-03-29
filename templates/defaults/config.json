@@ -21,15 +21,18 @@
     "spec_prereview_minor_escalation_threshold": 3,
     "auto_approve_on_unblock": false
   },
-  "agile": {
-    "steering_every": 3,
-    "drift_threshold": 80,
-    "drift_count_trigger": 2,
-    "no_diff_count_trigger": 2,
-    "epic_count_min": 2,
-    "epic_count_max": 5,
-    "dod_per_epic_min": 3,
-    "dod_per_epic_max": 7
+  "harness": {
+    "dynamic_complexity": {
+      "enabled": false,
+      "skip_prereview_for_simple": true,
+      "skip_design_wing_for_docs": true,
+      "single_reviewer_threshold": "simple",
+      "complexity_rules": {
+        "simple": { "max_ac": 2, "max_files": 1 },
+        "standard": { "max_ac": 5, "max_files": 5 },
+        "complex": { "min_ac": 6 }
+      }
+    }
   },
   "concurrency": {
     "max_parallel_tasks": 5,
@@ -350,6 +353,11 @@
   "review": {
     "auto_review": true,
     "max_iterations": 10,
+    "cross_validation": {
+      "enabled": false,
+      "min_reviewers": 2,
+      "line_proximity": 10
+    },
     "severity_auto_fix": {
       "enabled": true,
       "minor_skip_threshold": 3,

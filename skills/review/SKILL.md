@@ -113,9 +113,17 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
      "req_id": "REQ-NNN",
      "iteration": N,
      "status": "reviewing",
-     "created_at": "<ISO8601>"
+     "created_at": "<ISO8601>",
+     "previous_severity_counts": {
+       "critical": 0,
+       "major": 0,
+       "minor": 0
+     }
    }
    ```
+   - `previous_severity_counts` 채우기 규칙:
+     - iteration 1: `{ "critical": 0, "major": 0, "minor": 0 }`
+     - iteration 2+: 직전 회차(`RV-(N-1)`)의 `review_issues_summary.critical|major|minor` 값을 복사 (누락 시 0 fallback)
 4. **request.json 업데이트**:
    - `review_iterations` 배열에 `{ "rv_id": "RV-NNN", "created_at": "<ISO8601>", "status": "in_progress" }` 항목 추가 (Step 5 완료 후 `"completed"`로 갱신).
    - `review_summary` = `{ "iteration": N, "status": "reviewing" }` 업데이트.
@@ -181,6 +189,8 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `review.roles.browser_tester.agent` / `review.roles.browser_tester.tier` (존재 시 Pass A의 browser-test AC 실행 주체를 PM 직접 실행 → 서브에이전트 위임으로 전환)
    - `review.roles.impact_reviewer.enabled` / `review.roles.impact_reviewer.agent` / `review.roles.impact_reviewer.tier` / `review.roles.impact_reviewer.enhanced_analysis` (기본값: `true`)
    - `review.roles.intent_fidelity.agent` / `review.roles.intent_fidelity.tier`
+   - `review.cross_validation.enabled` / `review.cross_validation.min_reviewers` / `review.cross_validation.line_proximity`
+     - 기본값: `enabled=false`, `min_reviewers=2`, `line_proximity=10`
    - `intent_fidelity.enabled` (기본값: `true`)
    - `intent_fidelity.mode` (기본값: `"blocking"`)
    - `intent_fidelity.should_warning_log` (기본값: `true`)
@@ -937,9 +947,26 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
    - 키워드 매칭은 대소문자 무시(case-insensitive).
    - 예시 키워드: `인증`, `인가`, `인젝션`, `XSS`, `CSRF`, `SQL injection`, `권한 우회`, `authentication`, `authorization`, `injection`, `secret`, `token`
 
-3. **등급별 카운트 산출**: 재조정 완료 후 `critical_count`, `major_count`, `minor_count`를 산출합니다.
+3. **Severity 역행 감지 (iteration 2+ MANDATORY)**:
+   - 현재 회차가 iteration 2 이상이면 직전 회차 `reviews/RV-(N-1)/review.json`을 Read하여 `previous_severity_counts`를 현재 회차 `review.json`에 기록한다.
+   - **동일 이슈 판정 기준(관찰 가능 기준)**:
+     - 동일 파일 경로 + 라인 번호 차이 `<= 10` + 정규화된 설명 문자열이 동일하면 동일 이슈로 간주한다.
+     - 정규화 예: 대소문자 무시, 연속 공백 제거, 공통 접두사(`[CRITICAL]` 등) 제거.
+   - 동일 이슈가 직전 회차에도 보고되면 현재 회차의 해당 이슈 severity를 **자동 CRITICAL 승격**한다.
+   - 승격 내역은 `review-report.md` 또는 `review_issues_summary` 부가 메모에 `source: "severity_regression_guard"`로 기록한다.
 
-4. **`review_issues_summary` 기록**: `review.json`과 `request.json`의 해당 review iteration에 등급별 카운트 및 자동 처리 내역을 기록합니다 (스키마는 하단 "review_issues_summary 스키마" 섹션 참조).
+4. **Pass B 교차 검증 승격 (`review.cross_validation.enabled == true`)**:
+   - 적용 조건: Pass B 리뷰어 중 `max(2, review.cross_validation.min_reviewers)`명 이상이 같은 영역을 지적한 경우.
+   - 같은 영역 판정(관찰 가능 기준): 동일 파일 경로 + 라인 번호 차이 `<= review.cross_validation.line_proximity` (기본 `10`줄).
+   - 조건 충족 시 해당 영역 이슈 severity를 **+1 단계 승격**한다.
+     - `MINOR -> MAJOR`
+     - `MAJOR -> CRITICAL`
+     - `CRITICAL -> CRITICAL` (상한 고정)
+   - 승격 내역은 `review-report.md` 또는 `review_issues_summary` 부가 메모에 `source: "cross_validation"`로 기록한다.
+
+5. **등급별 카운트 산출**: 재조정 완료 후 `critical_count`, `major_count`, `minor_count`를 산출합니다.
+
+6. **`review_issues_summary` 기록**: `review.json`과 `request.json`의 해당 review iteration에 등급별 카운트 및 자동 처리 내역을 기록합니다 (스키마는 하단 "review_issues_summary 스키마" 섹션 참조).
 
 ##### (b-1) CRITICAL 또는 MAJOR가 1건 이상 존재
 
@@ -1110,6 +1137,7 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
 | `gaps_found` | 발견된 갭 수. 0이면 갭 없음. |
 | `tasks_created` | 갭으로 생성된 태스크 ID 배열. 갭 없으면 `[]`. |
 | `status` | Step 1에서 `"in_progress"`로 초기화, Step 5 완료 후 `"completed"`로 갱신. 갭 여부는 `gaps_found > 0`으로 구분. |
+| `previous_severity_counts` | (선택) 직전 iteration의 severity 카운트 스냅샷. 구조: `{ "critical": number, "major": number, "minor": number }` |
 | `review_issues_summary` | (선택) 등급별 코드리뷰 이슈 요약. 이슈가 존재하면 `review.json.review_issues_summary`와 동일 구조로 기록. |
 
 ### tasks[].self_check.intent_fidelity_result
@@ -1151,6 +1179,11 @@ intent_fidelity 리뷰 결과를 현재 태스크 단위로 기록한다.
   "iteration": N,
   "status": "passed | gap_found | reviewing | pass_a_failed",
   "created_at": "<ISO8601>",
+  "previous_severity_counts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
   "gaps_found": 0,
   "tasks_created": [],
   "gap_source": "ac_gap | code_review_issues | intent_fidelity | null",
@@ -1163,6 +1196,16 @@ intent_fidelity 리뷰 결과를 현재 태스크 단위로 기록한다.
   }
 }
 ```
+
+### previous_severity_counts 스키마
+
+이전 iteration(`RV-(N-1)`)의 severity 카운트를 현재 회차 메타데이터로 보존합니다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `critical` | number | 직전 iteration의 CRITICAL 카운트. |
+| `major` | number | 직전 iteration의 MAJOR 카운트. |
+| `minor` | number | 직전 iteration의 MINOR 카운트. |
 
 ### review_issues_summary 스키마
 
