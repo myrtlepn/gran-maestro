@@ -6,6 +6,7 @@ import { ResizableHandle } from '@/components/shared/ResizableHandle';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { RefreshButton } from '@/components/shared/RefreshButton';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -285,6 +286,14 @@ export function AgileView() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  // Objective state
+  const [objectiveContent, setObjectiveContent] = useState<string | null>(null);
+  const [objectiveLoading, setObjectiveLoading] = useState(false);
+  const [objectiveError, setObjectiveError] = useState<string | null>(null);
+  const [isObjectiveEditMode, setIsObjectiveEditMode] = useState(false);
+  const [objectiveEditValue, setObjectiveEditValue] = useState('');
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const { sidebarWidth, isResizing, startResizing, sidebarRef } = useResizableSidebar({
     defaultWidth: 320,
     minWidth: 280,
@@ -365,6 +374,18 @@ export function AgileView() {
     }
   }, [projectId]);
 
+  const requestObjective = useCallback(async (agiId: string) => {
+    try {
+      const data = await apiFetch<{ content: string | null; path: string }>(`/api/agile/sessions/${agiId}/objective`, projectId);
+      return data.content;
+    } catch (err) {
+      if (err instanceof ApiFetchError && err.status === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId) {
       setSessions([]);
@@ -415,11 +436,32 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setDetailLoading(false);
+
+      setObjectiveContent(null);
+      setIsObjectiveEditMode(false);
+      setStatusMessage(null);
       return;
     }
 
     let cancelled = false;
     setDetailLoading(true);
+    setObjectiveLoading(true);
+
+    // Fetch objective separately
+    requestObjective(selectedSessionId)
+      .then((content) => {
+        if (cancelled) return;
+        setObjectiveContent(content);
+        setObjectiveError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setObjectiveContent(null);
+        setObjectiveError(err instanceof Error ? err.message : 'Objective를 불러오지 못했습니다');
+      })
+      .finally(() => {
+        if (!cancelled) setObjectiveLoading(false);
+      });
 
     requestSessionDetail(selectedSessionId)
       .then((data) => {
@@ -447,7 +489,7 @@ export function AgileView() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, selectedSessionId, requestSessionDetail]);
+  }, [projectId, selectedSessionId, requestSessionDetail, requestObjective]);
 
   useEffect(() => {
     if (!projectId || !selectedSessionId || !selectedSprint || !selectedSprintId) {
@@ -545,12 +587,17 @@ export function AgileView() {
         setSelectedSprintId(undefined);
         setResultMarkdown(null);
         setRetrospective(null);
+        setObjectiveContent(null);
         return;
       }
 
       const detail = await requestSessionDetail(resolvedSessionId);
       setSessionDetail(detail);
       setDetailError(null);
+
+      requestObjective(resolvedSessionId)
+        .then(content => setObjectiveContent(content))
+        .catch(err => setObjectiveError(err instanceof Error ? err.message : 'Objective 새로고침 실패'));
 
       const nextSprintId = selectedSprintId === null
         ? null
@@ -583,6 +630,33 @@ export function AgileView() {
       setSessionsError(message);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleSaveObjective = async () => {
+    if (!projectId || !selectedSessionId) return;
+    try {
+      setStatusMessage(null);
+      const resolvedPath = projectId 
+        ? `/api/projects/${projectId}/agile/sessions/${selectedSessionId}/objective`
+        : `/api/agile/sessions/${selectedSessionId}/objective`;
+
+      const response = await fetch(resolvedPath, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: objectiveEditValue }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`저장 실패: ${response.status}`);
+      }
+
+      setObjectiveContent(objectiveEditValue);
+      setIsObjectiveEditMode(false);
+      setStatusMessage({ type: 'success', text: '저장 완료' });
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : '저장 실패' });
     }
   };
 
@@ -795,178 +869,272 @@ export function AgileView() {
               <StatusBadge status={selectedSession.status} />
             </div>
 
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="p-4 space-y-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <GitBranch className="h-4 w-4" /> Sprint Timeline
-                    </CardTitle>
-                    <CardDescription>
-                      Sprint - Plan - Result 흐름과 상태를 가로 타임라인으로 표시합니다.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {detailLoading ? (
-                      <Skeleton className="h-28 w-full" />
-                    ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
-                      <div className="overflow-x-auto pb-2">
-                        <div className="inline-flex min-w-max gap-3">
-                          {(selectedSprintId ? sessionDetail.sprints.filter(s => s.sprint_id === selectedSprintId) : sessionDetail.sprints).map((sprint) => {
-                            const sprintStatus = toFlowStatus(sprint.status);
-                            const planStatus = getPlanStatus(sprint);
-                            const resultStatus = getResultStatus(sprint);
+            <Tabs defaultValue="timeline" className="flex-1 flex flex-col min-h-0">
+              <div className="px-4 pt-3 border-b">
+                <TabsList>
+                  <TabsTrigger value="objective">Objective</TabsTrigger>
+                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                  <TabsTrigger value="result">Result</TabsTrigger>
+                </TabsList>
+              </div>
 
-                            return (
-                              <button
-                                key={sprint.sprint_id}
-                                type="button"
-                                onClick={() => setSelectedSprintId(sprint.sprint_id)}
-                                className={`rounded-lg border p-3 cursor-pointer transition-colors text-left flex-shrink-0 ${
-                                  selectedSprintId === sprint.sprint_id
-                                    ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
-                                    : 'border-border bg-background hover:bg-accent/40'
-                                }`}
-                              >
-                                <div className="inline-flex items-center gap-2">
-                                  <TimelineNode title={sprint.sprint_id} subtitle="Sprint" status={sprintStatus} />
-                                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                  <TimelineNode
-                                    title="Plan"
-                                    subtitle={`${toArray(sprint.completed).length}/${toArray(sprint.planned).length}`}
-                                    status={planStatus}
-                                  />
-                                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                  <TimelineNode
-                                    title="Result"
-                                    subtitle={`PLN ${toArray(sprint.generated?.pln).length} · REQ ${toArray(sprint.generated?.req).length}`}
-                                    status={resultStatus}
-                                  />
-                                </div>
-                              </button>
-                            );
-                          })}
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-4 space-y-4">
+                  <TabsContent value="objective" className="mt-0 outline-none space-y-4">
+                    <Card>
+                      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                        <div>
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <FileText className="h-4 w-4" /> Objective
+                          </CardTitle>
+                          <CardDescription>
+                            세션의 목표와 요구사항
+                          </CardDescription>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">타임라인 데이터가 없습니다.</div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <FileText className="h-4 w-4" /> Sprint Result Report
-                    </CardTitle>
-                    <CardDescription>
-                      {selectedSprintId ? `${selectedSprintId} 결과 보고서와 회고` : '스프린트를 선택하세요'}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {reportLoading ? (
-                      <div className="space-y-3">
-                        <Skeleton className="h-6 w-44" />
-                        <Skeleton className="h-28 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                      </div>
-                    ) : selectedSprintId && selectedSprint ? (
-                      <>
-                        {reportError && (
-                          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                            {reportError}
+                        {objectiveContent !== null && !isObjectiveEditMode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setObjectiveEditValue(objectiveContent || '');
+                              setIsObjectiveEditMode(true);
+                              setStatusMessage(null);
+                            }}
+                            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </CardHeader>
+                      <CardContent>
+                        {statusMessage && (
+                          <div className={`mb-4 px-3 py-2 text-sm rounded-md ${
+                            statusMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+                          }`}>
+                            {statusMessage.text}
                           </div>
                         )}
-
-                        <div className="rounded-md border p-4">
-                          <div className="text-sm font-semibold mb-3">result.md</div>
-                          <MarkdownRenderer content={resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint)} />
-                        </div>
-
-                        <div className="rounded-md border p-4 space-y-4">
-                          <div className="text-sm font-semibold flex items-center gap-2">
-                            <ListChecks className="h-4 w-4" /> RALPH Retrospective
+                        
+                        {objectiveLoading ? (
+                          <Skeleton className="h-40 w-full" />
+                        ) : objectiveError ? (
+                          <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
+                            {objectiveError}
                           </div>
+                        ) : isObjectiveEditMode ? (
+                          <div className="space-y-4">
+                            <textarea
+                              className="flex min-h-[300px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              value={objectiveEditValue}
+                              onChange={(e) => setObjectiveEditValue(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={handleSaveObjective}
+                                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsObjectiveEditMode(false);
+                                  setStatusMessage(null);
+                                }}
+                                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : objectiveContent !== null ? (
+                          <div className="rounded-md border p-4 bg-background">
+                            <MarkdownRenderer content={objectiveContent} />
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
+                            objective.md가 없습니다
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
 
-                          {retrospective ? (
-                            <>
-                              <div className="space-y-2">
-                                <h4 className="text-xs font-semibold text-muted-foreground">succeeded</h4>
-                                {toArray(retrospective.succeeded).length > 0 ? (
-                                  <ul className="list-disc pl-5 text-sm space-y-1">
-                                    {toArray(retrospective.succeeded).map((item, index) => (
-                                      <li key={`${item}-${index}`}>{item}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">기록 없음</p>
-                                )}
+                  <TabsContent value="timeline" className="mt-0 outline-none">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <GitBranch className="h-4 w-4" /> Sprint Timeline
+                        </CardTitle>
+                        <CardDescription>
+                          Sprint - Plan - Result 흐름과 상태를 가로 타임라인으로 표시합니다.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {detailLoading ? (
+                          <Skeleton className="h-28 w-full" />
+                        ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
+                          <div className="overflow-x-auto pb-2">
+                            <div className="inline-flex min-w-max gap-3">
+                              {(selectedSprintId ? sessionDetail.sprints.filter(s => s.sprint_id === selectedSprintId) : sessionDetail.sprints).map((sprint) => {
+                                const sprintStatus = toFlowStatus(sprint.status);
+                                const planStatus = getPlanStatus(sprint);
+                                const resultStatus = getResultStatus(sprint);
+
+                                return (
+                                  <button
+                                    key={sprint.sprint_id}
+                                    type="button"
+                                    onClick={() => setSelectedSprintId(sprint.sprint_id)}
+                                    className={`rounded-lg border p-3 cursor-pointer transition-colors text-left flex-shrink-0 ${
+                                      selectedSprintId === sprint.sprint_id
+                                        ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                                        : 'border-border bg-background hover:bg-accent/40'
+                                    }`}
+                                  >
+                                    <div className="inline-flex items-center gap-2">
+                                      <TimelineNode title={sprint.sprint_id} subtitle="Sprint" status={sprintStatus} />
+                                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                      <TimelineNode
+                                        title="Plan"
+                                        subtitle={`${toArray(sprint.completed).length}/${toArray(sprint.planned).length}`}
+                                        status={planStatus}
+                                      />
+                                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                      <TimelineNode
+                                        title="Result"
+                                        subtitle={`PLN ${toArray(sprint.generated?.pln).length} · REQ ${toArray(sprint.generated?.req).length}`}
+                                        status={resultStatus}
+                                      />
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">타임라인 데이터가 없습니다.</div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="result" className="mt-0 outline-none">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <FileText className="h-4 w-4" /> Sprint Result Report
+                        </CardTitle>
+                        <CardDescription>
+                          {selectedSprintId ? `${selectedSprintId} 결과 보고서와 회고` : '스프린트를 선택하세요'}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {reportLoading ? (
+                          <div className="space-y-3">
+                            <Skeleton className="h-6 w-44" />
+                            <Skeleton className="h-28 w-full" />
+                            <Skeleton className="h-24 w-full" />
+                          </div>
+                        ) : selectedSprintId && selectedSprint ? (
+                          <>
+                            {reportError && (
+                              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                                {reportError}
+                              </div>
+                            )}
+
+                            <div className="rounded-md border p-4">
+                              <div className="text-sm font-semibold mb-3">result.md</div>
+                              <MarkdownRenderer content={resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint)} />
+                            </div>
+
+                            <div className="rounded-md border p-4 space-y-4">
+                              <div className="text-sm font-semibold flex items-center gap-2">
+                                <ListChecks className="h-4 w-4" /> RALPH Retrospective
                               </div>
 
-                              <div className="space-y-2">
-                                <h4 className="text-xs font-semibold text-muted-foreground">failed</h4>
-                                {toArray(retrospective.failed).length > 0 ? (
+                              {retrospective ? (
+                                <>
                                   <div className="space-y-2">
-                                    {toArray(retrospective.failed).map((item, index) => (
-                                      <div key={`${item.item ?? 'failed'}-${index}`} className="rounded-md border bg-muted/20 p-3 text-sm">
-                                        <div className="font-medium">{item.item ?? `Failure ${index + 1}`}</div>
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                          tried_approach: {item.tried_approach ?? '-'}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                          failure_reason: {item.failure_reason ?? '-'}
-                                        </div>
-                                      </div>
-                                    ))}
+                                    <h4 className="text-xs font-semibold text-muted-foreground">succeeded</h4>
+                                    {toArray(retrospective.succeeded).length > 0 ? (
+                                      <ul className="list-disc pl-5 text-sm space-y-1">
+                                        {toArray(retrospective.succeeded).map((item, index) => (
+                                          <li key={`${item}-${index}`}>{item}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">기록 없음</p>
+                                    )}
                                   </div>
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">기록 없음</p>
-                                )}
-                              </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                                <div className="rounded-md border p-3">
-                                  <div className="text-xs text-muted-foreground">velocity planned</div>
-                                  <div className="font-semibold">{retrospective.velocity?.planned ?? '-'}</div>
-                                </div>
-                                <div className="rounded-md border p-3">
-                                  <div className="text-xs text-muted-foreground">velocity completed</div>
-                                  <div className="font-semibold">{retrospective.velocity?.completed ?? '-'}</div>
-                                </div>
-                                <div className="rounded-md border p-3">
-                                  <div className="text-xs text-muted-foreground">velocity rate</div>
-                                  <div className="font-semibold">{formatRate(retrospective.velocity?.rate)}</div>
-                                </div>
-                              </div>
+                                  <div className="space-y-2">
+                                    <h4 className="text-xs font-semibold text-muted-foreground">failed</h4>
+                                    {toArray(retrospective.failed).length > 0 ? (
+                                      <div className="space-y-2">
+                                        {toArray(retrospective.failed).map((item, index) => (
+                                          <div key={`${item.item ?? 'failed'}-${index}`} className="rounded-md border bg-muted/20 p-3 text-sm">
+                                            <div className="font-medium">{item.item ?? `Failure ${index + 1}`}</div>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                              tried_approach: {item.tried_approach ?? '-'}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                              failure_reason: {item.failure_reason ?? '-'}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">기록 없음</p>
+                                    )}
+                                  </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                                <div className="rounded-md border p-3">
-                                  <div className="text-xs text-muted-foreground mb-1">known_limitations</div>
-                                  <div>{retrospective.known_limitations || '-'}</div>
-                                </div>
-                                <div className="rounded-md border p-3">
-                                  <div className="text-xs text-muted-foreground mb-1">lessons_learned</div>
-                                  <div>{retrospective.lessons_learned || '-'}</div>
-                                </div>
-                              </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                                    <div className="rounded-md border p-3">
+                                      <div className="text-xs text-muted-foreground">velocity planned</div>
+                                      <div className="font-semibold">{retrospective.velocity?.planned ?? '-'}</div>
+                                    </div>
+                                    <div className="rounded-md border p-3">
+                                      <div className="text-xs text-muted-foreground">velocity completed</div>
+                                      <div className="font-semibold">{retrospective.velocity?.completed ?? '-'}</div>
+                                    </div>
+                                    <div className="rounded-md border p-3">
+                                      <div className="text-xs text-muted-foreground">velocity rate</div>
+                                      <div className="font-semibold">{formatRate(retrospective.velocity?.rate)}</div>
+                                    </div>
+                                  </div>
 
-                              <div className="rounded-md border p-3 text-sm">
-                                <div className="text-xs text-muted-foreground mb-1">direction</div>
-                                <div>{retrospective.direction || '-'}</div>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">retrospective.json이 아직 없습니다.</p>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">왼쪽에서 스프린트를 선택하세요.</div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </ScrollArea>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                    <div className="rounded-md border p-3">
+                                      <div className="text-xs text-muted-foreground mb-1">known_limitations</div>
+                                      <div>{retrospective.known_limitations || '-'}</div>
+                                    </div>
+                                    <div className="rounded-md border p-3">
+                                      <div className="text-xs text-muted-foreground mb-1">lessons_learned</div>
+                                      <div>{retrospective.lessons_learned || '-'}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-md border p-3 text-sm">
+                                    <div className="text-xs text-muted-foreground mb-1">direction</div>
+                                    <div>{retrospective.direction || '-'}</div>
+                                  </div>
+                                </>
+                              ) : (
+                                <p className="text-sm text-muted-foreground">retrospective.json이 아직 없습니다.</p>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">왼쪽에서 스프린트를 선택하세요.</div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                </div>
+              </ScrollArea>
+            </Tabs>
           </>
         )}
       </div>

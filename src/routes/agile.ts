@@ -157,6 +157,78 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
   });
 });
 
+projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const content = await readTextFile(`${sessionDir}/${objectivePath}`);
+
+  return c.json({
+    content,
+    path: objectivePath,
+  });
+});
+
+projectAgileApi.put("/agile/sessions/:agiId/objective", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  try {
+    const body = await c.req.json();
+    if (!isRecord(body) || typeof body.content !== "string") {
+      return c.json({ error: "Content body must be a JSON object with string content" }, 400);
+    }
+
+    const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+    const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+
+    try {
+      await Deno.writeTextFile(`${sessionDir}/${objectivePath}`, body.content);
+      return c.json({ success: true });
+    } catch {
+      return c.json({ error: "Failed to write objective" }, 500);
+    }
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+});
+
 projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
