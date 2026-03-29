@@ -60,9 +60,8 @@ Claude Code 세션 종료 후 진행 중이던 워크플로우를 복구합니�
     3. `git -C {worktree_path} commit -m "Resolve merge conflicts in {REQ-ID}/{TASK-ID}"`
     4. Phase 5 (머지 단계)로 재개
   - "worktree 재생성 후 재실행": ⚠️ **미커밋 변경 사항이 영구 소실됩니다** — 사용자에게 경고 후 진행:
-    1. `git worktree remove --force {worktree_path}` (--force 필수: merge_conflict 상태에서는 미커밋 변경 존재)
-    2. `git worktree prune` (참조 정리)
-    3. 새 worktree 생성 → Phase 2 처음부터 재실행
+    1. `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {worktree_path} --force` (--force 필수: merge_conflict 상태에서는 미커밋 변경 존재, prune 자동 실행 포함)
+    2. 새 worktree 생성 → Phase 2 처음부터 재실행
 - `queued`/`pending`/`pre_check` → 외주 실행/사전 검증 재실행
 - `pre_check_failed` → 실패 내용 포함 외주 재실행
 

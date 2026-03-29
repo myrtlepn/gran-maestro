@@ -141,7 +141,7 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
    > 생성되지 않으므로 `git branch -d`(soft delete)는 "not fully merged" 오류로 실패합니다.
    > 브랜치 삭제는 `git branch -D`를 사용하세요.
    - `strategy.accept_mode == "file-placement"`이면 worktree가 없을 수 있으므로 worktree 제거 단계는 "없으면 skip"으로 처리한다 (graceful skip, 비차단).
-   - `git worktree remove --force "{worktree_path}" || true` — 태스크 worktree 제거 (이미 제거된 경우 오류 무시)
+   - `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path "{worktree_path}" --force || true` — 태스크 worktree 제거 (이미 제거된 경우 오류 무시)
    - `git branch -D "gran-maestro/REQ-NNN-T01" || true` — 태스크 브랜치 강제 삭제 (`gran-maestro/REQ-NNN-T02` 등 반복)
    - `git branch -D "gran-maestro/REQ-NNN" || true` — REQ 브랜치 강제 삭제 (기본은 Step 3-3에서 처리, 정리 단계에서는 중복 방지 확인용)
    - 각 태스크를 **독립적으로** 실행 (`&&` 연결 금지 — 하나 실패 시 나머지 미실행됨)

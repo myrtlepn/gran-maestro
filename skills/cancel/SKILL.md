@@ -18,7 +18,7 @@ argument-hint: "{REQ-ID} [--force]"
 > ```
 
 1. REQ ID 파싱 → 활성 태스크 확인 → 취소 확인 프롬프트 (`--force` 아닌 경우)
-2. 취소 처리: 에이전트/CLI 프로세스 종료 → git worktree 삭제 → 임시 브랜치 정리 → `status="cancelled"`
+2. 취소 처리: 에이전트/CLI 프로세스 종료 → `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {worktree_path} [--force]` 실행 → 임시 브랜치 정리 → `status="cancelled"`
 3. **Plan 상태 동기화**: `source_plan` 있으면 `python3 mst.py plan sync {source_plan}` 실행; 없으면 스킵
 4. 모든 요청이 terminal 상태이고 `auto_deactivate:true`이면 Maestro 모드 자동 비활성화
 

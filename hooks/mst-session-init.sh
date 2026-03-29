@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+resolve_project_root() {
+  local git_top candidate parent
+  git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  if [ -f "${git_top}/.git" ]; then
+    candidate="$git_top"
+    while [ -n "$candidate" ] && [ "$candidate" != "/" ]; do
+      if [ -d "${candidate}/.gran-maestro" ] && [ -e "${candidate}/.git" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      parent="$(dirname "$candidate")"
+      if [ "$parent" = "$candidate" ]; then
+        break
+      fi
+      candidate="$parent"
+    done
+  fi
+
+  printf '%s\n' "$git_top"
+}
+
+PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"

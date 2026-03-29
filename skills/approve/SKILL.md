@@ -580,7 +580,7 @@ git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
 태스크 worktree는 위에서 생성한 REQ 중간 브랜치를 기준으로 생성한다:
 
 ```bash
-git worktree add {worktree_path} -b gran-maestro/REQ-NNN-T01 gran-maestro/REQ-NNN
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path {worktree_path} --branch gran-maestro/REQ-NNN-T01 --base gran-maestro/REQ-NNN
 ```
 
 ##### 4b. Outsource Brief 파일 작성
