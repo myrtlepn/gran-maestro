@@ -49,7 +49,7 @@ Subcommands:
   agile known-issues add <AGI-ID> --description TEXT --severity MINOR|MAJOR|CRITICAL --sprint N [--json]
   agile known-issues resolve <AGI-ID> --issue-id KI-NNN [--json]
   agile known-issues list <AGI-ID> [--status open|resolved] [--json]
-  agile objective-transition <AGI-ID> --story STORY-ID --status TEXT [--json]
+  agile objective-transition <AGI-ID> --story DOD-ID --status TEXT [--json]
   agile objective-check <AGI-ID> [--json]
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
@@ -1760,14 +1760,7 @@ def _normalize_agi_id(value: str) -> str:
     return agi_id
 
 
-def _normalize_story_id(value: str) -> str:
-    story_id = (value or "").strip()
-    if not re.fullmatch(r"STORY-[A-Z0-9_-]+", story_id, flags=re.IGNORECASE):
-        raise ValueError(f"Invalid story id: {value}")
-    return story_id.upper()
-
-
-def _normalize_epic_dod_id(value: str) -> str:
+def _normalize_dod_id(value: str) -> str:
     dod_id = (value or "").strip()
     if not re.fullmatch(r"DOD-[A-Z0-9_-]+", dod_id, flags=re.IGNORECASE):
         raise ValueError(f"Invalid DoD id: {value}")
@@ -1779,15 +1772,6 @@ def _normalize_known_issue_id(value: str) -> str:
     if not re.fullmatch(r"KI-\d+", issue_id):
         raise ValueError(f"Invalid known issue id: {value}")
     return issue_id
-
-
-def _resolve_objective_mode(session: dict) -> str:
-    raw_mode = session.get("objective_mode") if isinstance(session, dict) else None
-    if isinstance(raw_mode, str):
-        normalized = raw_mode.strip().lower()
-        if normalized in {"epic", "story"}:
-            return normalized
-    return "story"
 
 
 def _normalize_link_id(value: str, prefix: str) -> str:
@@ -2099,30 +2083,33 @@ def _collect_objective_story_statuses(content: str) -> dict[str, str]:
     return statuses
 
 
-def _collect_epic_dod_statuses(content: str) -> dict[str, str]:
+def _collect_objective_dod_items(content: str) -> dict[str, dict[str, str]]:
     pattern = re.compile(
         (
             r"<!--\s*"
-            r"epic:\s*(?P<epic>[A-Za-z0-9_-]+)\s+"
             r"dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+"
-            r"status:\s*(?P<status>[A-Za-z0-9_-]+)\s*"
+            r"status:\s*(?P<status>\w+)\s+"
+            r"priority:\s*(?P<priority>\w+)\s*"
             r"-->"
         ),
         re.IGNORECASE,
     )
-    statuses = {}
+    items = {}
     for match in pattern.finditer(content):
         dod_id = match.group("dod").upper()
-        statuses[dod_id] = match.group("status").lower()
-    return statuses
+        items[dod_id] = {
+            "status": match.group("status").lower(),
+            "priority": match.group("priority").lower(),
+        }
+    return items
 
 
-def _update_epic_dod_status(content: str, dod_id: str, new_status: str):
+def _update_objective_dod_status(content: str, dod_id: str, new_status: str):
     pattern = re.compile(
         (
-            r"(?P<head><!--\s*epic:\s*[A-Za-z0-9_-]+\s+dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+status:\s*)"
-            r"(?P<status>[A-Za-z0-9_-]+)"
-            r"(?P<tail>\s*-->)"
+            r"(?P<head><!--\s*dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+status:\s*)"
+            r"(?P<status>\w+)"
+            r"(?P<tail>\s+priority:\s*\w+\s*-->)"
         ),
         re.IGNORECASE,
     )
@@ -2164,8 +2151,10 @@ def cmd_agile_init(args):
 
     objective_content = """# Objective
 
-<!-- story:STORY-001 status:todo -->
-- [ ] STORY-001: Define first executable objective item.
+## Project DoD
+
+- [ ] DOD-001: Define first executable objective item.
+<!-- dod:DOD-001 status:todo priority:must -->
 """
     objective_path = _agi_objective_path(agi_id)
     objective_path.write_text(objective_content, encoding="utf-8")
@@ -2177,7 +2166,6 @@ def cmd_agile_init(args):
     payload = {
         "id": agi_id,
         "agi_id": agi_id,
-        "objective_mode": "epic",
         "status": "active",
         "current_sprint": 0,
         "steering_every": args.steering_every,
@@ -2633,18 +2621,13 @@ def cmd_agile_known_issues(args):
 def cmd_agile_objective_transition(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
-        session, _ = _load_agile_session(agi_id)
+        _load_agile_session(agi_id)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    objective_mode = _resolve_objective_mode(session)
     try:
-        story_id = (
-            _normalize_epic_dod_id(args.story)
-            if objective_mode == "epic"
-            else _normalize_story_id(args.story)
-        )
+        dod_id = _normalize_dod_id(args.story)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -2655,42 +2638,32 @@ def cmd_agile_objective_transition(args):
         return 1
 
     current_content = objective_path.read_text(encoding="utf-8")
-    if objective_mode == "epic":
-        before_statuses = _collect_epic_dod_statuses(current_content)
-        updated_content, found, changed = _update_epic_dod_status(
-            current_content,
-            story_id,
-            str(args.status).strip().lower(),
-        )
-    else:
-        before_statuses = _collect_objective_story_statuses(current_content)
-        updated_content, found, changed = _update_objective_story_status(
-            current_content,
-            story_id,
-            str(args.status).strip().lower(),
-        )
+    before_items = _collect_objective_dod_items(current_content)
+    updated_content, found, changed = _update_objective_dod_status(
+        current_content,
+        dod_id,
+        str(args.status).strip().lower(),
+    )
     if not found:
-        missing_label = "DoD item" if objective_mode == "epic" else "story"
-        print(f"Error: {missing_label} not found ({story_id})", file=sys.stderr)
+        print(f"Error: DoD item not found ({dod_id})", file=sys.stderr)
         return 1
 
     if changed:
         objective_path.write_text(updated_content, encoding="utf-8")
 
-    if objective_mode == "epic":
-        after_statuses = _collect_epic_dod_statuses(updated_content)
-    else:
-        after_statuses = _collect_objective_story_statuses(updated_content)
-    from_status = before_statuses.get(story_id)
-    to_status = after_statuses.get(story_id)
+    after_items = _collect_objective_dod_items(updated_content)
+    from_status = before_items.get(dod_id, {}).get("status")
+    to_status = after_items.get(dod_id, {}).get("status")
+    priority = after_items.get(dod_id, {}).get("priority")
     _append_ndjson(
         _agi_objective_changelog_path(agi_id),
         {
             "timestamp": _now_iso(),
             "event": "objective-transition",
-            "story": story_id,
+            "dod": dod_id,
             "from_status": from_status,
             "to_status": to_status,
+            "priority": priority,
             "changed": changed,
         },
     )
@@ -2698,17 +2671,20 @@ def cmd_agile_objective_transition(args):
         agi_id,
         "agile.objective-transition",
         {
-            "story": story_id,
+            "dod": dod_id,
             "from_status": from_status,
             "to_status": to_status,
+            "priority": priority,
             "changed": changed,
         },
     )
 
     output = {
         "agi_id": agi_id,
-        "story": story_id,
+        "story": dod_id,
+        "dod": dod_id,
         "status": to_status,
+        "priority": priority,
         "changed": changed,
     }
     if args.json:
@@ -2721,30 +2697,25 @@ def cmd_agile_objective_transition(args):
 def cmd_agile_objective_check(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
-        session, _ = _load_agile_session(agi_id)
+        _load_agile_session(agi_id)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    objective_mode = _resolve_objective_mode(session)
     objective_path = _agi_objective_path(agi_id)
     if not objective_path.exists():
         print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
         return 1
 
     content = objective_path.read_text(encoding="utf-8")
-    statuses = (
-        _collect_epic_dod_statuses(content)
-        if objective_mode == "epic"
-        else _collect_objective_story_statuses(content)
-    )
-    if not statuses:
+    dod_items = _collect_objective_dod_items(content)
+    if not dod_items:
         output = {
             "agi_id": agi_id,
             "all_done": False,
             "incomplete": [],
-            "stories": {},
-            "warning": "no Epic DoD items found" if objective_mode == "epic" else "no stories found",
+            "dods": {},
+            "warning": "no DoD items found",
         }
         if args.json:
             print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -2753,14 +2724,16 @@ def cmd_agile_objective_check(args):
         return 1
 
     incomplete = sorted([
-        story_id for story_id, status in statuses.items()
-        if status.lower() not in {"done", "completed"}
+        dod_id for dod_id, item in dod_items.items()
+        if item.get("status", "").lower() not in {"done", "completed"}
     ])
+    status_only = {dod_id: item.get("status") for dod_id, item in dod_items.items()}
     output = {
         "agi_id": agi_id,
         "all_done": len(incomplete) == 0,
         "incomplete": incomplete,
-        "stories": statuses,
+        "dods": dod_items,
+        "stories": status_only,
     }
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2))

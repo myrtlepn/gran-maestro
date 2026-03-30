@@ -52,38 +52,24 @@ def _init_agile(workspace: Path) -> str:
     return payload["agi_id"]
 
 
-def _write_session_mode(workspace: Path, agi_id: str, objective_mode):
-    paths = _agile_paths(workspace, agi_id)
-    session = json.loads(paths["session"].read_text(encoding="utf-8"))
-    if objective_mode is None:
-        session.pop("objective_mode", None)
-    else:
-        session["objective_mode"] = objective_mode
-    paths["session"].write_text(
-        json.dumps(session, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
 def _write_objective(workspace: Path, agi_id: str, content: str):
     paths = _agile_paths(workspace, agi_id)
     paths["objective"].write_text(content, encoding="utf-8")
 
 
-def test_objective_check_epic_mode_partial(tmp_path):
+def test_objective_check_dod_partial(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
 
-    _write_session_mode(workspace, agi_id, "epic")
     _write_objective(
         workspace,
         agi_id,
         (
             "# Objective\n\n"
             "- [ ] DOD-001\n"
-            "<!-- epic:EPIC-001 dod:DOD-001 status:todo -->\n"
+            "<!-- dod:DOD-001 status:todo priority:must -->\n"
             "- [x] DOD-002\n"
-            "<!-- epic:EPIC-001 dod:DOD-002 status:done -->\n"
+            "<!-- dod:DOD-002 status:done priority:should -->\n"
         ),
     )
 
@@ -93,12 +79,14 @@ def test_objective_check_epic_mode_partial(tmp_path):
     assert proc.returncode == 1
     assert payload["all_done"] is False
     assert payload["incomplete"] == ["DOD-001"]
+    assert payload["dods"]["DOD-001"] == {"status": "todo", "priority": "must"}
+    assert payload["stories"]["DOD-002"] == "done"
 
 
-def test_collect_epic_dod_statuses_structured_multiline_format():
+def test_collect_objective_dod_items_structured_multiline_format():
     content = (
         "# Objective\n\n"
-        "### EPIC-001\n\n"
+        "## Project DoD\n\n"
         "- [ ] DOD-001: API 응답 성능 안정화\n"
         "  - Direction: 최소화\n"
         "  - Measure: p95 응답 시간\n"
@@ -107,61 +95,66 @@ def test_collect_epic_dod_statuses_structured_multiline_format():
         "  - Target: 250ms 이하\n"
         "  > detail:\n"
         "  > - PERF-01 시나리오 기준\n"
-        "<!-- epic:EPIC-001 dod:DOD-001 status:todo -->\n"
+        "<!-- dod:DOD-001 status:todo priority:must -->\n"
         "- [x] DOD-002: 오류율 제어\n"
         "  - Direction: 보장\n"
         "  - Measure: 5xx 비율\n"
         "  - Object: API gateway\n"
         "  - Context: 일일 배치 실행 구간에서\n"
         "  - Target: 0.1% 이하\n"
-        "<!-- epic:EPIC-001 dod:DOD-002 status:done -->\n"
+        "<!-- dod:DOD-002 status:done priority:should -->\n"
     )
 
-    statuses = MST_MODULE._collect_epic_dod_statuses(content)
-    assert statuses == {"DOD-001": "todo", "DOD-002": "done"}
+    items = MST_MODULE._collect_objective_dod_items(content)
+    assert items == {
+        "DOD-001": {"status": "todo", "priority": "must"},
+        "DOD-002": {"status": "done", "priority": "should"},
+    }
 
 
-def test_collect_epic_dod_statuses_supports_spaced_marker_tokens():
+def test_collect_objective_dod_items_supports_spaced_marker_tokens():
     content = (
         "# Objective\n\n"
         "- [ ] DOD-010: 한 줄 포맷 호환\n"
-        "<!-- epic: EPIC-001 dod: DOD-010 status: TODO -->\n"
+        "<!-- dod: DOD-010 status: TODO priority: MUST -->\n"
         "- [ ] DOD-011: 다중행 포맷 호환\n"
-        "<!-- epic:EPIC-001 dod:DOD-011 status:done -->\n"
+        "<!-- dod:DOD-011 status:done priority:should -->\n"
     )
 
-    statuses = MST_MODULE._collect_epic_dod_statuses(content)
-    assert statuses == {"DOD-010": "todo", "DOD-011": "done"}
+    items = MST_MODULE._collect_objective_dod_items(content)
+    assert items == {
+        "DOD-010": {"status": "todo", "priority": "must"},
+        "DOD-011": {"status": "done", "priority": "should"},
+    }
 
 
-def test_update_epic_dod_status_supports_spaced_marker_tokens():
+def test_update_objective_dod_status_supports_spaced_marker_tokens():
     content = (
         "# Objective\n\n"
         "- [ ] DOD-010: 상태 전이\n"
-        "<!-- epic: EPIC-001 dod: DOD-010 status: todo -->\n"
+        "<!-- dod: DOD-010 status: todo priority: MUST -->\n"
     )
 
-    updated, found, changed = MST_MODULE._update_epic_dod_status(content, "DOD-010", "done")
+    updated, found, changed = MST_MODULE._update_objective_dod_status(content, "DOD-010", "done")
 
     assert found is True
     assert changed is True
-    assert "<!-- epic: EPIC-001 dod: DOD-010 status: done -->" in updated
+    assert "<!-- dod: DOD-010 status: done priority: MUST -->" in updated
 
 
-def test_objective_check_epic_all_done(tmp_path):
+def test_objective_check_dod_all_done(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
 
-    _write_session_mode(workspace, agi_id, "epic")
     _write_objective(
         workspace,
         agi_id,
         (
             "# Objective\n\n"
             "- [x] DOD-001\n"
-            "<!-- epic:EPIC-001 dod:DOD-001 status:done -->\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
             "- [x] DOD-002\n"
-            "<!-- epic:EPIC-001 dod:DOD-002 status:done -->\n"
+            "<!-- dod:DOD-002 status:completed priority:should -->\n"
         ),
     )
 
@@ -173,18 +166,17 @@ def test_objective_check_epic_all_done(tmp_path):
     assert payload["incomplete"] == []
 
 
-def test_objective_transition_epic_dod(tmp_path):
+def test_objective_transition_dod(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
 
-    _write_session_mode(workspace, agi_id, "epic")
     _write_objective(
         workspace,
         agi_id,
         (
             "# Objective\n\n"
             "- [ ] DOD-001\n"
-            "<!-- epic:EPIC-001 dod:DOD-001 status:todo -->\n"
+            "<!-- dod:DOD-001 status:todo priority:must -->\n"
         ),
     )
 
@@ -208,7 +200,7 @@ def test_objective_transition_epic_dod(tmp_path):
 
     paths = _agile_paths(workspace, agi_id)
     updated_objective = paths["objective"].read_text(encoding="utf-8")
-    assert "<!-- epic:EPIC-001 dod:DOD-001 status:done -->" in updated_objective
+    assert "<!-- dod:DOD-001 status:done priority:must -->" in updated_objective
 
     changelog_entries = [
         json.loads(line)
@@ -218,45 +210,60 @@ def test_objective_transition_epic_dod(tmp_path):
     assert changelog_entries, "objective changelog should not be empty"
     last = changelog_entries[-1]
     assert last["event"] == "objective-transition"
-    assert last["story"] == "DOD-001"
+    assert last["dod"] == "DOD-001"
     assert last["to_status"] == "done"
+    assert last["priority"] == "must"
 
 
-def test_objective_check_story_mode_compat(tmp_path):
+def test_objective_check_init_default_dod_pending(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
-
-    _write_session_mode(workspace, agi_id, "story")
 
     proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
     payload = json.loads(proc.stdout)
 
     assert proc.returncode == 1
     assert payload["all_done"] is False
-    assert payload["stories"]["STORY-001"] == "todo"
-    assert payload["incomplete"] == ["STORY-001"]
+    assert payload["stories"]["DOD-001"] == "todo"
+    assert payload["dods"]["DOD-001"]["priority"] == "must"
+    assert payload["incomplete"] == ["DOD-001"]
 
 
-def test_agile_init_objective_mode(tmp_path):
+def test_agile_init_seeds_dod_objective_template(tmp_path):
     workspace = _make_workspace(tmp_path)
 
     proc = _run_mst(workspace, "agile", "init", "--steering-every", "3", "--json")
     payload = json.loads(proc.stdout)
 
     assert proc.returncode == 0
-    assert payload["objective_mode"] == "epic"
+    assert "objective_mode" not in payload
+    assert payload["steering_every"] == 3
+    assert payload["objective"]["path"] == "objective/objective.md"
+    assert payload["objective"]["version"] == 1
+
+    objective_path = _agile_paths(workspace, payload["agi_id"])["objective"]
+    objective = objective_path.read_text(encoding="utf-8")
+    assert "<!-- dod:DOD-001 status:todo priority:must -->" in objective
 
 
-def test_legacy_session_fallback(tmp_path):
+def test_objective_check_warns_when_no_dod_markers(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
 
-    _write_session_mode(workspace, agi_id, None)
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "- [ ] Placeholder only\n"
+        ),
+    )
 
     proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
     payload = json.loads(proc.stdout)
 
     assert proc.returncode == 1
     assert payload["all_done"] is False
-    assert payload["stories"]["STORY-001"] == "todo"
-    assert payload["incomplete"] == ["STORY-001"]
+    assert payload["dods"] == {}
+    assert payload["incomplete"] == []
+    assert payload["warning"] == "no DoD items found"
