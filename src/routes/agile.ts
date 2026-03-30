@@ -575,14 +575,6 @@ projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
     }
   }
 
-  if (ifMatch) {
-    const latestContent = await readTextFile(objectiveFile);
-    const latestEtag = await objectiveEtagFromContent(latestContent);
-    if (latestEtag === null || latestEtag !== ifMatch) {
-      return c.json({ error: "Objective has been modified" }, 409);
-    }
-  }
-
   const mergedContent = reinsertObjectiveMarkers(currentContent, body.content);
   try {
     await Deno.writeTextFile(objectiveFile, mergedContent);
