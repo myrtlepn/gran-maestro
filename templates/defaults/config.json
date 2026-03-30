@@ -43,6 +43,12 @@
     "epic_count_max": 5,
     "dod_per_epic_min": 3,
     "dod_per_epic_max": 7,
+    "convergence_threshold_abs": 0.12,
+    "convergence_threshold_trend": 0.18,
+    "soft_limit_small": 8,
+    "soft_limit_large": 12,
+    "soft_limit_epic_threshold": 10,
+    "round_history_max_summary_lines": 50,
     "retrospective": {
       "enabled": true,
       "max_fix_sprint_depth": 2,
