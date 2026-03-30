@@ -402,6 +402,15 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
   --direction "{NEXT_DIRECTION}" \
   --json
 ```
+1.6 known-issues 자동 해소 체크 (MANDATORY):
+   - `python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json`으로 open 이슈 목록을 조회한다.
+   - 각 open 이슈에 대해: 해당 이슈가 참조하는 AC/DoD가 이번 스프린트에서 통과(done)되었는지 `objective-check` 결과와 대조한다.
+   - 통과된 AC/DoD와 관련된 이슈는 자동으로 resolve한다:
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues resolve {AGI_ID} --issue-id {KI_ID} --json
+     ```
+   - 자동 해소 대상이 없으면 no-op (graceful skip).
+
 2. DoD 체크리스트 갱신 "제안" 생성(확정 아님):
    - Sprint result 기반으로 제안 목록을 만든다: `{dod_id, suggested_status, evidence_ref, reason}`
    - `evidence_ref`에는 근거 파일 절대경로를 반드시 포함한다 (`result.md`, 테스트 로그, diff 요약 등).
@@ -493,6 +502,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
 ```
 1.5 회고(독립 에이전트 검토 + 심각도 분기) 수행:
    - Section 2.2-E.3의 회고 절차를 Story 모드에도 동일 적용한다.
+   - config 우선순위 (Epic 모드와 동일): `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.retrospective` → 없으면 `Read({PLUGIN_ROOT}/templates/defaults/config.json)` fallback.
+   - `FIX_SPRINT_DEPTH=0`으로 초기화한다 (각 스프린트 회고 시작 시 리셋).
    - 검토 에이전트 dispatch는 `agile.retrospective.agents`를 따르며, 누적 diff + 테스트 실행 + spec AC 대조를 반드시 포함한다.
    - 심각도 분기는 동일하다:
      - `CRITICAL/MAJOR` + depth 여유: 보완 스프린트 재귀 실행

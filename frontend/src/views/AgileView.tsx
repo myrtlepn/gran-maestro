@@ -508,6 +508,7 @@ export function AgileView() {
       setSelectedSprintId(undefined);
       setResultMarkdown(null);
       setRetrospective(null);
+      setRetrospectiveMd(null);
       setSessionsError(null);
       setDetailError(null);
       setReportError(null);
@@ -549,6 +550,7 @@ export function AgileView() {
       setSelectedSprintId(undefined);
       setResultMarkdown(null);
       setRetrospective(null);
+      setRetrospectiveMd(null);
       setDetailLoading(false);
 
       setObjectiveContent(null);
@@ -609,6 +611,7 @@ export function AgileView() {
     if (!projectId || !selectedSessionId || !selectedSprint || !selectedSprintId) {
       setResultMarkdown(null);
       setRetrospective(null);
+      setRetrospectiveMd(null);
       setRetrospectiveMd(null);
       setReportError(null);
       setReportLoading(false);
