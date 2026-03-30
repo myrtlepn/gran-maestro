@@ -14,6 +14,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 이 스킬 실행 중 **Write/Edit 도구를 사용할 수 있는 경로는 아래만 해당**합니다:
 
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/objective.md` (신규 생성)
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/details/*.md` (신규 생성)
 - `{PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json` (`mst.py state set`으로 기록되는 상태 파일)
 
 그 외 모든 경로에 대한 Write/Edit 사용은 금지합니다.
@@ -262,7 +263,7 @@ soft limit:
 
 ##### 1A.7 4중 가드레일 검증 (MANDATORY)
 
-1. **How-free**: 구현 방법이 포함되면 거부하고 관찰 가능한 결과 문장으로 재질문
+1. **How-free (DoD 전용)**: DoD 항목에 구현 방법(API 엔드포인트, 함수명, 파일명, 기술 스택)이 포함되면 거부하고 관찰 가능한 결과 문장으로 재질문한다. 단, `## 설계 결정 (Architecture Decisions)` 및 `objective/details/*.md`에서는 기술 상세를 허용한다.
 2. **범위 가이드**: DoD 수량은 추천 범위(`dod_count_min`/`dod_count_max`, 기본 5~15)를 안내하되 차단하지 않는다
 3. **So-that 검증**: 각 DoD가 `X 한다, so that 사용자는 Y 할 수 있다`로 연결되는지 확인
 4. **Sprint 동결**: 진행 중 Sprint의 체크리스트 변경 금지, 변경은 스티어링 체크포인트에서만 반영
@@ -297,16 +298,27 @@ soft limit:
    - 전략 검토에서 `CRITICAL` 해소 완료
    - 종합 confidence가 임계치 이상이거나, 임계치 미만 사유에 대해 사용자 승인 확보
 
-##### 1A.10 objective.md 저장
+##### 1A.9.5 PM 도메인 클러스터링 (MANDATORY)
+
+objective 저장 전에 Q&A 상세를 도메인 단위로 정리한다.
+
+1. Q&A/정제 루프에서 수집된 상세 내용을 의미 기반으로 그룹화한다.
+2. 각 그룹에 대해 `details/{domain-slug}.md` 파일명을 제안하고, 도메인명 + 1줄 요약을 작성한다.
+3. 사용자에게 클러스터링 결과(도메인/파일명/요약)를 확인받아 확정한다.
+4. `AUTO_MODE`에서는 사용자 확인 대신 PM이 자율 확정하고 근거를 함께 기록한다.
+5. 확정된 클러스터 맵은 Step 1A.10 저장 입력으로 사용한다.
+
+##### 1A.10 objective.md + details/*.md 저장
 
 `templates/objective.md` 포맷으로 아래 경로에 저장:
 
 ```
 {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/details/{domain}.md
 ```
 
 저장 규칙:
-- 아래 10개 섹션을 순서대로 포함한다.
+- objective.md에는 아래 10개 핵심 섹션 순서를 유지하고, 마지막에 `## 상세 문서 (Details)` 인덱스 섹션을 추가한다.
   1. 진행 상태 요약
   2. JTBD 레이어
   3. 프로젝트 완료 기준 (DoD)
@@ -317,11 +329,23 @@ soft limit:
   8. 리스크 레지스터
   9. 참조 레퍼런스
   10. 변경 이력
+- `## 상세 문서 (Details)`에는 domain별 detail 파일 링크 + 도메인명 + 1줄 요약을 기록한다.
+- detail 파일(`objective/details/*.md`)에는 해당 도메인 Q&A 상세를 원본 수준으로 보존한다(요약/축약 금지).
 - DoD는 다중행 구조(`Direction/Measure/Object/Context/Target`)를 사용한다.
 - 모든 DoD 항목에 아래 마커를 포함한다.
   - `<!-- dod:DOD-NNN status:todo priority:must -->`
 - `priority` 값은 MoSCoW 결과를 반영해 `must|should|could|wont` 중 하나를 사용한다.
 - 전략 검토/Confidence Matrix 결과를 objective.md 섹션으로 남기지 않는다.
+
+##### 1A.10.5 details D3 역방향 시뮬레이션 (MANDATORY)
+
+Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증을 수행한다.
+
+1. `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `d3.objective_detail_threshold`를 조회한다.
+2. 값이 없으면 기본값 `0.1`을 사용한다.
+3. `objective/details/*.md` 각 파일마다 독립 에이전트로 D3 역방향 시뮬레이션을 실행한다.
+4. 판정은 기존 plan D3 Gate(`mst:plan` Step 3.9) 패턴을 따르되, 임계치는 `objective_detail_threshold`를 사용한다.
+5. 모호도 점수가 임계치를 초과하면(명료도 90% 미만) 보완 요구를 생성하고 수정 후 재검증한다.
 
 저장 후:
 - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
@@ -339,6 +363,7 @@ soft limit:
 2. 아래를 추출해 `PARSED_CONTEXT`에 저장
    - JTBD: When I / I want to / So I can / 성공 지표 / 완료 정의
    - DoD 후보: 완료 조건/체크리스트/검증 기준
+   - 원본 문서 H1/H2 구조: 도메인 클러스터링 참고용 섹션 계층
    - 설계 결정/제약/MoSCoW/NFR/리스크/참조 정보
 3. 구현 상세는 objective 산출물에 강제하지 않고 관찰 가능한 결과 기준으로 정규화한다.
 
@@ -358,10 +383,12 @@ soft limit:
 - 재귀 정제 루프/수렴 판정: Step 1A.4~1A.5
 - DoD 품질 게이트/4중 가드레일/준비도 게이트: Step 1A.6~1A.8
 - 전략 검토 + Confidence Matrix(프로세스 전용): Step 1A.9
+- PM 도메인 클러스터링: Step 1A.9.5
+- detail D3 역방향 시뮬레이션: Step 1A.10.5
 
 ##### 1B.4 objective.md 저장
 
-- Step 1A.10과 동일한 경로/포맷/마커 규칙으로 저장
+- Step 1A.10/1A.10.5와 동일한 경로/포맷/마커/검증 규칙으로 저장
 - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
 - 정규화 요약 출력
 

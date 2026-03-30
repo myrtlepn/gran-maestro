@@ -130,3 +130,12 @@
 | 버전 | 날짜 | 변경 내용 | 변경 사유 |
 |------|------|-----------|-----------|
 | v1 | {YYYY-MM-DD} | 최초 생성 | Q&A 또는 기존 문서 파싱 |
+
+---
+
+## 상세 문서 (Details)
+
+> objective.md는 인덱스/요약을 유지하고, 상세 원문은 `details/*.md`에 보존한다.
+
+- [details/domain-a.md](details/domain-a.md) | 도메인: {도메인명} | 요약: {핵심 요약 1줄}
+- [details/domain-b.md](details/domain-b.md) | 도메인: {도메인명} | 요약: {핵심 요약 1줄}
