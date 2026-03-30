@@ -46,6 +46,9 @@ Subcommands:
   agile update       <AGI-ID> [--status TEXT] [--current-sprint N] [--steering-every N] [--objective-version N] [--json]
   agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--json]
   agile retrospective <AGI-ID> --sprint N --status TEXT --succeeded IDS --failed JSON [--failed JSON ...] --velocity-planned N --velocity-completed N --limitations TEXT --lessons TEXT --direction TEXT [--json]
+  agile known-issues add <AGI-ID> --description TEXT --severity MINOR|MAJOR|CRITICAL --sprint N [--json]
+  agile known-issues resolve <AGI-ID> --issue-id KI-NNN [--json]
+  agile known-issues list <AGI-ID> [--status open|resolved] [--json]
   agile objective-transition <AGI-ID> --story STORY-ID --status TEXT [--json]
   agile objective-check <AGI-ID> [--json]
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
@@ -1771,6 +1774,13 @@ def _normalize_epic_dod_id(value: str) -> str:
     return dod_id.upper()
 
 
+def _normalize_known_issue_id(value: str) -> str:
+    issue_id = (value or "").strip().upper()
+    if not re.fullmatch(r"KI-\d+", issue_id):
+        raise ValueError(f"Invalid known issue id: {value}")
+    return issue_id
+
+
 def _resolve_objective_mode(session: dict) -> str:
     raw_mode = session.get("objective_mode") if isinstance(session, dict) else None
     if isinstance(raw_mode, str):
@@ -1858,6 +1868,28 @@ def _agi_objective_changelog_path(agi_id: str) -> Path:
 
 def _agi_links_path(agi_id: str) -> Path:
     return _agi_session_dir(agi_id) / "index" / "links.json"
+
+
+def _agi_known_issues_path(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "known-issues.json"
+
+
+def _load_agile_known_issues(agi_id: str) -> List[dict]:
+    data = load_json(_agi_known_issues_path(agi_id))
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _next_known_issue_id(issues: List[dict]) -> str:
+    max_number = 0
+    for issue in issues:
+        issue_id = str(issue.get("id", "")).strip().upper()
+        match = re.fullmatch(r"KI-(\d+)", issue_id)
+        if not match:
+            continue
+        max_number = max(max_number, int(match.group(1)))
+    return f"KI-{max_number + 1:03d}"
 
 
 def _append_ndjson(path: Path, data):
@@ -2340,9 +2372,6 @@ def cmd_agile_retrospective(args):
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    if not failed:
-        print("Error: --failed is required", file=sys.stderr)
-        return 1
 
     sprint_id = f"S{args.sprint:02d}"
     velocity_rate = 0 if args.velocity_planned == 0 else round(
@@ -2369,6 +2398,57 @@ def cmd_agile_retrospective(args):
     sprint_dir.mkdir(parents=True, exist_ok=True)
     retrospective_path = sprint_dir / "retrospective.json"
     save_json(retrospective_path, payload)
+    known_issues = [
+        issue
+        for issue in _load_agile_known_issues(agi_id)
+        if str(issue.get("status", "")).strip().lower() == "open"
+    ]
+
+    succeeded_lines = "\n".join(f"- {item}" for item in succeeded) if succeeded else "- 없음"
+    failed_lines = (
+        "\n".join(
+            (
+                f"- 시도한 접근: {entry.get('tried_approach', '-')}"
+                f" | 실패 원인: {entry.get('failure_reason', '-')}"
+            )
+            for entry in failed
+        )
+        if failed
+        else "- 없음"
+    )
+    known_issue_lines = (
+        "\n".join(
+            (
+                f"- {str(issue.get('id', '-')).upper()} "
+                f"[{str(issue.get('severity', '-')).upper()}] "
+                f"{str(issue.get('description', '-')).strip()} "
+                f"(sprint: {str(issue.get('sprint_id', '-')).strip()}, status: {str(issue.get('status', '-')).strip()})"
+            )
+            for issue in known_issues
+        )
+        if known_issues
+        else "- 없음"
+    )
+    template_path = _plugin_root() / "templates" / "retrospective.md"
+    template_content = template_path.read_text(encoding="utf-8")
+    replacements = {
+        "SPRINT_ID": sprint_id,
+        "STATUS": str(payload["status"]),
+        "TIMESTAMP": str(payload["timestamp"]),
+        "SUCCEEDED_ITEMS": succeeded_lines,
+        "FAILED_ITEMS": failed_lines,
+        "VELOCITY_PLANNED": str(payload["velocity"]["planned"]),
+        "VELOCITY_COMPLETED": str(payload["velocity"]["completed"]),
+        "VELOCITY_RATE": str(payload["velocity"]["rate"]),
+        "KNOWN_LIMITATIONS": str(payload["known_limitations"]),
+        "LESSONS_LEARNED": str(payload["lessons_learned"]),
+        "DIRECTION": str(payload["direction"]),
+        "KNOWN_ISSUES": known_issue_lines,
+    }
+    retrospective_md_content = template_content
+    for key, value in replacements.items():
+        retrospective_md_content = retrospective_md_content.replace(f"{{{{{key}}}}}", value)
+    (sprint_dir / "retrospective.md").write_text(retrospective_md_content, encoding="utf-8")
 
     _append_agile_event(
         agi_id,
@@ -2384,6 +2464,148 @@ def cmd_agile_retrospective(args):
     else:
         print(str(retrospective_path))
     return 0
+
+
+def cmd_agile_known_issues_add(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+
+    description = str(args.description).strip()
+    if not description:
+        print("Error: --description is required", file=sys.stderr)
+        return 1
+
+    issues = _load_agile_known_issues(agi_id)
+    issue = {
+        "id": _next_known_issue_id(issues),
+        "description": description,
+        "severity": str(args.severity).strip().upper(),
+        "sprint_id": f"S{args.sprint:02d}",
+        "status": "open",
+        "created_at": _now_iso(),
+    }
+    issues.append(issue)
+    save_json(_agi_known_issues_path(agi_id), issues)
+    _append_agile_event(
+        agi_id,
+        "agile.known-issues.add",
+        {
+            "issue_id": issue["id"],
+            "severity": issue["severity"],
+            "status": issue["status"],
+        },
+    )
+
+    if args.json:
+        print(json.dumps(issue, ensure_ascii=False, indent=2))
+    else:
+        print(issue["id"])
+    return 0
+
+
+def cmd_agile_known_issues_resolve(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+        issue_id = _normalize_known_issue_id(args.issue_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    issues = _load_agile_known_issues(agi_id)
+    target_issue = None
+    changed = False
+    for issue in issues:
+        normalized_id = str(issue.get("id", "")).strip().upper()
+        if normalized_id != issue_id:
+            continue
+        target_issue = issue
+        if str(issue.get("status", "")).strip().lower() != "resolved":
+            issue["status"] = "resolved"
+            issue["resolved_at"] = _now_iso()
+            changed = True
+        elif "resolved_at" not in issue:
+            issue["resolved_at"] = _now_iso()
+            changed = True
+        break
+
+    if target_issue is None:
+        print(f"Error: known issue not found ({issue_id})", file=sys.stderr)
+        return 1
+
+    if changed:
+        save_json(_agi_known_issues_path(agi_id), issues)
+
+    _append_agile_event(
+        agi_id,
+        "agile.known-issues.resolve",
+        {
+            "issue_id": issue_id,
+            "status": "resolved",
+        },
+    )
+
+    if args.json:
+        print(json.dumps(target_issue, ensure_ascii=False, indent=2))
+    else:
+        print(issue_id)
+    return 0
+
+
+def cmd_agile_known_issues_list(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    issues = _load_agile_known_issues(agi_id)
+    if args.status:
+        status_filter = str(args.status).strip().lower()
+        issues = [
+            issue
+            for issue in issues
+            if str(issue.get("status", "")).strip().lower() == status_filter
+        ]
+
+    if args.json:
+        print(json.dumps(issues, ensure_ascii=False, indent=2))
+        return 0
+
+    for issue in issues:
+        print(
+            (
+                f"{str(issue.get('id', '')).strip().upper()}\t"
+                f"{str(issue.get('status', '')).strip().lower()}\t"
+                f"{str(issue.get('severity', '')).strip().upper()}\t"
+                f"{str(issue.get('sprint_id', '')).strip()}\t"
+                f"{str(issue.get('description', '')).strip()}"
+            )
+        )
+    return 0
+
+
+def cmd_agile_known_issues(args):
+    subcommand = getattr(args, "known_issues_subcommand", None)
+    dispatch = {
+        "add": cmd_agile_known_issues_add,
+        "resolve": cmd_agile_known_issues_resolve,
+        "list": cmd_agile_known_issues_list,
+    }
+    fn = dispatch.get(subcommand)
+    if fn is None:
+        print("Error: known-issues subcommand is required (add|resolve|list)", file=sys.stderr)
+        return 1
+    return fn(args)
 
 
 def cmd_agile_objective_transition(args):
@@ -5882,6 +6104,30 @@ def build_parser():
     agile_retrospective.add_argument("--direction", required=True)
     agile_retrospective.add_argument("--json", action="store_true")
 
+    agile_known_issues = agile_sub.add_parser("known-issues")
+    agile_known_issues_sub = agile_known_issues.add_subparsers(dest="known_issues_subcommand")
+
+    agile_known_issues_add = agile_known_issues_sub.add_parser("add")
+    agile_known_issues_add.add_argument("agi_id")
+    agile_known_issues_add.add_argument("--description", required=True)
+    agile_known_issues_add.add_argument(
+        "--severity",
+        required=True,
+        choices=["MINOR", "MAJOR", "CRITICAL"],
+    )
+    agile_known_issues_add.add_argument("--sprint", type=int, required=True)
+    agile_known_issues_add.add_argument("--json", action="store_true")
+
+    agile_known_issues_resolve = agile_known_issues_sub.add_parser("resolve")
+    agile_known_issues_resolve.add_argument("agi_id")
+    agile_known_issues_resolve.add_argument("--issue-id", required=True)
+    agile_known_issues_resolve.add_argument("--json", action="store_true")
+
+    agile_known_issues_list = agile_known_issues_sub.add_parser("list")
+    agile_known_issues_list.add_argument("agi_id")
+    agile_known_issues_list.add_argument("--status", choices=["open", "resolved"])
+    agile_known_issues_list.add_argument("--json", action="store_true")
+
     agile_objective_transition = agile_sub.add_parser("objective-transition")
     agile_objective_transition.add_argument("agi_id")
     agile_objective_transition.add_argument("--story", required=True)
@@ -6152,6 +6398,7 @@ def main():
         ("agile", "update"): cmd_agile_update,
         ("agile", "result"): cmd_agile_result,
         ("agile", "retrospective"): cmd_agile_retrospective,
+        ("agile", "known-issues"): cmd_agile_known_issues,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
         ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,

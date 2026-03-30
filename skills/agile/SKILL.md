@@ -254,12 +254,21 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 | **성공 지표** | objective.md의 성공 지표 전체 항목 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
 | **활성층** | 현재 Epic + 미완료 required DoD 항목 | `objective-check --json`의 `incomplete` + objective 파싱 |
 | **변화층** | 직전 Sprint 결과 요약 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md` |
+| **회고층** | 직전 Sprint retrospective 요약(lesson/limitation/direction) | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md` |
+| **이슈층** | open known issue 목록 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json` |
 
 도출 규칙:
 1. `objective-check` 결과의 `incomplete`(DoD ID 목록)에서 이번 Sprint 대상 DoD 묶음을 선택한다.
 2. 변화층(result.md)에서 직전 실패/미완료 원인을 반영한다.
-3. 위 두 입력으로 이번 Sprint의 Story 1개를 즉시 도출하고 `JIT_STORY_ID`, `JIT_STORY_DESC`를 선언한다.
-4. 출력: `[Sprint {CURRENT_SPRINT}] JIT Story 도출: {JIT_STORY_ID} — {JIT_STORY_DESC}`
+3. 직전 회고/known issue를 조회한다:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json
+Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md)
+```
+4. `retrospective.md`에서 `lessons_learned`/`limitations`/`direction`을 추출해 `[RETRO from S_prev]` 블록으로 구성한다. 파일이 없거나 파싱 실패 시 `"N/A"`로 채운다.
+5. open known issue를 `[KNOWN ISSUES]` 블록으로 구성한다. 이슈가 없으면 `"none"`으로 채운다.
+6. 위 입력으로 이번 Sprint의 Story 1개를 즉시 도출하고 `JIT_STORY_ID`, `JIT_STORY_DESC`를 선언한다.
+7. 출력: `[Sprint {CURRENT_SPRINT}] JIT Story 도출: {JIT_STORY_ID} — {JIT_STORY_DESC}`
 
 ###### 2.2-E.2 plan -a 호출 (컨텍스트 3계층 유지)
 
@@ -268,10 +277,13 @@ Skill(skill: "mst:plan", args: "-a {JIT_STORY_DESC}
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 현재 Epic: {EPIC_ID} | 미완료 DoD: {INCOMPLETE_DOD_LIST} | 이번 JIT Story: {JIT_STORY_ID}
 [변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
+[RETRO from S_prev] {RETRO_BLOCK_LITERAL}
+[KNOWN ISSUES] {KNOWN_ISSUES_BLOCK_LITERAL}
 [제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL} | 산출물 형태: {DELIVERABLE_SHAPE_LITERAL}")
 ```
 
 `PROJECT_DOD_LIST_LITERAL`/`SUCCESS_METRICS_LITERAL`/`DELIVERABLE_SHAPE_LITERAL` 추출에 실패하거나 항목이 비어 있으면 `"N/A"`로 채워 전달한다 (graceful fallback, 하위 호환).
+`RETRO_BLOCK_LITERAL`은 직전 retrospective 부재 시 `"N/A"`, `KNOWN_ISSUES_BLOCK_LITERAL`은 open issue 부재 시 `"none"`으로 채워 전달한다.
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
@@ -288,6 +300,62 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --completed "{JIT_STORY_ID_IF_DONE}" \
   --pln {PLN_ID} \
   --req {REQ_ID} \
+  --json
+```
+1.5 회고(독립 에이전트 검토 + 심각도 분기) 수행:
+   - config 우선순위: `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.retrospective` → 없으면 `Read({PLUGIN_ROOT}/templates/defaults/config.json)` fallback.
+   - 핵심 설정:
+     - `agile.retrospective.enabled` (기본 `true`)
+     - `agile.retrospective.max_fix_sprint_depth` (기본 `2`)
+     - `agile.retrospective.agents` (provider별 `{count,tier}`)
+   - `enabled=true`면 독립 검토를 dispatch한다. dispatch 규칙은 기존 `debug.agents` 패턴과 동일하게 `count>0` provider만 순회한다.
+```text
+for provider in [codex, gemini, claude]:
+  repeat AGENT_COUNT(provider) times:
+    Skill(skill: "mst:{provider}", args: "-a [Sprint Retrospective Review]
+AGI: {AGI_ID} / Sprint: {CURRENT_SPRINT}
+필수 작업:
+1) 해당 스프린트 누적 코드 diff 검토
+2) 프로젝트 테스트 실행(실패 로그 요약 포함)
+3) 해당 스프린트 spec AC(Given/When/Then) 대조
+출력 형식:
+- findings: [{severity: CRITICAL|MAJOR|MINOR, title, evidence_ref, ac_ref, fix_hint}]
+- verdict: clean|needs_fix")
+```
+   - 에이전트 응답을 합쳐 `CRITICAL/MAJOR/MINOR` 개수를 집계한다.
+   - 보완 스프린트 분기:
+     - `CRITICAL/MAJOR` 존재 + `max_fix_sprint_depth > 0` + `FIX_SPRINT_DEPTH < max_fix_sprint_depth`:
+       - `MINOR`는 즉시 known issue로 기록
+       - 보완 스프린트를 생성/실행한 뒤(동일 스프린트 내부 루프), 동일 회고 단계를 `FIX_SPRINT_DEPTH+1`로 재귀 수행
+     - `CRITICAL/MAJOR` 존재 + (`max_fix_sprint_depth == 0` 또는 `FIX_SPRINT_DEPTH >= max_fix_sprint_depth`):
+       - 남은 이슈 전부를 known issue로 분류
+     - `MINOR`만 존재:
+       - known issue로 분류
+     - clean:
+       - retrospective만 기록
+   - known issue 기록:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+  --description "{ISSUE_SUMMARY}" \
+  --severity {MINOR|MAJOR|CRITICAL} \
+  --sprint {CURRENT_SPRINT} \
+  --json
+```
+   - `mst.py agile known-issues add` 단계는 모든 분기에서 실행한다. clean 분기처럼 입력 이슈가 비어 있는 경우에는 no-op으로 처리한다.
+   - 보완 스프린트 비활성 조건: `max_fix_sprint_depth=0`.
+   - 보완 스프린트 depth 초과 시: 미해결 이슈를 known issue로 분류하고 재귀를 종료한다.
+   - 모든 경우에 retrospective 기록:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status done|failed \
+  --succeeded "{SUCCEEDED_ITEMS}" \
+  --failed '{"item":"{ITEM_ID}","cause":"{CAUSE}","attempt":"{ATTEMPT}"}' \
+  --velocity-planned {VELOCITY_PLANNED} \
+  --velocity-completed {VELOCITY_COMPLETED} \
+  --limitations "{LIMITATIONS}" \
+  --lessons "{LESSONS_LEARNED}" \
+  --direction "{NEXT_DIRECTION}" \
   --json
 ```
 2. DoD 체크리스트 갱신 "제안" 생성(확정 아님):
@@ -365,6 +433,37 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --completed "{STORY_ID_IF_DONE}" \
   --pln {PLN_ID} \
   --req {REQ_ID} \
+  --json
+```
+1.5 회고(독립 에이전트 검토 + 심각도 분기) 수행:
+   - Section 2.2-E.3의 회고 절차를 Story 모드에도 동일 적용한다.
+   - 검토 에이전트 dispatch는 `agile.retrospective.agents`를 따르며, 누적 diff + 테스트 실행 + spec AC 대조를 반드시 포함한다.
+   - 심각도 분기는 동일하다:
+     - `CRITICAL/MAJOR` + depth 여유: 보완 스프린트 재귀 실행
+     - `CRITICAL/MAJOR` + depth 초과 또는 `max_fix_sprint_depth=0`: known issue로 분류
+     - `MINOR`만: known issue로 분류
+     - clean: retrospective만 기록
+   - known issue 기록:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+  --description "{ISSUE_SUMMARY}" \
+  --severity {MINOR|MAJOR|CRITICAL} \
+  --sprint {CURRENT_SPRINT} \
+  --json
+```
+   - `mst.py agile known-issues add` 단계는 모든 분기에서 실행한다. clean 분기처럼 입력 이슈가 비어 있는 경우에는 no-op으로 처리한다.
+   - 모든 경우에 retrospective 기록:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status done|failed \
+  --succeeded "{SUCCEEDED_ITEMS}" \
+  --failed '{"item":"{ITEM_ID}","cause":"{CAUSE}","attempt":"{ATTEMPT}"}' \
+  --velocity-planned {VELOCITY_PLANNED} \
+  --velocity-completed {VELOCITY_COMPLETED} \
+  --limitations "{LIMITATIONS}" \
+  --lessons "{LESSONS_LEARNED}" \
+  --direction "{NEXT_DIRECTION}" \
   --json
 ```
 2. story 상태 업데이트:
@@ -453,6 +552,11 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 | 스프린트 | 계획 | 완료 | 미완료 | 블로커 |
 |----------|------|------|--------|--------|
 | S{N}     | ...  | ...  | ...    | ...    |
+
+회고 요약 (최근 {STEERING_EVERY} 스프린트)
+- lessons learned: {RETRO_LESSONS_SUMMARY}
+- limitations 추이: {RETRO_LIMITATIONS_TREND}
+- known issues: open {KNOWN_ISSUES_OPEN_COUNT} / resolved {KNOWN_ISSUES_RESOLVED_COUNT}
 
 DoD 체크 갱신 제안 (pending)
 | DOD-ID | 제안 상태 | evidence_ref | 근거 요약 |

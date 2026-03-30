@@ -42,7 +42,25 @@
     "epic_count_min": 2,
     "epic_count_max": 5,
     "dod_per_epic_min": 3,
-    "dod_per_epic_max": 7
+    "dod_per_epic_max": 7,
+    "retrospective": {
+      "enabled": true,
+      "max_fix_sprint_depth": 2,
+      "agents": {
+        "codex": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "gemini": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "claude": {
+          "count": 0,
+          "tier": "economy"
+        }
+      }
+    }
   },
   "concurrency": {
     "max_parallel_tasks": 5,
