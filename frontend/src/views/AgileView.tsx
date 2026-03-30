@@ -12,6 +12,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer';
+import { MilkdownEditor } from '@/components/shared/MilkdownEditor';
 import { ObjectiveCommentsPanel } from '@/views/ObjectiveCommentsPanel';
 import { ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
 
@@ -780,8 +781,8 @@ export function AgileView() {
     try {
       setStatusMessage(null);
       const resolvedPath = projectId 
-        ? `/api/projects/${projectId}/agile/sessions/${selectedSessionId}/objective`
-        : `/api/agile/sessions/${selectedSessionId}/objective`;
+        ? `/api/projects/${projectId}/agile/${selectedSessionId}/objective`
+        : `/api/agile/${selectedSessionId}/objective`;
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (objectiveEtag) {
@@ -789,7 +790,7 @@ export function AgileView() {
       }
 
       const response = await fetch(resolvedPath, {
-        method: 'PUT',
+        method: 'PATCH',
         headers,
         body: JSON.stringify({ content: objectiveEditValue }),
       });
@@ -811,6 +812,18 @@ export function AgileView() {
       setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : '저장 실패' });
     }
   };
+
+  const handleObjectiveModeChange = useCallback((mode: 'preview' | 'edit') => {
+    if (mode === 'edit') {
+      setObjectiveEditValue(objectiveContent ?? '');
+      setIsObjectiveEditMode(true);
+      setStatusMessage(null);
+      return;
+    }
+
+    setIsObjectiveEditMode(false);
+    setStatusMessage(null);
+  }, [objectiveContent]);
 
   if (!projectId) {
     return (
@@ -1060,18 +1073,31 @@ export function AgileView() {
                                 세션의 목표와 요구사항
                               </CardDescription>
                             </div>
-                            {objectiveContent !== null && !isObjectiveEditMode && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setObjectiveEditValue(objectiveContent || '');
-                                  setIsObjectiveEditMode(true);
-                                  setStatusMessage(null);
-                                }}
-                                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
-                              >
-                                Edit
-                              </button>
+                            {objectiveContent !== null && (
+                              <div className="inline-flex items-center rounded-md border border-input p-0.5 bg-muted/20">
+                                <button
+                                  type="button"
+                                  onClick={() => handleObjectiveModeChange('preview')}
+                                  className={`inline-flex h-8 items-center justify-center rounded-sm px-3 text-sm font-medium transition-colors ${
+                                    !isObjectiveEditMode
+                                      ? 'bg-background shadow-sm'
+                                      : 'text-muted-foreground hover:bg-accent/40'
+                                  }`}
+                                >
+                                  Preview
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleObjectiveModeChange('edit')}
+                                  className={`inline-flex h-8 items-center justify-center rounded-sm px-3 text-sm font-medium transition-colors ${
+                                    isObjectiveEditMode
+                                      ? 'bg-background shadow-sm'
+                                      : 'text-muted-foreground hover:bg-accent/40'
+                                  }`}
+                                >
+                                  Edit
+                                </button>
+                              </div>
                             )}
                           </CardHeader>
                           <CardContent>
@@ -1091,10 +1117,10 @@ export function AgileView() {
                               </div>
                             ) : isObjectiveEditMode ? (
                               <div className="space-y-4">
-                                <textarea
-                                  className="flex min-h-[300px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                  value={objectiveEditValue}
-                                  onChange={(e) => setObjectiveEditValue(e.target.value)}
+                                <MilkdownEditor
+                                  defaultValue={objectiveEditValue}
+                                  onChange={setObjectiveEditValue}
+                                  className="min-h-[300px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring prose prose-sm max-w-none"
                                 />
                                 <div className="flex gap-2">
                                   <button
@@ -1106,10 +1132,7 @@ export function AgileView() {
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setIsObjectiveEditMode(false);
-                                      setStatusMessage(null);
-                                    }}
+                                    onClick={() => handleObjectiveModeChange('preview')}
                                     className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
                                   >
                                     Cancel

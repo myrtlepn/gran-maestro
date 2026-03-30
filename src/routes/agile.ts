@@ -8,6 +8,9 @@ const projectAgileApi = new Hono();
 const AGI_ID_RE = /^AGI-\d+$/;
 const SPRINT_ID_RE = /^S\d+$/;
 const SNAPSHOT_FILE_RE = /^v(\d+)\.md$/;
+const OBJECTIVE_MARKER_LINE_RE = /^<!--\s*epic:(EPIC-\d+)\s+dod:(DOD-\d+)\s+status:([a-z_]+)\s*-->$/i;
+const MARKER_ANCHOR_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
+const MARKER_ANCHOR_CHECKLIST_RE = /^\s*[-*+]\s+\[[ xX]\]\s+/;
 
 type SessionJson = Record<string, unknown> & {
   id?: string;
@@ -37,6 +40,16 @@ type ObjectiveCommentsFile = {
   docRevision: string | null;
   updatedAt: string;
   comments: ObjectiveComment[];
+};
+
+type MarkerAnchorType = "heading" | "checklist" | "any";
+
+type ObjectiveMarker = {
+  markerLine: string;
+  epic: string;
+  dod: string;
+  anchorType: MarkerAnchorType;
+  anchorText: string | null;
 };
 
 function isValidAgiId(value: string): boolean {
@@ -84,6 +97,10 @@ function isCommentStatus(value: unknown): value is ObjectiveCommentStatus {
 async function toSha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function objectiveRevisionFromContent(content: string): Promise<string> {
+  return (await toSha256Hex(content)).slice(0, 12);
 }
 
 async function objectiveEtagFromContent(content: string | null): Promise<string | null> {
@@ -184,6 +201,129 @@ async function loadObjectiveComments(
     updatedAt: asStringOrNull(loaded.updatedAt) ?? initialState.updatedAt,
     comments,
   };
+}
+
+function normalizeAnchorText(line: string): string {
+  return line.trim().replace(/\s+/g, " ");
+}
+
+function markerAnchorFromOriginalLine(lines: string[], markerLineIndex: number): {
+  anchorType: MarkerAnchorType;
+  anchorText: string | null;
+} {
+  let fallbackAnchorText: string | null = null;
+
+  for (let i = markerLineIndex - 1; i >= 0; i -= 1) {
+    const currentLine = lines[i];
+    if (currentLine.trim().length === 0) continue;
+    const normalizedLine = normalizeAnchorText(currentLine);
+
+    if (fallbackAnchorText === null) {
+      fallbackAnchorText = normalizedLine;
+    }
+    if (MARKER_ANCHOR_CHECKLIST_RE.test(currentLine)) {
+      return {
+        anchorType: "checklist",
+        anchorText: normalizedLine,
+      };
+    }
+    if (MARKER_ANCHOR_HEADING_RE.test(currentLine)) {
+      return {
+        anchorType: "heading",
+        anchorText: normalizedLine,
+      };
+    }
+  }
+
+  return {
+    anchorType: "any",
+    anchorText: fallbackAnchorText,
+  };
+}
+
+function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
+  const lines = content.split("\n");
+  const markers: ObjectiveMarker[] = [];
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const match = OBJECTIVE_MARKER_LINE_RE.exec(lines[lineIndex].trim());
+    if (!match) continue;
+
+    const { anchorType, anchorText } = markerAnchorFromOriginalLine(lines, lineIndex);
+    markers.push({
+      markerLine: `<!-- epic:${match[1]} dod:${match[2]} status:${match[3].toLowerCase()} -->`,
+      epic: match[1],
+      dod: match[2],
+      anchorType,
+      anchorText,
+    });
+  }
+
+  return markers;
+}
+
+function findMarkerAnchorIndex(lines: string[], marker: ObjectiveMarker): number {
+  const dodToken = marker.dod.toLowerCase();
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!MARKER_ANCHOR_CHECKLIST_RE.test(line)) continue;
+    if (line.toLowerCase().includes(dodToken)) {
+      return i;
+    }
+  }
+
+  if (marker.anchorText) {
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (marker.anchorType === "heading" && !MARKER_ANCHOR_HEADING_RE.test(line)) continue;
+      if (marker.anchorType === "checklist" && !MARKER_ANCHOR_CHECKLIST_RE.test(line)) continue;
+      if (normalizeAnchorText(line) === marker.anchorText) {
+        return i;
+      }
+    }
+  }
+
+  const epicToken = marker.epic.toLowerCase();
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!MARKER_ANCHOR_HEADING_RE.test(line)) continue;
+    if (line.toLowerCase().includes(epicToken)) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function reinsertObjectiveMarkers(originalContent: string, editedContent: string): string {
+  const markers = extractObjectiveMarkers(originalContent);
+  if (markers.length === 0) {
+    return editedContent;
+  }
+
+  const hasTrailingNewLine = editedContent.endsWith("\n");
+  const lines = editedContent
+    .split("\n")
+    .filter((line) => !OBJECTIVE_MARKER_LINE_RE.test(line.trim()));
+  const insertionCountByAnchor = new Map<number, number>();
+
+  for (const marker of markers) {
+    const anchorIndex = findMarkerAnchorIndex(lines, marker);
+    if (anchorIndex === -1) {
+      lines.push(marker.markerLine);
+      continue;
+    }
+
+    const insertionOffset = insertionCountByAnchor.get(anchorIndex) ?? 0;
+    lines.splice(anchorIndex + 1 + insertionOffset, 0, marker.markerLine);
+    insertionCountByAnchor.set(anchorIndex, insertionOffset + 1);
+  }
+
+  const merged = lines.join("\n");
+  if (hasTrailingNewLine && !merged.endsWith("\n")) {
+    return `${merged}\n`;
+  }
+  return merged;
 }
 
 projectAgileApi.get("/agile/sessions", async (c) => {
@@ -312,6 +452,7 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
   const content = await readTextFile(`${sessionDir}/${objectivePath}`);
   const etag = await objectiveEtagFromContent(content);
+  const revision = content === null ? null : await objectiveRevisionFromContent(content);
   if (etag !== null) {
     c.header("ETag", etag);
   }
@@ -319,6 +460,7 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   return c.json({
     content,
     path: objectivePath,
+    revision,
   });
 });
 
@@ -385,6 +527,84 @@ projectAgileApi.put("/agile/sessions/:agiId/objective", async (c) => {
   }
 });
 
+projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(body) || typeof body.content !== "string") {
+    return c.json({ error: "Content body must be a JSON object with string content" }, 400);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const ifMatch = c.req.header("If-Match");
+  const currentContent = await readTextFile(objectiveFile);
+  if (currentContent === null) {
+    return c.json({ error: "Objective not found" }, 404);
+  }
+
+  if (ifMatch) {
+    const currentEtag = await objectiveEtagFromContent(currentContent);
+    if (currentEtag === null || currentEtag !== ifMatch) {
+      return c.json({ error: "Objective has been modified" }, 409);
+    }
+  }
+
+  if (ifMatch) {
+    const latestContent = await readTextFile(objectiveFile);
+    const latestEtag = await objectiveEtagFromContent(latestContent);
+    if (latestEtag === null || latestEtag !== ifMatch) {
+      return c.json({ error: "Objective has been modified" }, 409);
+    }
+  }
+
+  const mergedContent = reinsertObjectiveMarkers(currentContent, body.content);
+  try {
+    await Deno.writeTextFile(objectiveFile, mergedContent);
+  } catch {
+    return c.json({ error: "Failed to write objective" }, 500);
+  }
+
+  const revision = await toSha256Hex(mergedContent);
+  const mtime = await objectiveMtimeFromFile(objectiveFile);
+  const etag = await objectiveEtagFromContent(mergedContent);
+  if (etag !== null) {
+    c.header("ETag", etag);
+  }
+
+  return c.json({
+    content: mergedContent,
+    path: objectivePath,
+    revision,
+    mtime,
+  });
+});
+
 projectAgileApi.get("/agile/:agiId/objective", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
@@ -414,7 +634,7 @@ projectAgileApi.get("/agile/:agiId/objective", async (c) => {
     return c.json({ error: "Objective not found" }, 404);
   }
 
-  const revision = await toSha256Hex(content);
+  const revision = await objectiveRevisionFromContent(content);
   const mtime = await objectiveMtimeFromFile(objectiveFile);
   return c.json({
     content,
@@ -422,6 +642,66 @@ projectAgileApi.get("/agile/:agiId/objective", async (c) => {
     revision,
     mtime,
   });
+});
+
+projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(payload) || typeof payload.content !== "string" || typeof payload.baseRevision !== "string") {
+    return c.json({ error: "content and baseRevision are required" }, 400);
+  }
+
+  const baseRevision = payload.baseRevision.trim();
+  if (baseRevision.length === 0) {
+    return c.json({ error: "baseRevision is required" }, 400);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const currentContent = await readTextFile(objectiveFile);
+  if (currentContent === null) {
+    return c.json({ error: "Objective not found" }, 404);
+  }
+
+  const currentRevision = await objectiveRevisionFromContent(currentContent);
+  if (baseRevision !== currentRevision) {
+    return c.json({ error: "Objective has been modified", revision: currentRevision }, 409);
+  }
+
+  try {
+    await Deno.writeTextFile(objectiveFile, payload.content);
+  } catch {
+    return c.json({ error: "Failed to write objective" }, 500);
+  }
+
+  const revision = await objectiveRevisionFromContent(payload.content);
+  return c.json({ success: true, revision });
 });
 
 projectAgileApi.get("/agile/:agiId/objective/comments", async (c) => {
