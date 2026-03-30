@@ -397,16 +397,16 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
       const result = await readJsonFile<Record<string, unknown>>(`${sprintsDir}/${sprintId}/result.json`);
       if (!result) return null;
       return {
-        sprint_id: sprintId,
         ...result,
+        sprint_id: sprintId,
       };
     }),
   );
 
-  const objectiveContent = await readTextFile(`${sessionDir}/objective/objective.md`);
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
   const objectiveVersion = asNumberOrNull(objectiveMeta.version);
   const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveContent = await readTextFile(`${sessionDir}/${objectivePath}`);
   const links = await readJsonFile<Record<string, unknown>>(`${sessionDir}/index/links.json`);
   const sessionResponse = {
     ...session,
@@ -953,7 +953,9 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/diff", async (c) => {
     return c.json({ error: "Session not found" }, 404);
   }
 
-  const objectiveContent = await readTextFile(`${sessionDir}/objective/objective.md`);
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveContent = await readTextFile(`${sessionDir}/${objectivePath}`);
   if (objectiveContent === null) {
     return c.json({ error: "Objective not found" }, 404);
   }
@@ -973,7 +975,6 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/diff", async (c) => {
     changed = snapshot !== null && snapshot !== objectiveContent;
   }
 
-  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
   const objectiveVersion = asNumberOrNull(objectiveMeta.version) ?? snapshotVersion ?? 0;
 
   return c.json({
