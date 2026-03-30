@@ -1,6 +1,7 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { resolveBaseDir } from "../config.ts";
-import { dirExists, listDirs, readJsonFile, readTextFile } from "../utils.ts";
+import { broadcastSse } from "../sse.ts";
+import { dirExists, listDirs, readJsonFile, readTextFile, writeJsonFile } from "../utils.ts";
 
 const projectAgileApi = new Hono();
 
@@ -18,6 +19,24 @@ type SessionJson = Record<string, unknown> & {
   queue?: unknown;
   refs?: unknown;
   objective?: unknown;
+};
+
+type ObjectiveCommentStatus = "open" | "resolved";
+
+type ObjectiveComment = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  status: ObjectiveCommentStatus;
+  tags: string[];
+};
+
+type ObjectiveCommentsFile = {
+  docPath: string;
+  docRevision: string | null;
+  updatedAt: string;
+  comments: ObjectiveComment[];
 };
 
 function isValidAgiId(value: string): boolean {
@@ -53,6 +72,15 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function isCommentStatus(value: unknown): value is ObjectiveCommentStatus {
+  return value === "open" || value === "resolved";
+}
+
 async function toSha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -82,6 +110,80 @@ async function listObjectiveSnapshotVersions(historyDir: string): Promise<number
 
   versions.sort((a, b) => a - b);
   return versions;
+}
+
+function objectiveCommentsPathFromObjectivePath(objectivePath: string): string {
+  const normalized = objectivePath.replace(/\\/g, "/");
+  const slashIndex = normalized.lastIndexOf("/");
+  if (slashIndex === -1) {
+    return "objective.comments.json";
+  }
+  const directory = normalized.slice(0, slashIndex);
+  return `${directory}/objective.comments.json`;
+}
+
+function normalizeObjectiveComment(entry: unknown): ObjectiveComment | null {
+  if (!isRecord(entry)) return null;
+  const id = asStringOrNull(entry.id);
+  const author = asStringOrNull(entry.author);
+  const body = asStringOrNull(entry.body);
+  const createdAt = asStringOrNull(entry.createdAt);
+  const status = entry.status;
+  if (!id || !author || !body || !createdAt || !isCommentStatus(status)) {
+    return null;
+  }
+  return {
+    id,
+    author,
+    body,
+    createdAt,
+    status,
+    tags: asStringArray(entry.tags),
+  };
+}
+
+async function objectiveRevisionFromFile(objectiveFile: string): Promise<string | null> {
+  const content = await readTextFile(objectiveFile);
+  if (content === null) return null;
+  return await toSha256Hex(content);
+}
+
+async function objectiveMtimeFromFile(objectiveFile: string): Promise<string | null> {
+  try {
+    const stat = await Deno.stat(objectiveFile);
+    return stat.mtime ? stat.mtime.toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadObjectiveComments(
+  commentsFile: string,
+  objectivePath: string,
+  objectiveRevision: string | null,
+): Promise<ObjectiveCommentsFile> {
+  const initialState: ObjectiveCommentsFile = {
+    docPath: objectivePath,
+    docRevision: objectiveRevision,
+    updatedAt: new Date().toISOString(),
+    comments: [],
+  };
+
+  const loaded = await readJsonFile<Record<string, unknown>>(commentsFile);
+  if (!loaded) {
+    return initialState;
+  }
+
+  const comments = Array.isArray(loaded.comments)
+    ? loaded.comments.map(normalizeObjectiveComment).filter((item): item is ObjectiveComment => item !== null)
+    : [];
+
+  return {
+    docPath: asStringOrNull(loaded.docPath) ?? objectivePath,
+    docRevision: asStringOrNull(loaded.docRevision) ?? objectiveRevision,
+    updatedAt: asStringOrNull(loaded.updatedAt) ?? initialState.updatedAt,
+    comments,
+  };
 }
 
 projectAgileApi.get("/agile/sessions", async (c) => {
@@ -281,6 +383,230 @@ projectAgileApi.put("/agile/sessions/:agiId/objective", async (c) => {
   } catch {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
+});
+
+projectAgileApi.get("/agile/:agiId/objective", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const content = await readTextFile(objectiveFile);
+  if (content === null) {
+    return c.json({ error: "Objective not found" }, 404);
+  }
+
+  const revision = await toSha256Hex(content);
+  const mtime = await objectiveMtimeFromFile(objectiveFile);
+  return c.json({
+    content,
+    path: objectivePath,
+    revision,
+    mtime,
+  });
+});
+
+projectAgileApi.get("/agile/:agiId/objective/comments", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const commentsFile = `${sessionDir}/${objectiveCommentsPathFromObjectivePath(objectivePath)}`;
+  const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
+  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
+  return c.json(commentsState);
+});
+
+projectAgileApi.post("/agile/:agiId/objective/comments", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(payload)) {
+    return c.json({ error: "Request body must be an object" }, 400);
+  }
+
+  const commentBody = asStringOrNull(payload.body)?.trim();
+  if (!commentBody) {
+    return c.json({ error: "body is required" }, 400);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const commentsPath = objectiveCommentsPathFromObjectivePath(objectivePath);
+  const commentsFile = `${sessionDir}/${commentsPath}`;
+  const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
+  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
+
+  const now = new Date().toISOString();
+  const comment: ObjectiveComment = {
+    id: crypto.randomUUID(),
+    author: asStringOrNull(payload.author)?.trim() || "anonymous",
+    body: commentBody,
+    createdAt: now,
+    status: "open",
+    tags: asStringArray(payload.tags),
+  };
+
+  const nextState: ObjectiveCommentsFile = {
+    docPath: objectivePath,
+    docRevision: objectiveRevision,
+    updatedAt: now,
+    comments: [...commentsState.comments, comment],
+  };
+
+  const commentsDir = commentsFile.slice(0, commentsFile.lastIndexOf("/"));
+  try {
+    await Deno.mkdir(commentsDir, { recursive: true });
+  } catch {
+    // directory may already exist
+  }
+  const saved = await writeJsonFile(commentsFile, nextState);
+  if (!saved) {
+    return c.json({ error: "Failed to persist objective comments" }, 500);
+  }
+
+  broadcastSse({
+    type: "objective_comment_added",
+    projectId: c.req.param("projectId"),
+    sessionId: agiId,
+    data: {
+      agiId,
+      docPath: objectivePath,
+      docRevision: objectiveRevision,
+      comment,
+      timestamp: now,
+    },
+  });
+
+  return c.json({ id: comment.id, comment }, 201);
+});
+
+projectAgileApi.patch("/agile/:agiId/objective/comments/:commentId", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(payload) || !isCommentStatus(payload.status)) {
+    return c.json({ error: "status must be either open or resolved" }, 400);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectiveFile = `${sessionDir}/${objectivePath}`;
+  const commentsFile = `${sessionDir}/${objectiveCommentsPathFromObjectivePath(objectivePath)}`;
+  const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
+  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
+  const commentId = c.req.param("commentId");
+  const index = commentsState.comments.findIndex((item) => item.id === commentId);
+  if (index === -1) {
+    return c.json({ error: "Comment not found" }, 404);
+  }
+
+  const now = new Date().toISOString();
+  const updatedComment: ObjectiveComment = {
+    ...commentsState.comments[index],
+    status: payload.status,
+  };
+
+  const nextComments = [...commentsState.comments];
+  nextComments[index] = updatedComment;
+
+  const saved = await writeJsonFile(commentsFile, {
+    docPath: objectivePath,
+    docRevision: objectiveRevision,
+    updatedAt: now,
+    comments: nextComments,
+  } satisfies ObjectiveCommentsFile);
+  if (!saved) {
+    return c.json({ error: "Failed to persist objective comments" }, 500);
+  }
+
+  return c.json({ ok: true, comment: updatedComment });
 });
 
 projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective", async (c) => {

@@ -12,6 +12,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer';
+import { ObjectiveCommentsPanel } from '@/views/ObjectiveCommentsPanel';
 import { ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
 
 interface AgileSessionSummary {
@@ -646,6 +647,26 @@ export function AgileView() {
 
   useEffect(() => {
     if (!projectId || !lastSseEvent) return;
+
+    if (lastSseEvent.type === 'objective_changed') {
+      const eventSessionId =
+        (lastSseEvent as { sessionId?: string }).sessionId
+        ?? (lastSseEvent as { session_id?: string }).session_id
+        ?? (lastSseEvent as { data?: { agiId?: string } }).data?.agiId;
+
+      if (selectedSessionId && (!eventSessionId || eventSessionId === selectedSessionId)) {
+        requestObjective(selectedSessionId)
+          .then((content) => {
+            setObjectiveContent(content);
+            setObjectiveError(null);
+          })
+          .catch((err) => {
+            console.error('SSE re-fetch objective failed:', err);
+          });
+      }
+      return;
+    }
+
     if (lastSseEvent.type !== 'agile_update') return;
 
     requestSessions()
@@ -1023,87 +1044,100 @@ export function AgileView() {
 
               <ScrollArea className="flex-1 min-h-0">
                 <div className="p-4 space-y-4">
-                  <TabsContent value="objective" className="mt-0 outline-none space-y-4">
-                    <Card>
-                      <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                        <div>
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <FileText className="h-4 w-4" /> Objective
-                          </CardTitle>
-                          <CardDescription>
-                            세션의 목표와 요구사항
-                          </CardDescription>
-                        </div>
-                        {objectiveContent !== null && !isObjectiveEditMode && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setObjectiveEditValue(objectiveContent || '');
-                              setIsObjectiveEditMode(true);
-                              setStatusMessage(null);
-                            }}
-                            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </CardHeader>
-                      <CardContent>
-                        {statusMessage && (
-                          <div className={`mb-4 px-3 py-2 text-sm rounded-md ${
-                            statusMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
-                          }`}>
-                            {statusMessage.text}
-                          </div>
-                        )}
-                        
-                        {objectiveLoading ? (
-                          <Skeleton className="h-40 w-full" />
-                        ) : objectiveError ? (
-                          <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
-                            {objectiveError}
-                          </div>
-                        ) : isObjectiveEditMode ? (
-                          <div className="space-y-4">
-                            <textarea
-                              className="flex min-h-[300px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                              value={objectiveEditValue}
-                              onChange={(e) => setObjectiveEditValue(e.target.value)}
-                            />
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={handleSaveObjective}
-                                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2"
-                              >
-                                Save
-                              </button>
+                  <TabsContent value="objective" className="mt-0 outline-none">
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 h-full items-start">
+                      <div className="xl:col-span-2 space-y-4">
+                        <Card>
+                          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                            <div>
+                              <CardTitle className="text-base flex items-center gap-2">
+                                <FileText className="h-4 w-4" /> Objective
+                              </CardTitle>
+                              <CardDescription>
+                                세션의 목표와 요구사항
+                              </CardDescription>
+                            </div>
+                            {objectiveContent !== null && !isObjectiveEditMode && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setIsObjectiveEditMode(false);
+                                  setObjectiveEditValue(objectiveContent || '');
+                                  setIsObjectiveEditMode(true);
                                   setStatusMessage(null);
                                 }}
                                 className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
                               >
-                                Cancel
+                                Edit
                               </button>
-                            </div>
-                          </div>
-                        ) : objectiveContent !== null ? (
-                          <>
-                            <div className="rounded-md border p-4 bg-background">
-                              <MarkdownRenderer content={objectiveContent} />
-                            </div>
-                            {renderDodStatus(objectiveContent)}
-                          </>
+                            )}
+                          </CardHeader>
+                          <CardContent>
+                            {statusMessage && (
+                              <div className={`mb-4 px-3 py-2 text-sm rounded-md ${
+                                statusMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}>
+                                {statusMessage.text}
+                              </div>
+                            )}
+                            
+                            {objectiveLoading ? (
+                              <Skeleton className="h-40 w-full" />
+                            ) : objectiveError ? (
+                              <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
+                                {objectiveError}
+                              </div>
+                            ) : isObjectiveEditMode ? (
+                              <div className="space-y-4">
+                                <textarea
+                                  className="flex min-h-[300px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  value={objectiveEditValue}
+                                  onChange={(e) => setObjectiveEditValue(e.target.value)}
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleSaveObjective}
+                                    className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsObjectiveEditMode(false);
+                                      setStatusMessage(null);
+                                    }}
+                                    className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : objectiveContent !== null ? (
+                              <>
+                                <div className="rounded-md border p-4 bg-background">
+                                  <MarkdownRenderer content={objectiveContent} />
+                                </div>
+                                {renderDodStatus(objectiveContent)}
+                              </>
+                            ) : (
+                              <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
+                                objective.md가 없습니다
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
+                      <div className="xl:col-span-1 h-[600px] xl:h-[calc(100vh-250px)] sticky top-0">
+                        {selectedSessionId ? (
+                          <ObjectiveCommentsPanel agiId={selectedSessionId} />
                         ) : (
-                          <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
-                            objective.md가 없습니다
-                          </div>
+                          <Card className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/5">
+                            세션을 선택하세요
+                          </Card>
                         )}
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   </TabsContent>
 
                   <TabsContent value="timeline" className="mt-0 outline-none">

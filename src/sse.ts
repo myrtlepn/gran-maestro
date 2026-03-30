@@ -12,6 +12,58 @@ import {
 const activeSenders: Set<(event: SSEEvent) => void> = new Set();
 const completedAlerts = new Set<string>();
 
+export function broadcastSse(event: SSEEvent): void {
+  for (const send of activeSenders) {
+    try {
+      send(event);
+    } catch {
+      // ignore per-connection failures
+    }
+  }
+}
+
+async function toSha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function buildObjectiveChangedEvent(
+  relativePath: string,
+  absolutePath: string,
+  kind: string,
+  projectId?: string,
+): Promise<SSEEvent | null> {
+  const normalized = relativePath.replace(/\\/g, "/");
+  const match = normalized.match(
+    /(?:^|\/)(?:\.gran-maestro\/)?agile\/(AGI-[^/]+)\/objective\/objective\.md$/,
+  );
+  if (!match) {
+    return null;
+  }
+
+  let revision: string | null = null;
+  if (kind !== "remove") {
+    try {
+      revision = await toSha256Hex(await Deno.readTextFile(absolutePath));
+    } catch {
+      revision = null;
+    }
+  }
+
+  return {
+    type: "objective_changed",
+    projectId,
+    sessionId: match[1],
+    data: {
+      path: relativePath,
+      kind,
+      agiId: match[1],
+      revision,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
 const sseApi = new Hono();
 sseApi.get("/events", async (c) => {
   // Auth check is handled by middleware already
@@ -82,6 +134,15 @@ sseApi.get("/events", async (c) => {
                   state.pendingPaths.clear();
                   for (const [p, kind] of pending) {
                     const relPath = stripBasePath(p, state.baseDir);
+                    const objectiveChangedEvent = await buildObjectiveChangedEvent(
+                      relPath,
+                      p,
+                      kind,
+                      state.projectId,
+                    );
+                    if (objectiveChangedEvent) {
+                      send(objectiveChangedEvent);
+                    }
                     const sseEvent = classifyFsEvent(
                       relPath,
                       kind,
@@ -147,9 +208,7 @@ sseApi.get("/events", async (c) => {
 
 sseApi.post("/notify", async (c) => {
   const body = await c.req.json();
-  for (const send of activeSenders) {
-    try { send(body as SSEEvent); } catch { /* ignore */ }
-  }
+  broadcastSse(body as SSEEvent);
   return c.json({ ok: true });
 });
 
