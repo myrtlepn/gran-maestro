@@ -993,6 +993,19 @@ plan 주제, 요청 텍스트, 결정사항 섹션을 대상으로 아래 두 �
   - PM이 `mst:stitch`를 자동 호출해 시안을 초안에 반영
 - **미감지** → Stitch 단계 없이 진행
 
+#### Agile 컨텍스트 감지 (Step 4 진입 시, MANDATORY + graceful)
+
+1. 현재 plan 입력 args 본문에 아래 3개 태그가 모두 존재하는지 검사한다:
+   - `[고정층]`
+   - `[활성층]`
+   - `[변화층]`
+2. 3개 태그가 모두 있으면 `agile_context_active=true`, 없으면 `agile_context_active=false`로 처리한다.
+3. `agile_context_active=true`일 때:
+   - `[고정층] 목적 파일:` 라인에서 objective.md 경로를 추출해 `objective_context_path`로 보관한다.
+   - objective.md를 Read하여 JTBD 요약, 프로젝트 DoD 전체 항목, 성공 지표를 추출해 `objective_context`로 보관한다.
+   - objective.md가 없거나 파싱 실패하면 `objective_context_path`만 유지하고 세부 항목은 `[미확인]`으로 표기한다 (워크플로우 차단 금지).
+4. `agile_context_active=false`이면 `objective_context` 처리 전체를 skip한다 (하위 호환).
+
 #### Step 4.1: 테스트 흐름 수집 (브라우저 테스트 "진행" 선택 시 MANDATORY)
 
 > 이 단계는 브라우저 테스트 `enabled: true` 확정 직후에만 실행한다.
@@ -1084,6 +1097,24 @@ PM이 자율 추론한 테스트 흐름을 AskUserQuestion 없이 바로 확정�
      - When I: [어떤 상황에서]
      - I want to: [무엇을 하고 싶은지]
      - So I can: [어떤 목적/가치를 달성할 수 있는지]
+   - **`## Objective 컨텍스트` 섹션** (`agile_context_active=true`일 때만 조건부 생성):
+     - objective.md 파일 경로: `{objective_context_path}`
+     - JTBD 요약: `{objective_jtbd_summary}`
+     - 프로젝트 DoD 전체 항목: `{objective_project_dod_items}`
+     - 성공 지표: `{objective_success_metrics}`
+     - 섹션 예시:
+       ```markdown
+       ## Objective 컨텍스트
+       - objective.md: {objective_context_path}
+       - JTBD 요약: {objective_jtbd_summary}
+       - 프로젝트 DoD:
+         - {objective_project_dod_item_1}
+         - {objective_project_dod_item_2}
+       - 성공 지표:
+         - {objective_success_metric_1}
+         - {objective_success_metric_2}
+       ```
+     - `agile_context_active=false`이면 이 섹션을 생성하지 않는다 (하위 호환).
    - UI 감지 시 `## 브라우저 테스트` 섹션 추가:
      - `enabled: true | false`
      - `execution_phase: review-pass-a`
@@ -1132,6 +1163,15 @@ PM이 자율 추론한 테스트 흐름을 AskUserQuestion 없이 바로 확정�
      - **"스티치로 디자인 시안 보기"** *(UI 키워드 감지 시에만 표시)*: Stitch로 디자인 시안을 생성하고 plan에 통합
    - `AUTO_MODE=true`: `AskUserQuestion` 없이 **"저장하고 /mst:request 실행"** 경로를 기본값으로 즉시 진행 (직접 구현 아님 — REQ 생성+spec.md 작성으로 이동. 규모·복잡도와 무관하게 이 경로만 허용)
 4. 저장 선택 시 `plans/PLN-NNN/plan.md` 작성; `debug_context` 활성 시 `plan.json`에 `"linked_debug"` 추가
+
+   #### linked_objective 기록 (agile 컨텍스트 전용, MANDATORY)
+
+   - `agile_context_active=true`일 때만 `plan.json`에 `"linked_objective"` 필드를 추가한다.
+   - 값 결정 규칙:
+     1. `objective_context_path`에서 `/agile/(AGI-\d+)/objective/objective.md` 패턴으로 AGI ID를 추출한다.
+     2. 추출 성공 시: `"linked_objective": "AGI-NNN"` 기록
+     3. 추출 실패 시: `"linked_objective": null` 기록 (graceful fallback)
+   - `agile_context_active=false`이면 `"linked_objective"`를 기록하지 않는다 (기존 동작 유지, 하위 호환).
 
    #### AUTO_MODE next_action 기록 (MANDATORY)
 

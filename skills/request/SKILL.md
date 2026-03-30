@@ -335,6 +335,11 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - `--plan PLN-NNN` 또는 자연어 `PLN-NNN` 또는 `resolved_plan_id` 감지 시 `plans/PLN-NNN/plan.json` + `plan.md` Read
       - plan Read 성공 시: `request.json`에 `source_plan: "PLN-NNN"` 기록; `plan.json`의 `linked_requests`에 REQ-NNN 추가, `status` `active` → `in_progress`
       - plan.md 결정사항·범위·제약을 Phase 1 인풋으로 사용
+      - **Objective 컨텍스트 감지 (MANDATORY, graceful)**:
+        - plan.md에 `## Objective 컨텍스트` 섹션이 존재하면 해당 섹션을 파싱해 `objective_context` 변수로 보관한다.
+          - 저장 필드: `objective_md_path`, `jtbd_summary`, `project_dod_items[]`, `success_metrics[]`
+        - 섹션이 없으면 `objective_context=null`로 처리하고 기존 플로우를 유지한다 (하위 호환).
+        - 섹션은 있으나 일부 항목이 비어 있으면 가능한 항목만 보관하고 나머지는 빈값으로 둔다 (비차단).
       - **plan type 전략 감지 (MANDATORY, plan.json Read 직후)**:
         - `plan_type = plan.json.type` (`type` 필드 미존재 시 `"code"`)
         - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
@@ -786,6 +791,8 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - `[IMPACT]` PAC도 일반 PAC와 동일하게 Coverage를 추적한다 (`Mapped Spec AC IDs` 비우지 않음 권장).
       - **`## §0 Context Manifest` 자동 채움 규칙 (MANDATORY)**:
         - Step d에서 수집한 `context_manifest_files`를 bullet 목록으로 삽입한다.
+        - `objective_context.objective_md_path`가 있으면 해당 경로를 `context_manifest_files`에 dedupe 추가한다.
+        - `objective_context`가 없거나 경로가 비어 있으면 objective 경로 추가를 skip한다 (graceful fallback).
         - `--plan`이 없는 경우에도 동일 규칙 적용: Step 1c 탐색 결과 + 요청 분석 기반으로 `context_manifest_files`를 구성한다.
         - §0 본문 가이드라인 문구(완전하지 않을 수 있음 + 자율 탐색 유지)는 템플릿 문구를 그대로 유지한다.
         - 최종 spec.md의 §0 목록은 최소 1개 이상 파일 경로를 포함해야 한다.
@@ -798,6 +805,14 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
           - `last_modified`
           - `spec_generated_at`
         - `intent_context_active=false`면 §3.2 섹션 전체를 skip한다 (에러 아님).
+      - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**:
+        - `objective_context`가 존재하고 `project_dod_items[]`가 1개 이상일 때만 §3.4를 생성한다.
+        - 매핑 방향은 반드시 DoD→AC로 작성한다.
+        - 표 형식:
+          - `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`
+        - 각 DoD 항목은 최소 1개 AC와 매핑을 시도한다.
+        - 매핑 가능한 AC가 없으면 `Mapped Spec AC IDs`에 `[UNMAPPED]`, `Coverage`에 `Gap`으로 기록한다.
+        - `objective_context`가 없거나 `project_dod_items[]`가 비어 있으면 §3.4 전체를 skip한다 (graceful fallback, 하위 호환).
    h-0.7. **Regression Test 선행 태스크 생성** (Step h-1 이전, MANDATORY):
       - 목적: 기존 코드 수정 REQ에서 코드 변경 전에 **기존 동작 보존 회귀 검증** 태스크를 선행 배치한다.
       - 트리거 조건(모두 충족 시 생성):

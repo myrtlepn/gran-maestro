@@ -250,6 +250,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 | 계층 | 내용 | 출처 |
 |------|------|------|
 | **고정층** | objective.md의 JTBD + Epic DoD 전체 맥락 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
+| **프로젝트 DoD** | objective.md의 프로젝트 수준 DoD 전체 항목 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
+| **성공 지표** | objective.md의 성공 지표 전체 항목 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md` |
 | **활성층** | 현재 Epic + 미완료 required DoD 항목 | `objective-check --json`의 `incomplete` + objective 파싱 |
 | **변화층** | 직전 Sprint 결과 요약 | `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md` |
 
@@ -265,8 +267,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 Skill(skill: "mst:plan", args: "-a {JIT_STORY_DESC}
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 현재 Epic: {EPIC_ID} | 미완료 DoD: {INCOMPLETE_DOD_LIST} | 이번 JIT Story: {JIT_STORY_ID}
-[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md")
+[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
+[제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL} | 산출물 형태: {DELIVERABLE_SHAPE_LITERAL}")
 ```
+
+`PROJECT_DOD_LIST_LITERAL`/`SUCCESS_METRICS_LITERAL`/`DELIVERABLE_SHAPE_LITERAL` 추출에 실패하거나 항목이 비어 있으면 `"N/A"`로 채워 전달한다 (graceful fallback, 하위 호환).
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
@@ -341,8 +346,11 @@ plan -a 호출 전 3계층 컨텍스트를 구성한다:
 Skill(skill: "mst:plan", args: "-a {STORY_DESCRIPTION}
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 대상: {STORY_ID} — {STORY_TITLE} | deps: {DEPS_LIST} | AC: {AC_LIST}
-[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md")
+[변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
+[제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL} | 산출물 형태: {DELIVERABLE_SHAPE_LITERAL}")
 ```
+
+`PROJECT_DOD_LIST_LITERAL`/`SUCCESS_METRICS_LITERAL`/`DELIVERABLE_SHAPE_LITERAL`이 미존재해도 실패로 처리하지 않고 `"N/A"`로 전달해 기존 story 모드 루프를 유지한다 (graceful fallback).
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
@@ -551,17 +559,24 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 **감지 절차**:
 
 1. 스프린트에서 변경된 파일 목록 추출 (`git diff --name-only`)
-2. objective.md의 활성 Epic/Story/DoD 항목과 변경 파일의 관련성 및 **정합성** 확인
+2. objective.md의 활성 Epic/Story/DoD 항목과 변경 파일의 관련성 확인
    - 관련 없는 변경이 80% 이상인 경우: **drift 경고**
-3. drift 감지 시 아래 메시지 출력:
+3. **형태 정합성 검증** (관련성 체크 직후, MANDATORY):
+   - objective.md의 프로젝트 DoD 항목에서 이번 작업의 기대 산출물 유형(`DELIVERABLE_SHAPE_EXPECTED`)을 추출한다.
+   - 변경된 파일의 구조/형태(`DELIVERABLE_SHAPE_OBSERVED`)가 기대 유형과 부합하는지 LLM 판단으로 검증한다.
+   - 미부합 시 drift 경고 태그에 `[형태 불일치]`를 추가한다.
+   - 프로젝트 DoD 또는 산출물 유형 정보가 없으면 형태 정합성 검증은 skip하고 관련성 판정만으로 계속 진행한다 (graceful fallback).
+4. drift 감지 시 아래 메시지 출력:
    ```
    [drift 감지] Sprint {N}
    - 변경 파일: {파일 목록}
    - 목표 단위: {WORK_ITEM_ID} — {WORK_ITEM_TITLE}
    - 관련성: 관련|무관
+   - 형태 정합성: 부합|미부합|정보부족
+   - 태그: [형태 불일치]|(없음)
    - 판정: 정상|경고|비상
    ```
-4. **연속 2회 이상** drift 경고 발생 시: 비상 스티어링 트리거 → Step 3 즉시 진입
+5. **연속 2회 이상** drift 경고 발생 시: 비상 스티어링 트리거 → Step 3 즉시 진입
 
 ### 자동 중단 트리거
 
