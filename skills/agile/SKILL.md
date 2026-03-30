@@ -58,6 +58,12 @@ argument-hint: "{프로젝트 목표(JTBD+Epic(DoD 체크리스트) 기반) 또�
 - LLM이 objective.md를 직접 Write/Edit로 수정하는 행위.
 - `mst.py agile objective-transition` / `objective-check` 우회.
 - Step 0(세션 초기화) 없이 바로 objective 생성으로 진입.
+- 스프린트 횟수/완료 시점을 예측·확정·암시하는 표현을 objective/plan 입력/중간 보고/스티어링 보고에 기재하는 행위.
+- objective.md에 "예상 스프린트", "N회 스프린트", "X주 내 완료" 등 필드/문장을 추가하는 행위.
+- `plan -a` 입력, 중간 보고, 스티어링 보고에서 잔여 스프린트 수/완료 예정 스프린트 표현을 전달·기재하는 행위.
+- 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
+- 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
+- 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, Epic 간 상대적 복잡도 비교, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
 
 
 ## 실행 프로토콜
@@ -284,6 +290,7 @@ Skill(skill: "mst:plan", args: "-a {JIT_STORY_DESC}
 
 `PROJECT_DOD_LIST_LITERAL`/`SUCCESS_METRICS_LITERAL`/`DELIVERABLE_SHAPE_LITERAL` 추출에 실패하거나 항목이 비어 있으면 `"N/A"`로 채워 전달한다 (graceful fallback, 하위 호환).
 `RETRO_BLOCK_LITERAL`은 직전 retrospective 부재 시 `"N/A"`, `KNOWN_ISSUES_BLOCK_LITERAL`은 open issue 부재 시 `"none"`으로 채워 전달한다.
+- `plan -a` 입력에는 잔여 스프린트 수/완료 예정 스프린트/완료 시점 예측 표현(예: "2스프린트 남음", "3주 내 완료")을 포함하지 않는다.
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
@@ -419,6 +426,7 @@ Skill(skill: "mst:plan", args: "-a {STORY_DESCRIPTION}
 ```
 
 `PROJECT_DOD_LIST_LITERAL`/`SUCCESS_METRICS_LITERAL`/`DELIVERABLE_SHAPE_LITERAL`이 미존재해도 실패로 처리하지 않고 `"N/A"`로 전달해 기존 story 모드 루프를 유지한다 (graceful fallback).
+- `plan -a` 입력에는 잔여 스프린트 수/완료 예정 스프린트/완료 시점 예측 표현(예: "2스프린트 남음", "3주 내 완료")을 포함하지 않는다.
 
 서브스킬 종료 마커 확인: `[MST skill=plan step=returned return_to=agile/2]`
 
@@ -769,3 +777,5 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "간단한 목표니 Step 1 절차를 생략해도 된다." | 확인 증거: Step 1에서 `Skill(skill: "mst:agile-plan", ...)` 호출 로그와 반환 마커가 존재.
 - 합리화 패턴: "objective.md가 이미 있으니 직접 편집해도 된다." | 확인 증거: 상태 변경 시 항상 `mst.py agile objective-transition` 실행 로그 존재.
 - 합리화 패턴: "Step 0 없이 바로 생성으로 진행해도 된다." | 확인 증거: `mst.py agile status`(resume) 또는 `mst:agile-plan`(신규) 실행 로그가 Step 0~1 흐름에 존재.
+- 합리화 패턴: "대략 N 스프린트면 되니 계획/보고에 넣어도 된다." | 확인 증거: objective.md, plan 입력, 중간/스티어링 보고 산출물 전체에서 스프린트 횟수 예측 문구 0건.
+- 합리화 패턴: "횟수가 아니라 규모/기간 추정이므로 허용된다." | 확인 증거: 캘린더 변환/반복 횟수 암시 표현이 산출물 전체에서 0건.
