@@ -2337,6 +2337,24 @@ def cmd_agile_result(args):
         },
     )
 
+    # Auto-update index/links.json when PLN/REQ IDs are provided
+    if pln_ids or req_ids:
+        links_path = _agi_links_path(agi_id)
+        links = load_json(links_path) or {}
+        if not isinstance(links, dict):
+            links = {}
+        links["agi_id"] = agi_id
+        links.setdefault("pln", [])
+        links.setdefault("req", [])
+        for plan_id in pln_ids:
+            if plan_id not in links["pln"]:
+                links["pln"].append(plan_id)
+        for req_id in req_ids:
+            if req_id not in links["req"]:
+                links["req"].append(req_id)
+        links["updated_at"] = _now_iso()
+        save_json(links_path, links)
+
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -2430,7 +2448,11 @@ def cmd_agile_retrospective(args):
         else "- 없음"
     )
     template_path = _plugin_root() / "templates" / "retrospective.md"
-    template_content = template_path.read_text(encoding="utf-8")
+    try:
+        template_content = template_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        print(f"Error: retrospective template not found: {template_path} ({e})", file=sys.stderr)
+        return 1
     replacements = {
         "SPRINT_ID": sprint_id,
         "STATUS": str(payload["status"]),

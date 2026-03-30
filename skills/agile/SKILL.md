@@ -177,6 +177,18 @@ Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --
 
 **목표**: 프로젝트의 테스트 러너/프레임워크를 감지하고, smoke test 1개 이상이 통과한 것을 확인한 후 Sprint 1로 진입한다.
 
+##### 2.1.0 Sprint 0 시작 기록 (MANDATORY)
+
+Sprint 0 진입 즉시 `in_progress` 상태의 result를 기록하여 대시보드 타임라인에 표시한다:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+  --sprint 0 \
+  --status in_progress \
+  --summary "테스트 환경 구축 중" \
+  --json
+```
+
 ##### 2.1.1 테스트 러너 감지
 
 아래 파일을 순서대로 확인하여 테스트 러너를 감지한다:
@@ -212,6 +224,19 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 1. 감지된 `TEST_RUNNER`로 smoke test 실행하여 **최소 1개 테스트 통과** 확인
 2. 통과 시:
    - `[Sprint 0] smoke test 통과 — Sprint 1 진입 조건 충족` 출력
+   - Sprint 0 결과 기록 (완료):
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+       --sprint 0 \
+       --status done \
+       --planned "테스트 환경 구축" \
+       --completed "테스트 환경 구축" \
+       --pln {PLN_ID_IF_EXISTS} \
+       --req {REQ_ID_IF_EXISTS} \
+       --summary "smoke test 통과" \
+       --json
+     ```
+     - `PLN_ID_IF_EXISTS` / `REQ_ID_IF_EXISTS`: Sprint 0에서 `mst:plan`을 호출하여 PLN/REQ가 생성된 경우에만 전달. 테스트 환경이 이미 존재하여 plan 호출 없이 통과한 경우 `--pln`/`--req` 인자를 생략한다.
    - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --current-sprint 1 --json` 실행
    - `CURRENT_SPRINT=1` 설정 후 Sprint N 루프(2.2)로 진입
 3. 실패 시:
@@ -250,6 +275,17 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 **목표**: Epic의 미완료 required DoD 항목을 Sprint마다 JIT Story 1개로 전환하여 점진 완료한다.
 
 ###### 2.2-E.1 JIT Story 도출 (Sprint 시작)
+
+**Sprint 시작 기록 (MANDATORY)**: JIT Story 도출 직후 `in_progress` result를 즉시 기록한다:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status in_progress \
+  --planned "{JIT_STORY_ID}" \
+  --summary "{JIT_STORY_DESC}" \
+  --json
+```
 
 직전 result + Epic 현재 상태를 사용해 이번 Sprint의 Story 1개를 도출한다.
 
@@ -315,6 +351,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
      - `agile.retrospective.enabled` (기본 `true`)
      - `agile.retrospective.max_fix_sprint_depth` (기본 `2`)
      - `agile.retrospective.agents` (provider별 `{count,tier}`)
+   - `FIX_SPRINT_DEPTH=0`으로 초기화한다 (각 스프린트 회고 시작 시 리셋).
    - `enabled=true`면 독립 검토를 dispatch한다. dispatch 규칙은 기존 `debug.agents` 패턴과 동일하게 `count>0` provider만 순회한다.
 ```text
 for provider in [codex, gemini, claude]:
@@ -399,6 +436,17 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 ```text
 [Sprint {CURRENT_SPRINT}] 선택된 story: {STORY_ID} — {story 제목} (priority: {priority})
+```
+
+**Sprint 시작 기록 (MANDATORY)**: Story 선정 직후 `in_progress` result를 즉시 기록한다:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --status in_progress \
+  --planned "{STORY_ID}" \
+  --summary "{STORY_TITLE}" \
+  --json
 ```
 
 ###### 2.2-S.2 컨텍스트 전달 3계층 구성 (DSC-044)
@@ -562,6 +610,12 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 | S{N}     | ...  | ...  | ...    | ...    |
 
 회고 요약 (최근 {STEERING_EVERY} 스프린트)
+
+데이터 수집 절차:
+1. 최근 `STEERING_EVERY` 스프린트의 `retrospective.md`를 각각 Read하여 `lessons_learned`, `limitations`, `direction`을 추출한다.
+2. `python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --json`으로 전체 이슈를 조회하고 `status`별 카운트를 산출한다.
+3. 추출 결과를 아래 템플릿에 채운다.
+
 - lessons learned: {RETRO_LESSONS_SUMMARY}
 - limitations 추이: {RETRO_LIMITATIONS_TREND}
 - known issues: open {KNOWN_ISSUES_OPEN_COUNT} / resolved {KNOWN_ISSUES_RESOLVED_COUNT}

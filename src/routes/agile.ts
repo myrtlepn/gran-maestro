@@ -637,25 +637,25 @@ projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective", as
 projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective-md", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
-    return c.text("Project not found", 404);
+    return c.json({ error: "Project not found" }, 404);
   }
 
   const agiId = c.req.param("agiId");
   if (!isValidAgiId(agiId)) {
-    return c.text("Invalid AGI id", 400);
+    return c.json({ error: "Invalid AGI id" }, 400);
   }
 
   const sprintId = c.req.param("sprintId").toUpperCase();
   if (!isValidSprintId(sprintId)) {
-    return c.text("Invalid sprint id", 400);
+    return c.json({ error: "Invalid sprint id" }, 400);
   }
 
   const content = await readTextFile(
     `${baseDir}/agile/${agiId}/sprints/${sprintId}/retrospective.md`
   );
-  
+
   if (content === null) {
-    return c.text("Retrospective not found", 404);
+    return c.json({ error: "Retrospective not found" }, 404);
   }
   return c.text(content);
 });

@@ -468,6 +468,7 @@ export function AgileView() {
       
       return await response.text();
     } catch (err) {
+      console.error('Failed to fetch retrospective markdown:', err);
       return null;
     }
   }, [projectId]);
