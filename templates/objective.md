@@ -27,19 +27,10 @@
 
 ---
 
-## Epic 의존성 / 순서
+## 프로젝트 완료 기준 (DoD)
 
-```text
-EPIC-001 -> EPIC-002 -> EPIC-003 -> EPIC-004 -> EPIC-005
-```
-
----
-
-## Epic 레이어 (목표 + 구조화 DoD 체크리스트)
-
-### EPIC-001: {Epic 목표 제목}
-
-> 목표: {이 Epic이 달성해야 할 관찰 가능한 결과}
+> 모든 항목은 관찰 가능한 결과 중심으로 작성하고, 구현 방법/기술 선택을 강제하지 않는다.
+> 우선순위는 MoSCoW를 반영해 `priority`에 기록한다.
 
 - [ ] DOD-001: {완료 시 관찰 가능한 결과 한 줄 요약}
   - Direction: {최소화 | 최대화 | 보장 | 유지}
@@ -48,89 +39,92 @@ EPIC-001 -> EPIC-002 -> EPIC-003 -> EPIC-004 -> EPIC-005
   - Context: {측정 조건/상황}
   - Target: {수치 목표 또는 기대 결과}
   - Detail (optional): {외부 참조만으로 부족할 때 보충 설명}
-<!-- epic:EPIC-001 dod:DOD-001 status:todo -->
+<!-- dod:DOD-001 status:todo priority:must -->
+
 - [ ] DOD-002: {완료 시 관찰 가능한 결과 한 줄 요약}
   - Direction: {최소화 | 최대화 | 보장 | 유지}
   - Measure: {관찰/측정 가능한 지표}
   - Object: {측정 대상}
   - Context: {측정 조건/상황}
   - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-001 dod:DOD-002 status:todo -->
+<!-- dod:DOD-002 status:todo priority:must -->
+
 - [ ] DOD-003: {완료 시 관찰 가능한 결과 한 줄 요약}
   - Direction: {최소화 | 최대화 | 보장 | 유지}
   - Measure: {관찰/측정 가능한 지표}
   - Object: {측정 대상}
   - Context: {측정 조건/상황}
   - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-001 dod:DOD-003 status:todo -->
+<!-- dod:DOD-003 status:todo priority:must -->
 
-### EPIC-002: {Epic 목표 제목}
+---
 
-> 목표: {이 Epic이 달성해야 할 관찰 가능한 결과}
+## 설계 결정 (Architecture Decisions)
 
-- [ ] DOD-004: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-002 dod:DOD-004 status:todo -->
-- [ ] DOD-005: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-002 dod:DOD-005 status:todo -->
-- [ ] DOD-006: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-002 dod:DOD-006 status:todo -->
+> 구현 이전에 확정해야 할 설계 결정을 기록한다.
 
-### EPIC-003: {Epic 목표 제목}
+| ID | 결정 내용 | 근거 | 영향 범위 | 상태 |
+|----|-----------|------|-----------|------|
+| ADR-001 | {핵심 설계 결정} | {왜 이 결정을 했는가} | {영향 받는 영역} | proposed |
 
-> 목표: {이 Epic이 달성해야 할 관찰 가능한 결과}
+---
 
-- [ ] DOD-007: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-003 dod:DOD-007 status:todo -->
+## 제약사항 (Out-of-scope / 기술 / 비즈니스)
 
-### EPIC-004: {Epic 목표 제목}
+### Out-of-scope
+- {이번 범위에서 명시적으로 제외할 항목}
 
-> 목표: {이 Epic이 달성해야 할 관찰 가능한 결과}
+### 기술적 제약
+- {사용/금지 기술, 버전, 도구, 플랫폼 제약}
 
-- [ ] DOD-008: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-004 dod:DOD-008 status:todo -->
+### 비즈니스 제약
+- {일정, 예산, 규정, 조직 의존성 등}
 
-### EPIC-005: {Epic 목표 제목}
+---
 
-> 목표: {이 Epic이 달성해야 할 관찰 가능한 결과}
+## 우선순위 (MoSCoW)
 
-- [ ] DOD-009: {완료 시 관찰 가능한 결과 한 줄 요약}
-  - Direction: {최소화 | 최대화 | 보장 | 유지}
-  - Measure: {관찰/측정 가능한 지표}
-  - Object: {측정 대상}
-  - Context: {측정 조건/상황}
-  - Target: {수치 목표 또는 기대 결과}
-<!-- epic:EPIC-005 dod:DOD-009 status:todo -->
+- **Must**
+  - {없으면 프로젝트 실패로 간주되는 항목}
+- **Should**
+  - {중요하지만 단계적 적용 가능한 항목}
+- **Could**
+  - {여유가 있을 때 적용할 항목}
+- **Won't (this time)**
+  - {이번 범위에서 명시적으로 제외하는 항목}
+
+---
+
+## 프로젝트 NFR
+
+| 분류 | 요구사항 | 측정 방식 |
+|------|----------|-----------|
+| 성능 | {응답시간/처리량/부하 목표} | {측정 기준} |
+| 보안 | {인증/인가/데이터 보호 요구} | {검증 기준} |
+| 호환성/접근성 | {브라우저/OS/디바이스/접근성 요구} | {검증 기준} |
+| 오류 처리 | {실패 시 동작/복구/알림 정책} | {검증 기준} |
+
+---
+
+## 리스크 레지스터
+
+| 리스크 | 가능성 | 영향 | 완화 방안 | 상태 |
+|--------|--------|------|-----------|------|
+| {주요 리스크} | {Low/Med/High} | {Low/Med/High} | {대응 전략} | open |
+
+---
+
+## 참조 레퍼런스
+
+> Reference Lookup Protocol로 검증된 근거만 기록한다.
+
+- REF-001: {주제} | {url} | {핵심 요약} | {fresh|stale|expired}
 
 ---
 
 ## 변경 이력
 
-> 상태 변경은 `mst.py agile objective-transition` 및 `objective-check`로만 수행합니다.
+> 상태 변경은 `mst.py agile objective-transition` 및 `objective-check`로만 수행한다.
 > 버전 스냅샷: `objective/history/v{N}.md` | 변경 로그: `objective/changelog.ndjson`
 
 | 버전 | 날짜 | 변경 내용 | 변경 사유 |
