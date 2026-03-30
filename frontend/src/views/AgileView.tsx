@@ -354,6 +354,7 @@ export function AgileView() {
   const [selectedSprintId, setSelectedSprintId] = useState<string | null | undefined>(undefined);
   const [resultMarkdown, setResultMarkdown] = useState<string | null>(null);
   const [retrospective, setRetrospective] = useState<AgileRetrospective | null>(null);
+  const [retrospectiveMd, setRetrospectiveMd] = useState<string | null>(null);
 
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -449,6 +450,24 @@ export function AgileView() {
         return null;
       }
       throw err;
+    }
+  }, [projectId]);
+
+  const requestRetrospectiveMd = useCallback(async (agiId: string, sprintId: string): Promise<string | null> => {
+    try {
+      const resolvedPath = projectId 
+        ? `/api/projects/${projectId}/agile/sessions/${agiId}/sprints/${sprintId}/retrospective-md`
+        : `/api/agile/sessions/${agiId}/sprints/${sprintId}/retrospective-md`;
+
+      const response = await fetch(resolvedPath);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(`API failed: ${response.status}`);
+      }
+      
+      return await response.text();
+    } catch (err) {
+      return null;
     }
   }, [projectId]);
 
@@ -588,6 +607,7 @@ export function AgileView() {
     if (!projectId || !selectedSessionId || !selectedSprint || !selectedSprintId) {
       setResultMarkdown(null);
       setRetrospective(null);
+      setRetrospectiveMd(null);
       setReportError(null);
       setReportLoading(false);
       return;
@@ -599,17 +619,20 @@ export function AgileView() {
     Promise.all([
       requestResultMarkdown(selectedSessionId, selectedSprint),
       requestRetrospective(selectedSessionId, selectedSprintId),
+      requestRetrospectiveMd(selectedSessionId, selectedSprintId),
     ])
-      .then(([markdown, retro]) => {
+      .then(([markdown, retro, retroMd]) => {
         if (cancelled) return;
         setResultMarkdown(markdown);
         setRetrospective(retro);
+        setRetrospectiveMd(retroMd);
         setReportError(null);
       })
       .catch((err) => {
         if (cancelled) return;
         setResultMarkdown(buildFallbackResultMarkdown(selectedSprint));
         setRetrospective(null);
+        setRetrospectiveMd(null);
         setReportError(err instanceof Error ? err.message : '스프린트 보고서를 불러오지 못했습니다');
       })
       .finally(() => {
@@ -619,7 +642,7 @@ export function AgileView() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, selectedSessionId, selectedSprint, selectedSprintId, requestResultMarkdown, requestRetrospective]);
+  }, [projectId, selectedSessionId, selectedSprint, selectedSprintId, requestResultMarkdown, requestRetrospective, requestRetrospectiveMd]);
 
   useEffect(() => {
     if (!projectId || !lastSseEvent) return;
@@ -710,13 +733,15 @@ export function AgileView() {
         return;
       }
 
-      const [markdown, retro] = await Promise.all([
+      const [markdown, retro, retroMd] = await Promise.all([
         requestResultMarkdown(resolvedSessionId, sprint),
         requestRetrospective(resolvedSessionId, nextSprintId),
+        requestRetrospectiveMd(resolvedSessionId, nextSprintId),
       ]);
 
       setResultMarkdown(markdown);
       setRetrospective(retro);
+      setRetrospectiveMd(retroMd);
       setReportError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agile 데이터를 새로고침하지 못했습니다';
@@ -1169,6 +1194,15 @@ export function AgileView() {
                               <div className="text-sm font-semibold mb-3">result.md</div>
                               <div onClick={handleResultClick}><MarkdownRenderer content={linkify(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} /></div>
                             </div>
+
+                            {retrospectiveMd && (
+                              <div className="rounded-md border p-4">
+                                <div className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                  <FileText className="h-4 w-4" /> retrospective.md
+                                </div>
+                                <div onClick={handleResultClick}><MarkdownRenderer content={linkify(retrospectiveMd)} /></div>
+                              </div>
+                            )}
 
                             <div className="rounded-md border p-4 space-y-4">
                               <div className="text-sm font-semibold flex items-center gap-2">
