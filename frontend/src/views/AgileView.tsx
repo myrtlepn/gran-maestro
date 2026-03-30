@@ -612,7 +612,6 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setRetrospectiveMd(null);
-      setRetrospectiveMd(null);
       setReportError(null);
       setReportLoading(false);
       return;
