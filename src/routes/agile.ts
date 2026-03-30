@@ -8,9 +8,10 @@ const projectAgileApi = new Hono();
 const AGI_ID_RE = /^AGI-\d+$/;
 const SPRINT_ID_RE = /^S\d+$/;
 const SNAPSHOT_FILE_RE = /^v(\d+)\.md$/;
-const OBJECTIVE_MARKER_LINE_RE = /^<!--\s*epic:(EPIC-\d+)\s+dod:(DOD-\d+)\s+status:([a-z_]+)\s*-->$/i;
+const OBJECTIVE_DOD_MARKER_LINE_RE = /^<!--\s*dod:\s*(DOD-[A-Z0-9_-]+)\s+status:\s*([a-z_]+)\s+priority:\s*([a-z_]+)\s*-->$/i;
 const MARKER_ANCHOR_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
 const MARKER_ANCHOR_CHECKLIST_RE = /^\s*[-*+]\s+\[[ xX]\]\s+/;
+const OBJECTIVE_L2_HEADING_RE = /^\s{0,3}##\s+(.+?)\s*$/;
 
 type SessionJson = Record<string, unknown> & {
   id?: string;
@@ -46,11 +47,75 @@ type MarkerAnchorType = "heading" | "checklist" | "any";
 
 type ObjectiveMarker = {
   markerLine: string;
-  epic: string;
   dod: string;
+  status: string;
+  priority: string;
   anchorType: MarkerAnchorType;
   anchorText: string | null;
 };
+
+type ObjectiveParsedSectionKey =
+  | "architecture_decisions"
+  | "constraints"
+  | "moscow"
+  | "nfr"
+  | "risks"
+  | "references";
+
+type ObjectiveParsedSection = {
+  key: ObjectiveParsedSectionKey;
+  title: string;
+  content: string;
+};
+
+type ObjectiveParsedDod = {
+  dod: string;
+  status: string;
+  priority: string;
+  anchorText: string | null;
+};
+
+type ParsedObjective = {
+  dods: ObjectiveParsedDod[];
+  sections: ObjectiveParsedSection[];
+};
+
+const OBJECTIVE_SECTION_DEFINITIONS: Array<{
+  key: ObjectiveParsedSectionKey;
+  title: string;
+  aliases: string[];
+}> = [
+  {
+    key: "architecture_decisions",
+    title: "설계 결정",
+    aliases: ["설계 결정", "architecture decisions", "architecture decision"],
+  },
+  {
+    key: "constraints",
+    title: "제약사항",
+    aliases: ["제약사항", "제약 사항", "out-of-scope", "out of scope", "기술적 제약", "비즈니스 제약"],
+  },
+  {
+    key: "moscow",
+    title: "MoSCoW",
+    aliases: ["moscow", "우선순위"],
+  },
+  {
+    key: "nfr",
+    title: "NFR",
+    aliases: ["nfr", "프로젝트 nfr", "non-functional", "non functional"],
+  },
+  {
+    key: "risks",
+    title: "리스크",
+    aliases: ["리스크", "risk register", "리스크 레지스터"],
+  },
+  {
+    key: "references",
+    title: "레퍼런스",
+    aliases: ["레퍼런스", "참조 레퍼런스", "reference"],
+  },
+];
 
 function isValidAgiId(value: string): boolean {
   return AGI_ID_RE.test(value);
@@ -207,6 +272,24 @@ function normalizeAnchorText(line: string): string {
   return line.trim().replace(/\s+/g, " ");
 }
 
+function normalizeHeadingText(line: string): string {
+  return line
+    .trim()
+    .toLowerCase()
+    .replace(/[()[\]{}]/g, " ")
+    .replace(/[\\/|]+/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function trimSurroundingEmptyLines(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim().length === 0) start += 1;
+  while (end > start && lines[end - 1].trim().length === 0) end -= 1;
+  return lines.slice(start, end);
+}
+
 function markerAnchorFromOriginalLine(lines: string[], markerLineIndex: number): {
   anchorType: MarkerAnchorType;
   anchorText: string | null;
@@ -246,14 +329,18 @@ function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
   const markers: ObjectiveMarker[] = [];
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const match = OBJECTIVE_MARKER_LINE_RE.exec(lines[lineIndex].trim());
+    const match = OBJECTIVE_DOD_MARKER_LINE_RE.exec(lines[lineIndex].trim());
     if (!match) continue;
 
+    const dod = match[1].toUpperCase();
+    const status = match[2].toLowerCase();
+    const priority = match[3].toLowerCase();
     const { anchorType, anchorText } = markerAnchorFromOriginalLine(lines, lineIndex);
     markers.push({
-      markerLine: `<!-- epic:${match[1]} dod:${match[2]} status:${match[3].toLowerCase()} -->`,
-      epic: match[1],
-      dod: match[2],
+      markerLine: `<!-- dod:${dod} status:${status} priority:${priority} -->`,
+      dod,
+      status,
+      priority,
       anchorType,
       anchorText,
     });
@@ -283,15 +370,6 @@ function findMarkerAnchorIndex(lines: string[], marker: ObjectiveMarker): number
     }
   }
 
-  const epicToken = marker.epic.toLowerCase();
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!MARKER_ANCHOR_HEADING_RE.test(line)) continue;
-    if (line.toLowerCase().includes(epicToken)) {
-      return i;
-    }
-  }
-
   return -1;
 }
 
@@ -304,7 +382,7 @@ function reinsertObjectiveMarkers(originalContent: string, editedContent: string
   const hasTrailingNewLine = editedContent.endsWith("\n");
   const lines = editedContent
     .split("\n")
-    .filter((line) => !OBJECTIVE_MARKER_LINE_RE.test(line.trim()));
+    .filter((line) => !OBJECTIVE_DOD_MARKER_LINE_RE.test(line.trim()));
   const insertionCountByAnchor = new Map<number, number>();
 
   for (const marker of markers) {
@@ -324,6 +402,63 @@ function reinsertObjectiveMarkers(originalContent: string, editedContent: string
     return `${merged}\n`;
   }
   return merged;
+}
+
+function findObjectiveSectionDefinition(title: string): (typeof OBJECTIVE_SECTION_DEFINITIONS)[number] | null {
+  const normalizedTitle = normalizeHeadingText(title);
+  for (const definition of OBJECTIVE_SECTION_DEFINITIONS) {
+    if (definition.aliases.some((alias) => normalizedTitle.includes(normalizeHeadingText(alias)))) {
+      return definition;
+    }
+  }
+  return null;
+}
+
+function extractObjectiveSections(content: string): ObjectiveParsedSection[] {
+  const lines = content.split("\n");
+  const headings: Array<{ title: string; lineIndex: number }> = [];
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const match = OBJECTIVE_L2_HEADING_RE.exec(lines[lineIndex]);
+    if (!match) continue;
+    headings.push({
+      title: match[1].trim(),
+      lineIndex,
+    });
+  }
+
+  const sections: ObjectiveParsedSection[] = [];
+  for (let headingIndex = 0; headingIndex < headings.length; headingIndex += 1) {
+    const currentHeading = headings[headingIndex];
+    const definition = findObjectiveSectionDefinition(currentHeading.title);
+    if (!definition) continue;
+
+    const startLine = currentHeading.lineIndex + 1;
+    const endLine = headingIndex + 1 < headings.length ? headings[headingIndex + 1].lineIndex : lines.length;
+    const sectionLines = trimSurroundingEmptyLines(lines.slice(startLine, endLine));
+    if (sectionLines.length === 0) continue;
+
+    sections.push({
+      key: definition.key,
+      title: currentHeading.title,
+      content: sectionLines.join("\n"),
+    });
+  }
+
+  return sections;
+}
+
+function parseObjectiveContent(content: string): ParsedObjective {
+  const markers = extractObjectiveMarkers(content);
+  return {
+    dods: markers.map((marker) => ({
+      dod: marker.dod,
+      status: marker.status,
+      priority: marker.priority,
+      anchorText: marker.anchorText,
+    })),
+    sections: extractObjectiveSections(content),
+  };
 }
 
 projectAgileApi.get("/agile/sessions", async (c) => {
@@ -407,6 +542,7 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
   const objectiveVersion = asNumberOrNull(objectiveMeta.version);
   const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
   const objectiveContent = await readTextFile(`${sessionDir}/${objectivePath}`);
+  const parsedObjective = objectiveContent === null ? null : parseObjectiveContent(objectiveContent);
   const links = await readJsonFile<Record<string, unknown>>(`${sessionDir}/index/links.json`);
   const sessionResponse = {
     ...session,
@@ -422,6 +558,7 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
       version: objectiveVersion,
       path: objectivePath,
       content: objectiveContent,
+      parsed: parsedObjective,
     },
     links: links ?? null,
   });
@@ -453,6 +590,7 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   const content = await readTextFile(`${sessionDir}/${objectivePath}`);
   const etag = await objectiveEtagFromContent(content);
   const revision = content === null ? null : await objectiveRevisionFromContent(content);
+  const parsed = content === null ? null : parseObjectiveContent(content);
   if (etag !== null) {
     c.header("ETag", etag);
   }
@@ -461,6 +599,7 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
     content,
     path: objectivePath,
     revision,
+    parsed,
   });
 });
 
@@ -628,11 +767,13 @@ projectAgileApi.get("/agile/:agiId/objective", async (c) => {
 
   const revision = await objectiveRevisionFromContent(content);
   const mtime = await objectiveMtimeFromFile(objectiveFile);
+  const parsed = parseObjectiveContent(content);
   return c.json({
     content,
     path: objectivePath,
     revision,
     mtime,
+    parsed,
   });
 });
 

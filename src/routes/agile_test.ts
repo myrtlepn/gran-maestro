@@ -296,6 +296,123 @@ Deno.test("PUT /agile/sessions/:agiId/objective keeps backward compatibility wit
     setRegistry({ projects: [] });
   }
 });
+
+Deno.test("GET /agile/sessions/:agiId/objective parses project DoD markers and new objective sections", async () => {
+  const fixture = await setupSessionFixture(
+    {
+      steering_every: 3,
+    },
+    [
+      "# Objective",
+      "",
+      "## 프로젝트 완료 기준 (DoD)",
+      "- [ ] DOD-001: 성능 개선",
+      "<!-- dod:DOD-001 status:todo priority:must -->",
+      "- [x] DOD-002: 오류율 개선",
+      "<!-- dod:DOD-002 status:done priority:should -->",
+      "",
+      "## 설계 결정 (Architecture Decisions)",
+      "| ID | 결정 내용 |",
+      "| --- | --- |",
+      "| ADR-001 | API 캐시 적용 |",
+      "",
+      "## 제약사항 (Out-of-scope / 기술 / 비즈니스)",
+      "### Out-of-scope",
+      "- 레거시 마이그레이션 제외",
+      "",
+      "## 우선순위 (MoSCoW)",
+      "- **Must**",
+      "  - 신규 Objective 구조 렌더링",
+      "",
+      "## 프로젝트 NFR",
+      "| 분류 | 요구사항 |",
+      "| --- | --- |",
+      "| 성능 | p95 250ms |",
+      "",
+      "## 리스크 레지스터",
+      "| 리스크 | 가능성 | 영향 |",
+      "| --- | --- | --- |",
+      "| 파싱 누락 | 중 | 중 |",
+      "",
+      "## 참조 레퍼런스",
+      "- REF-001: https://example.com",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    assertEquals(response.status, 200);
+    const payload = await response.json() as Record<string, unknown>;
+    const parsed = payload.parsed as Record<string, unknown>;
+    const dods = parsed.dods as Array<Record<string, unknown>>;
+    const sections = parsed.sections as Array<Record<string, unknown>>;
+
+    assertEquals(Array.isArray(dods), true);
+    assertEquals(dods.length, 2);
+    assertEquals(dods[0].dod, "DOD-001");
+    assertEquals(dods[0].status, "todo");
+    assertEquals(dods[0].priority, "must");
+    assertEquals(dods[1].dod, "DOD-002");
+    assertEquals(dods[1].status, "done");
+    assertEquals(dods[1].priority, "should");
+
+    const sectionKeys = sections.map((section) => String(section.key));
+    assert(sectionKeys.includes("architecture_decisions"));
+    assert(sectionKeys.includes("constraints"));
+    assert(sectionKeys.includes("moscow"));
+    assert(sectionKeys.includes("nfr"));
+    assert(sectionKeys.includes("risks"));
+    assert(sectionKeys.includes("references"));
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("PATCH /agile/:agiId/objective reinserts DoD markers for edited objective content", async () => {
+  const fixture = await setupSessionFixture(
+    {
+      steering_every: 3,
+    },
+    [
+      "# Objective",
+      "",
+      "## 프로젝트 완료 기준 (DoD)",
+      "- [ ] DOD-010: Objective 마커 유지",
+      "<!-- dod:DOD-010 status:todo priority:must -->",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const patchResponse = await app.request("http://localhost/agile/AGI-001/objective", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content: [
+          "# Objective",
+          "",
+          "## 프로젝트 완료 기준 (DoD)",
+          "- [ ] DOD-010: Objective 마커 유지 (edited)",
+          "",
+        ].join("\n"),
+      }),
+    });
+
+    assertEquals(patchResponse.status, 200);
+    const payload = await patchResponse.json() as { content: string };
+    assert(payload.content.includes("<!-- dod:DOD-010 status:todo priority:must -->"));
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
 function assert(condition: unknown, message?: string): asserts condition {
   if (!condition) {
     throw new Error(message ?? "Assertion failed");

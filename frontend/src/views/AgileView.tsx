@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ApiFetchError, apiFetch } from '@/hooks/useApi';
 import { useResizableSidebar } from '@/hooks/useResizableSidebar';
 import { ResizableHandle } from '@/components/shared/ResizableHandle';
+import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -85,6 +86,31 @@ interface AgileRetrospective {
 
 type FlowStatus = 'done' | 'in_progress' | 'not_started';
 
+interface ObjectiveParsedDod {
+  dod: string;
+  status: string;
+  priority: string;
+  anchorText?: string | null;
+}
+
+interface ObjectiveParsedSection {
+  key: string;
+  title: string;
+  content: string;
+}
+
+interface ObjectiveParsedContent {
+  dods: ObjectiveParsedDod[];
+  sections: ObjectiveParsedSection[];
+}
+
+interface ObjectiveResponsePayload {
+  content: string | null;
+  path: string;
+  revision?: string | null;
+  parsed?: ObjectiveParsedContent | null;
+}
+
 
 function linkify(text: string): string {
   return text
@@ -100,44 +126,93 @@ function linkify(text: string): string {
     });
 }
 
-function parseDodMarkers(content: string) {
-  const regex = /<!--\s*epic:(EPIC-\d+)\s+dod:(DOD-\d+)\s+status:(todo|proposed_done|done|pending|approved|rejected)\s*-->/gi;
-  const markers = [];
-  let match;
+function parseDodMarkers(content: string): ObjectiveParsedDod[] {
+  const regex = /<!--\s*dod:\s*([a-z0-9_-]+)\s+status:\s*([a-z0-9_-]+)\s+priority:\s*([a-z0-9_-]+)\s*-->/gi;
+  const markers: ObjectiveParsedDod[] = [];
+  let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
     markers.push({
-      epic: match[1],
-      dod: match[2],
-      status: match[3]
+      dod: match[1].toUpperCase(),
+      status: match[2].toLowerCase(),
+      priority: match[3].toLowerCase(),
+      anchorText: null,
     });
   }
   return markers;
 }
 
-function renderDodStatus(content: string | null) {
-  if (!content) return null;
-  const markers = parseDodMarkers(content);
-  if (markers.length === 0) return null;
+function priorityBadgeClass(priority: string): string {
+  switch (priority.toLowerCase()) {
+    case 'must':
+      return 'text-red-600 border-red-300';
+    case 'should':
+      return 'text-amber-700 border-amber-300';
+    case 'could':
+      return 'text-blue-700 border-blue-300';
+    case "won't":
+    case 'wont':
+      return 'text-slate-600 border-slate-300';
+    default:
+      return 'text-muted-foreground border-border';
+  }
+}
+
+function renderDodStatus(dods: ObjectiveParsedDod[]) {
+  if (dods.length === 0) return null;
 
   return (
     <Card className="mt-4">
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <ListChecks className="h-4 w-4" /> Steering DoD Status
+          <ListChecks className="h-4 w-4" /> Project DoD Status
         </CardTitle>
         <CardDescription>
-          스티어링 체크포인트 진행 상태 (읽기 전용)
+          프로젝트 완료 기준(DoD) 상태와 우선순위
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          {markers.map((marker, idx) => (
-            <div key={idx} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5">
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-xs text-muted-foreground">{marker.epic}</span>
-                <span className="font-medium">{marker.dod}</span>
+          {dods.map((dod, idx) => (
+            <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5 gap-3">
+              <div className="min-w-0">
+                <div className="font-mono text-xs text-muted-foreground">{dod.dod}</div>
+                {dod.anchorText && (
+                  <p className="text-sm mt-1 truncate">{dod.anchorText}</p>
+                )}
               </div>
-              <StatusBadge status={marker.status} />
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge variant="outline" className={priorityBadgeClass(dod.priority)}>
+                  priority:{dod.priority}
+                </Badge>
+                <StatusBadge status={dod.status} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function renderObjectiveSections(sections: ObjectiveParsedSection[]) {
+  if (sections.length === 0) return null;
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4" /> Objective Sections
+        </CardTitle>
+        <CardDescription>
+          설계/제약/NFR/리스크/레퍼런스 요약 섹션
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {sections.map((section, index) => (
+            <div key={`${section.key}-${index}`} className="rounded-md border p-3 bg-muted/5">
+              <h4 className="text-sm font-semibold mb-2">{section.title}</h4>
+              <MarkdownRenderer content={section.content} />
             </div>
           ))}
         </div>
@@ -369,6 +444,7 @@ export function AgileView() {
 
   // Objective state
   const [objectiveContent, setObjectiveContent] = useState<string | null>(null);
+  const [objectiveParsed, setObjectiveParsed] = useState<ObjectiveParsedContent | null>(null);
   const [objectiveLoading, setObjectiveLoading] = useState(false);
   const [objectiveError, setObjectiveError] = useState<string | null>(null);
   const [isObjectiveEditMode, setIsObjectiveEditMode] = useState(false);
@@ -406,6 +482,16 @@ export function AgileView() {
   const selectedSprintStories = useMemo(
     () => (selectedSprint ? getSprintStories(selectedSprint) : []),
     [selectedSprint],
+  );
+  const objectiveDodItems = useMemo(() => {
+    if (objectiveParsed?.dods && objectiveParsed.dods.length > 0) {
+      return objectiveParsed.dods;
+    }
+    return objectiveContent ? parseDodMarkers(objectiveContent) : [];
+  }, [objectiveContent, objectiveParsed]);
+  const objectiveSections = useMemo(
+    () => objectiveParsed?.sections ?? [],
+    [objectiveParsed],
   );
 
   const requestSessions = useCallback(async (): Promise<AgileSessionSummary[]> => {
@@ -476,7 +562,7 @@ export function AgileView() {
 
   const [objectiveEtag, setObjectiveEtag] = useState<string | null>(null);
 
-  const requestObjective = useCallback(async (agiId: string) => {
+  const requestObjective = useCallback(async (agiId: string): Promise<ObjectiveResponsePayload | null> => {
     try {
       const resolvedPath = projectId 
         ? `/api/projects/${projectId}/agile/sessions/${agiId}/objective`
@@ -491,8 +577,24 @@ export function AgileView() {
       const etag = response.headers.get('ETag');
       setObjectiveEtag(etag);
 
-      const data = await response.json();
-      return data.content;
+      const data = await response.json() as ObjectiveResponsePayload;
+      const parsed = data.parsed;
+      const normalizedDods = Array.isArray(parsed?.dods)
+        ? parsed.dods.map((dod) => ({
+          dod: dod.dod?.toUpperCase?.() ?? '',
+          status: dod.status ?? 'todo',
+          priority: dod.priority ?? 'must',
+          anchorText: dod.anchorText ?? null,
+        })).filter((dod) => dod.dod.length > 0)
+        : [];
+      const normalizedSections = Array.isArray(parsed?.sections) ? parsed.sections : [];
+      return {
+        ...data,
+        parsed: {
+          dods: normalizedDods,
+          sections: normalizedSections,
+        },
+      };
     } catch (err) {
       if (err instanceof ApiFetchError && err.status === 404) {
         return null;
@@ -510,6 +612,7 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setRetrospectiveMd(null);
+      setObjectiveParsed(null);
       setSessionsError(null);
       setDetailError(null);
       setReportError(null);
@@ -555,6 +658,7 @@ export function AgileView() {
       setDetailLoading(false);
 
       setObjectiveContent(null);
+      setObjectiveParsed(null);
       setIsObjectiveEditMode(false);
       setStatusMessage(null);
       return;
@@ -566,14 +670,16 @@ export function AgileView() {
 
     // Fetch objective separately
     requestObjective(selectedSessionId)
-      .then((content) => {
+      .then((objective) => {
         if (cancelled) return;
-        setObjectiveContent(content);
+        setObjectiveContent(objective?.content ?? null);
+        setObjectiveParsed(objective?.parsed ?? null);
         setObjectiveError(null);
       })
       .catch((err) => {
         if (cancelled) return;
         setObjectiveContent(null);
+        setObjectiveParsed(null);
         setObjectiveError(err instanceof Error ? err.message : 'Objective를 불러오지 못했습니다');
       })
       .finally(() => {
@@ -656,8 +762,9 @@ export function AgileView() {
 
       if (selectedSessionId && (!eventSessionId || eventSessionId === selectedSessionId)) {
         requestObjective(selectedSessionId)
-          .then((content) => {
-            setObjectiveContent(content);
+          .then((objective) => {
+            setObjectiveContent(objective?.content ?? null);
+            setObjectiveParsed(objective?.parsed ?? null);
             setObjectiveError(null);
           })
           .catch((err) => {
@@ -725,6 +832,7 @@ export function AgileView() {
         setResultMarkdown(null);
         setRetrospective(null);
         setObjectiveContent(null);
+        setObjectiveParsed(null);
         return;
       }
 
@@ -733,7 +841,10 @@ export function AgileView() {
       setDetailError(null);
 
       requestObjective(resolvedSessionId)
-        .then(content => setObjectiveContent(content))
+        .then((objective) => {
+          setObjectiveContent(objective?.content ?? null);
+          setObjectiveParsed(objective?.parsed ?? null);
+        })
         .catch(err => setObjectiveError(err instanceof Error ? err.message : 'Objective 새로고침 실패'));
 
       const nextSprintId = selectedSprintId === null
@@ -799,8 +910,9 @@ export function AgileView() {
       }
 
       // Re-fetch objective to get the new ETag
-      const newContent = await requestObjective(selectedSessionId);
-      setObjectiveContent(newContent ?? objectiveEditValue);
+      const objective = await requestObjective(selectedSessionId);
+      setObjectiveContent(objective?.content ?? objectiveEditValue);
+      setObjectiveParsed(objective?.parsed ?? null);
       setIsObjectiveEditMode(false);
       setStatusMessage({ type: 'success', text: '저장 완료' });
       setTimeout(() => setStatusMessage(null), 3000);
@@ -1142,7 +1254,8 @@ export function AgileView() {
                                 <div className="rounded-md border p-4 bg-background">
                                   <MarkdownRenderer content={objectiveContent} />
                                 </div>
-                                {renderDodStatus(objectiveContent)}
+                                {renderDodStatus(objectiveDodItems)}
+                                {renderObjectiveSections(objectiveSections)}
                               </>
                             ) : (
                               <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
