@@ -26,11 +26,23 @@ if [ -d "$REPO_ROOT/hooks" ]; then
   echo "✓ hooks/ → .claude/hooks/ 동기화 완료"
 fi
 
-rsync -a --delete \
-  --exclude='.git' \
-  --exclude='node_modules' \
-  --exclude='.gran-maestro' \
-  "$REPO_ROOT/" "$CACHE/"
+RSYNC_OPTS=(
+  -a --delete
+  --exclude='.git'
+  --exclude='node_modules'
+  --exclude='.gran-maestro'
+)
 
+rsync "${RSYNC_OPTS[@]}" "$REPO_ROOT/" "$CACHE/"
 echo "✓ Synced → $CACHE"
+
+# 마켓플레이스 경로 동기화 (Claude가 세션 시작 시 스킬을 로드하는 경로)
+MARKETPLACE="$HOME/.claude/plugins/marketplaces/gran-maestro"
+if [ -d "$MARKETPLACE" ]; then
+  rsync "${RSYNC_OPTS[@]}" "$REPO_ROOT/" "$MARKETPLACE/"
+  echo "✓ Synced → $MARKETPLACE"
+else
+  echo "⚠ 마켓플레이스 경로 없음 (skip): $MARKETPLACE"
+fi
+
 echo "  Claude 세션을 재시작해야 변경사항이 반영됩니다."

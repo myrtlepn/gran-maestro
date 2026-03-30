@@ -520,7 +520,7 @@
       "chaotic"
     ],
     "light_mode": true,
-    "ambiguity_threshold": 0.5,
+    "ambiguity_threshold": 0.2,
     "objective_detail_threshold": 0.1,
     "max_escalation_retries": 3
   },

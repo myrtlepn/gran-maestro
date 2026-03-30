@@ -88,8 +88,10 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - 자동 검색은 `reference.auto_search == true`일 때만 실행.
    - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
    - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
-4. **REF 저장**:
-   - 신규 검색 결과는 `mst.py reference add`로 저장하고 REF-ID를 확보한다.
+4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
+   - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
+   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
 5. **프롬프트 주입**:
    - Pass B 리뷰어 프롬프트에 아래 `[REFERENCE_CONTEXT]`를 공통 주입한다.
      ```text

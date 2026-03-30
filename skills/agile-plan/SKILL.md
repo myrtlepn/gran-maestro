@@ -177,9 +177,11 @@ JTBD 직후 아래 항목을 점검한다. `WHO/WHAT/WHY`는 JTBD에서 이미 �
    - `auto_search == true`일 때만 `WebSearch` 실행
    - `auto_fact_check == true`면 핵심 claim 1회 교차 검증
 
-4. **REF 저장**
-   - 유효 결과는 즉시 저장:
-   - `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
+4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**
+   - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
+   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
+   - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
 
 5. **컨텍스트 주입 블록 생성**
    - 이후 판단 프롬프트에 아래 블록 주입:
@@ -300,9 +302,11 @@ soft limit:
 
 ##### 1A.9.5 PM 도메인 클러스터링 (MANDATORY)
 
-objective 저장 전에 Q&A 상세를 도메인 단위로 정리한다.
+objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 정리한다.
 
-1. Q&A/정제 루프에서 수집된 상세 내용을 의미 기반으로 그룹화한다.
+1. 수집된 모든 상세 내용을 의미 기반으로 그룹화한다.
+   - Q&A 모드(1A): 문답에서 수집된 설계 결정, 기술 선택, 프로세스, 구조 등 전체
+   - `--doc` 모드(1B): 원본 문서의 섹션별 내용 전체 + Q&A 보완 내용. 원본 문서의 H1/H2 구조를 클러스터링 참고 입력으로 우선 활용한다.
 2. 각 그룹에 대해 `details/{domain-slug}.md` 파일명을 제안하고, 도메인명 + 1줄 요약을 작성한다.
 3. 사용자에게 클러스터링 결과(도메인/파일명/요약)를 확인받아 확정한다.
 4. `AUTO_MODE`에서는 사용자 확인 대신 PM이 자율 확정하고 근거를 함께 기록한다.
@@ -330,7 +334,9 @@ objective 저장 전에 Q&A 상세를 도메인 단위로 정리한다.
   9. 참조 레퍼런스
   10. 변경 이력
 - `## 상세 문서 (Details)`에는 domain별 detail 파일 링크 + 도메인명 + 1줄 요약을 기록한다.
-- detail 파일(`objective/details/*.md`)에는 해당 도메인 Q&A 상세를 원본 수준으로 보존한다(요약/축약 금지).
+- detail 파일(`objective/details/*.md`)에는 해당 도메인의 **모든 상세 내용**을 원본 수준으로 보존한다(요약/축약 금지).
+  - Q&A 모드(1A): 사용자와의 문답에서 수집된 설계 결정, 기술 선택, 디렉토리 구조, 프로세스 설명 등 전체
+  - `--doc` 모드(1B): 원본 문서의 해당 도메인 내용 전체 + Q&A로 추가 보완된 내용. 원본 문서에 기술된 내용이 details/에서 누락되어서는 안 된다.
 - DoD는 다중행 구조(`Direction/Measure/Object/Context/Target`)를 사용한다.
 - 모든 DoD 항목에 아래 마커를 포함한다.
   - `<!-- dod:DOD-NNN status:todo priority:must -->`
@@ -355,7 +361,7 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 
 #### Step 1B: --doc 문서 파싱 모드
 
-**목표**: 기존 문서를 프로젝트 DoD 중심 구조로 정규화하고 누락 항목을 Q&A로 보완한다.
+**목표**: 기존 문서의 내용 전체를 프로젝트 DoD 중심 구조로 정규화하고, 원본 문서의 상세 내용을 details/에 도메인별로 전량 보존하며, 누락 항목을 Q&A로 보완한다.
 
 ##### 1B.1 문서 파싱
 
@@ -365,7 +371,8 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
    - DoD 후보: 완료 조건/체크리스트/검증 기준
    - 원본 문서 H1/H2 구조: 도메인 클러스터링 참고용 섹션 계층
    - 설계 결정/제약/MoSCoW/NFR/리스크/참조 정보
-3. 구현 상세는 objective 산출물에 강제하지 않고 관찰 가능한 결과 기준으로 정규화한다.
+   - **원본 전문(Full Content)**: 도메인별 details/ 저장을 위해 원본 문서의 섹션별 내용 전체를 보관한다 (요약 아님)
+3. DoD는 관찰 가능한 결과 기준으로 정규화하되, **원본 문서의 상세 내용(프로세스, Gate 체크리스트, 스키마, 템플릿, 예시 등)은 details/ 하위 문서에 도메인별로 전량 보존**한다. 원본에 기술된 내용이 objective 산출물 어디에도 없는 상태는 허용하지 않는다.
 
 ##### 1B.2 문서 기반 초기 정규화 (라운드 0)
 

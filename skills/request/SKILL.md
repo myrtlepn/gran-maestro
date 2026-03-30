@@ -103,8 +103,11 @@ Maestro 모드 비활성 시 자동 활성화:
    - `reference.auto_search == true`일 때만 실행, Step당 최대 `max_searches_per_step` 유지.
    - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
    - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
-4. **REF 저장**:
-   - 검색 결과를 `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`로 저장.
+4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
+   - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
+   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
+   - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
 5. **프롬프트 주입**:
    - 이후 spec 작성 프롬프트와 outsource brief 컨텍스트에 `[REFERENCE_CONTEXT]`를 주입한다.
    - 형식:

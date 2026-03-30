@@ -66,9 +66,10 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 
 ## Anti-Rationalization Checklist
 
-- 합리화 패턴: "요구사항이 명확해 보이니 Cynefin 분류를 생략해도 된다." | 확인 증거: 최종 응답에 선택한 Cynefin 도메인과 근거 신호(트레이드오프/의존성/불확실성)를 출력한다.
+- 합리화 패턴: "요구사항이 명확해 보이니 Cynefin 분류를 생략해도 된다." | 확인 증거: PM이 분류한 Cynefin 도메인과 적용 전략을 한 줄 통지로 출력한다.
 - 합리화 패턴: "질문 없이도 충분하니 Q&A를 건너뛰자." | 확인 증거: `AskUserQuestion` 실행 로그 또는 `auto-decisions.md`의 대응 결정 항목을 남긴다.
 - 합리화 패턴: "파일 저장 확인은 생략하고 다음 스킬로 넘어가자." | 확인 증거: `plan.md` 저장 경로와 실행 분기(`저장만/요청 실행`)를 명시한다.
+- 합리화 패턴: "WebSearch 결과를 표로 정리했으니 REF 저장은 생략해도 된다." | 확인 증거: WebSearch 실행 횟수와 동일한 횟수의 `Bash(mst.py reference add ...)` 호출 로그가 존재한다.
 
 ## 실행 프로토콜
 
@@ -118,8 +119,10 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
    - `reference.auto_search == true`일 때만 `WebSearch`를 실행하며, Step당 `max_searches_per_step`를 넘기지 않는다.
    - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
    - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
-4. **REF 저장**:
-   - 유효한 검색 결과는 즉시 `mst.py reference add`로 저장한다.
+4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
+   - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
+   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
    - 예시: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
 5. **프롬프트 주입 블록 생성**:
    - 이후 의사결정 프롬프트(질문 생성, ideation/discussion 호출 인자)에 아래 형식의 `[REFERENCE_CONTEXT]`를 반드시 주입한다.
@@ -271,16 +274,18 @@ PM이 요청을 아래 기준으로 4개 도메인 중 하나로 분류한다.
 - Complex → REQ 분리(Step 3.5) 강력 권장, 단계적 탐색 제안
 - Chaotic → /mst:debug 먼저 실행 후 plan 재개 안내
 
-**AUTO_MODE=false**:
-PM이 분류한 도메인의 label에 (Recommended)를 추가하고, 4개 도메인을 각각 독립 옵션으로 AskUserQuestion에 제시한다.
-각 옵션의 description에는 해당 도메인 선택 시 달라지는 워크플로우 분기를 [영향] + [적합] 태그로 요약한다:
-- Simple: [영향] 모호성 루프 간소화, MoSCoW Must/Won't만 확인, D3 Gate 자동 skip / [적합] 기존 패턴 적용, 범위 명확한 작업
-- Complicated: [영향] ideation/discussion 적극 활용, 전략 검토(Step 3.8) 수행, D3 Gate 필수 / [적합] 트레이드오프 분석 필요한 작업
-- Complex: [영향] REQ 분리 강력 권장, 단계적 탐색 제안, D3 Gate 필수 / [적합] 정답 불명확, 실험적 접근 필요
-- Chaotic: [영향] /mst:debug 선행 후 plan 재개, D3 Gate 자동 skip / [적합] 버그/장애/긴급 대응
+**AUTO_MODE 공통 (질문 없이 PM 자율 분류 + 한 줄 통지)**:
+PM이 자율 분류하고, 분류 결과와 적용 전략을 한 줄 통지로 출력한 뒤 다음 Step으로 진행한다.
+AskUserQuestion으로 도메인 선택을 묻지 않는다. 사용자가 이의를 제기하면 자연어 응답으로 재분류한다.
 
-**AUTO_MODE=true**:
-PM이 자율 분류 → auto-decisions.md에 기록 → 전략 자동 적용
+통지 포맷: `[Cynefin: {도메인}] {적용 전략 요약}`
+- Simple: `[Cynefin: Simple] 모호성 루프 간소화, D3 Gate skip으로 진행합니다.`
+- Complicated: `[Cynefin: Complicated] ideation/discussion 적극 활용, D3 Gate 필수로 진행합니다.`
+- Complex: `[Cynefin: Complex] REQ 분리 강력 권장, 단계적 탐색으로 진행합니다.`
+- Chaotic: `[Cynefin: Chaotic] /mst:debug 선행 후 plan 재개합니다.`
+
+**AUTO_MODE=true 추가 동작**:
+auto-decisions.md에 분류 근거를 기록한다.
 
 Cynefin 자동 분류 보조 규칙(가드레일):
 - 요구사항 텍스트에서 아래 신호를 스캔한다.
@@ -518,6 +523,17 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 
 > 이 단계는 테스트 방법론 적용 의도만 수집한다. 코드베이스 탐색·구현 수준 결정은 수행하지 않는다.
 
+> ⚠️ **AUTO_MODE 가드 (CRITICAL — 최우선 평가)**:
+> `AUTO_MODE=true`이면 아래 `AUTO_MODE=false` 블록 전체를 건너뛰고 즉시 AUTO_MODE=true 블록을 실행한다.
+> preset 값(`test_strategy`)을 읽거나 평가하지 않는다.
+
+**AUTO_MODE=true** (최우선 분기):
+- PM이 요청 맥락에서 테스트 방법론 적용 여부와 목표 커버리지 필요 여부를 자율 판단한다.
+- config의 `plan_qa_presets.test_strategy` 값이 `"ask"` 이외의 preset이면 해당 preset을 자율 판단의 기본값으로 채택한다.
+- 판단 근거와 결정 결과를 auto-decisions.md에 기록한다.
+- 결과를 plan.md `## 테스트 전략` 섹션에 반영한다.
+- **AskUserQuestion 호출 절대 금지.**
+
 **AUTO_MODE=false**:
 - `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.test_strategy` 값을 먼저 확인한다.
   - 키가 없으면 `templates/defaults/config.json`의 `plan_qa_presets.test_strategy`에서 fallback한다.
@@ -538,14 +554,20 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 - 결과를 plan.md `## 테스트 전략` 섹션에 반영한다.
 - `"적용 안 함"` 선택 시 이후 워크플로우는 기존과 동일하게 진행한다 (하위 호환 유지).
 
-**AUTO_MODE=true**:
-- PM이 요청 맥락에서 테스트 방법론 적용 여부와 목표 커버리지 필요 여부를 자율 판단한다.
-- 판단 근거와 결정 결과를 auto-decisions.md에 기록한다.
-- 결과를 plan.md `## 테스트 전략` 섹션에 반영한다.
-
 ### Step 2.45: Loop 종료 조건 수집 (선택적 Q&A)
 
 > 이 단계는 review 반복 루프의 추가 종료 조건을 수집한다. 조건 미설정 시 기존 종료 조건(AC 통과 + max_iterations)을 유지한다.
+
+> ⚠️ **AUTO_MODE 가드 (CRITICAL — 최우선 평가)**:
+> `AUTO_MODE=true`이면 아래 `AUTO_MODE=false` 블록 전체를 건너뛰고 즉시 AUTO_MODE=true 블록을 실행한다.
+> preset 값(`loop_exit`)을 읽거나 평가하지 않는다. AskUserQuestion 호출 절대 금지.
+
+**AUTO_MODE=true** (최우선 분기):
+- PM이 기본 프리셋 `"기존 검증 통과(기본값)"`을 자율 선택한다.
+- config의 `plan_qa_presets.loop_exit` 값이 `"ask"` 이외의 preset이면 해당 preset을 자율 판단의 기본값으로 채택한다.
+- 판단 근거와 결정 결과를 auto-decisions.md에 기록한다.
+- 결과를 plan.md `## Loop 종료 조건` 섹션에 반영한다.
+- **AskUserQuestion 호출 절대 금지.**
 
 **AUTO_MODE=false**:
 - `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.loop_exit` 값을 먼저 확인한다.
@@ -571,11 +593,6 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
     - 선택지: `"추가 조건 설정"` / `"이대로 진행"`
     - `"추가 조건 설정"` 선택 시 동일한 핵심 선택지 3개(+Other 자동 추가) 질문을 반복하고, `"이대로 진행"` 선택 시 수집을 종료한다.
 - 수집된 결과를 plan.md `## Loop 종료 조건` 섹션에 반영한다.
-
-**AUTO_MODE=true**:
-- PM이 기본 프리셋 `"기존 검증 통과(기본값)"`을 자율 선택한다.
-- 판단 근거와 결정 결과를 auto-decisions.md에 기록한다.
-- 결과를 plan.md `## Loop 종료 조건` 섹션에 반영한다.
 
 ### Step 2.6: 의존성 확인 (MANDATORY)
 
@@ -917,7 +934,7 @@ Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
   - `d3.agents.claude={count:0,tier:"economy"}`
   - `d3.cynefin_skip=["simple","chaotic"]`
   - `d3.light_mode=true`
-  - `d3.ambiguity_threshold=0.5`
+  - `d3.ambiguity_threshold=0.2`
   - `d3.max_escalation_retries=3`
   - `pac_trace.enabled=true`
 - `d3.enabled != true`면 이 단계 전체를 skip하고 Step 4로 진행한다.
