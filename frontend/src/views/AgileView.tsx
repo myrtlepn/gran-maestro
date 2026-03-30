@@ -585,11 +585,7 @@ export function AgileView() {
         if (cancelled) return;
         setSessionDetail(data);
         setDetailError(null);
-        setSelectedSprintId((prev) => (
-          prev === null
-            ? null
-            : resolveDefaultSprintId(data.sprints, data.session?.current_sprint, prev)
-        ));
+        setSelectedSprintId(resolveDefaultSprintId(data.sprints, data.session?.current_sprint, null));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -870,6 +866,7 @@ export function AgileView() {
                   setSelectedSprintId(null);
                   setResultMarkdown(null);
                   setRetrospective(null);
+                  setRetrospectiveMd(null);
                 }}
                 className={`w-full text-left rounded-md border p-3 transition-colors ${
                   selectedSessionId === session.id
@@ -1068,6 +1065,7 @@ export function AgileView() {
                             <div>
                               <CardTitle className="text-base flex items-center gap-2">
                                 <FileText className="h-4 w-4" /> Objective
+                                <span className="text-xs text-muted-foreground font-normal">세션 전체 목표</span>
                               </CardTitle>
                               <CardDescription>
                                 세션의 목표와 요구사항
