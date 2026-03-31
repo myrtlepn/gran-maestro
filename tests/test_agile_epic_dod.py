@@ -45,6 +45,15 @@ def _agile_paths(workspace: Path, agi_id: str) -> dict[str, Path]:
     }
 
 
+def _sprint_paths(workspace: Path, agi_id: str, sprint: int) -> dict[str, Path]:
+    sprint_id = f"S{sprint:02d}"
+    root = workspace / ".gran-maestro" / "agile" / agi_id / "sprints" / sprint_id
+    return {
+        "result_json": root / "result.json",
+        "result_md": root / "result.md",
+    }
+
+
 def _init_agile(workspace: Path) -> str:
     proc = _run_mst(workspace, "agile", "init", "--json")
     assert proc.returncode == 0, proc.stderr
@@ -267,3 +276,89 @@ def test_objective_check_warns_when_no_dod_markers(tmp_path):
     assert payload["dods"] == {}
     assert payload["incomplete"] == []
     assert payload["warning"] == "no DoD items found"
+
+
+def test_agile_result_saves_sprint_goals_and_renders_goal_section(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+    sprint_goals = json.dumps(
+        [
+            {
+                "goal": "설정 저장 시 서버 재시작 없이 반영",
+                "status": "achieved",
+                "change_summary": "config 핫리로드 구현 완료",
+                "evidence": {
+                    "screenshots": ["path/to/shot.webp"],
+                    "test_results": {"passed": 2, "failed": 0, "summary": "2/2 통과"},
+                    "diff": {"files_changed": 3, "insertions": 15, "deletions": 3, "commits": ["abc123"]},
+                },
+            }
+        ],
+        ensure_ascii=False,
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "5",
+        "--status",
+        "done",
+        "--planned",
+        "JT-S001",
+        "--completed",
+        "JT-S001",
+        "--sprint-goals",
+        sprint_goals,
+        "--json",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["sprint_goals"][0]["goal"] == "설정 저장 시 서버 재시작 없이 반영"
+    assert payload["sprint_goals"][0]["status"] == "achieved"
+    assert payload["sprint_goals"][0]["change_summary"] == "config 핫리로드 구현 완료"
+
+    paths = _sprint_paths(workspace, agi_id, 5)
+    saved = json.loads(paths["result_json"].read_text(encoding="utf-8"))
+    assert saved["sprint_goals"][0]["evidence"]["screenshots"] == ["path/to/shot.webp"]
+
+    result_md = paths["result_md"].read_text(encoding="utf-8")
+    assert "## 목표 달성 현황" in result_md
+    assert "설정 저장 시 서버 재시작 없이 반영" in result_md
+    assert "achieved" in result_md
+    assert "config 핫리로드 구현 완료" in result_md
+
+
+def test_agile_result_defaults_sprint_goals_to_empty_array(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "1",
+        "--status",
+        "done",
+        "--planned",
+        "JT-S001",
+        "--completed",
+        "JT-S001",
+        "--json",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["planned"] == ["JT-S001"]
+    assert payload["completed"] == ["JT-S001"]
+    assert payload["sprint_goals"] == []
+
+    paths = _sprint_paths(workspace, agi_id, 1)
+    saved = json.loads(paths["result_json"].read_text(encoding="utf-8"))
+    assert saved["generated"] == {"pln": [], "req": []}
+    assert saved["sprint_goals"] == []

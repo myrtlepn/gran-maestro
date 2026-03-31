@@ -44,7 +44,7 @@ Subcommands:
   agile init         [--steering-every N] [--json]
   agile status       <AGI-ID> [--json]
   agile update       <AGI-ID> [--status TEXT] [--current-sprint N] [--steering-every N] [--objective-version N] [--json]
-  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--json]
+  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--sprint-goals JSON] [--json]
   agile retrospective <AGI-ID> --sprint N --status TEXT --succeeded IDS --failed JSON [--failed JSON ...] --velocity-planned N --velocity-completed N --limitations TEXT --lessons TEXT --direction TEXT [--json]
   agile known-issues add <AGI-ID> --description TEXT --severity MINOR|MAJOR|CRITICAL --sprint N [--json]
   agile known-issues resolve <AGI-ID> --issue-id KI-NNN [--json]
@@ -1830,6 +1830,105 @@ def _parse_agile_failed_items(raw_values) -> List[dict]:
     return parsed_items
 
 
+def _parse_agile_sprint_goals(raw_value) -> List[dict]:
+    if raw_value is None:
+        return []
+    raw_text = str(raw_value).strip()
+    if not raw_text:
+        return []
+
+    try:
+        decoded = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid --sprint-goals JSON: {exc}")
+    if not isinstance(decoded, list):
+        raise ValueError("invalid --sprint-goals JSON: expected array")
+
+    parsed_items = []
+    for entry in decoded:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid --sprint-goals JSON: each item must be an object")
+
+        goal = str(entry.get("goal", "")).strip()
+        status = str(entry.get("status", "")).strip()
+        change_summary = str(entry.get("change_summary", "")).strip()
+        if not goal:
+            raise ValueError("invalid --sprint-goals JSON: missing goal")
+        if not status:
+            raise ValueError("invalid --sprint-goals JSON: missing status")
+        if not change_summary:
+            raise ValueError("invalid --sprint-goals JSON: missing change_summary")
+
+        raw_evidence = entry.get("evidence")
+        evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+        screenshots = evidence.get("screenshots")
+        if screenshots is None:
+            screenshots = []
+        if not isinstance(screenshots, list):
+            raise ValueError("invalid --sprint-goals JSON: evidence.screenshots must be an array")
+        test_results = evidence.get("test_results")
+        if test_results is None:
+            test_results = {}
+        if not isinstance(test_results, dict):
+            raise ValueError("invalid --sprint-goals JSON: evidence.test_results must be an object")
+        diff = evidence.get("diff")
+        if diff is None:
+            diff = {}
+        if not isinstance(diff, dict):
+            raise ValueError("invalid --sprint-goals JSON: evidence.diff must be an object")
+
+        normalized = dict(entry)
+        normalized["goal"] = goal
+        normalized["status"] = status
+        normalized["change_summary"] = change_summary
+        normalized["evidence"] = {
+            "screenshots": [str(item) for item in screenshots],
+            "test_results": test_results,
+            "diff": diff,
+        }
+        parsed_items.append(normalized)
+
+    return parsed_items
+
+
+def _render_sprint_goals_md_lines(sprint_goals: List[dict]) -> List[str]:
+    lines = [
+        "## 목표 달성 현황",
+        "",
+    ]
+    if not sprint_goals:
+        lines.extend([
+            "- 없음",
+            "",
+        ])
+        return lines
+
+    for index, goal_item in enumerate(sprint_goals, start=1):
+        goal = str(goal_item.get("goal", "-"))
+        status = str(goal_item.get("status", "-"))
+        change_summary = str(goal_item.get("change_summary", "-"))
+        evidence = goal_item.get("evidence")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        screenshots = evidence.get("screenshots")
+        screenshots = screenshots if isinstance(screenshots, list) else []
+        test_results = evidence.get("test_results")
+        test_results = test_results if isinstance(test_results, dict) else {}
+        diff = evidence.get("diff")
+        diff = diff if isinstance(diff, dict) else {}
+
+        lines.extend([
+            f"### Goal {index}",
+            f"- goal: {goal}",
+            f"- status: {status}",
+            f"- change_summary: {change_summary}",
+            f"- evidence.screenshots: {', '.join(str(item) for item in screenshots) if screenshots else '-'}",
+            f"- evidence.test_results: {json.dumps(test_results, ensure_ascii=False) if test_results else '-'}",
+            f"- evidence.diff: {json.dumps(diff, ensure_ascii=False) if diff else '-'}",
+            "",
+        ])
+    return lines
+
+
 def _agi_session_dir(agi_id: str) -> Path:
     return agile_dir() / agi_id
 
@@ -2272,6 +2371,7 @@ def cmd_agile_result(args):
     try:
         pln_ids = [_normalize_link_id(value, "PLN") for value in _split_csv_values(args.pln)]
         req_ids = [_normalize_link_id(value, "REQ") for value in _split_csv_values(args.req)]
+        sprint_goals = _parse_agile_sprint_goals(args.sprint_goals)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -2287,6 +2387,7 @@ def cmd_agile_result(args):
             "pln": pln_ids,
             "req": req_ids,
         },
+        "sprint_goals": sprint_goals,
         "timestamp": timestamp,
     }
     if args.summary is not None:
@@ -2298,24 +2399,21 @@ def cmd_agile_result(args):
     save_json(sprint_dir / "result.json", payload)
 
     result_md_path = sprint_dir / "result.md"
-    result_md_path.write_text(
-        "\n".join(
-            [
-                f"# {sprint_id} Result",
-                "",
-                f"- status: {payload['status']}",
-                f"- planned: {', '.join(planned) if planned else '-'}",
-                f"- completed: {', '.join(completed) if completed else '-'}",
-                f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
-                f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
-                f"- summary: {payload.get('summary', '-')}",
-                f"- outcome: {payload.get('outcome', '-')}",
-                f"- timestamp: {timestamp}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    result_md_lines = [
+        f"# {sprint_id} Result",
+        "",
+        f"- status: {payload['status']}",
+        f"- planned: {', '.join(planned) if planned else '-'}",
+        f"- completed: {', '.join(completed) if completed else '-'}",
+        f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
+        f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+        f"- summary: {payload.get('summary', '-')}",
+        f"- outcome: {payload.get('outcome', '-')}",
+        f"- timestamp: {timestamp}",
+        "",
+    ]
+    result_md_lines.extend(_render_sprint_goals_md_lines(sprint_goals))
+    result_md_path.write_text("\n".join(result_md_lines), encoding="utf-8")
     _append_agile_event(
         agi_id,
         "agile.result",
@@ -6084,6 +6182,7 @@ def build_parser():
     agile_result.add_argument("--req", action="append")
     agile_result.add_argument("--summary")
     agile_result.add_argument("--outcome")
+    agile_result.add_argument("--sprint-goals")
     agile_result.add_argument("--json", action="store_true")
 
     agile_retrospective = agile_sub.add_parser("retrospective")
