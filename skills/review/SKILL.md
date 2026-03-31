@@ -162,6 +162,26 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `[regression-test]` 보조 태그가 있으면 해당 AC를 regression 검증 대상(선행 작성된 회귀 테스트 재실행)으로 표시한다.
    - 하나의 AC에 복수 보조 태그가 있으면 첫 번째 태그를 `ac_test_type`으로 사용한다.
 2. **변경 파일 목록 수집**: `git log --name-only` 또는 `git diff <base>..HEAD --name-only` 기반으로 REQ 관련 변경 파일 목록 작성.
+2-a. **spec 직접 참조 파일 컨텍스트 확장 (MANDATORY)**:
+   - 대상: 각 태스크 `spec.md`의 `## 영향 파일` + `## 관련 파일` 섹션.
+   - 수집 규칙:
+     - 섹션 내 bullet/numbered list/inline code에 명시된 **직접 경로만** 수집한다.
+     - 재귀 확장 금지: 수집한 파일이 추가 include를 가리켜도 따라가지 않는다.
+     - 디렉토리 경로는 1-depth만 확장: 하위 "직계 파일"만 포함하고 하위 디렉토리는 제외한다.
+     - 경로 해석은 `spec.md` 기준 상대경로를 우선하고, 절대경로는 그대로 사용한다.
+   - 우선순위 정렬(중복 제거 후 유지):
+     1. `changed_files ∩ spec_direct_refs`
+     2. `## 영향 파일` 전용 항목
+     3. `## 관련 파일` 전용 항목
+   - 축약 규칙(리뷰어 컨텍스트 토큰 보호):
+     - 파일 길이 `<= 200 lines`: 원문 전문을 그대로 포함한다.
+     - 파일 길이 `> 200 lines`: `head 80 + keyword 120 + tail 20`으로 축약한다.
+     - `keyword 120`은 AC ID, changed file basename, `Given|When|Then|Test|TODO|FIXME|export|class|function` 매칭 라인에서 상한 120줄을 추출한다.
+     - head/keyword/tail은 라인 번호 기준 dedup 후 원래 순서로 합친다.
+   - 산출물:
+     - `spec_reference_files` (정렬/중복제거 완료된 파일 목록)
+     - `spec_reference_context_block` (리뷰어 프롬프트 주입용 전문/축약 본문)
+   - 섹션 미존재 또는 유효 경로 0건이면 graceful skip (`spec_reference_files=[]`).
 3. **AC별 파일 매핑 준비**: 각 AC 항목과 관련 변경 파일 연결.
 4. **Intent lookup (비차단)**: 변경 파일 목록을 기반으로 관련 Intent를 조회한다.
    - 실행:
@@ -220,6 +240,64 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
      - `AUTO_MODE`: CLI `--auto` 플래그 > `config.auto_mode.review` > 기본값(false)
      - `max_iterations`: (`AUTO_MODE=true`일 때) `config.auto_mode.max_review_iterations` > `config.review.max_iterations` > 기본값(10)
    - 이후 문서의 "**`--auto` 모드**" 분기는 `AUTO_MODE=true`일 때 동일하게 적용.
+
+### Step 2.5: Static Validation Gate (MANDATORY)
+
+> 이 Step의 목적: Pass A 진입 전에 정적 실패를 선차단한다 / 핵심 출력물: `static_validation_gate_result`, `static-validation-report.md`
+
+- 실행 위치:
+  - Step 2 직후 즉시 실행한다.
+  - Step 3(Pass A) 시작 전에 완료되어야 한다.
+- 게이트 원칙:
+  - 모든 하위 검증이 통과해야 `static_validation_gate_result=pass`.
+  - `pass`가 아니면 Step 4(Pass B) 진입을 금지한다.
+  - `static-validation-report.md`에 각 검증의 `Command/Expected/Actual/Exit Code`를 기록한다.
+
+#### TS 타입체크 게이트
+
+- 실행 조건:
+  - Step 2의 `changed_files`에 `*.ts` 또는 `*.tsx`가 1개 이상 포함되고,
+  - 대상 worktree에 `tsconfig*.json`이 1개 이상 존재할 때.
+- 실행 명령:
+  - `package.json.scripts.typecheck` 존재 시: `npm run typecheck`
+  - 미존재 시 fallback: `npx tsc --noEmit`
+- 실패 처리:
+  - `pass_a_result = "fail"`
+  - `failure_class = "implementation"`
+  - `static_validation_gate_result = "fail"`
+  - Step 3/4를 건너뛰고 Step 6(e) 경로로 진행한다.
+
+#### 빌드 게이트
+
+- 실행 조건:
+  - `package.json.scripts.build`가 존재할 때.
+- 실행 명령:
+  - `npm run build`
+- 실패 처리:
+  - `pass_a_result = "fail"`
+  - `failure_class = "implementation"`
+  - `static_validation_gate_result = "fail"`
+  - Step 3/4를 건너뛰고 Step 6(e) 경로로 진행한다.
+
+#### spec 참조 파일 존재성 게이트
+
+- 실행 조건:
+  - Step 2-a의 `spec_reference_files.length > 0`.
+- 실행 명령:
+  - 각 경로에 대해 `test -e <path>` 실행.
+- 실패 처리(미존재 파일 1개 이상):
+  - `review.json.status = "gap_found"`
+  - `review.json.gap_source = "ac_gap"`
+  - `static_validation_gate_result = "gap_found"`
+  - 누락 파일 목록을 근거로 갭 태스크 생성 규약을 적용하고 Step 6(c) 경로로 진행한다.
+- 하위 호환:
+  - `spec_reference_files`가 비어 있으면 이 게이트는 skip한다(비차단).
+
+#### Step 3/4 연결 규칙 (호환성 보장)
+
+- Step 3 진입 허용: `static_validation_gate_result == "pass"`
+- Step 3 진입 차단: `static_validation_gate_result in {"fail", "gap_found"}`
+- Step 4(Pass B) 진입 허용: `pass_a_result == "pass"` 이고 `static_validation_gate_result == "pass"`
 
 ### Step 3: Pass A — 인수 판정 (AC 충족성 검증)
 
@@ -699,6 +777,7 @@ arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에
 - `{{SPEC_PATH}}`: 해당 태스크의 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{NN}/spec.md` 절대 경로
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
 - `{{REFERENCE_CONTEXT}}`: Step 2에서 생성한 `[REFERENCE_CONTEXT]` 블록 (`references: none` 포함). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입.
+- `{{SPEC_REFERENCE_CONTEXT}}`: Step 2-a에서 생성한 spec 직접 참조 파일 컨텍스트 블록(`spec_reference_context_block`). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입한다.
 - `if strategy.review_mode == "fulltext"`:
   - 프롬프트 본문에 문서 전문(full text)을 직접 포함하고, diff 요약은 참고 정보로만 사용한다.
   - `code_reviewer`의 검토 포커스를 문서 품질(정확성/완결성/독자적합성/구조) 체크리스트로 고정한다.
@@ -1115,6 +1194,15 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
     "iteration": 1,
     "status": "gap_fixing"
   },
+  "plan_iterations": [
+    {
+      "iteration_no": 1,
+      "trigger": "post_review",
+      "started_at": "2026-03-01T00:10:00Z",
+      "ended_at": "2026-03-01T00:12:00Z",
+      "result": "passed"
+    }
+  ],
   "tasks": [
     {
       "id": "02",
@@ -1145,6 +1233,19 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
 | `status` | Step 1에서 `"in_progress"`로 초기화, Step 5 완료 후 `"completed"`로 갱신. 갭 여부는 `gaps_found > 0`으로 구분. |
 | `previous_severity_counts` | (선택) 직전 iteration의 severity 카운트 스냅샷. 구조: `{ "critical": number, "major": number, "minor": number }` |
 | `review_issues_summary` | (선택) 등급별 코드리뷰 이슈 요약. 이슈가 존재하면 `review.json.review_issues_summary`와 동일 구조로 기록. |
+
+### plan_iterations 배열 (정의 전용)
+
+`request.json.plan_iterations`는 `plan -a` 실행 시 사후 점검 반복 메트릭을 기록하는 필드다.  
+`mst:review`는 이 필드를 **정의만 참조**하며 생성/갱신 로직을 수행하지 않는다(기록 책임은 `plan -a`).
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `iteration_no` | number | plan 사후 점검 반복 번호(1부터 시작). |
+| `trigger` | string | 반복 실행 트리거 (`post_review`, `manual_retry`, `auto_retry` 등). |
+| `started_at` | string | 반복 시작 시각 (ISO8601). |
+| `ended_at` | string | 반복 종료 시각 (ISO8601). |
+| `result` | string | 반복 결과 (`passed`, `failed`, `needs_followup` 등). |
 
 ### tasks[].self_check.intent_fidelity_result
 
