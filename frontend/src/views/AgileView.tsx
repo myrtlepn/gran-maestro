@@ -85,6 +85,7 @@ interface AgileRetrospective {
 }
 
 type FlowStatus = 'done' | 'in_progress' | 'not_started';
+type StoryStatus = 'completed' | 'planned' | 'unknown';
 
 interface ObjectiveParsedDod {
   dod: string;
@@ -356,6 +357,28 @@ function getSprintStories(sprint: AgileSprint): string[] {
   return [...new Set([...toArray(sprint.planned), ...toArray(sprint.completed)])];
 }
 
+function getStoryStatus(sprint: AgileSprint, storyId: string): StoryStatus {
+  if (toArray(sprint.completed).includes(storyId)) {
+    return 'completed';
+  }
+  if (toArray(sprint.planned).includes(storyId)) {
+    return 'planned';
+  }
+  return 'unknown';
+}
+
+function storyStatusLabel(status: StoryStatus): string {
+  if (status === 'completed') return '완료';
+  if (status === 'planned') return '계획됨';
+  return '알 수 없음';
+}
+
+function storyStatusBadge(status: StoryStatus): string {
+  if (status === 'completed') return 'done';
+  if (status === 'planned') return 'planned';
+  return 'unknown';
+}
+
 function buildFallbackResultMarkdown(sprint: AgileSprint): string {
   const planned = toArray(sprint.planned);
   const completed = toArray(sprint.completed);
@@ -429,6 +452,7 @@ export function AgileView() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<AgileSessionDetail | null>(null);
   const [selectedSprintId, setSelectedSprintId] = useState<string | null | undefined>(undefined);
+  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
   const [resultMarkdown, setResultMarkdown] = useState<string | null>(null);
   const [retrospective, setRetrospective] = useState<AgileRetrospective | null>(null);
   const [retrospectiveMd, setRetrospectiveMd] = useState<string | null>(null);
@@ -483,6 +507,21 @@ export function AgileView() {
     () => (selectedSprint ? getSprintStories(selectedSprint) : []),
     [selectedSprint],
   );
+  const selectedStoryStatus = useMemo(
+    () => (selectedSprint && selectedStoryId ? getStoryStatus(selectedSprint, selectedStoryId) : null),
+    [selectedSprint, selectedStoryId],
+  );
+  const selectedStoryGeneratedLinks = useMemo(() => {
+    if (!selectedStoryId || !selectedSprint) return null;
+    const generatedPln = toArray(selectedSprint.generated?.pln);
+    const generatedReq = toArray(selectedSprint.generated?.req);
+    return linkify(
+      [
+        `- generated PLN: ${generatedPln.length > 0 ? generatedPln.join(', ') : '-'}`,
+        `- generated REQ: ${generatedReq.length > 0 ? generatedReq.join(', ') : '-'}`,
+      ].join('\n'),
+    );
+  }, [selectedStoryId, selectedSprint]);
   const objectiveDodItems = useMemo(() => {
     if (objectiveParsed?.dods && objectiveParsed.dods.length > 0) {
       return objectiveParsed.dods;
@@ -750,6 +789,14 @@ export function AgileView() {
       cancelled = true;
     };
   }, [projectId, selectedSessionId, selectedSprint, selectedSprintId, requestResultMarkdown, requestRetrospective, requestRetrospectiveMd]);
+
+  useEffect(() => {
+    if (selectedSprintStories.length === 0) {
+      setSelectedStoryId(null);
+      return;
+    }
+    setSelectedStoryId((prev) => (prev && selectedSprintStories.includes(prev) ? prev : selectedSprintStories[0]));
+  }, [selectedSprintStories]);
 
   useEffect(() => {
     if (!projectId || !lastSseEvent) return;
@@ -1107,11 +1154,47 @@ export function AgileView() {
                     <div className="rounded-md border p-3">
                       <div className="text-xs font-semibold text-muted-foreground mb-2">스토리 목록</div>
                       {selectedSprintStories.length > 0 ? (
-                        <ul className="list-disc pl-5 text-sm space-y-1">
-                          {selectedSprintStories.map((story, index) => (
-                            <li key={`${story}-${index}`}>{story}</li>
-                          ))}
-                        </ul>
+                        <div className="space-y-2">
+                          {selectedSprintStories.map((story, index) => {
+                            const status = getStoryStatus(selectedSprint, story);
+                            const isSelected = selectedStoryId === story;
+                            return (
+                              <button
+                                key={`${story}-${index}`}
+                                type="button"
+                                onClick={() => setSelectedStoryId(story)}
+                                className={`w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
+                                  isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/40'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-xs">{story}</span>
+                                  <StatusBadge status={storyStatusBadge(status)} />
+                                </div>
+                              </button>
+                            );
+                          })}
+
+                          {selectedStoryId && (
+                            <div className="rounded-md border bg-muted/10 p-3 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <Badge variant="outline" className="font-mono">{selectedStoryId}</Badge>
+                                <StatusBadge status={selectedStoryStatus ? storyStatusBadge(selectedStoryStatus) : 'unknown'} />
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                상태: {selectedStoryStatus ? storyStatusLabel(selectedStoryStatus) : '알 수 없음'}
+                              </p>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-1">관련 generated 링크</p>
+                                {selectedStoryGeneratedLinks ? (
+                                  <MarkdownRenderer content={selectedStoryGeneratedLinks} className="[&>ul]:mb-0 [&>ul]:space-y-0.5 [&_p]:mb-1" />
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">링크 정보가 없습니다.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">스토리 정보가 없습니다.</p>
                       )}
