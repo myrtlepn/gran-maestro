@@ -84,33 +84,57 @@ fi
 
 contains_allow_pattern() {
   local text="$1"
-  printf '%s' "$text" | grep -Eiq -- 'AskUserQuestion|"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|workflow complete|final answer delivered|user requested stop'
+  printf '%s' "$text" | grep -Eiq -- '"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|"name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|workflow complete|final answer delivered|user requested stop'
 }
-
-if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
-  debug_log "allow" "reason=explicit_allow_pattern"
-  exit 0
-fi
 
 STATE_INFO="$(python3 - "$STATE_FILE" <<'PY'
 import json
 import os
 import sys
 
+def emit(
+    status,
+    workflow_active=False,
+    current_skill="",
+    active_req="",
+    iteration=0,
+    next_skill="",
+    next_source="",
+    next_auto=False,
+    source_skill="",
+    has_next_action=False,
+    updated_at="",
+):
+    print(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+            status,
+            "true" if workflow_active else "false",
+            current_skill,
+            active_req,
+            iteration,
+            next_skill,
+            next_source,
+            "true" if next_auto else "false",
+            source_skill,
+            "true" if has_next_action else "false",
+            updated_at,
+        )
+    )
+
 path = sys.argv[1]
 if not os.path.isfile(path):
-    print("missing\tfalse\t\t\t0\t\t\tfalse\t")
+    emit("missing")
     raise SystemExit(0)
 
 try:
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
 except Exception:
-    print("invalid\tfalse\t\t\t0\t\t\tfalse\t")
+    emit("invalid")
     raise SystemExit(0)
 
 if not isinstance(payload, dict):
-    print("invalid\tfalse\t\t\t0\t\t\tfalse\t")
+    emit("invalid")
     raise SystemExit(0)
 
 workflow_active = bool(payload.get("workflow_active"))
@@ -126,9 +150,11 @@ next_skill = ""
 next_source = ""
 next_auto = False
 source_skill = ""
+has_next_action = False
 
 next_action = payload.get("next_action")
 if isinstance(next_action, dict):
+    has_next_action = True
     skill_candidates = [
         next_action.get("expected_skill"),
         next_action.get("skill"),
@@ -159,7 +185,7 @@ if isinstance(next_action, dict):
             break
 
 print(
-    "valid\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+    "valid\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
         "true" if workflow_active else "false",
         current_skill,
         active_req,
@@ -168,6 +194,7 @@ print(
         next_source,
         "true" if next_auto else "false",
         source_skill,
+        "true" if has_next_action else "false",
         updated_at,
     )
 )
@@ -183,11 +210,25 @@ NEXT_SKILL="$(printf '%s' "$STATE_INFO" | cut -f6)"
 NEXT_SOURCE="$(printf '%s' "$STATE_INFO" | cut -f7)"
 NEXT_AUTO="$(printf '%s' "$STATE_INFO" | cut -f8)"
 SOURCE_SKILL="$(printf '%s' "$STATE_INFO" | cut -f9)"
-UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f10-)"
+HAS_NEXT_ACTION="$(printf '%s' "$STATE_INFO" | cut -f10)"
+UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f11-)"
 
 if [ "$WORKFLOW_ACTIVE" != "true" ]; then
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
   exit 0
+fi
+
+if [ "$HAS_NEXT_ACTION" != "true" ]; then
+  if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
+    debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
+    exit 0
+  fi
+else
+  if [ "$NEXT_AUTO" = "true" ]; then
+    debug_log "block_decision" "reason=next_action_auto_override skip_allow_pattern=true next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE"
+  else
+    debug_log "block_decision" "reason=next_action_present skip_allow_pattern=true next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO"
+  fi
 fi
 
 REASON="Workflow active, continue current skill and context without stopping."
@@ -203,15 +244,17 @@ fi
 if [ -n "$UPDATED_AT" ]; then
   REASON="$REASON Last update: $UPDATED_AT."
 fi
-if [ "$NEXT_AUTO" = "true" ] && [ -n "$NEXT_SKILL" ]; then
-  REASON="$REASON Next action: call Skill(\"$NEXT_SKILL\")"
+if [ "$HAS_NEXT_ACTION" = "true" ] && [ -n "$NEXT_SKILL" ]; then
+  NEXT_ARGS="-a"
   if [ -n "$NEXT_SOURCE" ]; then
-    REASON="$REASON from $NEXT_SOURCE"
+    NEXT_ARGS="-a $NEXT_SOURCE"
   fi
+  REASON="$REASON You MUST call Skill(skill: \"$NEXT_SKILL\", args: \"$NEXT_ARGS\") immediately."
   if [ -n "$SOURCE_SKILL" ]; then
-    REASON="$REASON (source_skill=$SOURCE_SKILL)"
+    REASON="$REASON Transition source_skill: $SOURCE_SKILL."
   fi
-  REASON="$REASON immediately."
+elif [ "$HAS_NEXT_ACTION" = "true" ]; then
+  REASON="$REASON Next action is pending; do not stop."
 elif [ -n "$NEXT_SKILL" ]; then
   REASON="$REASON Workflow active, continue current skill before transitioning to $NEXT_SKILL."
 fi
