@@ -341,6 +341,8 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 
 규칙:
 - `plan -a` 입력에 완료 시점/잔여 횟수 예측 문구를 포함하지 않는다.
+- 스프린트 목표는 작업 항목 명사가 아니라 **관찰 가능한 결과/동작**으로 작성한다.
+  - 예: `"설정 탭 추가"` 대신 `"설정 페이지에서 포트 변경 후 저장 시 서버 재시작 없이 반영됨"` 형태로 작성한다.
 - 컨텍스트가 비어 있으면 `"N/A"`로 채워 graceful fallback 한다.
 
 ##### 2.2.4 Sprint 결과 기록 + DoD 갱신 제안
@@ -356,8 +358,35 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --completed "{COMPLETED_ITEM_IF_DONE}" \
   --pln {PLN_ID} \
   --req {REQ_ID} \
+  --sprint-goals '{SPRINT_GOALS_JSON_IF_AVAILABLE}' \
   --json
 ```
+  - `--sprint-goals`는 **optional**이다. sprint_goals를 구성할 수 없는 경우 인자를 생략하고 기존 방식으로 기록한다.
+  - `SPRINT_GOALS_JSON_IF_AVAILABLE` 구조:
+    ```json
+    [
+      {
+        "goal": "목표 텍스트",
+        "status": "achieved|not_achieved|partial",
+        "change_summary": "체감 변화 설명",
+        "evidence": {
+          "screenshots": ["path"],
+          "test_results": {
+            "passed": 0,
+            "failed": 0,
+            "summary": "text"
+          },
+          "diff": {
+            "files_changed": 0,
+            "insertions": 0,
+            "deletions": 0,
+            "commits": ["hash"]
+          }
+        }
+      }
+    ]
+    ```
+  - `evidence` 및 하위 필드(`screenshots`, `test_results`, `diff`)는 모두 선택적으로 포함한다. 수집 가능한 데이터만 채운다.
 2. 회고 기록:
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
