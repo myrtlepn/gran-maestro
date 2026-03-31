@@ -297,7 +297,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 - Step 3 진입 허용: `static_validation_gate_result == "pass"`
 - Step 3 진입 차단: `static_validation_gate_result in {"fail", "gap_found"}`
-- Step 4(Pass B) 진입 허용: `pass_a_result == "pass"` 이고 `static_validation_gate_result == "pass"`
+- Step 4(Pass B) 최종 진입 허용: `pass_a_result == "pass"` AND `static_validation_gate_result == "pass"` AND `coverage_matrix_gate_result == pass` AND `full_backend_test_gate_result in {pass, pass_with_warning}`
 
 ### Step 3: Pass A — 인수 판정 (AC 충족성 검증)
 
@@ -550,13 +550,97 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 ---
 
+### Step 3.4: Spec↔Diff Coverage Matrix Gate (MANDATORY)
+
+> 이 Step의 목적: Pass A 직후 AC-ID/PAC-ID 기준의 Spec↔Diff 양방향 커버리지를 기계적으로 검증해 Pass B 진입 누락을 차단한다 / 핵심 출력물: `coverage_matrix_gate_result`, `coverage-matrix.json`, `coverage-matrix.md`
+
+- 실행 위치:
+  - Step 3(Pass A) 완료 직후 실행한다.
+  - Step 3.5(Full Backend Test Gate) 진입 전에 완료되어야 한다.
+- 진입 조건:
+  - `pass_a_result == pass`이고 `static_validation_gate_result == "pass"`일 때만 실행한다.
+  - `pass_a_result == fail`이면 본 Step을 skip하고 기존 Step 6(e) 경로를 그대로 따른다.
+- 산출물 경로:
+  - JSON: `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV-NNN}/coverage-matrix.json`
+  - MD: `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV-NNN}/coverage-matrix.md`
+
+#### coverage-matrix.json 스키마 (MANDATORY)
+
+```json
+{
+  "spec_to_diff": [
+    {
+      "id": "AC-001 | PAC-4",
+      "kind": "spec_ac | plan_ac",
+      "grade": "MUST | SHOULD",
+      "ac_type": "automatable | manual | browser-test",
+      "mapped_diff_refs": ["src/module/file.ts#L10"],
+      "is_mapped": true,
+      "unmapped_reason": ""
+    }
+  ],
+  "diff_to_spec": [
+    {
+      "diff_ref": "src/module/file.ts#L10",
+      "mapped_ids": ["AC-001", "PAC-4"],
+      "is_mapped": true,
+      "unmapped_reason": ""
+    }
+  ],
+  "summary": {
+    "spec_total": 0,
+    "spec_mapped_count": 0,
+    "spec_unmapped_count": 0,
+    "must_total": 0,
+    "must_mapped_count": 0,
+    "must_unmapped_count": 0,
+    "diff_total": 0,
+    "diff_mapped_count": 0,
+    "diff_unmapped_count": 0
+  }
+}
+```
+
+- `spec_to_diff[]`:
+  - Step 2에서 파싱된 Spec AC + Plan AC(PAC)를 각각 1행으로 기록한다.
+  - 각 ID가 어떤 변경(diff ref)로 충족되는지 양방향 추적 가능해야 한다.
+- `diff_to_spec[]`:
+  - Step 2의 `changed_files`(필요 시 파일 내 핵심 hunks 포함)를 기준으로 각 변경이 어떤 AC/PAC와 연결되는지 기록한다.
+  - 어떤 AC/PAC에도 매핑되지 않은 변경은 `is_mapped=false`로 남기고 `unmapped_reason`을 기록한다.
+- `summary`:
+  - `must_unmapped_count`는 `grade=MUST`인 AC/PAC 중 `is_mapped=false` 개수다.
+
+#### coverage-matrix.md 생성 규칙 (MANDATORY)
+
+- 사람 검토용 요약 리포트를 같은 RV 폴더에 생성한다.
+- 최소 포함 항목:
+  - `Spec -> Diff` 표 (ID, grade, ac_type, mapped_diff_refs, unmapped_reason)
+  - `Diff -> Spec` 표 (diff_ref, mapped_ids, unmapped_reason)
+  - 요약 블록 (`must_unmapped_count`, `spec_unmapped_count`, `diff_unmapped_count`)
+
+#### Hard Gate (MANDATORY)
+
+- `summary.must_unmapped_count == 0`일 때만 `coverage_matrix_gate_result = pass`로 처리한다.
+- `summary.must_unmapped_count > 0`이면:
+  - `coverage_matrix_gate_result = gap_found`
+  - `review.json.status = "gap_found"`
+  - `review.json.gap_source = "ac_gap"`
+  - unmapped MUST AC/PAC별 갭 태스크를 기존 Step 6(c) 생성 규약(`generated_by: "review"`)으로 자동 생성한다.
+  - Step 3.5/Step 4 진입을 차단하고 Step 6(c)/(d) 경로로 진행한다.
+- 하위 호환:
+  - SHOULD-only unmapped는 경고로 기록하되 hard blocking 사유로 사용하지 않는다.
+  - 기존 Pass A 판정 필드(`pass_a_result`, `failed_ac_ids`, `failure_class`, `evidence`)는 변경하지 않는다.
+
+---
+
 ### Step 3.5: Full Backend Test Gate (MANDATORY)
 
 > 이 Step의 목적: Pass A 완료 후 Pass B 진입 전에 외부 프로젝트 worktree의 **백엔드 전체 테스트**를 강제 실행한다 / 핵심 출력물: `full_backend_test_gate_result`, `full-backend-test-report.md`, 보강-재테스트 이력
 
 - 진입 조건:
-  - `pass_a_result == pass`일 때만 실행한다.
+  - `pass_a_result == pass`이고 `coverage_matrix_gate_result == pass`일 때만 실행한다.
   - `pass_a_result == fail`이면 본 Step을 skip하고 기존 Step 6(e) 경로를 그대로 따른다.
+  - `coverage_matrix_gate_result == gap_found`이면 본 Step을 skip하고 Step 6(c)/(d) 경로를 따른다.
 - 차단 규칙:
   - 전체 테스트가 100% PASS(또는 "테스트 없음" 사용자 확인)되기 전에는 **Step 4(Pass B) 진입 금지**.
 - 범위 제한:
@@ -668,8 +752,10 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 #### Step 4/5 연결 규칙 (호환성 보장)
 
 - Step 4 진입 허용 조건:
+  - `coverage_matrix_gate_result == pass`
   - `full_backend_test_gate_result in {pass, pass_with_warning}`
 - Step 4 진입 차단 조건:
+  - `coverage_matrix_gate_result == gap_found`
   - `full_backend_test_gate_result in {fail, limit_reached}`
   - 이 경우 Pass B를 생략하고 Step 6(c)/(d) 기존 경로로 진행한다.
 - Step 5 취합 시 `full-backend-test-report.md`가 존재하면 `review-report.md`에 요약을 포함한다.
@@ -905,7 +991,7 @@ Agent(
    - fallback (FILE_NOT_FOUND 처리): 각 `review-*.md` 파일이 FILE_NOT_FOUND이면 해당 background Agent 반환값(`TaskOutput`)에서 전체 텍스트를 추출한다.
      - 추출 텍스트가 빈 문자열이 아니고 `# ` 또는 `## ` 마크다운 헤더를 1개 이상 포함하면 유효한 리뷰 결과로 간주하고 PM이 해당 `review-*.md` 경로에 Write한다.
      - 추출 텍스트가 비어있거나 헤더가 없으면 해당 역할을 "에이전트 실패"로 표시하고 나머지 취합을 계속 진행한다.
-2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `full-backend-test-report.md`(선택, Step 3.5 실행 시 생성).
+2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `coverage-matrix.json` + `coverage-matrix.md` + `full-backend-test-report.md`(선택, Step 3.5 실행 시 생성).
 3. **review-report.md 작성**: `reviews/RV-NNN/review-report.md`
    ```markdown
    # 리뷰 리포트 — RV-NNN (REQ-NNN 반복 N)
@@ -920,6 +1006,11 @@ Agent(
    - ✅ 충족 PAC N개
    - ❌ 미충족 PAC N개
      - PAC-X: <설명>
+
+   ## Spec↔Diff Coverage Matrix 결과
+   - MUST unmapped: N건 (hard gate 기준: 0이어야 Pass B 허용)
+   - Spec unmapped: N건 / Diff unmapped: N건
+   - 상세: `coverage-matrix.md`, `coverage-matrix.json`
 
    ## Full Backend Test Gate 결과
    - 상태: PASS | PASS_WITH_WARNING | FAIL | LIMIT_REACHED | NO_TESTS_DETECTED
@@ -961,6 +1052,41 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
 - `[MUST] [impact-check]` AC 중 `FAIL`이 1건이라도 있으면 `review.json.status = "gap_found"`로 처리하고 `(c)` 분기로 진입한다.
 
 > **Step 5 완료 시 공통 절차**: 분기 처리가 완료되면 `request.json.review_iterations` 배열에서 현재 회차 항목의 `status`를 `"in_progress"` → `"completed"`로 갱신합니다.
+
+#### PM 판정 기계화 Boolean Gate (Step 6 선행, MANDATORY)
+
+`PM_PASS = MUST_AUTOMATABLE_PASS AND EVIDENCE_COMPLETE AND NO_BLOCKING_EXCEPTION`
+
+1. `MUST_AUTOMATABLE_PASS` 계산 규칙:
+   - 대상: MUST 등급이면서 `ac_type == automatable`인 Spec AC/PAC만 포함한다.
+   - 제외: `manual`/`browser-test` MUST AC는 자동 통과 계산에서 제외하고 별도 플래그로만 관리한다.
+   - 판정 정규화:
+     - `PASS` → pass
+     - `FAIL` → fail
+     - `TIMEOUT`/`timeout` → fail (강제)
+     - `N/A`/`na` → `na_reason`이 비어 있지 않을 때만 유효, 비어 있으면 fail (강제)
+   - MUST 대상 중 1건이라도 fail이면 `MUST_AUTOMATABLE_PASS=false`.
+   - 별도 플래그(리포트/메타 기록):
+     - `manual_must_flag`: MUST + manual AC 존재 여부/개수
+     - `browser_test_must_flag`: MUST + browser-test AC 존재 여부/개수
+2. `EVIDENCE_COMPLETE` 계산 규칙:
+   - 아래 필수 증적 4종이 모두 존재하고 비어있지 않아야 true:
+     - `reviews/RV-NNN/review.json`
+     - `reviews/RV-NNN/evidence-ledger.md`
+     - `reviews/RV-NNN/coverage-matrix.json`
+     - `reviews/RV-NNN/coverage-matrix.md`
+3. `NO_BLOCKING_EXCEPTION` 계산 규칙:
+   - 아래 blocking 조건이 모두 없어야 true:
+     - `pass_a_result == fail`
+     - `static_validation_gate_result in {fail, gap_found}`
+     - `coverage_matrix_gate_result == gap_found`
+     - `full_backend_test_gate_result in {fail, limit_reached}`
+     - blocking 모드 intent_fidelity 실패
+4. 적용 규칙:
+   - 기존 Step 6 분기 판정 결과가 `(a)`(pass 후보)일 때만 최종 확정 직전에 Boolean Gate를 평가한다.
+   - `PM_PASS=true`면 `(a)`를 유지한다.
+   - `PM_PASS=false`면 `(a)`를 취소하고 `(c)`와 동일 경로로 강등한다 (`review.json.status="gap_found"`, `gap_source="ac_gap"`).
+   - 기존 `(b)/(c)/(d)/(e)`로 이미 확정된 경우에는 Boolean Gate가 분기를 덮어쓰지 않는다(하위 호환).
 
 #### 커스텀 Loop 종료 조건 게이트 (Step 6 선행)
 
@@ -1300,9 +1426,23 @@ intent_fidelity 리뷰 결과를 현재 태스크 단위로 기록한다.
     "minor": 0,
     "auto_fixed": [],
     "skipped": []
+  },
+  "pm_gate": {
+    "pm_pass": true,
+    "must_automatable_pass": true,
+    "evidence_complete": true,
+    "no_blocking_exception": true,
+    "manual_must_flag": {
+      "count": 0
+    },
+    "browser_test_must_flag": {
+      "count": 0
+    }
   }
 }
 ```
+
+`pm_gate`는 Step 6 Boolean Gate 계산 결과를 저장하는 선택 필드다(하위 호환). 필드가 없으면 기존 리포트 파싱만으로도 동작해야 한다.
 
 ### previous_severity_counts 스키마
 
