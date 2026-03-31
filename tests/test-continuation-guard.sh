@@ -140,6 +140,49 @@ assert_eq "explicit allow pattern exits 0" "0" "$STOP_EXIT"
 assert_empty "AskUserQuestion -> empty stdout" "$output"
 
 cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":1,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"{\"tool_name\":\"AskUserQuestion\"} 계속 진행하시겠습니까?"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile + AskUserQuestion(no marker) exits 0" "0" "$STOP_EXIT"
+assert_contains "agile + AskUserQuestion(no marker) -> block" '"decision": "block"' "$output"
+assert_contains "agile + AskUserQuestion(no marker) reason includes continuation guard" 'Sprint loop active; continue to next sprint without stopping.' "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":2,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"[스티어링 체크포인트] {\"tool_name\":\"AskUserQuestion\"}"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile + AskUserQuestion([스티어링 체크포인트]) exits 0" "0" "$STOP_EXIT"
+assert_empty "agile + AskUserQuestion([스티어링 체크포인트]) -> allow" "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":3,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"[비상 스티어링] {\"tool_name\":\"AskUserQuestion\"}"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile + AskUserQuestion([비상 스티어링]) exits 0" "0" "$STOP_EXIT"
+assert_empty "agile + AskUserQuestion([비상 스티어링]) -> allow" "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":4,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"[Sprint 0] {\"tool_name\":\"AskUserQuestion\"}"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile + AskUserQuestion([Sprint 0]) exits 0" "0" "$STOP_EXIT"
+assert_empty "agile + AskUserQuestion([Sprint 0]) -> allow" "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":5,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"[자동 중단] {\"tool_name\":\"AskUserQuestion\"}"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile + AskUserQuestion([자동 중단]) exits 0" "0" "$STOP_EXIT"
+assert_empty "agile + AskUserQuestion([자동 중단]) -> allow" "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:request","active_req":"REQ-541","iteration":1,"updated_at":"2026-03-31T00:00:00Z"}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"{\"tool_name\":\"AskUserQuestion\"}"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "non-agile + AskUserQuestion exits 0" "0" "$STOP_EXIT"
+assert_empty "non-agile + AskUserQuestion keeps existing allow" "$output"
+
+cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:plan","active_req":"REQ-496","iteration":3,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"mst:request","source":"PLN-364","auto":true}}'
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"

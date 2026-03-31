@@ -61,7 +61,25 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - `plan -a` 입력, 중간 보고, 스티어링 보고에서 잔여 스프린트 수/완료 예정 스프린트 표현을 전달·기재하는 행위.
 - 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
 - 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
+- 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
 - 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
+
+### AskUserQuestion 허용 지점 (Whitelist)
+
+- 허용 지점 1: Step 3.3 DoD 제안 approve/reject 확인
+  - 필수 마커: `[스티어링 체크포인트]`
+- 허용 지점 2: Step 3 비상 스티어링 강제 진입 후 사용자 개입 요청
+  - 필수 마커: `[비상 스티어링]`
+- 허용 지점 3: Step 2.1 Sprint 0 smoke test 실패 후 재시도/중단 확인
+  - 필수 마커: `[Sprint 0]`
+- 허용 지점 4: Step 2.2.5 소스 검증 3회 실패 초과 시 사용자 에스컬레이션
+  - 필수 마커: `[자동 중단]`
+- 허용 지점 5: Step 3.5 변경 후 정합성 정책 레벨 확인
+  - 필수 마커: `[스티어링 체크포인트]`
+
+동기화 규칙:
+- 위 허용 지점/마커 목록을 변경하면 `hooks/mst-stop-hook.sh`의 agile AskUserQuestion 화이트리스트를 같은 PR에서 동시에 갱신한다.
+- stop hook 화이트리스트에 없는 마커가 포함된 AskUserQuestion은 스프린트 루프에서 허용되지 않는다.
 
 ## 실행 프로토콜
 
@@ -397,7 +415,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
   --current-sprint {CURRENT_SPRINT + 1} \
   --json
 ```
-5. `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신하고 루프 상단으로 복귀한다.
+5. `CONTINUATION GUARD`:
+  - 위 update 호출 직후 `AskUserQuestion`을 삽입하지 않는다.
+  - 즉시 `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신하고 루프 상단으로 복귀한다.
 
 ---
 

@@ -87,6 +87,14 @@ contains_allow_pattern() {
   printf '%s' "$text" | grep -Eiq -- '"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|"name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|workflow complete|final answer delivered|user requested stop'
 }
 
+contains_agile_allow_marker() {
+  local text="$1"
+  printf '%s' "$text" | grep -Fq "[스티어링 체크포인트]" \
+    || printf '%s' "$text" | grep -Fq "[비상 스티어링]" \
+    || printf '%s' "$text" | grep -Fq "[Sprint 0]" \
+    || printf '%s' "$text" | grep -Fq "[자동 중단]"
+}
+
 STATE_INFO="$(python3 - "$STATE_FILE" <<'PY'
 import json
 import os
@@ -220,6 +228,34 @@ fi
 
 if [ "$HAS_NEXT_ACTION" != "true" ]; then
   if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
+    if [ "$CURRENT_SKILL" = "mst:agile" ]; then
+      AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
+${STDIN_RAW}"
+      if contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
+        debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL"
+        exit 0
+      fi
+
+      REASON="Sprint loop active; continue to next sprint without stopping."
+      REASON="$REASON AskUserQuestion is allowed only with agile whitelist markers."
+      if [ -n "$CURRENT_SKILL" ]; then
+        REASON="$REASON Current skill: $CURRENT_SKILL."
+      fi
+      if [ -n "$ACTIVE_REQ" ]; then
+        REASON="$REASON Active request: $ACTIVE_REQ."
+      fi
+
+      python3 - "$REASON" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1]
+print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+PY
+      debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ"
+      exit 0
+    fi
+
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
     exit 0
   fi
