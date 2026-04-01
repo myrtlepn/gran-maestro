@@ -883,9 +883,28 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
             - Phase B로 spec을 작성한 서브에이전트와 별개로 PM이 prereview 에이전트를 dispatch (역할 분리)
             - PM 재량만으로 Phase A를 미실행하는 것은 금지
 
+      **h-1.5 테스트 태스크 자동 생성** (스텝 1 직후, 스텝 2 양방향 검증 직전, MANDATORY):
+      - 목적: 모든 구현 태스크 완료 후 실행되는 **테스트 전용 후행 태스크**를 마지막에 자동 추가한다.
+      - 생성 조건:
+        - 모든 REQ에서 항상 1개 생성한다 (단일 구현 태스크 REQ 포함).
+      - 생성 위치/ID:
+        - 테스트 태스크는 태스크 리스트의 마지막에 배치한다.
+        - 테스트 태스크 ID는 마지막 구현 태스크의 다음 순번으로 생성한다.
+      - 의존성 규칙 (양방향, MANDATORY):
+        - 테스트 태스크 spec `§5 선행 작업(blockedBy)`에는 모든 구현 태스크 ID를 기입한다.
+        - 각 구현 태스크 spec `§5 후행 작업(blocks)`에는 테스트 태스크 ID를 추가한다 (중복 금지, dedupe).
+      - spec 작성 규칙:
+        - 테스트 태스크 spec은 반드시 `templates/test-spec.md` 템플릿을 사용한다.
+        - `§2 테스트 범위`에는 `통합 검증 + 증분 테스트 + 회귀 테스트`를 모두 명시한다.
+        - `§3 통합 AC`는 구현 태스크들의 핵심 AC를 Given/When/Then + Test 형식으로 종합 재구성한다.
+        - `§4 회귀 테스트 항목`은 PM이 변경 영향 범위를 분석하여 최소 1개 이상 작성한다.
+      - request.json 반영 규칙:
+        - 테스트 태스크도 일반 태스크와 동일하게 `request.json.tasks[]`에 메타데이터(`id`, `title`, `status`, `agent`, `spec`, `covers_ac`)를 기록한다.
+
       **스텝 2 (검증): 양방향 의존성 검증 훅** (모든 spec.md Write 완료 직후 실행)
       - 각 spec의 blocks 목록을 읽어 대상 태스크 spec의 blockedBy 포함 여부 확인; 역방향도 동일하게 검증
       - blocks/blockedBy 양방향 일치 검증: 불일치 발견 시 오류 메시지 출력 + request.json의 tasks 배열 업데이트 차단 (spec.md는 유지, PM이 수동 수정 후 재시도)
+      - `h-1.5`에서 추가한 `구현 태스크 blocks ↔ 테스트 태스크 blockedBy` 관계도 동일 규칙으로 검증한다.
       - 부분 실패 (k/N spec 성공) 시: 실패 태스크 ID 목록 표시 + 해당 태스크 spec.md만 재작성 재시도 안내 (성공 태스크 유지)
 
    i. 태스크 디렉토리 일괄 생성: `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/tasks/01..N` (N개 동시 생성)
