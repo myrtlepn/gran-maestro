@@ -259,7 +259,7 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 
 **목표**: 매 Sprint 시작 시 프로젝트 건강을 먼저 점검하고, 문제를 우선 해결한 뒤 프로젝트 DoD를 MoSCoW+의존성 기반으로 진행한다.
 
-반복 시작 전 매번 공통 게이트를 수행한다:
+반복 시작 전 매번 공통 게이트를 아래 순서로 수행한다:
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
@@ -267,7 +267,39 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
   --skill mst:agile \
   --auto true \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
+```
 
+##### 2.2.0.5 Accept Preflight 검증 (이전 Sprint REQ 완료 확인)
+
+`state set-workflow` 직후, `objective-check` 호출 전에 직전 Sprint REQ의 accept 완료 여부를 선검증한다.
+
+1. `CURRENT_SPRINT == 1`이면 Sprint 0은 smoke test이므로 preflight를 skip하고 objective-check로 진행한다.
+2. `CURRENT_SPRINT > 1`이면 직전 Sprint 결과에서 REQ ID를 추출한다.
+```bash
+Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT-1}/result.json)
+Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT-1}/result.md)
+```
+- 결과에서 `REQ-<숫자>` 패턴이 없으면(예: 건강 이슈 수정 Sprint) preflight를 skip하고 objective-check로 진행한다.
+3. `Read({PROJECT_ROOT}/.gran-maestro/requests/{PREV_REQ_ID}/request.json)` 후 `status`를 확인한다.
+- `status`가 `done`, `completed`, `accepted` 중 하나이면 정상 완료로 간주하고 preflight를 skip한다.
+- 그 외(`phase2_execution`, `phase3_review`, `spec_ready` 등)는 미완료로 간주한다.
+4. 미완료로 판정되면 브랜치 존재 여부를 교차 검증한다.
+```bash
+git show-ref --verify --quiet refs/heads/gran-maestro/{PREV_REQ_ID}
+```
+- 브랜치가 존재하면 accept 미실행으로 확정한다.
+5. accept를 선행 실행한다.
+```text
+Skill(skill: "mst:accept", args: "{PREV_REQ_ID}")
+```
+6. accept 실행 결과를 확인한다.
+- 성공 조건:
+  - `request.json.status`가 `done`, `completed`, `accepted` 중 하나
+  - `refs/heads/gran-maestro/{PREV_REQ_ID}` 및 `refs/heads/gran-maestro/{PREV_REQ_ID}-T*`가 정리됨
+- 실패 조건:
+  - 위 성공 조건을 만족하지 못하면 `[비상 스티어링]` 마커로 사용자 개입을 요청하고 Sprint 진행을 중단한다.
+
+```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 ```
 
