@@ -15,7 +15,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer';
 import { MilkdownEditor } from '@/components/shared/MilkdownEditor';
 import { ObjectiveCommentsPanel } from '@/views/ObjectiveCommentsPanel';
-import { ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
+import { ArrowDown, ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
 
 interface AgileSessionSummary {
   id: string;
@@ -1896,8 +1896,8 @@ export function AgileView() {
                         {detailLoading ? (
                           <Skeleton className="h-28 w-full" />
                         ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
-                          <div className="overflow-x-auto pb-2">
-                            <div className="inline-flex min-w-max items-center gap-3">
+                          <div className="pb-2">
+                            <div className="flex flex-col gap-3">
                               {sessionDetail.sprints.map((sprint, index) => {
                                 const goalLine = sprintGoalLine(sprint);
                                 const hasGoalLine = Boolean(goalLine);
@@ -1911,19 +1911,19 @@ export function AgileView() {
                                 const generatedReq = toArray(sprint.generated?.req);
 
                                 return (
-                                  <div key={sprint.sprint_id} className="inline-flex items-center gap-3">
+                                  <div key={sprint.sprint_id} className="flex flex-col gap-3 w-full">
                                     {index > 0 && (
-                                      <div className="min-w-[120px] flex flex-col items-center justify-center text-muted-foreground">
-                                        <ArrowRight className="h-4 w-4" />
+                                      <div className="flex flex-col items-center justify-center text-muted-foreground py-1">
+                                        <ArrowDown className="h-4 w-4" />
                                         {previousDirection && (
-                                          <p className="mt-1 text-[11px] text-center max-w-[120px] break-words">{previousDirection}</p>
+                                          <p className="mt-1 text-[11px] text-center max-w-[200px] break-words">{previousDirection}</p>
                                         )}
                                       </div>
                                     )}
                                     <button
                                       type="button"
                                       onClick={() => setSelectedSprintId(sprint.sprint_id)}
-                                      className={`rounded-lg border p-3 cursor-pointer transition-colors text-left min-w-[260px] max-w-[320px] ${
+                                      className={`w-full rounded-lg border p-3 cursor-pointer transition-colors text-left ${
                                         selectedSprintId === sprint.sprint_id
                                           ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
                                           : 'border-border bg-background hover:bg-accent/40'
