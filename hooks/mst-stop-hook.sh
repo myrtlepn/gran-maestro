@@ -95,6 +95,62 @@ contains_agile_allow_marker() {
     || printf '%s' "$text" | grep -Fq "[자동 중단]"
 }
 
+emit_block_json() {
+  local reason="$1"
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1]
+print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+persist_block_state() {
+  local reason="$1"
+  python3 - "$STATE_FILE" "$reason" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+reason = sys.argv[2]
+
+payload = {}
+if os.path.isfile(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        payload = {}
+
+if not isinstance(payload, dict):
+    payload = {}
+
+block_count = payload.get("block_count")
+if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
+    block_count = 0
+
+block_count += 1
+payload["block_count"] = block_count
+payload["last_block_reason"] = reason if isinstance(reason, str) else ""
+
+tmp_path = f"{path}.tmp"
+try:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, path)
+except Exception:
+    pass
+
+print(block_count)
+PY
+}
+
 STATE_INFO="$(python3 - "$STATE_FILE" <<'PY'
 import json
 import os
@@ -112,9 +168,17 @@ def emit(
     source_skill="",
     has_next_action=False,
     updated_at="",
+    agile_loop_active=False,
+    block_count=0,
+    last_block_reason="",
 ):
+    if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
+        block_count = 0
+    if not isinstance(last_block_reason, str):
+        last_block_reason = ""
+    last_block_reason = last_block_reason.replace("\t", " ").replace("\n", " ").strip()
     print(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
             status,
             "true" if workflow_active else "false",
             current_skill,
@@ -126,6 +190,9 @@ def emit(
             source_skill,
             "true" if has_next_action else "false",
             updated_at,
+            "true" if agile_loop_active else "false",
+            block_count,
+            last_block_reason,
         )
     )
 
@@ -149,6 +216,17 @@ workflow_active = bool(payload.get("workflow_active"))
 current_skill = payload.get("current_skill") if isinstance(payload.get("current_skill"), str) else ""
 active_req = payload.get("active_req") if isinstance(payload.get("active_req"), str) else ""
 updated_at = payload.get("updated_at") if isinstance(payload.get("updated_at"), str) else ""
+agile_loop_active = payload.get("agile_loop_active")
+if not isinstance(agile_loop_active, bool):
+    agile_loop_active = False
+
+block_count = payload.get("block_count")
+if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
+    block_count = 0
+
+last_block_reason = payload.get("last_block_reason")
+if not isinstance(last_block_reason, str):
+    last_block_reason = ""
 
 iteration = payload.get("iteration")
 if not isinstance(iteration, int):
@@ -192,19 +270,21 @@ if isinstance(next_action, dict):
             next_auto = True
             break
 
-print(
-    "valid\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
-        "true" if workflow_active else "false",
-        current_skill,
-        active_req,
-        iteration,
-        next_skill,
-        next_source,
-        "true" if next_auto else "false",
-        source_skill,
-        "true" if has_next_action else "false",
-        updated_at,
-    )
+emit(
+    "valid",
+    workflow_active=workflow_active,
+    current_skill=current_skill,
+    active_req=active_req,
+    iteration=iteration,
+    next_skill=next_skill,
+    next_source=next_source,
+    next_auto=next_auto,
+    source_skill=source_skill,
+    has_next_action=has_next_action,
+    updated_at=updated_at,
+    agile_loop_active=agile_loop_active,
+    block_count=block_count,
+    last_block_reason=last_block_reason,
 )
 PY
 )"
@@ -219,43 +299,69 @@ NEXT_SOURCE="$(printf '%s' "$STATE_INFO" | cut -f7)"
 NEXT_AUTO="$(printf '%s' "$STATE_INFO" | cut -f8)"
 SOURCE_SKILL="$(printf '%s' "$STATE_INFO" | cut -f9)"
 HAS_NEXT_ACTION="$(printf '%s' "$STATE_INFO" | cut -f10)"
-UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f11-)"
+UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f11)"
+AGILE_LOOP_ACTIVE="$(printf '%s' "$STATE_INFO" | cut -f12)"
+BLOCK_COUNT="$(printf '%s' "$STATE_INFO" | cut -f13)"
+LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14-)"
 
 if [ "$WORKFLOW_ACTIVE" != "true" ]; then
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
   exit 0
 fi
 
-if [ "$HAS_NEXT_ACTION" != "true" ]; then
-  if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
-    if [ "$CURRENT_SKILL" = "mst:agile" ]; then
-      AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
+if ! printf '%s' "$BLOCK_COUNT" | grep -Eq '^[0-9]+$'; then
+  BLOCK_COUNT="0"
+fi
+
+AGILE_GUARD_ACTIVE="false"
+if [ "$AGILE_LOOP_ACTIVE" = "true" ] || [ "$CURRENT_SKILL" = "mst:agile" ]; then
+  AGILE_GUARD_ACTIVE="true"
+fi
+
+ALLOW_PATTERN_FOUND="false"
+if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
+  ALLOW_PATTERN_FOUND="true"
+fi
+
+AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
 ${STDIN_RAW}"
-      if contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
-        debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL"
-        exit 0
-      fi
 
-      REASON="Sprint loop active; continue to next sprint without stopping."
-      REASON="$REASON AskUserQuestion is allowed only with agile whitelist markers."
-      if [ -n "$CURRENT_SKILL" ]; then
-        REASON="$REASON Current skill: $CURRENT_SKILL."
-      fi
-      if [ -n "$ACTIVE_REQ" ]; then
-        REASON="$REASON Active request: $ACTIVE_REQ."
-      fi
+if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
+  debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE"
+  exit 0
+fi
 
-      python3 - "$REASON" <<'PY'
-import json
-import sys
+if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; then
+  NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
+  REMAINING_DODS="continue current sprint backlog"
+  if [ -n "$NEXT_SOURCE" ]; then
+    REMAINING_DODS="$NEXT_SOURCE"
+  elif [ -n "$ACTIVE_REQ" ]; then
+    REMAINING_DODS="$ACTIVE_REQ"
+  fi
 
-reason = sys.argv[1]
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-PY
-      debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ"
-      exit 0
-    fi
+  REASON="Sprint loop active; remaining DoDs: $REMAINING_DODS."
+  REASON="$REASON AskUserQuestion is allowed only with agile whitelist markers."
+  if [ -n "$CURRENT_SKILL" ]; then
+    REASON="$REASON Current skill: $CURRENT_SKILL."
+  fi
+  if [ -n "$ACTIVE_REQ" ]; then
+    REASON="$REASON Active request: $ACTIVE_REQ."
+  fi
+  REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
 
+  if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
+    REASON="[자동 중단] $REASON Escalate to user for steering."
+  fi
+
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
+  emit_block_json "$REASON"
+  debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
+fi
+
+if [ "$HAS_NEXT_ACTION" != "true" ]; then
+  if [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
     exit 0
   fi
@@ -296,13 +402,7 @@ elif [ -n "$NEXT_SKILL" ]; then
 fi
 REASON="$REASON Do not stop; emit the next tool call now."
 
-python3 - "$REASON" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1]
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-PY
-
-debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO"
+PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+emit_block_json "$REASON"
+debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"
 exit 0

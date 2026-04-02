@@ -62,6 +62,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
 - 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
 - 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
+- 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
 - 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
 
 ### AskUserQuestion 허용 지점 (Whitelist)
@@ -259,10 +260,14 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 
 **목표**: 매 Sprint 시작 시 프로젝트 건강을 먼저 점검하고, 문제를 우선 해결한 뒤 프로젝트 DoD를 MoSCoW+의존성 기반으로 진행한다.
 
+스프린트 시작 시 아래 체크포인트 마커를 반드시 출력한다:
+`[LOOP {CURRENT_SPRINT}] DOD 진행: {done}/{total} | 잔여: {remaining}`
+
 반복 시작 전 매번 공통 게이트를 아래 순서로 수행한다:
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --agile-loop-active true \
   --active true \
   --skill mst:agile \
   --auto true \
@@ -477,8 +482,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
   --json
 ```
 5. `CONTINUATION GUARD`:
-  - 위 update 호출 직후 `AskUserQuestion`을 삽입하지 않는다.
-  - 즉시 `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신하고 루프 상단으로 복귀한다.
+  - 위 update 호출 직후 `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신한다.
+  - 즉시 다음 DoD의 구현을 시작하라: 루프 상단으로 복귀해 다음 Sprint를 연속 실행한다.
 
 ---
 
@@ -509,6 +514,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --agile-loop-active false \
   --active false \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
@@ -705,6 +711,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --agile-loop-active false \
   --active false \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
