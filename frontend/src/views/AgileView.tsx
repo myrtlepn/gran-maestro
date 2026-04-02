@@ -1521,10 +1521,22 @@ export function AgileView() {
                     <div className="rounded-md border p-3">
                       <div className="text-xs font-semibold text-muted-foreground mb-2">스토리 목록</div>
                       {selectedSprintStories.length > 0 ? (
-                        <ul className="list-disc pl-5 text-sm space-y-1">
-                          {selectedSprintStories.map((story, index) => (
-                            <li key={`${story}-${index}`}>{story}</li>
-                          ))}
+                        <ul className="list-disc pl-5 text-sm space-y-2">
+                          {selectedSprintStories.map((story, index) => {
+                            const dod = objectiveDodItems.find((d) => d.dod === story);
+                            return (
+                              <li key={`${story}-${index}`}>
+                                {dod?.anchorText ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-medium text-foreground">{dod.anchorText}</span>
+                                    <span className="font-mono text-[11px] text-muted-foreground">{story}</span>
+                                  </div>
+                                ) : (
+                                  story
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       ) : (
                         <p className="text-sm text-muted-foreground">스토리 정보가 없습니다.</p>
