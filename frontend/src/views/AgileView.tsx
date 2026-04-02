@@ -610,6 +610,13 @@ export function AgileView() {
     storageKey: 'agile-sprint-panel-width',
   });
   const [isSprintPanelCollapsed, setIsSprintPanelCollapsed] = useState(false);
+  const [isObjectiveCommentsCollapsed, setIsObjectiveCommentsCollapsed] = useState(() => {
+    return localStorage.getItem('agile-objective-comments-collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('agile-objective-comments-collapsed', String(isObjectiveCommentsCollapsed));
+  }, [isObjectiveCommentsCollapsed]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -1602,8 +1609,8 @@ export function AgileView() {
               <ScrollArea className="flex-1 min-h-0">
                 <div className="p-4 space-y-4">
                   <TabsContent value="objective" className="mt-0 outline-none">
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 h-full items-start">
-                      <div className="xl:col-span-2 h-[600px] xl:h-[calc(100vh-250px)]">
+                    <div className={`grid grid-cols-1 ${isObjectiveCommentsCollapsed ? 'xl:flex xl:flex-row' : 'xl:grid-cols-3'} gap-4 h-full items-start`}>
+                      <div className={`${isObjectiveCommentsCollapsed ? 'flex-1 min-w-0' : 'xl:col-span-2'} h-[600px] xl:h-[calc(100vh-250px)]`}>
                         <Card className="h-full flex flex-col shadow-sm">
                           <CardHeader className="pb-3 flex flex-row items-center justify-between border-b shrink-0">
                             <div>
@@ -1825,15 +1832,41 @@ export function AgileView() {
                           </div>
                         </Card>
                       </div>
-                      <div className="xl:col-span-1 h-[600px] xl:h-[calc(100vh-250px)] sticky top-0">
-                        {selectedSessionId ? (
-                          <ObjectiveCommentsPanel agiId={selectedSessionId} />
-                        ) : (
-                          <Card className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/5">
-                            세션을 선택하세요
-                          </Card>
-                        )}
-                      </div>
+                      {isObjectiveCommentsCollapsed ? (
+                        <div className="w-11 border rounded-md bg-muted/10 shrink-0 flex flex-col items-center justify-start pt-3 h-[600px] xl:h-[calc(100vh-250px)] sticky top-0">
+                          <button
+                            type="button"
+                            onClick={() => setIsObjectiveCommentsCollapsed(false)}
+                            className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
+                            aria-label="코멘트 패널 펼치기"
+                            title="코멘트 패널 펼치기"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="xl:col-span-1 h-[600px] xl:h-[calc(100vh-250px)] sticky top-0">
+                          {selectedSessionId ? (
+                            <ObjectiveCommentsPanel 
+                              agiId={selectedSessionId} 
+                              onCollapse={() => setIsObjectiveCommentsCollapsed(true)} 
+                            />
+                          ) : (
+                            <Card className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/5 relative">
+                              <button
+                                type="button"
+                                onClick={() => setIsObjectiveCommentsCollapsed(true)}
+                                className="absolute top-3 right-3 h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
+                                aria-label="코멘트 패널 접기"
+                                title="코멘트 패널 접기"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                              세션을 선택하세요
+                            </Card>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </TabsContent>
 

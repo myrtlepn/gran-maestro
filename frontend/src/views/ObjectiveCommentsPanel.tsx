@@ -3,7 +3,7 @@ import { useAppContext } from '@/context/AppContext';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { MessageSquare, Check, RotateCcw } from 'lucide-react';
+import { MessageSquare, Check, RotateCcw, ChevronRight } from 'lucide-react';
 
 interface ObjectiveComment {
   id: string;
@@ -21,7 +21,7 @@ interface ObjectiveCommentsResponse {
   comments: ObjectiveComment[];
 }
 
-export function ObjectiveCommentsPanel({ agiId }: { agiId: string }) {
+export function ObjectiveCommentsPanel({ agiId, onCollapse }: { agiId: string, onCollapse?: () => void }) {
   const { projectId, lastSseEvent } = useAppContext();
   const [comments, setComments] = useState<ObjectiveComment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,11 +135,13 @@ export function ObjectiveCommentsPanel({ agiId }: { agiId: string }) {
 
   return (
     <Card className="flex flex-col h-full border-l-0 rounded-none border-y-0 border-r-0">
-      <CardHeader className="pb-3 border-b px-4 py-3 bg-muted/10 shrink-0">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+      <CardHeader className="pb-3 border-b px-4 py-3 bg-muted/10 shrink-0 flex flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2 m-0">
             <MessageSquare className="h-4 w-4" /> Comments
           </CardTitle>
+        </div>
+        <div className="flex items-center gap-2">
           <div className="flex bg-muted p-0.5 rounded-md">
             <button
               onClick={() => setFilter('all')}
@@ -160,6 +162,17 @@ export function ObjectiveCommentsPanel({ agiId }: { agiId: string }) {
               Resolved
             </button>
           </div>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
+              aria-label="코멘트 패널 접기"
+              title="코멘트 패널 접기"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </CardHeader>
       
