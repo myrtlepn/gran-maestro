@@ -564,6 +564,99 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
   });
 });
 
+projectAgileApi.get("/agile/sessions/:agiId/objective/files", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(/\\/g, "/");
+  const objectiveDir = objectivePath.includes("/") ? objectivePath.slice(0, objectivePath.lastIndexOf("/")) : "objective";
+  const detailsDir = `${sessionDir}/${objectiveDir}/details`;
+  const detailFiles: string[] = [];
+
+  try {
+    for await (const entry of Deno.readDir(detailsDir)) {
+      if (!entry.isFile || !entry.name.endsWith(".md")) continue;
+      detailFiles.push(entry.name);
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return c.json({ files: [] });
+    }
+    throw error;
+  }
+
+  detailFiles.sort((a, b) => a.localeCompare(b));
+  return c.json({
+    files: [
+      { name: objectivePath.split("/").at(-1) ?? "objective.md", path: objectivePath, type: "root" },
+      ...detailFiles.map((name) => ({
+        name,
+        path: `${objectiveDir}/details/${name}`,
+        type: "detail",
+      })),
+    ],
+  });
+});
+
+projectAgileApi.get("/agile/sessions/:agiId/objective/details/:filename", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const filename = c.req.param("filename");
+  if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+  const objectivePath = (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(/\\/g, "/");
+  const objectiveDir = objectivePath.includes("/") ? objectivePath.slice(0, objectivePath.lastIndexOf("/")) : "objective";
+  const detailPath = `${objectiveDir}/details/${filename}`;
+  const content = await readTextFile(`${sessionDir}/${detailPath}`);
+  if (content === null) {
+    return c.json({ error: "Objective detail not found" }, 404);
+  }
+
+  return c.json({
+    content,
+    path: detailPath,
+  });
+});
+
 projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
