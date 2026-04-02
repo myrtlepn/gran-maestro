@@ -2394,6 +2394,16 @@ def cmd_agile_result(args):
         payload["summary"] = str(args.summary)
     if args.outcome is not None:
         payload["outcome"] = str(args.outcome)
+    if args.sprint_purpose is not None:
+        payload["sprint_purpose"] = str(args.sprint_purpose)
+    if args.selection_reason is not None:
+        payload["selection_reason"] = str(args.selection_reason)
+    if args.target_dod is not None:
+        payload["target_dod"] = str(args.target_dod)
+    if args.target_dod_text is not None:
+        payload["target_dod_text"] = str(args.target_dod_text)
+    if args.previous_direction is not None:
+        payload["previous_direction"] = str(args.previous_direction)
     sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
     save_json(sprint_dir / "result.json", payload)
@@ -2402,16 +2412,49 @@ def cmd_agile_result(args):
     result_md_lines = [
         f"# {sprint_id} Result",
         "",
-        f"- status: {payload['status']}",
-        f"- planned: {', '.join(planned) if planned else '-'}",
-        f"- completed: {', '.join(completed) if completed else '-'}",
-        f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
-        f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
-        f"- summary: {payload.get('summary', '-')}",
-        f"- outcome: {payload.get('outcome', '-')}",
-        f"- timestamp: {timestamp}",
-        "",
     ]
+    why_keys = (
+        "sprint_purpose",
+        "selection_reason",
+        "target_dod",
+        "target_dod_text",
+        "previous_direction",
+    )
+    has_why = any(key in payload for key in why_keys)
+    if has_why:
+        target_dod = payload.get("target_dod") or "-"
+        target_dod_text = payload.get("target_dod_text") or "-"
+        if target_dod == "-" and target_dod_text == "-":
+            target_dod_line = "-"
+        elif target_dod_text == "-":
+            target_dod_line = target_dod
+        elif target_dod == "-":
+            target_dod_line = target_dod_text
+        else:
+            target_dod_line = f"{target_dod} — {target_dod_text}"
+        result_md_lines.extend(
+            [
+                "## 이 스프린트를 왜 했는가",
+                f"- 스프린트 목적: {payload.get('sprint_purpose') or '-'}",
+                f"- 대상 DoD: {target_dod_line}",
+                f"- 선택 근거: {payload.get('selection_reason') or '-'}",
+                f"- 직전 회고 방향: {payload.get('previous_direction') or '-'}",
+                "",
+            ]
+        )
+    result_md_lines.extend(
+        [
+            f"- status: {payload['status']}",
+            f"- planned: {', '.join(planned) if planned else '-'}",
+            f"- completed: {', '.join(completed) if completed else '-'}",
+            f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
+            f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+            f"- summary: {payload.get('summary', '-')}",
+            f"- outcome: {payload.get('outcome', '-')}",
+            f"- timestamp: {timestamp}",
+            "",
+        ]
+    )
     result_md_lines.extend(_render_sprint_goals_md_lines(sprint_goals))
     result_md_path.write_text("\n".join(result_md_lines), encoding="utf-8")
     _append_agile_event(
@@ -6183,6 +6226,11 @@ def build_parser():
     agile_result.add_argument("--summary")
     agile_result.add_argument("--outcome")
     agile_result.add_argument("--sprint-goals")
+    agile_result.add_argument("--sprint-purpose")
+    agile_result.add_argument("--selection-reason")
+    agile_result.add_argument("--target-dod")
+    agile_result.add_argument("--target-dod-text")
+    agile_result.add_argument("--previous-direction")
     agile_result.add_argument("--json", action="store_true")
 
     agile_retrospective = agile_sub.add_parser("retrospective")

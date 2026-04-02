@@ -80,6 +80,11 @@ interface AgileSprint {
   timestamp?: string;
   summary?: string;
   outcome?: string;
+  sprint_purpose?: string;
+  selection_reason?: string;
+  target_dod?: string;
+  target_dod_text?: string;
+  previous_direction?: string;
   result_md?: string;
   sprint_goals?: SprintGoal[];
 }
