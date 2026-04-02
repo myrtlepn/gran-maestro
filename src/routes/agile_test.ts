@@ -653,6 +653,51 @@ Deno.test("GET /agile/sessions/:agiId/objective parses project DoD markers and n
   }
 });
 
+Deno.test("GET /agile/sessions/:agiId/objective parses DoD contentText from line after marker", async () => {
+  const fixture = await setupSessionFixture(
+    {
+      steering_every: 3,
+    },
+    [
+      "# Objective",
+      "",
+      "## 프로젝트 완료 기준 (DoD)",
+      "<!-- dod:DOD-001 status:todo priority:must -->",
+      "**DOD-001: 인증 플로우 검증**",
+      "",
+      "<!-- dod:DOD-002 status:done priority:should -->",
+      "**DOD-002: 감사 로그 보존**",
+      "",
+      "<!-- dod:DOD-003 status:todo priority:could -->",
+      "**DOD-003: 롤백 절차 문서화**",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    assertEquals(response.status, 200);
+    const payload = await response.json() as Record<string, unknown>;
+    const parsed = payload.parsed as Record<string, unknown>;
+    const dods = parsed.dods as Array<Record<string, unknown>>;
+
+    assertEquals(Array.isArray(dods), true);
+    assertEquals(dods.length, 3);
+    assertEquals(dods[0].contentText, "**DOD-001: 인증 플로우 검증**");
+    assertEquals(dods[1].contentText, "**DOD-002: 감사 로그 보존**");
+    assertEquals(dods[2].contentText, "**DOD-003: 롤백 절차 문서화**");
+
+    const contentTexts = dods.map((dod) => String(dod.contentText ?? ""));
+    const uniqueCount = new Set(contentTexts).size;
+    assertEquals(uniqueCount, 3);
+    assertEquals(contentTexts.includes("## 프로젝트 완료 기준 (DoD)"), false);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
 Deno.test("PATCH /agile/:agiId/objective reinserts DoD markers for edited objective content", async () => {
   const fixture = await setupSessionFixture(
     {

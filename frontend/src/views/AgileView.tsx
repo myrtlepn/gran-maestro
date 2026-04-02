@@ -124,6 +124,7 @@ interface ObjectiveParsedDod {
   status: string;
   priority: string;
   anchorText?: string | null;
+  contentText?: string | null;
 }
 
 interface ObjectiveParsedSection {
@@ -194,6 +195,7 @@ function parseDodMarkers(content: string): ObjectiveParsedDod[] {
       status: match[2].toLowerCase(),
       priority: match[3].toLowerCase(),
       anchorText: null,
+      contentText: null,
     });
   }
   return markers;
@@ -230,22 +232,25 @@ function renderDodStatus(dods: ObjectiveParsedDod[]) {
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          {dods.map((dod, idx) => (
-            <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5 gap-3">
-              <div className="min-w-0">
-                <div className="font-mono text-xs text-muted-foreground">{dod.dod}</div>
-                {dod.anchorText && (
-                  <p className="text-sm mt-1 truncate">{dod.anchorText}</p>
-                )}
+          {dods.map((dod, idx) => {
+            const dodText = dod.contentText ?? dod.anchorText;
+            return (
+              <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5 gap-3">
+                <div className="min-w-0">
+                  <div className="font-mono text-xs text-muted-foreground">{dod.dod}</div>
+                  {dodText && (
+                    <p className="text-sm mt-1 truncate">{dodText}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className={priorityBadgeClass(dod.priority)}>
+                    priority:{dod.priority}
+                  </Badge>
+                  <StatusBadge status={dod.status} />
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Badge variant="outline" className={priorityBadgeClass(dod.priority)}>
-                  priority:{dod.priority}
-                </Badge>
-                <StatusBadge status={dod.status} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardContent>
     </Card>
@@ -837,6 +842,7 @@ export function AgileView() {
           status: dod.status ?? 'todo',
           priority: dod.priority ?? 'must',
           anchorText: dod.anchorText ?? null,
+          contentText: dod.contentText ?? null,
         })).filter((dod) => dod.dod.length > 0)
         : [];
       const normalizedSections = Array.isArray(parsed?.sections) ? parsed.sections : [];
@@ -1866,8 +1872,8 @@ export function AgileView() {
                                     <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/10 gap-3 transition-colors">
                                       <div className="min-w-0 flex items-center gap-2">
                                         <span className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</span>
-                                        {dod.anchorText ? (
-                                          <p className="text-sm truncate">{dod.anchorText}</p>
+                                        {(dod.contentText ?? dod.anchorText) ? (
+                                          <p className="text-sm truncate">{dod.contentText ?? dod.anchorText}</p>
                                         ) : (
                                           <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
                                         )}
@@ -2251,8 +2257,8 @@ export function AgileView() {
                                           <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/5 gap-3 transition-colors">
                                             <div className="min-w-0 flex items-center gap-2">
                                               <div className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</div>
-                                              {dod.anchorText ? (
-                                                <p className="text-sm truncate">{dod.anchorText}</p>
+                                              {(dod.contentText ?? dod.anchorText) ? (
+                                                <p className="text-sm truncate">{dod.contentText ?? dod.anchorText}</p>
                                               ) : (
                                                 <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
                                               )}

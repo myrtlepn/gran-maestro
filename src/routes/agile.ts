@@ -60,6 +60,7 @@ type ObjectiveMarker = {
   priority: string;
   anchorType: MarkerAnchorType;
   anchorText: string | null;
+  contentText?: string;
 };
 
 type ObjectiveParsedSectionKey =
@@ -81,6 +82,7 @@ type ObjectiveParsedDod = {
   status: string;
   priority: string;
   anchorText: string | null;
+  contentText?: string;
 };
 
 type ParsedObjective = {
@@ -341,6 +343,17 @@ function markerAnchorFromOriginalLine(lines: string[], markerLineIndex: number):
   };
 }
 
+function markerContentFromFollowingLine(lines: string[], markerLineIndex: number): string | null {
+  for (let i = markerLineIndex + 1; i < lines.length; i += 1) {
+    const currentLine = lines[i];
+    const trimmed = currentLine.trim();
+    if (trimmed.length === 0) continue;
+    if (OBJECTIVE_DOD_MARKER_LINE_RE.test(trimmed)) continue;
+    return normalizeAnchorText(currentLine);
+  }
+  return null;
+}
+
 function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
   const lines = content.split("\n");
   const markers: ObjectiveMarker[] = [];
@@ -353,6 +366,7 @@ function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
     const status = match[2].toLowerCase();
     const priority = match[3].toLowerCase();
     const { anchorType, anchorText } = markerAnchorFromOriginalLine(lines, lineIndex);
+    const contentText = markerContentFromFollowingLine(lines, lineIndex);
     markers.push({
       markerLine: `<!-- dod:${dod} status:${status} priority:${priority} -->`,
       dod,
@@ -360,6 +374,7 @@ function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
       priority,
       anchorType,
       anchorText,
+      contentText: contentText ?? undefined,
     });
   }
 
@@ -473,6 +488,7 @@ function parseObjectiveContent(content: string): ParsedObjective {
       status: marker.status,
       priority: marker.priority,
       anchorText: marker.anchorText,
+      contentText: marker.contentText,
     })),
     sections: extractObjectiveSections(content),
   };
