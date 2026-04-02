@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { ApiFetchError, apiFetch } from '@/hooks/useApi';
@@ -260,6 +260,7 @@ function renderDodStatus(dods: ObjectiveParsedDod[]) {
 function renderObjectiveSections(
   sections: ObjectiveParsedSection[],
   rewriteMarkdown: (content: string) => string,
+  onLinkClick?: (e: MouseEvent<HTMLAnchorElement>, href: string) => void,
 ) {
   if (sections.length === 0) return null;
 
@@ -278,13 +279,37 @@ function renderObjectiveSections(
           {sections.map((section, index) => (
             <div key={`${section.key}-${index}`} className="rounded-md border p-3 bg-muted/5">
               <h4 className="text-sm font-semibold mb-2">{section.title}</h4>
-              <MarkdownRenderer content={rewriteMarkdown(section.content)} />
+              <MarkdownRenderer content={rewriteMarkdown(section.content)} onLinkClick={onLinkClick} />
             </div>
           ))}
         </div>
       </CardContent>
     </Card>
   );
+}
+
+function resolveObjectiveMarkdownPath(href: string, currentFile: string): string | null {
+  const trimmedHref = href.trim();
+  if (!trimmedHref || trimmedHref.startsWith('#') || trimmedHref.startsWith('?')) {
+    return null;
+  }
+
+  try {
+    const currentUrl = new URL(currentFile, 'https://objective.local/');
+    const resolvedUrl = new URL(trimmedHref, currentUrl);
+    if (resolvedUrl.origin !== 'https://objective.local') {
+      return null;
+    }
+
+    const normalizedPath = decodeURIComponent(resolvedUrl.pathname.replace(/^\/+/, ''));
+    if (!normalizedPath.toLowerCase().endsWith('.md')) {
+      return null;
+    }
+
+    return normalizedPath;
+  } catch {
+    return null;
+  }
 }
 
 function toArray<T>(value: T[] | undefined): T[] {
@@ -676,6 +701,18 @@ export function AgileView() {
     (content: string) => rewriteMarkdown(linkify(content)),
     [rewriteMarkdown],
   );
+  const handleObjectiveMarkdownLinkClick = useCallback((e: MouseEvent<HTMLAnchorElement>, href: string) => {
+    const nextFile = resolveObjectiveMarkdownPath(href, selectedObjectiveFile);
+    if (!nextFile) return;
+
+    const canNavigate = nextFile === 'objective.md' || objectiveFiles.includes(nextFile);
+    if (!canNavigate) return;
+
+    e.preventDefault();
+    if (nextFile !== selectedObjectiveFile) {
+      setSelectedObjectiveFile(nextFile);
+    }
+  }, [objectiveFiles, selectedObjectiveFile]);
 
   useEffect(() => {
     if (!canCompareResult) {
@@ -801,8 +838,11 @@ export function AgileView() {
         if (response.status === 404) return [];
         throw new Error(`Failed to load objective files: ${response.status}`);
       }
-      const data = await response.json();
-      return Array.isArray(data) ? data : [];
+      const data = await response.json() as { files?: { name?: string; path?: string }[] };
+      if (!Array.isArray(data?.files)) return [];
+      return data.files
+        .map((item) => (typeof item?.name === 'string' ? item.name : typeof item?.path === 'string' ? item.path : null))
+        .filter((name): name is string => Boolean(name && name.trim().length > 0));
     } catch (err) {
       console.error('Failed to load objective files:', err);
       return [];
@@ -1736,7 +1776,7 @@ export function AgileView() {
                                     </div>
                                   ) : objectiveDetailContent !== null ? (
                                     <div className="rounded-md border p-4 bg-background overflow-auto flex-1">
-                                      <MarkdownRenderer content={rewriteMarkdown(objectiveDetailContent)} />
+                                      <MarkdownRenderer content={rewriteMarkdown(objectiveDetailContent)} onLinkClick={handleObjectiveMarkdownLinkClick} />
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
@@ -1779,10 +1819,10 @@ export function AgileView() {
                                   ) : objectiveContent !== null ? (
                                     <div className="overflow-auto flex-1 pb-4">
                                       <div className="rounded-md border p-4 bg-background">
-                                        <MarkdownRenderer content={rewriteMarkdown(objectiveContent)} />
+                                        <MarkdownRenderer content={rewriteMarkdown(objectiveContent)} onLinkClick={handleObjectiveMarkdownLinkClick} />
                                       </div>
                                       {renderDodStatus(objectiveDodItems)}
-                                      {renderObjectiveSections(objectiveSections, rewriteMarkdown)}
+                                      {renderObjectiveSections(objectiveSections, rewriteMarkdown, handleObjectiveMarkdownLinkClick)}
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">

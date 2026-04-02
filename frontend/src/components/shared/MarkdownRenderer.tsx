@@ -23,7 +23,15 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   );
 }
 
-export function MarkdownRenderer({ content, className }: { content: string; className?: string }) {
+export function MarkdownRenderer({ 
+  content, 
+  className,
+  onLinkClick
+}: { 
+  content: string; 
+  className?: string;
+  onLinkClick?: (e: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+}) {
   return (
     <div className={cn(className)}>
       <ReactMarkdown
@@ -37,16 +45,25 @@ export function MarkdownRenderer({ content, className }: { content: string; clas
           h5: ({ children }) => <h5 className="text-sm font-semibold text-foreground mt-3 mb-1">{children}</h5>,
           h6: ({ children }) => <h6 className="text-xs font-semibold text-muted-foreground mt-2 mb-1">{children}</h6>,
           p: ({ children }) => <p className="text-sm text-foreground leading-7 mb-3">{children}</p>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              className="text-primary underline underline-offset-4 hover:text-primary/80"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+              if (onLinkClick && href) {
+                onLinkClick(e, href);
+              }
+            };
+
+            return (
+              <a
+                href={href}
+                className="text-primary underline underline-offset-4 hover:text-primary/80"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleClick}
+              >
+                {children}
+              </a>
+            );
+          },
           ul: ({ children }) => <ul className="list-disc pl-6 text-sm text-foreground mb-3 space-y-1">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal pl-6 text-sm text-foreground mb-3 space-y-1">{children}</ol>,
           li: ({ children }) => <li className="text-sm text-foreground leading-7 [&>p]:mb-0">{children}</li>,
