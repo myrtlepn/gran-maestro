@@ -159,6 +159,7 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [agentPreloadError, setAgentPreloadError] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const prefetchRequestIdRef = useRef<number>(0);
 
   useEffect(() => {
@@ -176,6 +177,7 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
       setDiffChanges([]);
       setDiffError(null);
       setAgentPreloadError(null);
+      setApplyError(null);
       setBaseBranch('');
       setBaseBranchLoaded(false);
       setAgentOverrides({});
@@ -209,7 +211,7 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
         setBaseBranchLoaded(true);
       } catch (err) {
         if (!isMounted) return;
-        alert(`Failed to initialize setup wizard: ${err instanceof Error ? err.message : String(err)}`);
+        console.error('Failed to initialize setup wizard:', err);
       } finally {
         if (isMounted) {
           setInitializing(false);
@@ -359,16 +361,17 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
 
     const presetId = resolvePresetId(selectedAgent, selectedTier, builtinPresets);
     if (!presetId) {
-      alert('프리셋을 찾을 수 없습니다');
+      setApplyError('프리셋을 찾을 수 없습니다');
       return;
     }
+    setApplyError(null);
     setApplying(true);
 
     try {
       try {
         await apiFetch(`/api/presets/${presetId}/apply`, projectId, { method: 'POST' });
       } catch (err) {
-        alert(`Failed to apply preset: ${err instanceof Error ? err.message : String(err)}`);
+        setApplyError(`프리셋 적용 실패: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
 
@@ -390,7 +393,7 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
           body: JSON.stringify(nextConfig),
         });
       } catch (_err) {
-        alert('프리셋은 적용되었으나 도구 설정 적용에 실패했습니다');
+        setApplyError('프리셋은 적용되었으나 도구 설정 적용에 실패했습니다');
         return;
       }
 
@@ -751,12 +754,18 @@ export function SetupWizardModal({ open, onOpenChange, projectId, onApplied }: S
 
         <DialogFooter className="px-6 py-4 border-t bg-muted/25 flex-row items-center justify-between shrink-0">
           <div className="text-xs text-muted-foreground">
-            {step === 1 && 'Step 1/6: Git 설정'}
-            {step === 2 && 'Step 2/6: 에이전트 조합 선택'}
-            {step === 3 && 'Step 3/6: 성향 선택'}
-            {step === 4 && 'Step 4/6: Agent 미세조정'}
-            {step === 5 && 'Step 5/6: 도구 커스터마이즈'}
-            {step === 6 && 'Step 6/6: 리뷰 및 적용'}
+            {applyError ? (
+              <span className="text-destructive font-medium">{applyError}</span>
+            ) : (
+              <>
+                {step === 1 && 'Step 1/6: Git 설정'}
+                {step === 2 && 'Step 2/6: 에이전트 조합 선택'}
+                {step === 3 && 'Step 3/6: 성향 선택'}
+                {step === 4 && 'Step 4/6: Agent 미세조정'}
+                {step === 5 && 'Step 5/6: 도구 커스터마이즈'}
+                {step === 6 && 'Step 6/6: 리뷰 및 적용'}
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={handleBack} disabled={!canGoBack || initializing || applying}>
