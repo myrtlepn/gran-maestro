@@ -4,6 +4,40 @@
 
 ---
 
+## [0.56.0] — 2026-04-02
+
+### 새 기능
+
+- **Agile 자율 실행 엔진**: `/mst:agile` + `/mst:agile-plan` 스킬 신설 — JTBD 기반 objective 문서 생성, Sprint 0→N 자율 루프, 프로젝트 건강 우선 모델, 스티어링 체크포인트
+- **Agile 대시보드**: 타임라인 흐름도, 스프린트 세부 패널(3컬럼), Objective 실시간 편집기, Result 탭(WHY/WHAT/HOW PROVE 구조), 회고 렌더링, 코멘트 기능
+- **Sprint 비교 기능**: Result 탭 비교 토글 + 좌우 분할 뷰로 스프린트 간 성과 비교
+- **Sprint 회고(Retrospective)**: 독립 에이전트 검토 + 보완 스프린트 + known issue 추적 + 교훈(lessons_learned) 전달
+- **노션형 마크다운 에디터**: Milkdown 통합으로 Objective 문서 WYSIWYG 편집
+- **plan-doc 문서 실행 파이프라인**: doc-request 템플릿(reference/decision/ops/auto) + 문서 유형 6개 확장 + 검증 루프
+- **Plan type dispatcher**: 4개 스킬(plan/plan-doc/agile-plan/doc-request) 타입별 자동 분기
+
+### 개선
+
+- **Agile 스프린트 루프 안정화**: 3계층 방어(금지 패턴 + hook 화이트리스트 + CONTINUATION GUARD)로 임의 중단 차단
+- **Review 검증 체계화**: Static Validation Gate + 커버리지 매트릭스 + PM 판정 기계화 + Full Backend Test Gate
+- **DoD 품질 게이트**: IEEE 830 + IREB + ODI 기반 DoD 검증 + DoR 준비도 체크
+- **Result 탭 재설계**: 도메인별 계층 탐색 + 테스트 4단 구조(의도/전략/흐름/결과) + 시각 자료 인라인 렌더링
+- **Hook 시스템 단순화**: ralph-loop 스타일 단일 re-feed stop hook으로 교체
+- **agile-plan 대화 문서화**: 재귀 탐색 루프 재설계(갯수 제한 제거 + 수렴 판정) + 상세 보존 원칙
+- **Windows 호환성**: SIGTERM OS 분기, 경로 구분자 정규식, 대시보드 Windows 명령어 지원
+- **Agile Comments 패널**: 접기/펼치기 토글 버튼 + localStorage 상태 유지
+- **스토리 목록 가시성**: ID + anchorText 동시 렌더링 + 시각적 강조
+
+### 버그 수정
+
+- **DoD 항목 텍스트 동일 표시**: contentText 순방향 추출 + 프론트 우선 표시로 수정
+- **Stitch HTML 미리보기**: downloadUrl JSON 서빙/저장 버그 수정
+- **Worktree hooks 복사 누락**: worktree 생성 시 .claude/hooks/ 자동 복사
+- **Sprint 클릭 미갱신**: sprint_id 병합 순서 + objective 경로 + 스프린트 자동 선택 복구
+- **Hook format 버그**: mst-stop-hook.sh format 오류 + updated_at 테스트 추가
+
+---
+
 ## [0.55.4] — 2026-03-23
 
 ### 새 기능
