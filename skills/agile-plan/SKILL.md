@@ -89,6 +89,30 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 3. `[신규 세션] AGI-{NNN} 생성됨 (steering-every: {STEERING_EVERY})` 출력
 4. Step 1로 진행
 
+### Step 0.5: 의도 분류 게이트
+
+- PM은 요청 텍스트를 읽고 아래 질문을 내부 판단한다.
+  - "이 요청이 새 프로젝트 objective를 정의하려는 의도인가?"
+- confidence(0.0~1.0)를 산정한다.
+- 기본 경로는 objective 생성이다. confidence가 낮을 때만 확인 질문을 수행한다.
+
+#### 0.5.1 confidence >= 0.8 (직행)
+
+1. `[의도 확인: objective 생성으로 진행]` 한 줄 통지를 출력한다.
+2. Step 1A로 직행한다.
+3. 요청 원문을 Step 1A JTBD Q&A의 초기 컨텍스트로 전달한다.
+
+#### 0.5.2 confidence < 0.8 (1회 확인 질문)
+
+1. AskUserQuestion으로 아래 확인 질문을 **1회만** 제시한다.
+   - question: `이 요청을 objective 생성으로 진행할까요?`
+   - options:
+     - `objective 생성으로 진행`
+     - `다른 의도 설명`
+2. 사용자 응답이 `objective 생성으로 진행`이면 Step 1A로 진행한다.
+3. Step 1A 진행 시 요청 원문 + Step 0.5 확인 대화 내용을 JTBD Q&A 초기 컨텍스트로 함께 전달한다.
+4. 사용자 응답이 `다른 의도 설명`이면 적합한 스킬을 안내하고 종료한다.
+
 ---
 
 ### Step 1: Objective 생성/정규화
