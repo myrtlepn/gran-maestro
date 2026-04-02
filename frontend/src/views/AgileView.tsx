@@ -141,6 +141,10 @@ interface ObjectiveResponsePayload {
   parsed?: ObjectiveParsedContent | null;
 }
 
+interface ResultDetailFile {
+  name: string;
+}
+
 
 function linkify(text: string): string {
   return text
@@ -396,6 +400,11 @@ function sprintGoalLine(sprint: AgileSprint): string | null {
   return line.length > 0 ? line : null;
 }
 
+function toResultDetailTabLabel(filename: string): string {
+  const withoutExtension = filename.replace(/\.md$/i, '').trim();
+  return withoutExtension.length > 0 ? withoutExtension : filename;
+}
+
 export function AgileView() {
   const navigate = useNavigate();
 
@@ -418,6 +427,12 @@ export function AgileView() {
   const [resultMarkdown, setResultMarkdown] = useState<string | null>(null);
   const [retrospective, setRetrospective] = useState<AgileRetrospective | null>(null);
   const [retrospectiveMd, setRetrospectiveMd] = useState<string | null>(null);
+  const [resultDetailFiles, setResultDetailFiles] = useState<string[]>([]);
+  const [selectedResultDetailFile, setSelectedResultDetailFile] = useState<string | null>(null);
+  const [resultDetailContent, setResultDetailContent] = useState<string | null>(null);
+  const [resultDetailFilesLoading, setResultDetailFilesLoading] = useState(false);
+  const [resultDetailLoading, setResultDetailLoading] = useState(false);
+  const [resultDetailError, setResultDetailError] = useState<string | null>(null);
 
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -577,6 +592,46 @@ export function AgileView() {
     }
   }, [projectId]);
 
+  const requestResultDetailFiles = useCallback(async (agiId: string, sprintId: string): Promise<string[]> => {
+    try {
+      const resolvedPath = projectId
+        ? `/api/projects/${projectId}/agile/sessions/${agiId}/sprints/${sprintId}/result-details/files`
+        : `/api/agile/sessions/${agiId}/sprints/${sprintId}/result-details/files`;
+      const response = await fetch(resolvedPath);
+      if (!response.ok) {
+        if (response.status === 404) return [];
+        throw new Error(`Failed to load result detail files: ${response.status}`);
+      }
+      const data = await response.json() as { files?: ResultDetailFile[] };
+      if (!Array.isArray(data?.files)) return [];
+
+      return data.files
+        .map((item) => (typeof item?.name === 'string' ? item.name : null))
+        .filter((name): name is string => Boolean(name && name.trim().length > 0));
+    } catch (err) {
+      console.error('Failed to load result detail files:', err);
+      return [];
+    }
+  }, [projectId]);
+
+  const requestResultDetail = useCallback(async (agiId: string, sprintId: string, filename: string): Promise<string | null> => {
+    try {
+      const resolvedPath = projectId
+        ? `/api/projects/${projectId}/agile/sessions/${agiId}/sprints/${sprintId}/result-details/${encodeURIComponent(filename)}`
+        : `/api/agile/sessions/${agiId}/sprints/${sprintId}/result-details/${encodeURIComponent(filename)}`;
+      const response = await fetch(resolvedPath);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(`Failed to load result detail: ${response.status}`);
+      }
+      const data = await response.json() as { content?: string };
+      return typeof data?.content === 'string' ? data.content : null;
+    } catch (err) {
+      console.error('Failed to load result detail:', err);
+      throw err;
+    }
+  }, [projectId]);
+
   const [objectiveEtag, setObjectiveEtag] = useState<string | null>(null);
 
   const requestObjectiveFiles = useCallback(async (agiId: string): Promise<string[]> => {
@@ -664,6 +719,12 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setRetrospectiveMd(null);
+      setResultDetailFiles([]);
+      setSelectedResultDetailFile(null);
+      setResultDetailContent(null);
+      setResultDetailError(null);
+      setResultDetailFilesLoading(false);
+      setResultDetailLoading(false);
       setObjectiveParsed(null);
       setSessionsError(null);
       setDetailError(null);
@@ -707,6 +768,12 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setRetrospectiveMd(null);
+      setResultDetailFiles([]);
+      setSelectedResultDetailFile(null);
+      setResultDetailContent(null);
+      setResultDetailError(null);
+      setResultDetailFilesLoading(false);
+      setResultDetailLoading(false);
       setDetailLoading(false);
 
       setObjectiveContent(null);
@@ -777,6 +844,75 @@ export function AgileView() {
     };
   }, [projectId, selectedSessionId, requestSessionDetail, requestObjective, requestObjectiveFiles]);
 
+  useEffect(() => {
+    if (!projectId || !selectedSessionId || !selectedSprintId || !selectedSprint) {
+      setResultDetailFiles([]);
+      setSelectedResultDetailFile(null);
+      setResultDetailContent(null);
+      setResultDetailError(null);
+      setResultDetailFilesLoading(false);
+      setResultDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setResultDetailFilesLoading(true);
+    setResultDetailError(null);
+
+    requestResultDetailFiles(selectedSessionId, selectedSprintId)
+      .then((files) => {
+        if (cancelled) return;
+        setResultDetailFiles(files);
+        setSelectedResultDetailFile((prev) => {
+          if (files.length === 0) return null;
+          if (prev && files.includes(prev)) return prev;
+          return files[0];
+        });
+        if (files.length === 0) {
+          setResultDetailContent(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setResultDetailFilesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, selectedSessionId, selectedSprintId, selectedSprint, requestResultDetailFiles]);
+
+  useEffect(() => {
+    if (!projectId || !selectedSessionId || !selectedSprintId || !selectedResultDetailFile) {
+      setResultDetailContent(null);
+      setResultDetailError(null);
+      setResultDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setResultDetailLoading(true);
+    setResultDetailError(null);
+    setResultDetailContent(null);
+
+    requestResultDetail(selectedSessionId, selectedSprintId, selectedResultDetailFile)
+      .then((content) => {
+        if (cancelled) return;
+        setResultDetailContent(content);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setResultDetailContent(null);
+        setResultDetailError(err instanceof Error ? err.message : '결과 상세 내용을 불러오지 못했습니다');
+      })
+      .finally(() => {
+        if (!cancelled) setResultDetailLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, selectedSessionId, selectedSprintId, selectedResultDetailFile, requestResultDetail]);
+
   // Fetch objective detail content when selected file changes
   useEffect(() => {
     if (!projectId || !selectedSessionId || !selectedObjectiveFile) return;
@@ -815,6 +951,12 @@ export function AgileView() {
       setResultMarkdown(null);
       setRetrospective(null);
       setRetrospectiveMd(null);
+      setResultDetailFiles([]);
+      setSelectedResultDetailFile(null);
+      setResultDetailContent(null);
+      setResultDetailError(null);
+      setResultDetailFilesLoading(false);
+      setResultDetailLoading(false);
       setReportError(null);
       setReportLoading(false);
       return;
@@ -931,6 +1073,13 @@ export function AgileView() {
         setSelectedSprintId(undefined);
         setResultMarkdown(null);
         setRetrospective(null);
+        setRetrospectiveMd(null);
+        setResultDetailFiles([]);
+        setSelectedResultDetailFile(null);
+        setResultDetailContent(null);
+        setResultDetailError(null);
+        setResultDetailFilesLoading(false);
+        setResultDetailLoading(false);
         setObjectiveContent(null);
         setObjectiveParsed(null);
         return;
@@ -955,6 +1104,13 @@ export function AgileView() {
       if (!nextSprintId) {
         setResultMarkdown(null);
         setRetrospective(null);
+        setRetrospectiveMd(null);
+        setResultDetailFiles([]);
+        setSelectedResultDetailFile(null);
+        setResultDetailContent(null);
+        setResultDetailError(null);
+        setResultDetailFilesLoading(false);
+        setResultDetailLoading(false);
         return;
       }
 
@@ -962,6 +1118,13 @@ export function AgileView() {
       if (!sprint) {
         setResultMarkdown(null);
         setRetrospective(null);
+        setRetrospectiveMd(null);
+        setResultDetailFiles([]);
+        setSelectedResultDetailFile(null);
+        setResultDetailContent(null);
+        setResultDetailError(null);
+        setResultDetailFilesLoading(false);
+        setResultDetailLoading(false);
         return;
       }
 
@@ -1079,6 +1242,12 @@ export function AgileView() {
                   setResultMarkdown(null);
                   setRetrospective(null);
                   setRetrospectiveMd(null);
+                  setResultDetailFiles([]);
+                  setSelectedResultDetailFile(null);
+                  setResultDetailContent(null);
+                  setResultDetailError(null);
+                  setResultDetailFilesLoading(false);
+                  setResultDetailLoading(false);
                 }}
                 className={`w-full text-left rounded-md border p-3 transition-colors ${
                   selectedSessionId === session.id
@@ -1770,6 +1939,43 @@ export function AgileView() {
                               ) : (
                                 <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
                                   증빙 데이터 없음
+                                </div>
+                              )}
+
+                              {!resultDetailFilesLoading && resultDetailFiles.length > 0 && (
+                                <div className="space-y-3 pt-2">
+                                  <div className="text-xs font-semibold text-muted-foreground">도메인별 상세 (result-details)</div>
+                                  <Tabs
+                                    value={selectedResultDetailFile ?? resultDetailFiles[0]}
+                                    onValueChange={(value) => setSelectedResultDetailFile(value)}
+                                    className="space-y-3"
+                                  >
+                                    <div className="overflow-x-auto">
+                                      <TabsList className="inline-flex w-max">
+                                        {resultDetailFiles.map((file) => (
+                                          <TabsTrigger key={file} value={file}>
+                                            {toResultDetailTabLabel(file)}
+                                          </TabsTrigger>
+                                        ))}
+                                      </TabsList>
+                                    </div>
+                                  </Tabs>
+
+                                  {resultDetailLoading ? (
+                                    <Skeleton className="h-28 w-full" />
+                                  ) : resultDetailError ? (
+                                    <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
+                                      {resultDetailError}
+                                    </div>
+                                  ) : resultDetailContent !== null ? (
+                                    <div onClick={handleResultClick} className="rounded-md border bg-background p-4 overflow-auto max-h-[420px] prose prose-sm max-w-none">
+                                      <MarkdownRenderer content={linkify(resultDetailContent)} />
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
+                                      상세 내용이 없습니다
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

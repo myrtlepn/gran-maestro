@@ -256,6 +256,117 @@ Deno.test("GET /agile/sessions/:agiId/objective/details/:filename rejects traver
   }
 });
 
+Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/files returns sprint result-detail markdown files", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    await Deno.mkdir(resultDetailsDir, { recursive: true });
+    await Deno.writeTextFile(`${resultDetailsDir}/frontend.md`, "# Frontend");
+    await Deno.writeTextFile(`${resultDetailsDir}/architecture.md`, "# Architecture");
+    await Deno.writeTextFile(`${resultDetailsDir}/notes.txt`, "ignore");
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files");
+    assertEquals(response.status, 200);
+    const payload = await response.json() as { files: Array<Record<string, unknown>> };
+
+    assertEquals(payload.files, [
+      { name: "architecture.md", path: "sprints/S01/result-details/architecture.md" },
+      { name: "frontend.md", path: "sprints/S01/result-details/frontend.md" },
+    ]);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/files returns empty list when directory is missing", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files");
+    assertEquals(response.status, 200);
+    const payload = await response.json() as { files: unknown[] };
+    assertEquals(payload.files, []);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename returns result-detail content", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    await Deno.mkdir(resultDetailsDir, { recursive: true });
+    await Deno.writeTextFile(`${resultDetailsDir}/frontend.md`, "# Frontend detail");
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/frontend.md");
+    assertEquals(response.status, 200);
+    const payload = await response.json() as { content: string; path: string };
+
+    assertEquals(payload.content, "# Frontend detail");
+    assertEquals(payload.path, "sprints/S01/result-details/frontend.md");
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename returns 404 for missing file", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    await Deno.mkdir(resultDetailsDir, { recursive: true });
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/nonexistent.md");
+    assertEquals(response.status, 404);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename rejects traversal-style filename", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    await Deno.mkdir(resultDetailsDir, { recursive: true });
+
+    const app = createApp(fixture.baseDir);
+
+    const parentTraversal = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/..%2Fhack.md",
+    );
+    assertEquals(parentTraversal.status, 400);
+
+    const encodedSlashTraversal = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/subdir%2Fhack.md",
+    );
+    assertEquals(encodedSlashTraversal.status, 400);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
 Deno.test("PUT /agile/sessions/:agiId/objective succeeds when If-Match matches current ETag", async () => {
   const fixture = await setupSessionFixture({
     steering_every: 3,
