@@ -2430,6 +2430,8 @@ def cmd_agile_result(args):
         payload["target_dod_text"] = str(args.target_dod_text)
     if args.previous_direction is not None:
         payload["previous_direction"] = str(args.previous_direction)
+    if args.previous_lessons is not None:
+        payload["previous_lessons"] = str(args.previous_lessons)
     sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
     save_json(sprint_dir / "result.json", payload)
@@ -2445,6 +2447,7 @@ def cmd_agile_result(args):
         "target_dod",
         "target_dod_text",
         "previous_direction",
+        "previous_lessons",
     )
     has_why = any(key in payload for key in why_keys)
     if has_why:
@@ -2465,6 +2468,7 @@ def cmd_agile_result(args):
                 f"- 대상 DoD: {target_dod_line}",
                 f"- 선택 근거: {payload.get('selection_reason') or '-'}",
                 f"- 직전 회고 방향: {payload.get('previous_direction') or '-'}",
+                f"- 직전 교훈: {payload.get('previous_lessons') or '-'}",
                 "",
             ]
         )
@@ -6258,6 +6262,7 @@ def build_parser():
     agile_result.add_argument("--target-dod")
     agile_result.add_argument("--target-dod-text")
     agile_result.add_argument("--previous-direction")
+    agile_result.add_argument("--previous-lessons")
     agile_result.add_argument("--json", action="store_true")
 
     agile_retrospective = agile_sub.add_parser("retrospective")

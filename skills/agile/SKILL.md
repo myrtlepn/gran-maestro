@@ -331,10 +331,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json
 ```
-4. 직전 Sprint 회고의 미해결 항목(`failed`, `limitations`) 확인
+4. 직전 Sprint 회고의 미해결 항목(`failed`, `limitations`) 및 교훈(`lessons_learned`) 확인
 ```bash
 Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md)
 ```
+  - `lessons_learned` 값을 `PREVIOUS_LESSONS` 변수에 저장한다. 이 값은 2.2.3 plan 컨텍스트 및 result 기록 시 사용한다.
 
 판정:
 - 실패 테스트/빌드, open known issues, 미해결 회고 항목 중 하나라도 있으면 `HEALTH_ISSUE_FOUND=true`로 두고 **수정 작업을 DoD 진행보다 우선**한다.
@@ -371,7 +372,7 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 현재 대상: {SELECTED_WORK_ITEM} | 미완료 DoD: {INCOMPLETE_DOD_LIST}
 [변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
-[회고층] 직전 회고: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
+[회고층] 직전 회고: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md | 직전 교훈: {PREVIOUS_LESSONS}
 [이슈층] open known issues: {OPEN_ISSUE_LIST}
 [제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL}")
 ```
@@ -396,6 +397,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --pln {PLN_ID} \
   --req {REQ_ID} \
   --sprint-goals '{SPRINT_GOALS_JSON_IF_AVAILABLE}' \
+  --previous-lessons "{PREVIOUS_LESSONS}" \
   --json
 ```
   - `--sprint-goals`는 **optional**이다. sprint_goals를 구성할 수 없는 경우 인자를 생략하고 기존 방식으로 기록한다.
