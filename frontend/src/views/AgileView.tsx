@@ -148,6 +148,11 @@ interface ResultDetailFile {
   name: string;
 }
 
+interface SprintWhyItem {
+  label: string;
+  value: string;
+}
+
 
 function linkify(text: string): string {
   return text
@@ -385,6 +390,43 @@ function isGoalAchieved(status: string | undefined): boolean {
   return (status ?? '').trim().toLowerCase() === 'achieved';
 }
 
+function getSprintGoals(sprint: AgileSprint | null): SprintGoal[] {
+  if (!sprint) return [];
+
+  return toArray(sprint.sprint_goals).filter(
+    (goal): goal is SprintGoal => (
+      typeof goal?.goal === 'string'
+      && typeof goal?.status === 'string'
+      && typeof goal?.change_summary === 'string'
+    ),
+  );
+}
+
+function getSprintWhyItems(sprint: AgileSprint | null): SprintWhyItem[] {
+  if (!sprint) return [];
+
+  const items: SprintWhyItem[] = [];
+  const purpose = typeof sprint.sprint_purpose === 'string' ? sprint.sprint_purpose.trim() : '';
+  const selectionReason = typeof sprint.selection_reason === 'string' ? sprint.selection_reason.trim() : '';
+  const targetDodText = typeof sprint.target_dod_text === 'string' ? sprint.target_dod_text.trim() : '';
+  const previousDirection = typeof sprint.previous_direction === 'string' ? sprint.previous_direction.trim() : '';
+
+  if (purpose.length > 0) {
+    items.push({ label: 'Sprint 목적', value: purpose });
+  }
+  if (selectionReason.length > 0) {
+    items.push({ label: '선택 근거', value: selectionReason });
+  }
+  if (targetDodText.length > 0) {
+    items.push({ label: '대상 DoD', value: targetDodText });
+  }
+  if (previousDirection.length > 0) {
+    items.push({ label: '직전 회고 방향', value: previousDirection });
+  }
+
+  return items;
+}
+
 function formatGoalTestResults(testResults: SprintGoalTestResults | undefined): string {
   if (!testResults) return '증빙 미첨부';
 
@@ -506,6 +548,7 @@ export function AgileView() {
   const [resultDetailFilesLoading, setResultDetailFilesLoading] = useState(false);
   const [resultDetailLoading, setResultDetailLoading] = useState(false);
   const [resultDetailError, setResultDetailError] = useState<string | null>(null);
+  const [isResultCompareMode, setIsResultCompareMode] = useState(false);
 
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -577,17 +620,32 @@ export function AgileView() {
     [selectedSprint],
   );
   const selectedSprintGoals = useMemo(
-    () => (selectedSprint
-      ? toArray(selectedSprint.sprint_goals).filter(
-        (goal): goal is SprintGoal => (
-          typeof goal?.goal === 'string'
-          && typeof goal?.status === 'string'
-          && typeof goal?.change_summary === 'string'
-        ),
-      )
-      : []),
+    () => getSprintGoals(selectedSprint),
     [selectedSprint],
   );
+  const selectedSprintWhyItems = useMemo(
+    () => getSprintWhyItems(selectedSprint),
+    [selectedSprint],
+  );
+  const selectedSprintIndex = useMemo(
+    () => sessionDetail?.sprints.findIndex((sprint) => sprint.sprint_id === selectedSprintId) ?? -1,
+    [sessionDetail, selectedSprintId],
+  );
+  const previousSprint = useMemo(
+    () => (selectedSprintIndex > 0 && sessionDetail
+      ? sessionDetail.sprints[selectedSprintIndex - 1] ?? null
+      : null),
+    [sessionDetail, selectedSprintIndex],
+  );
+  const previousSprintGoals = useMemo(
+    () => getSprintGoals(previousSprint),
+    [previousSprint],
+  );
+  const previousSprintWhyItems = useMemo(
+    () => getSprintWhyItems(previousSprint),
+    [previousSprint],
+  );
+  const canCompareResult = Boolean(previousSprint);
   const objectiveDodItems = useMemo(() => {
     if (objectiveParsed?.dods && objectiveParsed.dods.length > 0) {
       return objectiveParsed.dods;
@@ -606,6 +664,12 @@ export function AgileView() {
     (content: string) => rewriteMarkdown(linkify(content)),
     [rewriteMarkdown],
   );
+
+  useEffect(() => {
+    if (!canCompareResult) {
+      setIsResultCompareMode(false);
+    }
+  }, [canCompareResult]);
 
   const requestSessions = useCallback(async (): Promise<AgileSessionSummary[]> => {
     const data = await apiFetch<AgileSessionSummary[]>('/api/agile/sessions', projectId);
@@ -1878,12 +1942,34 @@ export function AgileView() {
                   <TabsContent value="result" className="mt-0 outline-none">
                     <Card>
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <FileText className="h-4 w-4" /> Sprint Result Report
-                        </CardTitle>
-                        <CardDescription>
-                          {selectedSprintId ? `${selectedSprintId} 결과 보고서와 회고` : '스프린트를 선택하세요'}
-                        </CardDescription>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <CardTitle className="text-base flex items-center gap-2">
+                              <FileText className="h-4 w-4" /> Sprint Result Report
+                            </CardTitle>
+                            <CardDescription>
+                              {selectedSprintId ? `${selectedSprintId} 결과 보고서와 회고` : '스프린트를 선택하세요'}
+                            </CardDescription>
+                          </div>
+                          <div className="flex flex-col items-start gap-1 md:items-end">
+                            <button
+                              type="button"
+                              disabled={!canCompareResult}
+                              aria-pressed={isResultCompareMode}
+                              onClick={() => setIsResultCompareMode((prev) => !prev)}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                                isResultCompareMode
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-border bg-background text-foreground hover:bg-accent/40'
+                              } disabled:cursor-not-allowed disabled:border-border disabled:bg-muted/50 disabled:text-muted-foreground`}
+                            >
+                              비교
+                            </button>
+                            {selectedSprint && !canCompareResult && (
+                              <div className="text-[11px] text-muted-foreground">이전 Sprint 없음</div>
+                            )}
+                          </div>
+                        </div>
                       </CardHeader>
                       <CardContent className="space-y-6">
                         {reportLoading ? (
@@ -1900,87 +1986,159 @@ export function AgileView() {
                               </div>
                             )}
 
-                            {/* WHY Section */}
-                            {(selectedSprint.sprint_purpose || selectedSprint.selection_reason || selectedSprint.target_dod_text || selectedSprint.previous_direction) ? (
-                              <div className="space-y-3">
-                                <h3 className="text-sm font-semibold flex items-center gap-2">
-                                  이 스프린트를 왜 했는가
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {selectedSprint.sprint_purpose && (
-                                    <div className="rounded-md border bg-muted/5 p-3 space-y-1">
-                                      <div className="text-xs font-semibold text-muted-foreground">Sprint 목적</div>
-                                      <div className="text-sm">{selectedSprint.sprint_purpose}</div>
+                            {isResultCompareMode && previousSprint ? (
+                              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                                {[
+                                  {
+                                    title: '이전 Sprint',
+                                    sprint: previousSprint,
+                                    whyItems: previousSprintWhyItems,
+                                    goals: previousSprintGoals,
+                                  },
+                                  {
+                                    title: '현재 Sprint',
+                                    sprint: selectedSprint,
+                                    whyItems: selectedSprintWhyItems,
+                                    goals: selectedSprintGoals,
+                                  },
+                                ].map(({ title, sprint, whyItems, goals }) => (
+                                  <div key={`compare-${title}-${sprint.sprint_id}`} className="rounded-md border bg-muted/5 p-4 space-y-4">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <h3 className="text-sm font-semibold">{sprint.sprint_id}</h3>
+                                      <span className="text-[11px] rounded-full border bg-background px-2 py-0.5 text-muted-foreground">
+                                        {title}
+                                      </span>
                                     </div>
-                                  )}
-                                  {selectedSprint.selection_reason && (
-                                    <div className="rounded-md border bg-muted/5 p-3 space-y-1">
-                                      <div className="text-xs font-semibold text-muted-foreground">선택 근거</div>
-                                      <div className="text-sm">{selectedSprint.selection_reason}</div>
+                                    <div className="space-y-3">
+                                      <h4 className="text-xs font-semibold text-muted-foreground">WHY</h4>
+                                      {whyItems.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {whyItems.map((item, index) => (
+                                            <div key={`${sprint.sprint_id}-why-${index}`} className="rounded-md border bg-background p-3 space-y-1">
+                                              <div className="text-xs font-semibold text-muted-foreground">{item.label}</div>
+                                              <div className="text-sm">{item.value}</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-muted-foreground border rounded-md p-3 bg-background italic">
+                                          WHY 데이터 없음
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                  {selectedSprint.target_dod_text && (
-                                    <div className="rounded-md border bg-muted/5 p-3 space-y-1">
-                                      <div className="text-xs font-semibold text-muted-foreground">대상 DoD</div>
-                                      <div className="text-sm">{selectedSprint.target_dod_text}</div>
+
+                                    <div className="space-y-3">
+                                      <h4 className="text-xs font-semibold text-muted-foreground">WHAT</h4>
+                                      {goals.length > 0 ? (
+                                        <div className="rounded-md border overflow-hidden bg-background">
+                                          <table className="w-full text-sm text-left">
+                                            <thead className="bg-muted/50 text-muted-foreground">
+                                              <tr>
+                                                <th className="px-4 py-3 font-medium border-b w-[34%]">목표</th>
+                                                <th className="px-4 py-3 font-medium border-b w-20 text-center">상태</th>
+                                                <th className="px-4 py-3 font-medium border-b">변화 요약</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                              {goals.map((goal, index) => {
+                                                const achieved = isGoalAchieved(goal.status);
+                                                return (
+                                                  <tr key={`${sprint.sprint_id}-what-${index}`} className="hover:bg-muted/10 transition-colors">
+                                                    <td className="px-4 py-3 font-medium align-top">
+                                                      {goal.goal}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center align-top">
+                                                      <span className="inline-flex items-center justify-center text-lg" title={goal.status}>
+                                                        {achieved ? '✅' : '❌'}
+                                                      </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-muted-foreground align-top prose prose-sm max-w-none" onClick={handleResultClick}>
+                                                      <MarkdownRenderer content={rewriteLinkedMarkdown(goal.change_summary)} />
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-muted-foreground border rounded-md p-3 bg-background italic">
+                                          달성 목표 데이터 없음
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                  {selectedSprint.previous_direction && (
-                                    <div className="rounded-md border bg-muted/5 p-3 space-y-1">
-                                      <div className="text-xs font-semibold text-muted-foreground">직전 회고 방향</div>
-                                      <div className="text-sm">{selectedSprint.previous_direction}</div>
-                                    </div>
-                                  )}
-                                </div>
+                                  </div>
+                                ))}
                               </div>
-                            ) : null}
+                            ) : (
+                              <>
+                                {/* WHY Section */}
+                                {selectedSprintWhyItems.length > 0 ? (
+                                  <div className="space-y-3">
+                                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                                      이 스프린트를 왜 했는가
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {selectedSprintWhyItems.map((item, index) => (
+                                        <div key={`current-why-${index}`} className="rounded-md border bg-muted/5 p-3 space-y-1">
+                                          <div className="text-xs font-semibold text-muted-foreground">{item.label}</div>
+                                          <div className="text-sm">{item.value}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
 
-                            {/* WHAT Section */}
-                            <div className="space-y-3">
-                              <h3 className="text-sm font-semibold flex items-center gap-2">
-                                무엇을 달성했는가
-                              </h3>
-                              {selectedSprintGoals.length > 0 ? (
-                                <div className="rounded-md border overflow-hidden bg-background">
-                                  <table className="w-full text-sm text-left">
-                                    <thead className="bg-muted/50 text-muted-foreground">
-                                      <tr>
-                                        <th className="px-4 py-3 font-medium border-b w-[25%]">목표</th>
-                                        <th className="px-4 py-3 font-medium border-b w-24 text-center">상태</th>
-                                        <th className="px-4 py-3 font-medium border-b">변화 요약</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                      {selectedSprintGoals.map((goal, index) => {
-                                        const achieved = isGoalAchieved(goal.status);
-                                        return (
-                                          <tr key={`what-${index}`} className="hover:bg-muted/10 transition-colors">
-                                            <td className="px-4 py-3 font-medium align-top">
-                                              {goal.goal}
-                                            </td>
-                                            <td className="px-4 py-3 text-center align-top">
-                                              <span className="inline-flex items-center justify-center text-lg" title={goal.status}>
-                                                {achieved ? '✅' : '❌'}
-                                              </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-muted-foreground align-top prose prose-sm max-w-none" onClick={handleResultClick}>
-                                              <MarkdownRenderer content={rewriteLinkedMarkdown(goal.change_summary)} />
-                                            </td>
+                                {/* WHAT Section */}
+                                <div className="space-y-3">
+                                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                                    무엇을 달성했는가
+                                  </h3>
+                                  {selectedSprintGoals.length > 0 ? (
+                                    <div className="rounded-md border overflow-hidden bg-background">
+                                      <table className="w-full text-sm text-left">
+                                        <thead className="bg-muted/50 text-muted-foreground">
+                                          <tr>
+                                            <th className="px-4 py-3 font-medium border-b w-[25%]">목표</th>
+                                            <th className="px-4 py-3 font-medium border-b w-24 text-center">상태</th>
+                                            <th className="px-4 py-3 font-medium border-b">변화 요약</th>
                                           </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                          {selectedSprintGoals.map((goal, index) => {
+                                            const achieved = isGoalAchieved(goal.status);
+                                            return (
+                                              <tr key={`what-${index}`} className="hover:bg-muted/10 transition-colors">
+                                                <td className="px-4 py-3 font-medium align-top">
+                                                  {goal.goal}
+                                                </td>
+                                                <td className="px-4 py-3 text-center align-top">
+                                                  <span className="inline-flex items-center justify-center text-lg" title={goal.status}>
+                                                    {achieved ? '✅' : '❌'}
+                                                  </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-muted-foreground align-top prose prose-sm max-w-none" onClick={handleResultClick}>
+                                                  <MarkdownRenderer content={rewriteLinkedMarkdown(goal.change_summary)} />
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
+                                      달성 목표 데이터 없음
+                                    </div>
+                                  )}
                                 </div>
-                              ) : (
-                                <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
-                                  달성 목표 데이터 없음
-                                </div>
-                              )}
-                            </div>
+                              </>
+                            )}
 
-                            {/* HOW PROVE Section */}
-                            <div className="space-y-3">
+                            {!isResultCompareMode && (
+                              <>
+                                {/* HOW PROVE Section */}
+                                <div className="space-y-3">
                               <h3 className="text-sm font-semibold flex items-center gap-2">
                                 어떻게 증명하는가
                               </h3>
@@ -2058,146 +2216,148 @@ export function AgileView() {
                                   )}
                                 </div>
                               )}
-                            </div>
+                                </div>
 
-                            {/* DoD 진행률 Section */}
-                            {objectiveDodItems && objectiveDodItems.length > 0 && (
-                              <div className="space-y-3 pt-2">
-                                <h3 className="text-sm font-semibold flex items-center justify-between gap-2">
-                                  <span>Objective DoD 진행률</span>
-                                  <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                    {objectiveDodItems.filter(d => d.status === 'done').length} / {objectiveDodItems.length} 완료
-                                  </span>
-                                </h3>
-                                <div className="rounded-md border bg-background overflow-hidden">
-                                  <div className="h-1.5 w-full bg-muted">
-                                    <div 
-                                      className="h-full bg-primary transition-all duration-500" 
-                                      style={{ width: `${(objectiveDodItems.filter(d => d.status === 'done').length / objectiveDodItems.length) * 100}%` }}
-                                    />
+                                {/* DoD 진행률 Section */}
+                                {objectiveDodItems && objectiveDodItems.length > 0 && (
+                                  <div className="space-y-3 pt-2">
+                                    <h3 className="text-sm font-semibold flex items-center justify-between gap-2">
+                                      <span>Objective DoD 진행률</span>
+                                      <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                        {objectiveDodItems.filter(d => d.status === 'done').length} / {objectiveDodItems.length} 완료
+                                      </span>
+                                    </h3>
+                                    <div className="rounded-md border bg-background overflow-hidden">
+                                      <div className="h-1.5 w-full bg-muted">
+                                        <div 
+                                          className="h-full bg-primary transition-all duration-500" 
+                                          style={{ width: `${(objectiveDodItems.filter(d => d.status === 'done').length / objectiveDodItems.length) * 100}%` }}
+                                        />
+                                      </div>
+                                      <div className="p-2 space-y-1">
+                                        {objectiveDodItems.map((dod, idx) => (
+                                          <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/5 gap-3 transition-colors">
+                                            <div className="min-w-0 flex items-center gap-2">
+                                              <div className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</div>
+                                              {dod.anchorText ? (
+                                                <p className="text-sm truncate">{dod.anchorText}</p>
+                                              ) : (
+                                                <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                              <StatusBadge status={dod.status} />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div className="p-2 space-y-1">
-                                    {objectiveDodItems.map((dod, idx) => (
-                                      <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/5 gap-3 transition-colors">
-                                        <div className="min-w-0 flex items-center gap-2">
-                                          <div className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</div>
-                                          {dod.anchorText ? (
-                                            <p className="text-sm truncate">{dod.anchorText}</p>
+                                )}
+
+                                {/* 메타데이터 접힘 유지 */}
+                                <details className="rounded-md border p-4 group mt-4">
+                                  <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
+                                    <FileText className="h-4 w-4" /> 스프린트 메타데이터 (result.md / retrospective.md)
+                                  </summary>
+                                  <div className="mt-4 space-y-4 pt-4 border-t">
+                                    <div>
+                                      <div className="text-xs font-semibold text-muted-foreground mb-2">result.md</div>
+                                      <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
+                                        <MarkdownRenderer content={rewriteLinkedMarkdown(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
+                                      </div>
+                                    </div>
+                                    {retrospectiveMd && (
+                                      <div>
+                                        <div className="text-xs font-semibold text-muted-foreground mb-2">retrospective.md</div>
+                                        <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
+                                          <MarkdownRenderer content={rewriteLinkedMarkdown(retrospectiveMd)} />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </details>
+
+                                <details className="rounded-md border p-4 group">
+                                  <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
+                                    <ListChecks className="h-4 w-4" /> 스프린트 회고 JSON
+                                  </summary>
+
+                                  <div className="mt-4 space-y-4">
+                                    {retrospective ? (
+                                      <>
+                                        <div className="space-y-2">
+                                          <h4 className="text-xs font-semibold text-muted-foreground">succeeded</h4>
+                                          {toArray(retrospective.succeeded).length > 0 ? (
+                                            <ul className="list-disc pl-5 text-sm space-y-1">
+                                              {toArray(retrospective.succeeded).map((item, index) => (
+                                                <li key={`${item}-${index}`}>{item}</li>
+                                              ))}
+                                            </ul>
                                           ) : (
-                                            <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
+                                            <p className="text-sm text-muted-foreground">기록 없음</p>
                                           )}
                                         </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <StatusBadge status={dod.status} />
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
 
-                            {/* 메타데이터 접힘 유지 */}
-                            <details className="rounded-md border p-4 group mt-4">
-                              <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
-                                <FileText className="h-4 w-4" /> 스프린트 메타데이터 (result.md / retrospective.md)
-                              </summary>
-                              <div className="mt-4 space-y-4 pt-4 border-t">
-                                <div>
-                                  <div className="text-xs font-semibold text-muted-foreground mb-2">result.md</div>
-                                  <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                    <MarkdownRenderer content={rewriteLinkedMarkdown(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
-                                  </div>
-                                </div>
-                                {retrospectiveMd && (
-                                  <div>
-                                    <div className="text-xs font-semibold text-muted-foreground mb-2">retrospective.md</div>
-                                    <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                      <MarkdownRenderer content={rewriteLinkedMarkdown(retrospectiveMd)} />
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </details>
-
-                            <details className="rounded-md border p-4 group">
-                              <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
-                                <ListChecks className="h-4 w-4" /> 스프린트 회고 JSON
-                              </summary>
-
-                              <div className="mt-4 space-y-4">
-                                {retrospective ? (
-                                  <>
-                                    <div className="space-y-2">
-                                      <h4 className="text-xs font-semibold text-muted-foreground">succeeded</h4>
-                                      {toArray(retrospective.succeeded).length > 0 ? (
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {toArray(retrospective.succeeded).map((item, index) => (
-                                            <li key={`${item}-${index}`}>{item}</li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <p className="text-sm text-muted-foreground">기록 없음</p>
-                                      )}
-                                    </div>
-
-                                    <div className="space-y-2">
-                                      <h4 className="text-xs font-semibold text-muted-foreground">failed</h4>
-                                      {toArray(retrospective.failed).length > 0 ? (
                                         <div className="space-y-2">
-                                          {toArray(retrospective.failed).map((item, index) => (
-                                            <div key={`${item.item ?? 'failed'}-${index}`} className="rounded-md border bg-muted/20 p-3 text-sm">
-                                              <div className="font-medium">{item.item ?? `Failure ${index + 1}`}</div>
-                                              <div className="text-xs text-muted-foreground mt-1">
-                                                tried_approach: {item.tried_approach ?? '-'}
-                                              </div>
-                                              <div className="text-xs text-muted-foreground mt-1">
-                                                failure_reason: {item.failure_reason ?? '-'}
-                                              </div>
+                                          <h4 className="text-xs font-semibold text-muted-foreground">failed</h4>
+                                          {toArray(retrospective.failed).length > 0 ? (
+                                            <div className="space-y-2">
+                                              {toArray(retrospective.failed).map((item, index) => (
+                                                <div key={`${item.item ?? 'failed'}-${index}`} className="rounded-md border bg-muted/20 p-3 text-sm">
+                                                  <div className="font-medium">{item.item ?? `Failure ${index + 1}`}</div>
+                                                  <div className="text-xs text-muted-foreground mt-1">
+                                                    tried_approach: {item.tried_approach ?? '-'}
+                                                  </div>
+                                                  <div className="text-xs text-muted-foreground mt-1">
+                                                    failure_reason: {item.failure_reason ?? '-'}
+                                                  </div>
+                                                </div>
+                                              ))}
                                             </div>
-                                          ))}
+                                          ) : (
+                                            <p className="text-sm text-muted-foreground">기록 없음</p>
+                                          )}
                                         </div>
-                                      ) : (
-                                        <p className="text-sm text-muted-foreground">기록 없음</p>
-                                      )}
-                                    </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                                      <div className="rounded-md border p-3">
-                                        <div className="text-xs text-muted-foreground">velocity planned</div>
-                                        <div className="font-semibold">{retrospective.velocity?.planned ?? '-'}</div>
-                                      </div>
-                                      <div className="rounded-md border p-3">
-                                        <div className="text-xs text-muted-foreground">velocity completed</div>
-                                        <div className="font-semibold">{retrospective.velocity?.completed ?? '-'}</div>
-                                      </div>
-                                      <div className="rounded-md border p-3">
-                                        <div className="text-xs text-muted-foreground">velocity rate</div>
-                                        <div className="font-semibold">{formatRate(retrospective.velocity?.rate)}</div>
-                                      </div>
-                                    </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                                          <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">velocity planned</div>
+                                            <div className="font-semibold">{retrospective.velocity?.planned ?? '-'}</div>
+                                          </div>
+                                          <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">velocity completed</div>
+                                            <div className="font-semibold">{retrospective.velocity?.completed ?? '-'}</div>
+                                          </div>
+                                          <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground">velocity rate</div>
+                                            <div className="font-semibold">{formatRate(retrospective.velocity?.rate)}</div>
+                                          </div>
+                                        </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                                      <div className="rounded-md border p-3">
-                                        <div className="text-xs text-muted-foreground mb-1">known_limitations</div>
-                                        <div>{retrospective.known_limitations || '-'}</div>
-                                      </div>
-                                      <div className="rounded-md border p-3">
-                                        <div className="text-xs text-muted-foreground mb-1">lessons_learned</div>
-                                        <div>{retrospective.lessons_learned || '-'}</div>
-                                      </div>
-                                    </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                          <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground mb-1">known_limitations</div>
+                                            <div>{retrospective.known_limitations || '-'}</div>
+                                          </div>
+                                          <div className="rounded-md border p-3">
+                                            <div className="text-xs text-muted-foreground mb-1">lessons_learned</div>
+                                            <div>{retrospective.lessons_learned || '-'}</div>
+                                          </div>
+                                        </div>
 
-                                    <div className="rounded-md border p-3 text-sm">
-                                      <div className="text-xs text-muted-foreground mb-1">direction</div>
-                                      <div>{retrospective.direction || '-'}</div>
-                                    </div>
-                                  </>
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">retrospective.json이 아직 없습니다.</p>
-                                )}
-                              </div>
-                            </details>
+                                        <div className="rounded-md border p-3 text-sm">
+                                          <div className="text-xs text-muted-foreground mb-1">direction</div>
+                                          <div>{retrospective.direction || '-'}</div>
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">retrospective.json이 아직 없습니다.</p>
+                                    )}
+                                  </div>
+                                </details>
+                              </>
+                            )}
                           </>
                         ) : (
                           <div className="text-sm text-muted-foreground">왼쪽에서 스프린트를 선택하세요.</div>
