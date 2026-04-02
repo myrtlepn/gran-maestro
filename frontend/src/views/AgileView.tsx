@@ -40,6 +40,9 @@ interface SprintGoalTestResults {
   passed?: number;
   failed?: number;
   summary?: string;
+  test_intent?: string;
+  test_strategy?: string;
+  test_flow?: string[];
 }
 
 interface SprintGoalDiff {
@@ -372,6 +375,57 @@ function formatGoalTestResults(testResults: SprintGoalTestResults | undefined): 
     ? ` · ${testResults.summary}`
     : '';
   return `pass ${passed} / fail ${failed}${summary}`;
+}
+
+function renderGoalTestSection(testResults: SprintGoalTestResults | undefined) {
+  const testIntent = typeof testResults?.test_intent === 'string' ? testResults.test_intent.trim() : '';
+  if (testIntent.length === 0) {
+    return (
+      <>
+        <div className="text-xs font-semibold text-muted-foreground mb-1">테스트 결과</div>
+        <div>{formatGoalTestResults(testResults)}</div>
+      </>
+    );
+  }
+
+  const testStrategy = typeof testResults?.test_strategy === 'string' && testResults.test_strategy.trim().length > 0
+    ? testResults.test_strategy.trim()
+    : '-';
+  const testFlow = toArray(testResults?.test_flow)
+    .map((step) => (typeof step === 'string' ? step.trim() : ''))
+    .filter((step) => step.length > 0);
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold text-muted-foreground">테스트 검증</div>
+      <div className="rounded-md border bg-background p-3 space-y-2">
+        <div>
+          <div className="text-[11px] font-semibold text-muted-foreground">의도</div>
+          <div className="text-sm">{testIntent}</div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-muted-foreground">전략</div>
+          <div className="text-sm">{testStrategy}</div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-muted-foreground">흐름</div>
+          {testFlow.length > 0 ? (
+            <ol className="mt-1 list-decimal list-inside text-sm space-y-1">
+              {testFlow.map((step, index) => (
+                <li key={`test-flow-${index}`}>{step}</li>
+              ))}
+            </ol>
+          ) : (
+            <div className="text-sm">-</div>
+          )}
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold text-muted-foreground">결과</div>
+          <div className="text-sm">{formatGoalTestResults(testResults)}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatGoalDiff(diff: SprintGoalDiff | undefined): string {
@@ -1920,8 +1974,7 @@ export function AgileView() {
                                         </div>
                                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
                                           <div>
-                                            <div className="text-xs font-semibold text-muted-foreground mb-1">테스트 결과</div>
-                                            <div>{formatGoalTestResults(evidence?.test_results)}</div>
+                                            {renderGoalTestSection(evidence?.test_results)}
                                           </div>
                                           <div>
                                             <div className="text-xs font-semibold text-muted-foreground mb-1">Diff 정보</div>
