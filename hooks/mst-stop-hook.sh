@@ -45,7 +45,21 @@ debug_log() {
 HOOK_INFO="$(printf '%s' "$STDIN_RAW" | python3 -c 'import json, sys
 raw = sys.stdin.read() or ""
 stop_active = "unknown"
+agile_auto_mode = "unknown"
 last_msg = ""
+
+def parse_bool(value):
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("1", "true", "yes", "y", "on"):
+            return "true"
+        if text in ("0", "false", "no", "n", "off"):
+            return "false"
+    return "unknown"
 
 try:
     payload = json.loads(raw)
@@ -59,6 +73,12 @@ if isinstance(payload, dict):
     elif value is False:
         stop_active = "false"
 
+    for key in ("agile_auto_mode", "agileAutoMode", "AUTO_MODE", "auto_mode"):
+        parsed = parse_bool(payload.get(key))
+        if parsed != "unknown":
+            agile_auto_mode = parsed
+            break
+
     candidates = [
         payload.get("last_assistant_message"),
         payload.get("assistant_message"),
@@ -71,11 +91,12 @@ if isinstance(payload, dict):
             last_msg = candidate.strip()
             break
 
-print(f"{stop_active}\t{last_msg}")
-' 2>/dev/null || printf 'unknown\t\n')"
+print(f"{stop_active}\t{agile_auto_mode}\t{last_msg}")
+' 2>/dev/null || printf 'unknown\tunknown\t\n')"
 
 STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INFO" | cut -f1)"
-LAST_ASSISTANT_MESSAGE="$(printf '%s' "$HOOK_INFO" | cut -f2-)"
+AGILE_AUTO_MODE_HINT="$(printf '%s' "$HOOK_INFO" | cut -f2)"
+LAST_ASSISTANT_MESSAGE="$(printf '%s' "$HOOK_INFO" | cut -f3-)"
 
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   debug_log "allow" "reason=stop_hook_active_true"
@@ -93,6 +114,11 @@ contains_agile_allow_marker() {
     || printf '%s' "$text" | grep -Fq "[비상 스티어링]" \
     || printf '%s' "$text" | grep -Fq "[Sprint 0]" \
     || printf '%s' "$text" | grep -Fq "[자동 중단]"
+}
+
+contains_agile_text_question() {
+  local text="$1"
+  printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요'
 }
 
 emit_block_json() {
@@ -318,6 +344,15 @@ if [ "$AGILE_LOOP_ACTIVE" = "true" ] || [ "$CURRENT_SKILL" = "mst:agile" ]; then
   AGILE_GUARD_ACTIVE="true"
 fi
 
+AGILE_AUTO_MODE_ACTIVE="false"
+if [ "$AGILE_AUTO_MODE_HINT" = "true" ]; then
+  AGILE_AUTO_MODE_ACTIVE="true"
+elif [ "$AGILE_AUTO_MODE_HINT" = "false" ]; then
+  AGILE_AUTO_MODE_ACTIVE="false"
+elif [ "$NEXT_AUTO" = "true" ]; then
+  AGILE_AUTO_MODE_ACTIVE="true"
+fi
+
 ALLOW_PATTERN_FOUND="false"
 if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
   ALLOW_PATTERN_FOUND="true"
@@ -326,8 +361,22 @@ fi
 AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
 ${STDIN_RAW}"
 
+if [ "$AGILE_LOOP_ACTIVE" = "true" ] && [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ] && contains_agile_text_question "$AGILE_ALLOW_CONTEXT"; then
+  NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
+  REASON="Sprint loop active in AUTO_MODE=true; text-based question patterns are blocked."
+  REASON="$REASON Remove phrases like '계속할까요?', '진행할까요?', '멈추고' and continue autonomously."
+  REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
+  if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
+    REASON="[자동 중단] $REASON Escalate to user for steering."
+  fi
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
+  emit_block_json "$REASON"
+  debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
+fi
+
 if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
-  debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE"
+  debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
   exit 0
 fi
 

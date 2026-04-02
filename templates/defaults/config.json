@@ -555,6 +555,7 @@
     }
   },
   "auto_mode": {
+    "agile": false,
     "plan": false,
     "request": false,
     "review": false,

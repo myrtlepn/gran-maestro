@@ -62,6 +62,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
 - 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
 - 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
+- `AUTO_MODE=true`인 스프린트 루프에서 텍스트 출력으로 `"계속할까요?"`, `"진행할까요?"`, `"멈추고"` 등 질문을 생성하는 행위.
 - 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
 - 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
 
@@ -69,14 +70,19 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 
 - 허용 지점 1: Step 3.3 DoD 제안 approve/reject 확인
   - 필수 마커: `[스티어링 체크포인트]`
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 증거 기반으로 approve/reject를 자율 판단한다.
 - 허용 지점 2: Step 3 비상 스티어링 강제 진입 후 사용자 개입 요청
   - 필수 마커: `[비상 스티어링]`
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 계속 진행/방향 수정/중단을 자율 판단한다.
 - 허용 지점 3: Step 2.1 Sprint 0 smoke test 실패 후 재시도/중단 확인
   - 필수 마커: `[Sprint 0]`
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 재시도/중단을 자율 판단한다.
 - 허용 지점 4: Step 2.2.5 소스 검증 3회 실패 초과 시 사용자 에스컬레이션
   - 필수 마커: `[자동 중단]`
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 자동 중단 절차로 즉시 전환한다.
 - 허용 지점 5: Step 3.5 변경 후 정합성 정책 레벨 확인
   - 필수 마커: `[스티어링 체크포인트]`
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 정합성 정책 레벨을 자율 판단한다.
 
 동기화 규칙:
 - 위 허용 지점/마커 목록을 변경하면 `hooks/mst-stop-hook.sh`의 agile AskUserQuestion 화이트리스트를 같은 PR에서 동시에 갱신한다.
@@ -103,10 +109,17 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 
 | 플래그 | 설명 | 예시 |
 |--------|------|------|
+| `-a`, `--auto` | 자율 모드 활성화 | `-a`, `--auto` |
 | `--resume AGI-NNN` | 기존 세션 재개 | `--resume AGI-001` |
 | `--doc 파일경로` | 기존 문서 지정 (파싱 모드) | `--doc docs/goals.md` |
 | `--steering-every N` | 스티어링 체크포인트 간격 (기본값: 3) | `--steering-every 5` |
 
+- `-a` 또는 `--auto`가 args 어디에든 포함되면 `AUTO_MODE=true`, 없으면 `AUTO_MODE=false`.
+- `AUTO_MODE=false`인 경우 config fallback을 적용한다:
+  1. `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `auto_mode.agile` 확인
+  2. 키가 없으면 `Read(templates/defaults/config.json)`에서 `auto_mode.agile` 확인
+  3. `auto_mode.agile == true`면 `AUTO_MODE=true`, 아니면 `false`
+- 우선순위: CLI 플래그(`-a`/`--auto`)가 config보다 우선한다.
 - `--steering-every` 미지정 시: `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.steering_every` 값을 사용한다. config에도 없으면 기본값 `3`.
 
 #### 0.2 분기: --resume 있는 경우
@@ -118,7 +131,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:agile \
-  --auto true \
+  --auto {AUTO_MODE} \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 4. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status}`
@@ -136,7 +149,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:agile \
-  --auto true \
+  --auto {AUTO_MODE} \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 4. Step 1로 진행
@@ -252,7 +265,8 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
   - `CURRENT_SPRINT=1` 설정 후 Sprint N 루프(2.2)로 진입
 3. 실패 시:
   - `[Sprint 0] smoke test 실패 — 원인 분석 후 수동 확인 필요` 출력 + 실패 로그 요약
-  - `AskUserQuestion`으로 사용자에게 확인 요청 후 재시도 또는 중단
+  - `AUTO_MODE=true`이면 AskUserQuestion 없이 PM이 자율 판단으로 1회 재시도 후, 재실패 시 자동 중단 절차로 전환한다.
+  - `AUTO_MODE=false`이면 `AskUserQuestion`으로 사용자에게 확인 요청 후 재시도 또는 중단한다.
 
 ---
 
@@ -270,7 +284,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
   --agile-loop-active true \
   --active true \
   --skill mst:agile \
-  --auto true \
+  --auto {AUTO_MODE} \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 
@@ -354,7 +368,9 @@ Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
 결정:
 - 건강 이슈가 있으면 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 확정한다.
 - 건강 이슈가 없으면 `SELECTED_WORK_ITEM={SELECTED_DOD}`로 확정한다.
-- 의존성 미충족으로 선택 불가하면 의존성 해소 작업을 생성하고 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
+- 의존성 미충족으로 선택 불가하면 아래 분기를 적용한다.
+  - `AUTO_MODE=true`: AskUserQuestion 없이 의존성 해소 작업을 자동 생성하고 즉시 진행한다. `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
+  - `AUTO_MODE=false`: 기존 동작을 유지한다. 의존성 해소 작업을 생성하고 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
 
 ##### 2.2.3 plan -a 호출 (3계층 컨텍스트)
 
@@ -477,6 +493,8 @@ fallback: `mst:explore` 사용 불가 시 `mst:codex` 또는 `mst:claude`를 동
   - 자동 수정 태스크를 생성해 즉시 보완 작업을 수행한다.
   - 보완 후 테스트/빌드를 재실행하고 다시 소스 검증을 수행한다.
 3. 최대 재시도는 **3회**다. 3회 초과 시 `AskUserQuestion`으로 사용자 에스컬레이션 후 지시를 따른다.
+  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 `[자동 중단]` 절차로 즉시 전환한다.
+  - `AUTO_MODE=false`이면 기존대로 AskUserQuestion 에스컬레이션을 수행한다.
 4. `pass` 또는 `MINOR`만 남으면:
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
@@ -587,7 +605,14 @@ DoD 체크 갱신 제안 (pending)
 
 #### 3.3 DoD 제안 approve/reject (MANDATORY)
 
-진행 보고서 출력 후 `AskUserQuestion`으로 사용자에게 확인:
+진행 보고서 출력 후 아래 분기를 적용한다.
+
+- `AUTO_MODE=true`:
+  - AskUserQuestion을 호출하지 않는다.
+  - PM이 `evidence_ref`, 테스트/빌드 결과, `source-verify.md`를 근거로 DoD별 approve/reject를 자율 판단한다.
+  - 판단 결과를 `[스티어링 체크포인트] AUTO_MODE 자율 판단` 로그로 기록한 뒤 즉시 상태 전이를 수행한다.
+- `AUTO_MODE=false`:
+  - `AskUserQuestion`으로 사용자에게 확인한다.
 
 > "DoD 제안 목록을 승인/반려해주세요. (예: approve DOD-001,DOD-002 / reject DOD-003)"
 
@@ -631,7 +656,9 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 **원칙**: 완료 기록 삭제 금지. 변경된 항목은 `superseded` 또는 `revalidated` 상태로 보존한다.
 
-레벨 결정 후 `AskUserQuestion`으로 처리 방식 확인하고 루프로 복귀.
+레벨 결정 후 아래 분기를 적용하고 루프로 복귀한다.
+- `AUTO_MODE=true`: AskUserQuestion을 skip하고 PM이 정합성 정책 레벨(Level A/B/C)을 자율 판단해 적용한다.
+- `AUTO_MODE=false`: `AskUserQuestion`으로 처리 방식 확인 후 적용한다.
 
 ---
 
@@ -734,7 +761,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 비상 스티어링 진입 시:
 1. `[비상 스티어링] 조건: {TRIGGER_REASON}` 출력 후 Step 3으로 진입
 2. Step 3.2 진행 보고서 즉시 출력
-3. `AskUserQuestion`으로 사용자 개입 요청:
+3. 사용자 개입 분기:
 ```text
 [비상 스티어링] 자동 진행이 중단되었습니다. 트리거: {TRIGGER_REASON}
 
@@ -743,6 +770,8 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 2) objective 수정 (Step 3.4 방향 전환)
 3) 완전 중단
 ```
+   - `AUTO_MODE=true`: AskUserQuestion을 skip하고 PM이 위 1~3 중 하나를 자율 판단해 즉시 실행한다.
+   - `AUTO_MODE=false`: `AskUserQuestion`으로 사용자 개입을 요청한다.
 4. 사용자 응답에 따라 분기:
   - **계속 진행**: 해당 DoD `blocked` 처리 후 다음 DoD로 진행
   - **objective 수정**: Step 3.4 수행 후 루프 재진입
