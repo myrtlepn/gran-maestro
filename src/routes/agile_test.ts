@@ -367,6 +367,67 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename
   }
 });
 
+Deno.test("GET /agile/sessions/:agiId/file serves image files with matching Content-Type", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const relativePath = "sprints/S01/screenshots/screen.png";
+    const imageFile = `${fixture.baseDir}/agile/AGI-001/${relativePath}`;
+    await Deno.mkdir(`${fixture.baseDir}/agile/AGI-001/sprints/S01/screenshots`, { recursive: true });
+    const expectedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    await Deno.writeFile(imageFile, expectedBytes);
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      `http://localhost/agile/sessions/AGI-001/file?path=${encodeURIComponent(relativePath)}`,
+    );
+
+    assertEquals(response.status, 200);
+    assertEquals(response.headers.get("Content-Type"), "image/png");
+    const actualBytes = new Uint8Array(await response.arrayBuffer());
+    assertEquals(Array.from(actualBytes), Array.from(expectedBytes));
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/file returns 400 when path includes traversal segment", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/file?path=..%2Fsecret.png",
+    );
+    assertEquals(response.status, 400);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId/file returns 404 when image file does not exist", async () => {
+  const fixture = await setupSessionFixture({
+    steering_every: 3,
+  }, "Objective root");
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/file?path=sprints%2FS01%2Fscreenshots%2Fmissing.png",
+    );
+    assertEquals(response.status, 404);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
 Deno.test("PUT /agile/sessions/:agiId/objective succeeds when If-Match matches current ETag", async () => {
   const fixture = await setupSessionFixture({
     steering_every: 3,

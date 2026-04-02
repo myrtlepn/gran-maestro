@@ -8,6 +8,14 @@ const projectAgileApi = new Hono();
 const AGI_ID_RE = /^AGI-\d+$/;
 const SPRINT_ID_RE = /^S\d+$/;
 const SNAPSHOT_FILE_RE = /^v(\d+)\.md$/;
+const IMAGE_EXTENSION_TO_CONTENT_TYPE: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+};
 const OBJECTIVE_DOD_MARKER_LINE_RE = /^<!--\s*dod:\s*(DOD-[A-Z0-9_-]+)\s+status:\s*([a-z_]+)\s+priority:\s*([a-z_]+)\s*-->$/i;
 const MARKER_ANCHOR_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
 const MARKER_ANCHOR_CHECKLIST_RE = /^\s*[-*+]\s+\[[ xX]\]\s+/;
@@ -153,6 +161,15 @@ function asArray(value: unknown): unknown[] {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function imageContentTypeFromPath(filePath: string): string | null {
+  const normalized = filePath.replace(/\\/g, "/");
+  const lower = normalized.toLowerCase();
+  const extensionIndex = lower.lastIndexOf(".");
+  if (extensionIndex === -1) return null;
+  const extension = lower.slice(extensionIndex);
+  return IMAGE_EXTENSION_TO_CONTENT_TYPE[extension] ?? null;
 }
 
 function isCommentStatus(value: unknown): value is ObjectiveCommentStatus {
@@ -562,6 +579,58 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
     },
     links: links ?? null,
   });
+});
+
+projectAgileApi.get("/agile/sessions/:agiId/file", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  if (!isValidAgiId(agiId)) {
+    return c.json({ error: "Invalid AGI id" }, 400);
+  }
+
+  const relativePath = c.req.query("path");
+  if (!relativePath) {
+    return c.json({ error: "path query parameter is required" }, 400);
+  }
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+  if (normalizedPath.includes("..")) {
+    return c.json({ error: "Invalid path" }, 400);
+  }
+
+  const contentType = imageContentTypeFromPath(normalizedPath);
+  if (!contentType) {
+    return c.json({ error: "Unsupported file extension" }, 400);
+  }
+
+  const sessionDir = `${baseDir}/agile/${agiId}`;
+  if (!(await dirExists(sessionDir))) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const absolutePath = `${sessionDir}/${normalizedPath}`;
+  try {
+    const fileBytes = await Deno.readFile(absolutePath);
+    return new Response(fileBytes, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return c.json({ error: "File not found" }, 404);
+    }
+    throw error;
+  }
 });
 
 projectAgileApi.get("/agile/sessions/:agiId/objective/files", async (c) => {

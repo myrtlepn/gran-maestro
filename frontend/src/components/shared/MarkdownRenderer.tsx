@@ -1,8 +1,27 @@
+import { isValidElement, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import '@/styles/hljs-themes.css';
 import { cn } from '@/lib/utils';
+
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  if (!src || loadFailed) {
+    return <span className="text-xs text-muted-foreground italic">{alt?.trim() || '이미지를 불러올 수 없습니다.'}</span>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt ?? ''}
+      className="max-w-full h-auto rounded-md my-2"
+      loading="lazy"
+      onError={() => setLoadFailed(true)}
+    />
+  );
+}
 
 export function MarkdownRenderer({ content, className }: { content: string; className?: string }) {
   return (
@@ -31,6 +50,7 @@ export function MarkdownRenderer({ content, className }: { content: string; clas
           ul: ({ children }) => <ul className="list-disc pl-6 text-sm text-foreground mb-3 space-y-1">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal pl-6 text-sm text-foreground mb-3 space-y-1">{children}</ol>,
           li: ({ children }) => <li className="text-sm text-foreground leading-7 [&>p]:mb-0">{children}</li>,
+          img: ({ src, alt }) => <MarkdownImage src={src} alt={alt} />,
           table: ({ children }) => (
             <div className="overflow-x-auto mb-4">
               <table className="w-full text-sm border-collapse border border-border">{children}</table>
@@ -56,9 +76,22 @@ export function MarkdownRenderer({ content, className }: { content: string; clas
               <code className="px-1.5 py-0.5 rounded bg-muted font-mono text-xs text-foreground" {...props}>{children}</code>
             );
           },
-          pre: ({ children }) => (
-            <pre className="my-3 rounded-lg bg-[#f6f8fa] dark:bg-[#0d1117] p-4 overflow-x-auto text-xs">{children}</pre>
-          ),
+          pre: ({ children }) => {
+            const firstChild = Array.isArray(children) ? children[0] : children;
+            const className = isValidElement<{ className?: string }>(firstChild) ? firstChild.props.className : undefined;
+            const isD2Block = typeof className === 'string' && /\blanguage-d2\b/i.test(className);
+
+            return (
+              <div className="my-3">
+                {isD2Block && (
+                  <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    D2가 설치되어 있지 않아 텍스트로 표시합니다.
+                  </div>
+                )}
+                <pre className="rounded-lg bg-[#f6f8fa] dark:bg-[#0d1117] p-4 overflow-x-auto text-xs">{children}</pre>
+              </div>
+            );
+          },
         }}
       >
         {content}

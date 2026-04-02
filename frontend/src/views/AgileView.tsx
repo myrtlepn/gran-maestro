@@ -163,6 +163,22 @@ function linkify(text: string): string {
     });
 }
 
+const LOCAL_MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\((\.{1,2}\/[^)\s]+)\)/g;
+
+function rewriteLocalMarkdownImagePaths(content: string, agiId: string | null): string {
+  if (!agiId || content.length === 0) return content;
+
+  return content.replace(LOCAL_MARKDOWN_IMAGE_PATTERN, (fullMatch, altText: string, rawPath: string) => {
+    if (!rawPath.startsWith('./') && !rawPath.startsWith('../')) {
+      return fullMatch;
+    }
+
+    const normalizedPath = rawPath.startsWith('./') ? rawPath.slice(2) : rawPath;
+    const url = `/api/agile/sessions/${encodeURIComponent(agiId)}/file?path=${encodeURIComponent(normalizedPath)}`;
+    return `![${altText}](${url})`;
+  });
+}
+
 function parseDodMarkers(content: string): ObjectiveParsedDod[] {
   const regex = /<!--\s*dod:\s*([a-z0-9_-]+)\s+status:\s*([a-z0-9_-]+)\s+priority:\s*([a-z0-9_-]+)\s*-->/gi;
   const markers: ObjectiveParsedDod[] = [];
@@ -231,7 +247,10 @@ function renderDodStatus(dods: ObjectiveParsedDod[]) {
   );
 }
 
-function renderObjectiveSections(sections: ObjectiveParsedSection[]) {
+function renderObjectiveSections(
+  sections: ObjectiveParsedSection[],
+  rewriteMarkdown: (content: string) => string,
+) {
   if (sections.length === 0) return null;
 
   return (
@@ -249,7 +268,7 @@ function renderObjectiveSections(sections: ObjectiveParsedSection[]) {
           {sections.map((section, index) => (
             <div key={`${section.key}-${index}`} className="rounded-md border p-3 bg-muted/5">
               <h4 className="text-sm font-semibold mb-2">{section.title}</h4>
-              <MarkdownRenderer content={section.content} />
+              <MarkdownRenderer content={rewriteMarkdown(section.content)} />
             </div>
           ))}
         </div>
@@ -578,6 +597,14 @@ export function AgileView() {
   const objectiveSections = useMemo(
     () => objectiveParsed?.sections ?? [],
     [objectiveParsed],
+  );
+  const rewriteMarkdown = useCallback(
+    (content: string) => rewriteLocalMarkdownImagePaths(content, selectedSessionId),
+    [selectedSessionId],
+  );
+  const rewriteLinkedMarkdown = useCallback(
+    (content: string) => rewriteMarkdown(linkify(content)),
+    [rewriteMarkdown],
   );
 
   const requestSessions = useCallback(async (): Promise<AgileSessionSummary[]> => {
@@ -1620,7 +1647,7 @@ export function AgileView() {
                                     </div>
                                   ) : objectiveDetailContent !== null ? (
                                     <div className="rounded-md border p-4 bg-background overflow-auto flex-1">
-                                      <MarkdownRenderer content={objectiveDetailContent} />
+                                      <MarkdownRenderer content={rewriteMarkdown(objectiveDetailContent)} />
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
@@ -1663,10 +1690,10 @@ export function AgileView() {
                                   ) : objectiveContent !== null ? (
                                     <div className="overflow-auto flex-1 pb-4">
                                       <div className="rounded-md border p-4 bg-background">
-                                        <MarkdownRenderer content={objectiveContent} />
+                                        <MarkdownRenderer content={rewriteMarkdown(objectiveContent)} />
                                       </div>
                                       {renderDodStatus(objectiveDodItems)}
-                                      {renderObjectiveSections(objectiveSections)}
+                                      {renderObjectiveSections(objectiveSections, rewriteMarkdown)}
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground py-8 text-center border rounded-md bg-muted/10">
@@ -1937,7 +1964,7 @@ export function AgileView() {
                                               </span>
                                             </td>
                                             <td className="px-4 py-3 text-muted-foreground align-top prose prose-sm max-w-none" onClick={handleResultClick}>
-                                              <MarkdownRenderer content={linkify(goal.change_summary)} />
+                                              <MarkdownRenderer content={rewriteLinkedMarkdown(goal.change_summary)} />
                                             </td>
                                           </tr>
                                         );
@@ -1982,7 +2009,7 @@ export function AgileView() {
                                           </div>
                                           <div onClick={handleResultClick} className="prose prose-sm max-w-none">
                                             <div className="text-xs font-semibold text-muted-foreground mb-1">스크린샷</div>
-                                            <MarkdownRenderer content={linkify(screenshotLinks)} />
+                                            <MarkdownRenderer content={rewriteLinkedMarkdown(screenshotLinks)} />
                                           </div>
                                         </div>
                                       </div>
@@ -2022,7 +2049,7 @@ export function AgileView() {
                                     </div>
                                   ) : resultDetailContent !== null ? (
                                     <div onClick={handleResultClick} className="rounded-md border bg-background p-4 overflow-auto max-h-[420px] prose prose-sm max-w-none">
-                                      <MarkdownRenderer content={linkify(resultDetailContent)} />
+                                      <MarkdownRenderer content={rewriteLinkedMarkdown(resultDetailContent)} />
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
@@ -2079,14 +2106,14 @@ export function AgileView() {
                                 <div>
                                   <div className="text-xs font-semibold text-muted-foreground mb-2">result.md</div>
                                   <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                    <MarkdownRenderer content={linkify(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
+                                    <MarkdownRenderer content={rewriteLinkedMarkdown(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
                                   </div>
                                 </div>
                                 {retrospectiveMd && (
                                   <div>
                                     <div className="text-xs font-semibold text-muted-foreground mb-2">retrospective.md</div>
                                     <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                      <MarkdownRenderer content={linkify(retrospectiveMd)} />
+                                      <MarkdownRenderer content={rewriteLinkedMarkdown(retrospectiveMd)} />
                                     </div>
                                   </div>
                                 )}
