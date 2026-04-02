@@ -116,8 +116,6 @@ interface AgileRetrospective {
   timestamp?: string;
 }
 
-type FlowStatus = 'done' | 'in_progress' | 'not_started';
-
 interface ObjectiveParsedDod {
   dod: string;
   status: string;
@@ -302,57 +300,6 @@ function resolveDefaultSprintId(
   return sprints[sprints.length - 1]?.sprint_id ?? null;
 }
 
-function toFlowStatus(raw: string | undefined): FlowStatus {
-  const normalized = (raw ?? '').toLowerCase().replace(/[\s_-]+/g, '');
-
-  if (normalized === 'done' || normalized === 'completed' || normalized === 'success') {
-    return 'done';
-  }
-  if (
-    normalized === 'inprogress'
-    || normalized === 'running'
-    || normalized === 'active'
-    || normalized === 'processing'
-    || normalized === 'executing'
-  ) {
-    return 'in_progress';
-  }
-
-  return 'not_started';
-}
-
-function getPlanStatus(sprint: AgileSprint): FlowStatus {
-  const plannedCount = toArray(sprint.planned).length;
-  const completedCount = toArray(sprint.completed).length;
-
-  if (plannedCount > 0 && completedCount >= plannedCount) {
-    return 'done';
-  }
-  if (completedCount > 0) {
-    return 'in_progress';
-  }
-
-  const sprintStatus = toFlowStatus(sprint.status);
-  if (sprintStatus === 'done' && plannedCount > 0) {
-    return 'in_progress';
-  }
-  return sprintStatus;
-}
-
-function getResultStatus(sprint: AgileSprint): FlowStatus {
-  const sprintStatus = toFlowStatus(sprint.status);
-  if (sprintStatus !== 'not_started') {
-    return sprintStatus;
-  }
-
-  const hasGenerated = toArray(sprint.generated?.pln).length > 0 || toArray(sprint.generated?.req).length > 0;
-  if (hasGenerated || sprint.summary || sprint.outcome) {
-    return 'in_progress';
-  }
-
-  return 'not_started';
-}
-
 function formatTime(value: string | null | undefined): string {
   if (!value) return '-';
   const parsed = new Date(value);
@@ -434,38 +381,19 @@ function formatGoalDiff(diff: SprintGoalDiff | undefined): string {
   return `files ${filesChanged} · +${insertions} / -${deletions} · commits: ${commitText}`;
 }
 
-function nodeClassName(status: FlowStatus): string {
-  if (status === 'done') {
-    return 'border-green-300 bg-green-50 text-green-700';
-  }
-  if (status === 'in_progress') {
-    return 'border-blue-300 bg-blue-50 text-blue-700';
-  }
-  return 'border-slate-300 bg-slate-100 text-slate-600';
+function isDodDone(status: string | undefined): boolean {
+  return (status ?? '').trim().toLowerCase() === 'done';
 }
 
-function statusText(status: FlowStatus): string {
-  if (status === 'done') return '완료';
-  if (status === 'in_progress') return '진행중';
-  return '미시작';
-}
-
-function TimelineNode({
-  title,
-  subtitle,
-  status,
-}: {
-  title: string;
-  subtitle?: string;
-  status: FlowStatus;
-}) {
-  return (
-    <div className={`rounded-md border px-3 py-2 min-w-[132px] ${nodeClassName(status)}`}>
-      <div className="text-sm font-semibold">{title}</div>
-      {subtitle && <div className="text-xs opacity-90 mt-0.5">{subtitle}</div>}
-      <div className="text-[11px] mt-1 font-medium">{statusText(status)}</div>
-    </div>
-  );
+function sprintGoalLine(sprint: AgileSprint): string | null {
+  const targetDod = typeof sprint.target_dod === 'string' && sprint.target_dod.trim().length > 0
+    ? sprint.target_dod.trim()
+    : (typeof sprint.target_dod_text === 'string' && sprint.target_dod_text.trim().length > 0 ? sprint.target_dod_text.trim() : null);
+  const purpose = typeof sprint.sprint_purpose === 'string' && sprint.sprint_purpose.trim().length > 0
+    ? sprint.sprint_purpose.trim()
+    : null;
+  const line = [targetDod, purpose].filter((value): value is string => Boolean(value)).join(' · ');
+  return line.length > 0 ? line : null;
 }
 
 export function AgileView() {
@@ -1584,47 +1512,108 @@ export function AgileView() {
                           <GitBranch className="h-4 w-4" /> Sprint Timeline
                         </CardTitle>
                         <CardDescription>
-                          Sprint - Plan - Result 흐름과 상태를 가로 타임라인으로 표시합니다.
+                          Sprint 카드, Objective DoD 진행률, 스프린트 간 인과를 함께 표시합니다.
                         </CardDescription>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="space-y-4">
+                        {objectiveDodItems.length > 0 && (() => {
+                          const doneCount = objectiveDodItems.filter((dod) => isDodDone(dod.status)).length;
+                          const completionRate = Math.round((doneCount / objectiveDodItems.length) * 100);
+                          return (
+                            <div className="rounded-md border bg-muted/5 p-3 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <h3 className="text-sm font-semibold">Objective DoD 진행률</h3>
+                                <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                  {doneCount} / {objectiveDodItems.length} 완료 ({completionRate}%)
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary transition-all duration-500"
+                                  style={{ width: `${completionRate}%` }}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                {objectiveDodItems.map((dod, idx) => {
+                                  const status = isDodDone(dod.status) ? 'done' : 'todo';
+                                  return (
+                                    <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/10 gap-3 transition-colors">
+                                      <div className="min-w-0 flex items-center gap-2">
+                                        <span className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</span>
+                                        {dod.anchorText ? (
+                                          <p className="text-sm truncate">{dod.anchorText}</p>
+                                        ) : (
+                                          <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
+                                        )}
+                                      </div>
+                                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
+                                        status === 'done'
+                                          ? 'bg-green-100 text-green-700'
+                                          : 'bg-slate-100 text-slate-600'
+                                      }`}
+                                      >
+                                        {status}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {detailLoading ? (
                           <Skeleton className="h-28 w-full" />
                         ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
                           <div className="overflow-x-auto pb-2">
-                            <div className="inline-flex min-w-max gap-3">
-                              {(selectedSprintId ? sessionDetail.sprints.filter(s => s.sprint_id === selectedSprintId) : sessionDetail.sprints).map((sprint) => {
-                                const sprintStatus = toFlowStatus(sprint.status);
-                                const planStatus = getPlanStatus(sprint);
-                                const resultStatus = getResultStatus(sprint);
+                            <div className="inline-flex min-w-max items-center gap-3">
+                              {sessionDetail.sprints.map((sprint, index) => {
+                                const goalLine = sprintGoalLine(sprint);
+                                const hasGoalLine = Boolean(goalLine);
+                                const previousDirection = typeof sprint.previous_direction === 'string' && sprint.previous_direction.trim().length > 0
+                                  ? sprint.previous_direction.trim()
+                                  : null;
+                                const sprintStatus = typeof sprint.status === 'string' && sprint.status.trim().length > 0
+                                  ? sprint.status
+                                  : 'unknown';
+                                const generatedPln = toArray(sprint.generated?.pln);
+                                const generatedReq = toArray(sprint.generated?.req);
 
                                 return (
-                                  <button
-                                    key={sprint.sprint_id}
-                                    type="button"
-                                    onClick={() => setSelectedSprintId(sprint.sprint_id)}
-                                    className={`rounded-lg border p-3 cursor-pointer transition-colors text-left flex-shrink-0 ${
-                                      selectedSprintId === sprint.sprint_id
-                                        ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
-                                        : 'border-border bg-background hover:bg-accent/40'
-                                    }`}
-                                  >
-                                    <div className="inline-flex items-center gap-2">
-                                      <TimelineNode title={sprint.sprint_id} subtitle="Sprint" status={sprintStatus} />
-                                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                      <TimelineNode
-                                        title="Plan"
-                                        subtitle={`${toArray(sprint.completed).length}/${toArray(sprint.planned).length}`}
-                                        status={planStatus}
-                                      />
-                                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                      <TimelineNode
-                                        title="Result"
-                                        subtitle={`PLN ${toArray(sprint.generated?.pln).length} · REQ ${toArray(sprint.generated?.req).length}`}
-                                        status={resultStatus}
-                                      />
-                                    </div>
-                                  </button>
+                                  <div key={sprint.sprint_id} className="inline-flex items-center gap-3">
+                                    {index > 0 && (
+                                      <div className="min-w-[120px] flex flex-col items-center justify-center text-muted-foreground">
+                                        <ArrowRight className="h-4 w-4" />
+                                        {previousDirection && (
+                                          <p className="mt-1 text-[11px] text-center max-w-[120px] break-words">{previousDirection}</p>
+                                        )}
+                                      </div>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedSprintId(sprint.sprint_id)}
+                                      className={`rounded-lg border p-3 cursor-pointer transition-colors text-left min-w-[260px] max-w-[320px] ${
+                                        selectedSprintId === sprint.sprint_id
+                                          ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                                          : 'border-border bg-background hover:bg-accent/40'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-sm font-semibold">{sprint.sprint_id}</div>
+                                        <StatusBadge status={sprintStatus} />
+                                      </div>
+                                      {hasGoalLine && (
+                                        <p className="mt-2 text-sm text-muted-foreground truncate" title={goalLine ?? undefined}>
+                                          {goalLine}
+                                        </p>
+                                      )}
+                                      {hasGoalLine && (
+                                        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                                          <div>PLN {generatedPln.length} · REQ {generatedReq.length}</div>
+                                          <div>{formatSprintPeriod(sprint)}</div>
+                                        </div>
+                                      )}
+                                    </button>
+                                  </div>
                                 );
                               })}
                             </div>
