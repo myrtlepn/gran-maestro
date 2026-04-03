@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { RefreshButton } from '@/components/shared/RefreshButton';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -460,6 +461,51 @@ function formatRate(rate: number | undefined): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+type SprintPhaseLabel = 'Plan' | 'Execute' | 'Review' | 'Done';
+
+function resolveSprintPhase(status: string | undefined): SprintPhaseLabel {
+  const normalized = (status ?? '').trim().toLowerCase();
+  if (normalized.length === 0) return 'Plan';
+
+  if (['done', 'completed', 'success'].includes(normalized)) {
+    return 'Done';
+  }
+
+  if (['review', 'phase3_review', 'qa', 'verify', 'verifying'].includes(normalized)) {
+    return 'Review';
+  }
+
+  if ([
+    'active',
+    'running',
+    'processing',
+    'executing',
+    'execute',
+    'in_progress',
+    'in-progress',
+    'progress',
+    'ongoing',
+  ].includes(normalized)) {
+    return 'Execute';
+  }
+
+  return 'Plan';
+}
+
+function phaseBadgeClass(phase: SprintPhaseLabel): string {
+  switch (phase) {
+    case 'Done':
+      return 'border-green-300 text-green-700 bg-green-50';
+    case 'Review':
+      return 'border-purple-300 text-purple-700 bg-purple-50';
+    case 'Execute':
+      return 'border-blue-300 text-blue-700 bg-blue-50';
+    case 'Plan':
+    default:
+      return 'border-amber-300 text-amber-700 bg-amber-50';
+  }
+}
+
 function formatSprintPeriod(sprint: AgileSprint): string {
   if (typeof sprint.period === 'string' && sprint.period.trim().length > 0) {
     return sprint.period;
@@ -731,6 +777,10 @@ export function AgileView() {
   const selectedSprintGoals = useMemo(
     () => getSprintGoals(selectedSprint),
     [selectedSprint],
+  );
+  const currentSprintId = useMemo(
+    () => toSprintId(sessionDetail?.session.current_sprint ?? selectedSession?.current_sprint),
+    [sessionDetail?.session.current_sprint, selectedSession?.current_sprint],
   );
   const selectedSprintWhyItems = useMemo(
     () => getSprintWhyItems(selectedSprint),
@@ -1920,6 +1970,8 @@ export function AgileView() {
                                   const sprintStatus = typeof sprint.status === 'string' && sprint.status.trim().length > 0
                                     ? sprint.status
                                     : 'unknown';
+                                  const sprintPhase = resolveSprintPhase(sprintStatus);
+                                  const isCurrentSprint = currentSprintId === sprint.sprint_id;
                                   const generatedPln = toArray(sprint.generated?.pln);
                                   const generatedReq = toArray(sprint.generated?.req);
 
@@ -1943,11 +1995,23 @@ export function AgileView() {
                                           selectedSprintId === sprint.sprint_id
                                             ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
                                             : 'border-border bg-background hover:bg-accent/40'
-                                        }`}
+                                        } ${isCurrentSprint ? 'ring-2 ring-emerald-400/70 border-emerald-500/70' : ''}`}
                                       >
                                         <div className="flex items-center justify-between gap-2">
-                                          <div className="text-sm font-semibold">{sprint.sprint_id}</div>
-                                          <StatusBadge status={sprintStatus} />
+                                          <div className="flex items-center gap-2">
+                                            <div className="text-sm font-semibold">{sprint.sprint_id}</div>
+                                            {isCurrentSprint && (
+                                              <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wide">
+                                                Current
+                                              </Badge>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <Badge variant="outline" className={phaseBadgeClass(sprintPhase)}>
+                                              {sprintPhase}
+                                            </Badge>
+                                            <StatusBadge status={sprintStatus} />
+                                          </div>
                                         </div>
                                         {hasGoalLine && (
                                           <p className="mt-2 text-sm text-muted-foreground truncate" title={goalLine ?? undefined}>
@@ -2172,116 +2236,113 @@ export function AgileView() {
 
                             {!isResultCompareMode && (
                               <>
-                                {/* HOW PROVE Section */}
-                                <div className="space-y-3">
-                              <h3 className="text-sm font-semibold flex items-center gap-2">
-                                어떻게 증명하는가
-                              </h3>
-                              {selectedSprintGoals.length > 0 ? (
-                                <div className="grid grid-cols-1 gap-3">
-                                  {selectedSprintGoals.map((goal, index) => {
-                                    const evidence = goal.evidence;
-                                    const screenshots = toArray(evidence?.screenshots)
-                                      .filter((item) => typeof item === 'string' && item.trim().length > 0);
-                                    const screenshotLinks = screenshots.length > 0
-                                      ? screenshots.map((shot, shotIndex) => `[screenshot ${shotIndex + 1}](${shot})`).join(', ')
-                                      : '증빙 미첨부';
+                                <Collapsible defaultOpen={false} className="rounded-md border p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                                      어떻게 증명하는가
+                                    </h3>
+                                    <CollapsibleTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="rounded-md border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent/40"
+                                      >
+                                        펼치기/접기
+                                      </button>
+                                    </CollapsibleTrigger>
+                                  </div>
+                                  <CollapsibleContent className="space-y-3 mt-4">
+                                    {selectedSprintGoals.length > 0 ? (
+                                      <div className="grid grid-cols-1 gap-3">
+                                        {selectedSprintGoals.map((goal, index) => {
+                                          const evidence = goal.evidence;
+                                          const screenshots = toArray(evidence?.screenshots)
+                                            .filter((item) => typeof item === 'string' && item.trim().length > 0);
+                                          const screenshotLinks = screenshots.length > 0
+                                            ? screenshots.map((shot, shotIndex) => `[screenshot ${shotIndex + 1}](${shot})`).join(', ')
+                                            : '증빙 미첨부';
 
-                                    return (
-                                      <div key={`how-${index}`} className="rounded-md border bg-muted/5 p-4 space-y-3">
-                                        <div className="font-medium text-sm pb-2 border-b">
-                                          {goal.goal}
-                                        </div>
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
-                                          <div>
-                                            {renderGoalTestSection(evidence?.test_results)}
-                                          </div>
-                                          <div>
-                                            <div className="text-xs font-semibold text-muted-foreground mb-1">Diff 정보</div>
-                                            <div>{formatGoalDiff(evidence?.diff)}</div>
-                                          </div>
-                                          <div onClick={handleResultClick} className="prose prose-sm max-w-none">
-                                            <div className="text-xs font-semibold text-muted-foreground mb-1">스크린샷</div>
-                                            <MarkdownRenderer content={rewriteLinkedMarkdown(screenshotLinks)} />
-                                          </div>
-                                        </div>
+                                          return (
+                                            <div key={`how-${index}`} className="rounded-md border bg-muted/5 p-4 space-y-3">
+                                              <div className="font-medium text-sm pb-2 border-b">
+                                                {goal.goal}
+                                              </div>
+                                              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
+                                                <div>
+                                                  {renderGoalTestSection(evidence?.test_results)}
+                                                </div>
+                                                <div>
+                                                  <div className="text-xs font-semibold text-muted-foreground mb-1">Diff 정보</div>
+                                                  <div>{formatGoalDiff(evidence?.diff)}</div>
+                                                </div>
+                                                <div onClick={handleResultClick} className="prose prose-sm max-w-none">
+                                                  <div className="text-xs font-semibold text-muted-foreground mb-1">스크린샷</div>
+                                                  <MarkdownRenderer content={rewriteLinkedMarkdown(screenshotLinks)} />
+                                                </div>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
-                                  증빙 데이터 없음
-                                </div>
-                              )}
-
-                              {!resultDetailFilesLoading && resultDetailFiles.length > 0 && (
-                                <div className="space-y-3 pt-2">
-                                  <div className="text-xs font-semibold text-muted-foreground">도메인별 상세 (result-details)</div>
-                                  <Tabs
-                                    value={selectedResultDetailFile ?? resultDetailFiles[0]}
-                                    onValueChange={(value) => setSelectedResultDetailFile(value)}
-                                    className="space-y-3"
-                                  >
-                                    <div className="overflow-x-auto">
-                                      <TabsList className="inline-flex w-max">
-                                        {resultDetailFiles.map((file) => (
-                                          <TabsTrigger key={file} value={file}>
-                                            {toResultDetailTabLabel(file)}
-                                          </TabsTrigger>
-                                        ))}
-                                      </TabsList>
-                                    </div>
-                                  </Tabs>
-
-                                  {resultDetailLoading ? (
-                                    <Skeleton className="h-28 w-full" />
-                                  ) : resultDetailError ? (
-                                    <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
-                                      {resultDetailError}
-                                    </div>
-                                  ) : resultDetailContent !== null ? (
-                                    <div onClick={handleResultClick} className="rounded-md border bg-background p-4 overflow-auto max-h-[420px] prose prose-sm max-w-none">
-                                      <MarkdownRenderer content={rewriteLinkedMarkdown(resultDetailContent)} />
-                                    </div>
-                                  ) : (
-                                    <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
-                                      상세 내용이 없습니다
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                                </div>
-
-                                {/* 메타데이터 접힘 유지 */}
-                                <details className="rounded-md border p-4 group mt-4">
-                                  <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
-                                    <FileText className="h-4 w-4" /> 스프린트 메타데이터 (result.md / retrospective.md)
-                                  </summary>
-                                  <div className="mt-4 space-y-4 pt-4 border-t">
-                                    <div>
-                                      <div className="text-xs font-semibold text-muted-foreground mb-2">result.md</div>
-                                      <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                        <MarkdownRenderer content={rewriteLinkedMarkdown(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
-                                      </div>
-                                    </div>
-                                    {retrospectiveMd && (
-                                      <div>
-                                        <div className="text-xs font-semibold text-muted-foreground mb-2">retrospective.md</div>
-                                        <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
-                                          <MarkdownRenderer content={rewriteLinkedMarkdown(retrospectiveMd)} />
-                                        </div>
+                                    ) : (
+                                      <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
+                                        증빙 데이터 없음
                                       </div>
                                     )}
+
+                                    {!resultDetailFilesLoading && resultDetailFiles.length > 0 && (
+                                      <div className="space-y-3 pt-2">
+                                        <div className="text-xs font-semibold text-muted-foreground">도메인별 상세 (result-details)</div>
+                                        <Tabs
+                                          value={selectedResultDetailFile ?? resultDetailFiles[0]}
+                                          onValueChange={(value) => setSelectedResultDetailFile(value)}
+                                          className="space-y-3"
+                                        >
+                                          <div className="overflow-x-auto">
+                                            <TabsList className="inline-flex w-max">
+                                              {resultDetailFiles.map((file) => (
+                                                <TabsTrigger key={file} value={file}>
+                                                  {toResultDetailTabLabel(file)}
+                                                </TabsTrigger>
+                                              ))}
+                                            </TabsList>
+                                          </div>
+                                        </Tabs>
+
+                                        {resultDetailLoading ? (
+                                          <Skeleton className="h-28 w-full" />
+                                        ) : resultDetailError ? (
+                                          <div className="text-sm text-red-600 p-3 bg-red-50 rounded-md">
+                                            {resultDetailError}
+                                          </div>
+                                        ) : resultDetailContent !== null ? (
+                                          <div onClick={handleResultClick} className="rounded-md border bg-background p-4 overflow-auto max-h-[420px] prose prose-sm max-w-none">
+                                            <MarkdownRenderer content={rewriteLinkedMarkdown(resultDetailContent)} />
+                                          </div>
+                                        ) : (
+                                          <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
+                                            상세 내용이 없습니다
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </CollapsibleContent>
+                                </Collapsible>
+
+                                <Collapsible defaultOpen={false} className="rounded-md border p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                                      <ListChecks className="h-4 w-4" /> Retrospective
+                                    </h3>
+                                    <CollapsibleTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="rounded-md border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent/40"
+                                      >
+                                        펼치기/접기
+                                      </button>
+                                    </CollapsibleTrigger>
                                   </div>
-                                </details>
-
-                                <details className="rounded-md border p-4 group">
-                                  <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
-                                    <ListChecks className="h-4 w-4" /> 스프린트 회고 JSON
-                                  </summary>
-
-                                  <div className="mt-4 space-y-4">
+                                  <CollapsibleContent className="space-y-4 mt-4">
                                     {retrospective ? (
                                       <>
                                         <div className="space-y-2">
@@ -2351,6 +2412,29 @@ export function AgileView() {
                                       </>
                                     ) : (
                                       <p className="text-sm text-muted-foreground">retrospective.json이 아직 없습니다.</p>
+                                    )}
+                                  </CollapsibleContent>
+                                </Collapsible>
+
+                                {/* 메타데이터 접힘 유지 */}
+                                <details className="rounded-md border p-4 group mt-4">
+                                  <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
+                                    <FileText className="h-4 w-4" /> 스프린트 메타데이터 (result.md / retrospective.md)
+                                  </summary>
+                                  <div className="mt-4 space-y-4 pt-4 border-t">
+                                    <div>
+                                      <div className="text-xs font-semibold text-muted-foreground mb-2">result.md</div>
+                                      <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
+                                        <MarkdownRenderer content={rewriteLinkedMarkdown(resultMarkdown ?? buildFallbackResultMarkdown(selectedSprint))} />
+                                      </div>
+                                    </div>
+                                    {retrospectiveMd && (
+                                      <div>
+                                        <div className="text-xs font-semibold text-muted-foreground mb-2">retrospective.md</div>
+                                        <div onClick={handleResultClick} className="rounded-md border bg-muted/5 p-4 overflow-auto max-h-[400px] prose prose-sm max-w-none">
+                                          <MarkdownRenderer content={rewriteLinkedMarkdown(retrospectiveMd)} />
+                                        </div>
+                                      </div>
                                     )}
                                   </div>
                                 </details>
