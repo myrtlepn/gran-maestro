@@ -126,7 +126,8 @@
     }
   },
   "workflow": {
-    "spec_prereview": false
+    "spec_prereview": false,
+    "default_agent": "claude-dev"
   },
   "phase1_exploration": {
     "roles": {
@@ -154,5 +155,9 @@
         "tier": "economy"
       }
     }
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "claude-dev": ["backend", "skill", "test", "infra", "frontend", "ui", "docs", "config"]
   }
 }

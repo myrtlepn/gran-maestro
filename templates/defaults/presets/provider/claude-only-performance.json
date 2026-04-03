@@ -148,5 +148,12 @@
         "tier": "premium"
       }
     }
+  },
+  "workflow": {
+    "default_agent": "claude-dev"
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "claude-dev": ["backend", "skill", "test", "infra", "frontend", "ui", "docs", "config"]
   }
 }

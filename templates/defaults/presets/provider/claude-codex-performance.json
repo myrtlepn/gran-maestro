@@ -157,5 +157,13 @@
         "tier": "premium"
       }
     }
+  },
+  "workflow": {
+    "default_agent": "codex-dev"
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "codex-dev": ["backend", "skill", "test", "infra"],
+    "claude-dev": ["docs", "config"]
   }
 }

@@ -144,7 +144,8 @@
     }
   },
   "workflow": {
-    "spec_prereview": false
+    "spec_prereview": false,
+    "default_agent": "codex-dev"
   },
   "phase1_exploration": {
     "roles": {
@@ -172,5 +173,11 @@
         "tier": "economy"
       }
     }
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "codex-dev": ["backend", "skill", "test", "infra"],
+    "gemini-dev": ["frontend", "ui"],
+    "claude-dev": ["docs", "config"]
   }
 }
