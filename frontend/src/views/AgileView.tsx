@@ -219,11 +219,66 @@ function priorityBadgeClass(priority: string): string {
   }
 }
 
-function renderDodStatus(dods: ObjectiveParsedDod[]) {
+const DOD_PRIORITY_DISPLAY_ORDER = ['must', 'should', 'could'] as const;
+
+function isDodDoneStatus(status: string): boolean {
+  return status.trim().toLowerCase() === 'done';
+}
+
+function extractDodIds(value: string | undefined): string[] {
+  if (!value) return [];
+  const matches = value.toUpperCase().match(/DOD-\d+/g);
+  return matches ? [...new Set(matches)] : [];
+}
+
+function buildDodCompletionSprintMap(sprints: AgileSprint[]): Record<string, string> {
+  const completionSprintByDod: Record<string, string> = {};
+  for (const sprint of sprints) {
+    const dodIds = [
+      ...extractDodIds(typeof sprint.target_dod === 'string' ? sprint.target_dod : undefined),
+      ...extractDodIds(typeof sprint.target_dod_text === 'string' ? sprint.target_dod_text : undefined),
+    ];
+
+    for (const dodId of dodIds) {
+      completionSprintByDod[dodId] = sprint.sprint_id;
+    }
+  }
+  return completionSprintByDod;
+}
+
+function renderDodStatus(
+  dods: ObjectiveParsedDod[],
+  options?: {
+    completionSprintByDod?: Record<string, string>;
+    rewriteMarkdown?: (content: string) => string;
+    onLinkClick?: (e: MouseEvent<HTMLAnchorElement>, href: string) => void;
+  },
+) {
   if (dods.length === 0) return null;
 
+  const completionSprintByDod = options?.completionSprintByDod ?? {};
+  const rewriteMarkdown = options?.rewriteMarkdown;
+  const onLinkClick = options?.onLinkClick;
+
+  const grouped = new Map<string, ObjectiveParsedDod[]>();
+  for (const dod of dods) {
+    const key = dod.priority.toLowerCase();
+    const items = grouped.get(key) ?? [];
+    items.push(dod);
+    grouped.set(key, items);
+  }
+
+  const fallbackPriorityKeys = [...grouped.keys()]
+    .filter((key) => !DOD_PRIORITY_DISPLAY_ORDER.includes(key as typeof DOD_PRIORITY_DISPLAY_ORDER[number]))
+    .sort((a, b) => a.localeCompare(b));
+
+  const orderedPriorityKeys = [
+    ...DOD_PRIORITY_DISPLAY_ORDER.filter((key) => grouped.has(key)),
+    ...fallbackPriorityKeys,
+  ];
+
   return (
-    <Card className="mt-4">
+    <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <ListChecks className="h-4 w-4" /> Project DoD Status
@@ -233,22 +288,52 @@ function renderDodStatus(dods: ObjectiveParsedDod[]) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          {dods.map((dod, idx) => {
-            const dodText = dod.contentText ?? dod.anchorText;
+        <div className="space-y-4">
+          {orderedPriorityKeys.map((priorityKey) => {
+            const items = [...(grouped.get(priorityKey) ?? [])].sort((a, b) => {
+              const doneRankGap = Number(isDodDoneStatus(b.status)) - Number(isDodDoneStatus(a.status));
+              if (doneRankGap !== 0) return doneRankGap;
+              return a.dod.localeCompare(b.dod);
+            });
+
             return (
-              <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5 gap-3">
-                <div className="min-w-0">
-                  <div className="font-mono text-xs text-muted-foreground">{dod.dod}</div>
-                  {dodText && (
-                    <p className="text-sm mt-1 truncate">{dodText}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline" className={priorityBadgeClass(dod.priority)}>
-                    priority:{dod.priority}
-                  </Badge>
-                  <StatusBadge status={dod.status} />
+              <div key={priorityKey} className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {priorityKey}
+                </h3>
+                <div className="space-y-2">
+                  {items.map((dod, idx) => {
+                    const dodText = (dod.contentText ?? dod.anchorText ?? '').trim();
+                    const isDone = isDodDoneStatus(dod.status);
+                    const completionSprintId = isDone ? completionSprintByDod[dod.dod] : null;
+
+                    return (
+                      <div key={`${priorityKey}-${dod.dod}-${idx}`} className="flex items-center justify-between border rounded-md p-3 text-sm bg-muted/5 gap-3">
+                        <div className="min-w-0">
+                          <div className="font-mono text-xs text-muted-foreground">{dod.dod}</div>
+                          {dodText.length > 0 && (
+                            <div className="text-sm mt-1 min-w-0 [&_p]:my-0">
+                              <MarkdownRenderer
+                                content={rewriteMarkdown ? rewriteMarkdown(dodText) : dodText}
+                                onLinkClick={onLinkClick}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isDone && (
+                            <Badge variant="secondary" className="font-mono text-[11px]">
+                              sprint:{completionSprintId ?? '-'}
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className={priorityBadgeClass(dod.priority)}>
+                            priority:{dod.priority}
+                          </Badge>
+                          <StatusBadge status={dod.status} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -679,6 +764,10 @@ export function AgileView() {
   const objectiveSections = useMemo(
     () => objectiveParsed?.sections ?? [],
     [objectiveParsed],
+  );
+  const dodCompletionSprintByDod = useMemo(
+    () => buildDodCompletionSprintMap(sessionDetail?.sprints ?? []),
+    [sessionDetail],
   );
   const rewriteMarkdown = useCallback(
     (content: string) => rewriteLocalMarkdownImagePaths(content, selectedSessionId),
@@ -1686,7 +1775,6 @@ export function AgileView() {
                                       <div className="rounded-md border p-4 bg-background">
                                         <MarkdownRenderer content={rewriteMarkdown(objectiveContent)} onLinkClick={handleObjectiveMarkdownLinkClick} />
                                       </div>
-                                      {renderDodStatus(objectiveDodItems)}
                                       {renderObjectiveSections(objectiveSections, rewriteMarkdown, handleObjectiveMarkdownLinkClick)}
                                     </div>
                                   ) : (
@@ -1776,108 +1864,114 @@ export function AgileView() {
                   </TabsContent>
 
                   <TabsContent value="overview" className="mt-0 outline-none">
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <GitBranch className="h-4 w-4" /> Sprint Timeline
-                        </CardTitle>
-                        <CardDescription>
-                          Sprint 타임라인과 현재 Sprint 상태를 확인할 수 있습니다.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {detailError && (
-                          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                            {detailError}
-                          </div>
-                        )}
-                        <div className="rounded-md border bg-muted/5 p-3 space-y-3">
-                          <h3 className="text-sm font-semibold">현재 Sprint 상태</h3>
-                          {selectedSprint ? (
-                            <>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
-                                <StatusBadge status={selectedSprint.status ?? 'unknown'} />
-                              </div>
-                              <div className="text-xs text-muted-foreground space-y-1">
-                                <div>기간: {formatSprintPeriod(selectedSprint)}</div>
-                                <div>
-                                  planned {toArray(selectedSprint.planned).length} · completed {toArray(selectedSprint.completed).length}
-                                </div>
-                                <div>stories: {selectedSprintStories.length}</div>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">
-                              현재 선택된 Sprint가 없습니다.
-                            </p>
+                    <div className="space-y-4">
+                      {renderDodStatus(objectiveDodItems, {
+                        completionSprintByDod: dodCompletionSprintByDod,
+                        rewriteMarkdown,
+                      })}
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <GitBranch className="h-4 w-4" /> Sprint Timeline
+                          </CardTitle>
+                          <CardDescription>
+                            Sprint 타임라인과 현재 Sprint 상태를 확인할 수 있습니다.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {detailError && (
+                            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                              {detailError}
+                            </div>
                           )}
-                        </div>
-                        {detailLoading ? (
-                          <Skeleton className="h-28 w-full" />
-                        ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
-                          <div className="pb-2">
-                            <div className="flex flex-col gap-3">
-                              {sessionDetail.sprints.map((sprint, index) => {
-                                const goalLine = sprintGoalLine(sprint);
-                                const hasGoalLine = Boolean(goalLine);
-                                const previousDirection = typeof sprint.previous_direction === 'string' && sprint.previous_direction.trim().length > 0
-                                  ? sprint.previous_direction.trim()
-                                  : null;
-                                const sprintStatus = typeof sprint.status === 'string' && sprint.status.trim().length > 0
-                                  ? sprint.status
-                                  : 'unknown';
-                                const generatedPln = toArray(sprint.generated?.pln);
-                                const generatedReq = toArray(sprint.generated?.req);
+                          <div className="rounded-md border bg-muted/5 p-3 space-y-3">
+                            <h3 className="text-sm font-semibold">현재 Sprint 상태</h3>
+                            {selectedSprint ? (
+                              <>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
+                                  <StatusBadge status={selectedSprint.status ?? 'unknown'} />
+                                </div>
+                                <div className="text-xs text-muted-foreground space-y-1">
+                                  <div>기간: {formatSprintPeriod(selectedSprint)}</div>
+                                  <div>
+                                    planned {toArray(selectedSprint.planned).length} · completed {toArray(selectedSprint.completed).length}
+                                  </div>
+                                  <div>stories: {selectedSprintStories.length}</div>
+                                </div>
+                              </>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">
+                                현재 선택된 Sprint가 없습니다.
+                              </p>
+                            )}
+                          </div>
+                          {detailLoading ? (
+                            <Skeleton className="h-28 w-full" />
+                          ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
+                            <div className="pb-2">
+                              <div className="flex flex-col gap-3">
+                                {sessionDetail.sprints.map((sprint, index) => {
+                                  const goalLine = sprintGoalLine(sprint);
+                                  const hasGoalLine = Boolean(goalLine);
+                                  const previousDirection = typeof sprint.previous_direction === 'string' && sprint.previous_direction.trim().length > 0
+                                    ? sprint.previous_direction.trim()
+                                    : null;
+                                  const sprintStatus = typeof sprint.status === 'string' && sprint.status.trim().length > 0
+                                    ? sprint.status
+                                    : 'unknown';
+                                  const generatedPln = toArray(sprint.generated?.pln);
+                                  const generatedReq = toArray(sprint.generated?.req);
 
-                                return (
-                                  <div key={sprint.sprint_id} className="flex flex-col gap-3 w-full">
-                                    {index > 0 && (
-                                      <div className="flex flex-col items-center justify-center text-muted-foreground py-1">
-                                        <ArrowDown className="h-4 w-4" />
-                                        {previousDirection && (
-                                          <p className="mt-1 text-[11px] text-center max-w-[200px] break-words">{previousDirection}</p>
-                                        )}
-                                      </div>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedSprintId(sprint.sprint_id);
-                                        setActiveMainTab('sprint-detail');
-                                      }}
-                                      className={`w-full rounded-lg border p-3 cursor-pointer transition-colors text-left ${
-                                        selectedSprintId === sprint.sprint_id
-                                          ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
-                                          : 'border-border bg-background hover:bg-accent/40'
-                                      }`}
-                                    >
-                                      <div className="flex items-center justify-between gap-2">
-                                        <div className="text-sm font-semibold">{sprint.sprint_id}</div>
-                                        <StatusBadge status={sprintStatus} />
-                                      </div>
-                                      {hasGoalLine && (
-                                        <p className="mt-2 text-sm text-muted-foreground truncate" title={goalLine ?? undefined}>
-                                          {goalLine}
-                                        </p>
-                                      )}
-                                      {hasGoalLine && (
-                                        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                                          <div>PLN {generatedPln.length} · REQ {generatedReq.length}</div>
-                                          <div>{formatSprintPeriod(sprint)}</div>
+                                  return (
+                                    <div key={sprint.sprint_id} className="flex flex-col gap-3 w-full">
+                                      {index > 0 && (
+                                        <div className="flex flex-col items-center justify-center text-muted-foreground py-1">
+                                          <ArrowDown className="h-4 w-4" />
+                                          {previousDirection && (
+                                            <p className="mt-1 text-[11px] text-center max-w-[200px] break-words">{previousDirection}</p>
+                                          )}
                                         </div>
                                       )}
-                                    </button>
-                                  </div>
-                                );
-                              })}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedSprintId(sprint.sprint_id);
+                                          setActiveMainTab('sprint-detail');
+                                        }}
+                                        className={`w-full rounded-lg border p-3 cursor-pointer transition-colors text-left ${
+                                          selectedSprintId === sprint.sprint_id
+                                            ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                                            : 'border-border bg-background hover:bg-accent/40'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="text-sm font-semibold">{sprint.sprint_id}</div>
+                                          <StatusBadge status={sprintStatus} />
+                                        </div>
+                                        {hasGoalLine && (
+                                          <p className="mt-2 text-sm text-muted-foreground truncate" title={goalLine ?? undefined}>
+                                            {goalLine}
+                                          </p>
+                                        )}
+                                        {hasGoalLine && (
+                                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                                            <div>PLN {generatedPln.length} · REQ {generatedReq.length}</div>
+                                            <div>{formatSprintPeriod(sprint)}</div>
+                                          </div>
+                                        )}
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-muted-foreground">타임라인 데이터가 없습니다.</div>
-                        )}
-                      </CardContent>
-                    </Card>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">타임라인 데이터가 없습니다.</div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
                   </TabsContent>
 
                   <TabsContent value="sprint-detail" className="mt-0 outline-none">
