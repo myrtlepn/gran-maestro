@@ -399,9 +399,9 @@
     "auto_review": true,
     "max_iterations": 10,
     "cross_validation": {
-      "enabled": false,
+      "enabled": true,
       "min_reviewers": 2,
-      "line_proximity": 10
+      "line_proximity": 15
     },
     "severity_auto_fix": {
       "enabled": true,
@@ -457,6 +457,30 @@
         "agent": "codex",
         "tier": "premium",
         "enhanced_analysis": true
+      },
+      "adversarial_reviewer": {
+        "enabled": false,
+        "agent": "codex",
+        "tier": "premium",
+        "trigger": "auto",
+        "auto_conditions": {
+          "min_changed_files": 3,
+          "sensitive_dirs": ["auth", "db", "migrations", "payments", "secrets"],
+          "min_diff_lines": 50
+        },
+        "attack_surfaces": [
+          "auth_permissions",
+          "data_integrity",
+          "rollback_safety",
+          "race_conditions",
+          "null_timeout",
+          "version_skew",
+          "observability"
+        ],
+        "max_findings": 5,
+        "confidence_threshold": 0.5,
+        "non_blocking": true,
+        "max_retries": 1
       }
     }
   },

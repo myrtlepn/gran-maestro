@@ -89,6 +89,15 @@ type WorkflowModelRoleAssignmentRow = {
 };
 
 const MODEL_ROLE_DISPLAY_ORDER = ['pm_conductor', 'architect', 'developer', 'reviewer', 'developer_claude'] as const;
+const ADVERSARIAL_ATTACK_SURFACE_OPTIONS = [
+  'auth_permissions',
+  'data_integrity',
+  'rollback_safety',
+  'race_conditions',
+  'null_timeout',
+  'version_skew',
+  'observability',
+] as const;
 
 const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> = {
   stitch: ['enabled', 'auto_detect', 'auto_trigger', 'project_id', 'model_id', 'failure_policy'],
@@ -1128,9 +1137,86 @@ export function SettingsView() {
   function renderField(path: string[], key: string, value: any, depth = 0, label = key) {
     const indent = depth * 16;
     const fullPath = [...path, key];
+    const fullPathKey = fullPath.join('.');
     const descEntry = SETTING_DESCRIPTIONS[fullPath.join('.')];
     const description = getDescription(descEntry);
     const options = getOptions(descEntry);
+
+    if (fullPathKey === 'review.cross_validation' && isObject(value)) {
+      const crossValidationValue = value as Record<string, unknown>;
+      const orderedKeys = [
+        'enabled',
+        'line_proximity',
+        ...Object.keys(crossValidationValue).filter((subKey) => subKey !== 'enabled' && subKey !== 'line_proximity'),
+      ].filter((subKey, index, array) => subKey in crossValidationValue && array.indexOf(subKey) === index);
+
+      return (
+        <div key={fullPathKey}>
+          <div style={{ paddingLeft: indent }} className="text-xs font-semibold text-muted-foreground py-1 mt-2">
+            {label}
+          </div>
+          {description && (
+            <div style={{ paddingLeft: indent }} className="text-xs text-muted-foreground pb-2">
+              {description}
+            </div>
+          )}
+          <div className="space-y-4">
+            {orderedKeys.map((subKey) => renderField(fullPath, subKey, crossValidationValue[subKey], depth + 1))}
+          </div>
+        </div>
+      );
+    }
+
+    if (fullPathKey === 'review.roles.adversarial_reviewer.attack_surfaces' && Array.isArray(value)) {
+      const selectedSurfaces = new Set(value.map(String));
+      const knownSurfaces = [...ADVERSARIAL_ATTACK_SURFACE_OPTIONS];
+      const extraSurfaces = value
+        .map(String)
+        .filter((surface, index, array) => !knownSurfaces.includes(surface as typeof ADVERSARIAL_ATTACK_SURFACE_OPTIONS[number]) && array.indexOf(surface) === index);
+      const allSurfaceOptions = [...knownSurfaces, ...extraSurfaces];
+
+      return (
+        <div key={fullPathKey}>
+          <div style={{ paddingLeft: indent }} className="text-xs font-semibold text-muted-foreground py-1 mt-2">
+            {label}
+          </div>
+          {description && (
+            <div style={{ paddingLeft: indent }} className="text-xs text-muted-foreground pb-2">
+              {description}
+            </div>
+          )}
+          <Card style={{ marginLeft: indent }}>
+            <CardContent className="p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {allSurfaceOptions.map((surface) => (
+                  <label key={surface} className="flex items-center gap-2 rounded border px-2 py-1.5 text-xs font-mono">
+                    <input
+                      type="checkbox"
+                      checked={selectedSurfaces.has(surface)}
+                      onChange={(event) => {
+                        const nextSelected = new Set(selectedSurfaces);
+                        if (event.target.checked) {
+                          nextSelected.add(surface);
+                        } else {
+                          nextSelected.delete(surface);
+                        }
+                        handleFieldChange(fullPath, allSurfaceOptions.filter((entry) => nextSelected.has(entry)));
+                      }}
+                    />
+                    <span>{surface}</span>
+                  </label>
+                ))}
+              </div>
+              {extraSurfaces.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  기본 목록 외 surface도 보존됩니다.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
 
     if (
       path.join('.') === 'models.roles' &&

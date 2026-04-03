@@ -764,7 +764,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
 
 ### Step 4: Pass B — 코드/문서 품질 검증
 
-> 이 Step의 목적: Pass A 통과 산출물을 기반으로 코드/설계/UI/의도 충실도/영향 범위 갭을 찾는다 / 핵심 출력물: `ac-results.md`, `review-code.md`, `review-arch.md`, `review-ui.md`, `review-intent-fidelity.md`, `review-impact.md`
+> 이 Step의 목적: Pass A 통과 산출물을 기반으로 코드/설계/UI/의도 충실도/영향 범위/적대적 관점 갭을 찾는다 / 핵심 출력물: `ac-results.md`, `review-code.md`, `review-arch.md`, `review-ui.md`, `review-intent-fidelity.md`, `review-impact.md`, `review-adversarial.md`
 
 #### Pass B 타입 분기 (if 1개, MANDATORY)
 
@@ -790,7 +790,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - `review-code.md`에 위 4개 축별 `PASS|FAIL`과 근거를 표 형태로 기록한다.
    - FAIL 항목은 반드시 수정 권고(어떤 섹션을 어떻게 고칠지)를 포함한다.
 
-Pass B는 Claude(인컨텍스트)와 background 에이전트 5개를 동시 시작합니다.
+Pass B는 Claude(인컨텍스트)와 background 에이전트 6개(기존 5개 + adversarial_reviewer)를 동시 시작합니다.
 
 ```
 Claude (인컨텍스트):   spec §3 AC 체크리스트 순차 검증  ─┐
@@ -798,7 +798,8 @@ code-reviewer (bg):   구현 레벨 리뷰                  ─┤─→ Step 5�
 arch-reviewer (bg):   설계/계획 레벨 리뷰              ─┤
 ui-reviewer (bg):     UI 설계 검토 (조건부)            ─┤
 intent-fidelity (bg): 원본 의도 대비 구현 일치 검증     ─┤
-impact-reviewer (bg): 영향 범위(회귀 영향) 분석         ─┘
+impact-reviewer (bg): 영향 범위(회귀 영향) 분석         ─┤
+adversarial-reviewer (bg): 공격 표면 기반 적대적 리뷰   ─┘
 ```
 
 #### Claude 인컨텍스트: AC 검증
@@ -837,6 +838,7 @@ background 에이전트는 `run_in_background: true` 옵션으로 dispatch합니
 | `ui_reviewer` | Stitch 시안 vs 실제 UI, UX 흐름 일관성 | `review.roles.ui_reviewer.agent` | `providers[agent][review.roles.ui_reviewer.tier \|\| default_tier]`로 resolve |
 | `intent_fidelity` | 원본 의도(plan 요청 + docs) 대비 구현 일치 검증. spec §3.2 Intent Trace의 각 항목을 구현 증거와 대조. Missing/Partial/Verified 분류. 기본 blocking 모드에서 MUST 항목 Partial/Missing은 pass/fail에 반영, SHOULD는 warning으로만 추적 | `review.roles.intent_fidelity.agent` | `providers[agent][review.roles.intent_fidelity.tier \|\| default_tier]`로 resolve |
 | `impact_reviewer` | `git diff --name-only` 기준 변경 파일 식별 후 영향 범위를 회귀 관점으로 검토. `review.roles.impact_reviewer.enhanced_analysis=true`이면 각 변경 파일의 정적 `import`/`require`를 **2단계 역추적**(변경 파일 → 직접 의존자 → 간접 의존자)하고, 역추적된 의존 파일 소스를 직접 Read하여 변경 내용과 대조해 기능 깨짐 여부를 판단한다. `enhanced_analysis=false`이면 기존 **1단계 역추적 + [IMPACT] 태그 체계**만 유지한다. 영향 이슈는 Impact 전용 rubric(공개 API/라우트=CRITICAL, 공유 컴포넌트/유틸리티=MAJOR, 내부 모듈=MINOR)으로 태깅. 추가로 `[impact-check]` AC가 있으면 Given/When/Then 조건의 PASS/FAIL verdict를 AC별로 전담 판정한다. | `review.roles.impact_reviewer.agent` | `providers[agent][review.roles.impact_reviewer.tier \|\| default_tier]`로 resolve |
+| `adversarial_reviewer` | 보안/데이터 무결성/동시성/롤백 안전/null·timeout/버전 스큐/관측성 등 attack surface 관점으로 적대적 리뷰를 수행한다. finding에는 `attack_surface`와 `confidence(0~1)`를 포함하며, Step 5에서 confidence→severity 매핑을 적용해 통합한다. | `review.roles.adversarial_reviewer.agent` | `providers[agent][review.roles.adversarial_reviewer.tier \|\| default_tier]`로 resolve |
 
 ### 테스트 패턴 준수 검증 (code_reviewer 추가 관점)
 
@@ -848,7 +850,8 @@ spec.md에 유형별 원칙이 주입된 AC가 있는 경우:
    - "[MAJOR] AC-005 [api-test]: schema 검증 누락"
 4. 보조 태그가 없는 AC는 이 검증을 skip한다.
 
-각 리뷰어(code_reviewer, arch_reviewer, ui_reviewer, impact_reviewer)는 발견한 이슈에 반드시 `[CRITICAL]`, `[MAJOR]`, `[MINOR]` 등급을 태깅해야 한다 (`templates/review-request.md`의 등급 판별 가이드 및 보안 오버라이드 규칙 적용).
+각 리뷰어(code_reviewer, arch_reviewer, ui_reviewer, impact_reviewer, adversarial_reviewer)는 발견한 이슈에 반드시 `[CRITICAL]`, `[MAJOR]`, `[MINOR]` 등급을 태깅해야 한다 (`templates/review-request.md`의 등급 판별 가이드 및 보안 오버라이드 규칙 적용).
+adversarial_reviewer는 등급 태깅과 별개로 finding별 `confidence`를 필수로 포함하며, Step 5에서 confidence 기준 재매핑 결과를 최종 severity로 사용한다.
 intent_fidelity는 등급 대신 `Verified/Partial/Missing` + `INTENT-GAP` 카운트를 출력한다.
 
 arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에는 위 Scope Audit 지시(`SCOPE_CREEP`, `OMISSION`, 미발견 시 `"확인 완료 — 해당 없음"` 명시)를 반드시 포함해 전달한다.
@@ -859,11 +862,12 @@ arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에
 - ui_reviewer → `reviews/RV-NNN/review-ui.md`
 - intent_fidelity → `reviews/RV-NNN/review-intent-fidelity.md`
 - impact_reviewer → `reviews/RV-NNN/review-impact.md`
+- adversarial_reviewer → `reviews/RV-NNN/review-adversarial.md`
 
 - `{{SPEC_PATH}}`: 해당 태스크의 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{NN}/spec.md` 절대 경로
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
-- `{{REFERENCE_CONTEXT}}`: Step 2에서 생성한 `[REFERENCE_CONTEXT]` 블록 (`references: none` 포함). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입.
-- `{{SPEC_REFERENCE_CONTEXT}}`: Step 2-a에서 생성한 spec 직접 참조 파일 컨텍스트 블록(`spec_reference_context_block`). code/arch/ui/intent_fidelity/impact 모든 리뷰어 프롬프트에 동일 주입한다.
+- `{{REFERENCE_CONTEXT}}`: Step 2에서 생성한 `[REFERENCE_CONTEXT]` 블록 (`references: none` 포함). code/arch/ui/intent_fidelity/impact/adversarial 모든 리뷰어 프롬프트에 동일 주입.
+- `{{SPEC_REFERENCE_CONTEXT}}`: Step 2-a에서 생성한 spec 직접 참조 파일 컨텍스트 블록(`spec_reference_context_block`). code/arch/ui/intent_fidelity/impact/adversarial 모든 리뷰어 프롬프트에 동일 주입한다.
 - `if strategy.review_mode == "fulltext"`:
   - 프롬프트 본문에 문서 전문(full text)을 직접 포함하고, diff 요약은 참고 정보로만 사용한다.
   - `code_reviewer`의 검토 포커스를 문서 품질(정확성/완결성/독자적합성/구조) 체크리스트로 고정한다.
@@ -885,6 +889,14 @@ arch_reviewer dispatch 시 `templates/review-request.md`의 `{{PERSPECTIVE}}`에
   - `영향 이슈 등급 rubric: 공개 API/라우트 영향=[CRITICAL], 공유 컴포넌트/유틸리티 영향=[MAJOR], 내부 모듈 영향=[MINOR]`
   - `[impact-check]` AC가 있으면 각 AC의 Given/When/Then 충족 여부를 PASS/FAIL/SKIP로 판정하고 `review-impact.md`에 `AC ID | Grade | Verdict | Evidence` 표로 기록
 - dispatch는 기존 background 리뷰어와 동일하게 `run_in_background: true`로 병렬 실행한다.
+
+#### adversarial_reviewer dispatch 입력 규칙
+
+- `review.roles.adversarial_reviewer.enabled != true`이면 auto-skip하고 취합 시 `"Adversarial 리뷰 skip (비활성화)"`를 표시한다.
+- 프롬프트 템플릿은 `templates/adversarial-review-prompt.md`를 사용한다.
+  - 템플릿 Read 실패(FILE_NOT_FOUND 포함) 시 비차단으로 skip하고 취합 시 `[ADVERSARIAL: SKIPPED — prompt template missing]`를 기록한다.
+- dispatch는 기존 background 리뷰어와 동일한 `run_in_background: true` 패턴으로 실행한다.
+- timeout/에이전트 에러가 발생해도 워크플로우를 중단하지 않는다. Step 5에서 `[ADVERSARIAL: SKIPPED — {timeout|agent_error}]`로 표시하고 기존 역할 취합을 계속 진행한다.
 
 #### [impact-check] AC 전담 판정 규칙 (Pass B, impact_reviewer)
 
@@ -979,6 +991,7 @@ Agent(
 
 **ui_reviewer 스킵 조건**: `request.json.stitch_screens` 배열이 비어있고 `frontend/` 디렉토리 변경 파일이 없으면 auto-skip. 취합 시 "UI 리뷰 skip (변경 없음)" 표시.
 **impact_reviewer 스킵 조건**: `review.roles.impact_reviewer.enabled=false` 또는 변경 파일 목록 비어있음이면 auto-skip. 취합 시 각각 "Impact 리뷰 skip (비활성화)" 또는 "Impact 리뷰 skip (변경 파일 없음)" 표시.
+**adversarial_reviewer 스킵 조건**: `review.roles.adversarial_reviewer.enabled=false`이면 auto-skip. 취합 시 "Adversarial 리뷰 skip (비활성화)" 표시.
 **intent_fidelity 스킵 조건**: `intent_fidelity.enabled=false` 또는 `## 3.2 Intent Trace` 미존재 시 auto-skip. 취합 시 각각 "Intent Fidelity 리뷰 skip (비활성화)" 또는 "Intent Fidelity 리뷰 skip (Intent Trace 없음)" 표시.
 - `impact_reviewer` 비활성화 상태에서 `[impact-check]` AC가 존재하면 `review-impact.md` 또는 취합 로그에 해당 AC별 `SKIP` 경고를 남긴다 (비차단, 하위 호환).
 
@@ -986,12 +999,12 @@ Agent(
 
 > 이 Step의 목적: Pass B 산출물을 수집·요약해 리뷰 결과를 단일 리포트로 정리한다 / 핵심 출력물: `review-report.md`
 
-1. **완료 폴링**: background 에이전트 5개(또는 skip된 에이전트 제외) 완료 대기. approve SKILL.md Step 4d 완료 감지 패턴 동일 적용.
+1. **완료 폴링**: background 에이전트 6개(또는 skip된 에이전트 제외) 완료 대기. approve SKILL.md Step 4d 완료 감지 패턴 동일 적용.
    - 에이전트 실패 시: 해당 역할 리뷰 "에이전트 실패" 표시 후 나머지 취합 계속 진행.
    - fallback (FILE_NOT_FOUND 처리): 각 `review-*.md` 파일이 FILE_NOT_FOUND이면 해당 background Agent 반환값(`TaskOutput`)에서 전체 텍스트를 추출한다.
      - 추출 텍스트가 빈 문자열이 아니고 `# ` 또는 `## ` 마크다운 헤더를 1개 이상 포함하면 유효한 리뷰 결과로 간주하고 PM이 해당 `review-*.md` 경로에 Write한다.
      - 추출 텍스트가 비어있거나 헤더가 없으면 해당 역할을 "에이전트 실패"로 표시하고 나머지 취합을 계속 진행한다.
-2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `coverage-matrix.json` + `coverage-matrix.md` + `full-backend-test-report.md`(선택, Step 3.5 실행 시 생성).
+2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `review-adversarial.md` + `coverage-matrix.json` + `coverage-matrix.md` + `full-backend-test-report.md`(선택, Step 3.5 실행 시 생성).
 3. **review-report.md 작성**: `reviews/RV-NNN/review-report.md`
    ```markdown
    # 리뷰 리포트 — RV-NNN (REQ-NNN 반복 N)
@@ -1019,6 +1032,11 @@ Agent(
    - 실패 테스트 목록 + 의도 판정(INTENTIONAL/UNINTENTIONAL/UNCERTAIN)
    - 상세: `full-backend-test-report.md` (없으면 "Step 3.5 skip")
 
+   ## 교차 매트릭스 (파일 × attack_surface) — finding 3개+ 시
+   - 조건 미충족 시: `finding < 3 (matrix skip)`
+   - 셀 표기: `F-NN [합의|단독 발견|상충]`
+   - sources: `[role1, role2, ...]`
+
    ## 코드 리뷰 주요 발견 사항
    <review-code.md 핵심 항목>
 
@@ -1040,7 +1058,37 @@ Agent(
    - 영향 없음 시: `영향 범위 분석 완료 — 해당 없음`
    - 비활성화 skip 시: `Impact 리뷰 skip (비활성화)`
    - 에이전트 실패 시: `에이전트 실패`
+
+   ## Adversarial 리뷰 결과
+   - `[ADVERSARIAL: SKIPPED — {사유}]` 또는 finding 요약
+   - 상세: `review-adversarial.md` 또는 skip 사유
    ```
+
+4. **adversarial finding 통합 (MANDATORY)**:
+   - `review-adversarial.md`의 각 finding에서 `confidence` 값을 읽어 severity를 아래 기준으로 재매핑한다.
+     - `confidence >= 0.8` → `CRITICAL`
+     - `0.5 <= confidence <= 0.79` → `MAJOR`
+     - `0.2 <= confidence <= 0.49` → `MINOR`
+     - `confidence < 0.2` → `DROP` (report 본문/집계에서 제외)
+   - adversarial finding은 `F-NN` 식별자를 부여해 report에 기록한다.
+
+5. **교차 검증 승격 + sources 병기 (MANDATORY)**:
+   - `review.cross_validation.enabled == true`이면, Pass B 리뷰어(code/arch/ui/impact/adversarial) 중 `max(2, review.cross_validation.min_reviewers)`명 이상이 동일 파일·라인 근접(`line_proximity`) 영역을 지적할 때 severity를 1단계 승격한다.
+   - 승격 시 finding에 `sources: [역할1, 역할2, ...]`를 병기하고 `source: "cross_validation"` 메모를 남긴다.
+   - 교차 확인 라벨 규칙:
+     - `합의`: 동일 영역을 2개 이상 역할이 지적
+     - `단독 발견`: 1개 역할만 지적
+     - `상충`: 동일 영역에 상반된 verdict/주장이 공존
+
+6. **교차 매트릭스 포맷 (MANDATORY)**:
+   - 최종 finding(드롭 제외) 개수가 3개 이상이면 report 상단에 `파일 × attack_surface` 격자를 생성한다.
+   - 행은 파일 경로, 열은 attack_surface(보안/데이터 무결성/동시성/롤백 안전/null·timeout/버전 스큐/관측성)로 구성한다.
+   - 각 셀에는 `F-NN`과 교차 확인 라벨(`합의|단독 발견|상충`)을 표시한다.
+
+7. **adversarial non-blocking 처리 (MANDATORY)**:
+   - timeout, 에이전트 에러, 프롬프트 템플릿 누락/Read 실패 시 adversarial만 skip 처리하고 기존 6개 역할 기준으로 report 생성/분기 로직을 계속 수행한다.
+   - 이 경우 report에 반드시 `[ADVERSARIAL: SKIPPED — {사유}]` 섹션을 남긴다.
+   - adversarial skip 단독 사유만으로 `gap_found`를 트리거하지 않는다.
 
 ### Step 6: 갭 처리 분기
 
@@ -1149,9 +1197,10 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
 
 ##### (b) 사전 처리: 이슈 파싱 및 등급 분류
 
-1. **리뷰어 태깅 파싱**: `review-report.md`의 코드/아키텍처/UI 리뷰 발견 사항에서 `[CRITICAL]`, `[MAJOR]`, `[MINOR]` 접두사를 파싱하여 등급별 배열로 분리합니다.
+1. **리뷰어 태깅 파싱**: `review-report.md`의 코드/아키텍처/UI/영향/adversarial 리뷰 발견 사항에서 `[CRITICAL]`, `[MAJOR]`, `[MINOR]` 접두사를 파싱하여 등급별 배열로 분리합니다.
    - 태깅 형식 예시: `[CRITICAL] SQL injection 취약점 발견`, `[MAJOR] 에러 핸들링 누락`, `[MINOR] 변수명 컨벤션 불일치`
    - **태깅 없는 이슈**: 리뷰어가 등급 접두사를 붙이지 않은 이슈는 **MAJOR로 기본 분류**합니다.
+   - adversarial finding은 Step 5에서 confidence 매핑이 끝난 항목만 포함한다(`DROP` 제외).
 
 2. **PM 재조정 (보안 오버라이드)**: `config.review.severity_auto_fix.security_override_keywords` 배열의 키워드와 각 이슈 내용을 매칭합니다.
    - 키워드가 이슈 텍스트에 포함되면 해당 이슈의 등급을 **무조건 CRITICAL로 승격**합니다 (원래 MAJOR/MINOR였더라도).
@@ -1167,13 +1216,13 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
    - 승격 내역은 `review-report.md` 또는 `review_issues_summary` 부가 메모에 `source: "severity_regression_guard"`로 기록한다.
 
 4. **Pass B 교차 검증 승격 (`review.cross_validation.enabled == true`)**:
-   - 적용 조건: Pass B 리뷰어 중 `max(2, review.cross_validation.min_reviewers)`명 이상이 같은 영역을 지적한 경우.
+   - 적용 조건: Pass B 리뷰어(code/arch/ui/impact/adversarial) 중 `max(2, review.cross_validation.min_reviewers)`명 이상이 같은 영역을 지적한 경우.
    - 같은 영역 판정(관찰 가능 기준): 동일 파일 경로 + 라인 번호 차이 `<= review.cross_validation.line_proximity` (기본 `10`줄).
    - 조건 충족 시 해당 영역 이슈 severity를 **+1 단계 승격**한다.
      - `MINOR -> MAJOR`
      - `MAJOR -> CRITICAL`
      - `CRITICAL -> CRITICAL` (상한 고정)
-   - 승격 내역은 `review-report.md` 또는 `review_issues_summary` 부가 메모에 `source: "cross_validation"`로 기록한다.
+   - 승격 내역은 `review-report.md` 또는 `review_issues_summary` 부가 메모에 `source: "cross_validation"`로 기록하고 `sources: [역할1, 역할2, ...]`를 병기한다.
 
 5. **등급별 카운트 산출**: 재조정 완료 후 `critical_count`, `major_count`, `minor_count`를 산출합니다.
 
