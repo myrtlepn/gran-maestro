@@ -64,6 +64,8 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
 - `AUTO_MODE=true`인 스프린트 루프에서 텍스트 출력으로 `"계속할까요?"`, `"진행할까요?"`, `"멈추고"` 등 질문을 생성하는 행위.
 - 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
+- 정기 스티어링 해당 Sprint에서 Step 3을 건너뛰고 Step 2를 계속 진행하는 행위.
+- 정기 스티어링 미해당 Sprint에서 자의적으로 `"계속할까요?"`, `"멈출까요?"` 질문을 삽입하는 행위.
 - 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
 
 ### AskUserQuestion 허용 지점 (Whitelist)
@@ -180,6 +182,8 @@ Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --
 #### 2.0 상태 복원
 
 세션 초기화(Step 0) 또는 Step 1 복귀 결과로 `CURRENT_SPRINT`, `STEERING_EVERY`를 복원한다.
+- `STEERING_DISABLED`는 기본값 `false`로 두고, `STEERING_EVERY == 0`이면 즉시 `true`로 해석한다.
+- `EMERGENCY_STEERING_ENABLED`는 기본값 `true`로 두고, 세션/복귀 컨텍스트에 명시값이 있으면 해당 값을 우선한다.
 
 - `--resume AGI-NNN` 진입:
   - session.json에서 `current_sprint`를 복원한다.
@@ -324,7 +328,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 
 - `all_done: true`이면 루프를 종료하고 2.3으로 이동한다.
 - `all_done: false`이면 Sprint를 계속 진행한다.
-- `CURRENT_SPRINT > 0` 이고 `CURRENT_SPRINT % STEERING_EVERY == 0`이면 Step 3(스티어링 체크포인트) 수행 후 이 루프로 복귀한다.
+- 정기 스티어링은 `STEERING_DISABLED=true` 또는 `STEERING_EVERY == 0`이면 skip한다.
+- `[CRITICAL][NO-AD-HOC-PAUSE]` 정기 스티어링 미해당 Sprint에서는 `"계속할까요?"`/`"멈출까요?"` 질문 없이 즉시 Step 2.2.1로 진행한다.
+- `STEERING_EVERY > 0` 이고 `CURRENT_SPRINT > 0` 이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3(스티어링 체크포인트)를 수행 후 이 루프로 복귀한다.
 
 ##### 2.2.1 프로젝트 건강 점검 (Sprint 시작 시 MANDATORY)
 
@@ -535,7 +541,10 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 ```
 5. `CONTINUATION GUARD`:
   - 위 update 호출 직후 `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신한다.
-  - 즉시 다음 DoD의 구현을 시작하라: 루프 상단으로 복귀해 다음 Sprint를 연속 실행한다.
+  - `[CRITICAL][STEERING-CHECK-ON-INCREMENTED-SPRINT]` 증가된 `CURRENT_SPRINT` 기준으로 스티어링 해당 여부를 **반드시 즉시 판정**한다.
+  - `STEERING_DISABLED=true` 또는 `STEERING_EVERY == 0`이면 정기 스티어링을 skip하고 Step 2.2.1로 즉시 진행한다.
+  - `STEERING_EVERY > 0`이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3를 실행한 뒤 루프 상단으로 복귀한다.
+  - 위 조건에 해당하지 않으면 `[CRITICAL][NO-AD-HOC-PAUSE]` 어떤 확인 질문도 삽입하지 말고 Step 2.2.1로 즉시 진행한다.
 
 ---
 
@@ -585,10 +594,11 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 
 | 유형 | 조건 |
 |------|------|
-| **정기** | `CURRENT_SPRINT > 0` AND `CURRENT_SPRINT % STEERING_EVERY == 0` |
+| **정기** | `STEERING_DISABLED != true` AND `STEERING_EVERY > 0` AND `CURRENT_SPRINT > 0` AND `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0` |
 | **비상** | 안전장치 섹션의 비상 스티어링 트리거 조건 충족 시 즉시 진입 |
 
 `steering_every` 값은 session.json에서 로드하며 기본값은 3이다.
+`STEERING_EVERY == 0` 또는 `STEERING_DISABLED == true`이면 정기 스티어링은 비활성화 상태로 간주한다.
 
 #### 3.2 진행 보고서 출력
 
@@ -782,6 +792,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 ### 비상 스티어링 트리거
 
 정기 체크포인트 외에 아래 조건에서 **Step 3을 즉시 강제 트리거**한다:
+- `EMERGENCY_STEERING_ENABLED == false`이면 본 섹션 전체를 skip하고 비상 스티어링 강제 진입을 수행하지 않는다.
 
 | 트리거 조건 | 설명 |
 |-------------|------|
@@ -842,3 +853,5 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "Step 0 없이 바로 생성으로 진행해도 된다." | 확인 증거: `mst.py agile status`(resume) 또는 `mst:agile-plan`(신규) 실행 로그가 Step 0~1 흐름에 존재.
 - 합리화 패턴: "대략 N 스프린트면 되니 계획/보고에 넣어도 된다." | 확인 증거: objective.md, plan 입력, 중간/스티어링 보고 산출물 전체에서 스프린트 횟수 예측 문구 0건.
 - 합리화 패턴: "횟수가 아니라 규모/기간 추정이므로 허용된다." | 확인 증거: 캘린더 변환/반복 횟수 암시 표현이 산출물 전체에서 0건.
+- 합리화 패턴: "이번 스프린트는 바쁘니 스티어링 해당이어도 Step 3을 건너뛰자." | 확인 증거: 스티어링 해당 시점마다 `[MANDATORY][STEERING-DUE]` 로그와 Step 3 실행 기록이 존재.
+- 합리화 패턴: "스티어링 미해당이지만 한 번 더 계속 여부를 묻자." | 확인 증거: 미해당 스프린트 로그에서 `"계속할까요?"`, `"멈출까요?"` 질문이 0건이고 Step 2.2.1로 즉시 진행한다.
