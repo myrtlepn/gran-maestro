@@ -21,6 +21,10 @@
     "spec_prereview_minor_escalation_threshold": 3,
     "auto_approve_on_unblock": false
   },
+  "intent_verification": {
+    "enabled": true,
+    "max_iterations": 5
+  },
   "harness": {
     "dynamic_complexity": {
       "enabled": false,

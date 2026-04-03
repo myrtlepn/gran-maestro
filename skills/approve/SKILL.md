@@ -769,7 +769,7 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
      echo "[Step 5.5 skip] worktree가 이미 커밋된 상태 (clean). 이중 커밋 방지."
    fi
    ```
-   clean이면 커밋 없이 `status` → `committed` 전환 후 Step 6 진행.
+   clean이면 커밋 없이 `status` → `committed` 전환 후 Step 5.7 진행.
 
 1. 전체 변경 스테이징 (worktree 격리로 인해 -A 사용 안전):
    ```bash
@@ -801,7 +801,126 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
    ```
    - 실패 시 경고만 출력하고 워크플로우는 계속 진행.
 
-5. 해당 태스크 `status`를 `committed`로 변경 → Step 6 진행. `background_task_ids` 항목 status → `"completed"` 업데이트
+5. 해당 태스크 `status`를 `committed`로 변경 → Step 5.7 진행. `background_task_ids` 항목 status → `"completed"` 업데이트
+
+#### Step 5.7: 설계 의도 검증 루프 (PM 커밋 이후, Phase 3 이전)
+
+> 이 Step은 Step 5 ~ Step 6 사이의 **NON-STOP EXECUTION RULE 적용 범위 내부**다.
+> 검증 에이전트 반환 후 텍스트만 출력하고 멈추지 말고, 즉시 판정/보완/재검증 또는 Step 6 전환을 수행한다.
+
+Step 5.5 완료 직후 아래 순서로 실행한다.
+
+설계 문서 `.gran-maestro/agile/AGI-009/objective/details/verification-loop-design.md`의 §1~§8은 이 Step에 아래처럼 매핑된다.
+- §1 전체 흐름: `5.7-0`, `5.7-2`, `5.7-3`, `5.7-5`
+- §2 검증 에이전트 프롬프트 설계: `5.7-1`, `5.7-2(a)`, `5.7-2(b)`
+- §3 보완 태스크 디스패치: `5.7-2(c)`
+- §4 수렴 조건: `5.7-3`
+- §5 모드 분기(auto/user): `5.7-2(c)` 3번
+- §6 config 설정: `5.7-0` (`intent_verification.enabled`, `max_iterations`)
+- §7 파일 저장 경로: `5.7-2(b)`, `5.7-4`
+- §8 NON-STOP 규칙 적용: Step 5.7 헤더/`5.7-5`
+
+##### 5.7-0. 진입 게이트 (source_plan Guard + 하위호환)
+
+```pseudo
+req = Read({PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json)
+source_plan = req.source_plan
+intent_cfg = Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json).intent_verification or {}
+intent_enabled = intent_cfg.enabled if boolean else true
+max_iterations = intent_cfg.max_iterations if positive_integer else 5
+all_committed = every(req.tasks[].status in ["committed", "done"])
+
+if all_committed == false:
+  # 아직 다른 태스크 커밋이 남았으면 검증 루프를 실행하지 않고 기존 흐름 유지
+  goto Step 6
+
+if source_plan is null or source_plan is empty:
+  echo "[Step 5.7 skip] source_plan 없음 (--plan 없는 REQ) → Step 6 진행"
+  goto Step 6
+
+if intent_enabled == false:
+  echo "[Step 5.7 skip] intent_verification.enabled=false → Step 6 진행"
+  goto Step 6
+```
+
+- `--plan` 없는 REQ는 Step 5.7 **전체 skip**하며 기존 흐름(Step 5.5 → Step 6)을 유지한다.
+
+##### 5.7-1. 비교 대상 초기화 (AD/PAC/구조 명세)
+
+1. plan 파일 Read:
+   - `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`
+   - `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`
+2. `plan.md`에서 `## Architecture Decisions` 및 구조 명세 관련 섹션을 추출한다.
+3. `plan.ids.json`에서 PAC 목록(`id`, `grade`, 설명)을 추출한다.
+4. 검증 결과 저장 디렉토리 준비:
+   - `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/intent-verification/`
+
+##### 5.7-2. 반복 루프 (iteration = 1..max_iterations, 기본 5)
+
+각 iteration마다 아래 (a)~(d)를 순서대로 실행한다.
+
+###### (a) 검증 에이전트 디스패치
+
+1. 템플릿 Read: `{PROJECT_ROOT}/templates/intent-verification.md`
+2. 변수 치환(문자열 치환, MANDATORY):
+   - `{REQ_ID}` → 현재 REQ ID
+   - `{PLN_ID}` → `source_plan`
+   - `{ITERATION}` → 현재 iteration 번호
+   - `{WORKTREE_PATH}` → `request.json.worktree`
+   - `{AD_LIST}` → plan.md AD 목록 추출 결과
+   - `{PAC_LIST}` → plan.ids.json PAC 목록 추출 결과
+   - `{STRUCTURE_SPEC}` → plan.md 구조 명세 추출 결과
+3. 치환된 프롬프트 저장:
+   - `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/intent-verification/prompt-iteration-{iteration}.md`
+4. 기존 Step 5b 재외주 패턴과 동일한 실행 전략/재시도 정책으로 검증 에이전트를 디스패치한다.
+   - 입력: 치환 완료 프롬프트 + `--dir {worktree_path}`
+   - 출력: 설계 의도 비교 리포트(markdown, 템플릿의 `## 요약` 표 + `## 항목별 판정` + `## 보완 필요 항목` 구조 유지)
+
+###### (b) 리포트 저장 + PM 판정
+
+1. 리포트를 아래 경로에 즉시 저장한다 (MANDATORY):
+   - `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/intent-verification/iteration-{iteration}.md`
+2. 리포트의 항목별 판정을 집계한다:
+   - 반영됨 / 부분반영 / 미반영
+   - 반영됨: plan 결정/조건이 코드에서 관찰 가능한 형태로 구현됨
+   - 부분반영: 의도는 맞지만 일부만 구현되었거나 세부 누락이 있음
+   - 미반영: plan 결정/조건이 코드에 없거나 상충 구현이 존재함
+3. `부분반영 + 미반영 == 0`이면 수렴으로 간주하고 루프 종료:
+   - `echo "[Step 5.7 converged] 미반영 항목 0건 → Step 6 진행"`
+
+###### (c) 보완 태스크 디스패치 (미반영 항목 존재 시)
+
+1. `보완 필요 항목` 목록을 기반으로 단일 보완 태스크를 생성한다.
+2. 보완 태스크는 기존 구현 태스크와 동일한 에이전트 배정/외주 브리프 패턴을 재사용한다.
+3. 모드 분기:
+   - `AUTO_MODE=true` (auto): PM 자율 판단으로 즉시 보완 디스패치
+   - `AUTO_MODE=false` (user): AskUserQuestion으로 미반영 목록 제시
+     - `"보완하고 재검증"`: 보완 디스패치 후 계속
+     - `"남은 항목 무시하고 진행"`: 루프 종료 후 Step 6 진행
+4. 보완 완료 후 PM 커밋은 **Step 5.5와 동일한 절차**(add/build-if-needed/commit/hash 저장)로 수행한다.
+
+###### (d) 재검증 재진입
+
+- 보완 커밋 완료 즉시 `iteration += 1` 후 Step 5.7-2 (a)로 재진입한다.
+- `iteration > max_iterations`이면 루프를 종료한다.
+
+##### 5.7-3. 종료 조건
+
+- 수렴: `부분반영 + 미반영 == 0` → 즉시 Step 6 진행
+- 한도 도달: `iteration > max_iterations` → 잔여 미반영이 있어도 Step 6 진행
+- 에이전트 실행 실패: 기존 outsource 재시도 패턴(`retry.max_cli_retries`) 적용
+
+##### 5.7-4. 최종 요약 저장 (권장)
+
+루프 종료 시 아래 파일에 요약을 저장한다.
+
+- `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/intent-verification/summary.md`
+- 포함 항목: 총 iteration 수, 수렴 여부, 잔여 미반영 항목 목록
+
+##### 5.7-5. Step 6 연결
+
+- Step 5.7 종료 직후 **즉시** `Step 6: Phase 3 전환`으로 진행한다.
+- "Step 6으로 이동합니다" 같은 텍스트만 출력하고 멈추는 동작은 금지한다.
 
 #### Step 5b: 사전검증 실패 재외주 (Pre-check Failure Re-outsourcing)
 
