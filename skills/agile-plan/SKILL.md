@@ -337,6 +337,72 @@ soft limit:
    - 전략 검토에서 `CRITICAL` 해소 완료
    - 종합 confidence가 임계치 이상이거나, 임계치 미만 사유에 대해 사용자 승인 확보
 
+##### 1A.9.2 디자인 단계 (MANDATORY)
+
+전략 검토를 통과한 뒤, objective 저장 전에 디자인 단계를 수행한다.
+
+###### 1A.9.2.1 UI 프로젝트 감지 (MANDATORY)
+
+1. 먼저 아래 키워드 매칭을 수행한다.
+   - `웹사이트`, `앱`, `화면`, `UI`, `페이지`, `대시보드`, `컴포넌트`, `레이아웃`, `프론트엔드`, `디자인`, `목업`, `시안`, `랜딩`, `포털`
+2. 키워드 매칭이 없으면 LLM 의미 판단을 보조 실행한다.
+   - 예: 사용자 대면 화면이 필수인 목표인지 판단
+3. 두 검사 모두 미감지면 아래 로그 1줄만 출력하고 Step 1A.9.5로 직행한다.
+   - `[디자인 단계 skip] UI 프로젝트 미감지`
+4. `AUTO_MODE` 분기:
+   - `AUTO_MODE=false`: 감지 시 사용자에게 디자인 단계 진행 여부를 1회 확인한다.
+   - `AUTO_MODE=true`: 감지 시 사용자 확인 없이 자동 진입한다.
+
+###### 1A.9.2.2 텍스트 와이어프레임 생성 (MANDATORY)
+
+확정된 DoD/설계 결정을 기준으로 아래 3종을 모두 포함한 와이어프레임을 작성한다.
+
+1. 전체 화면 목록: `화면명 + 1줄 설명`
+2. 화면 간 네비게이션 흐름: `→` 기반 흐름
+3. 화면별 ASCII 박스 레이아웃
+
+저장 경로:
+- `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/details/design-wireframe.md`
+
+`AUTO_MODE` 분기:
+- `AUTO_MODE=false`: 생성한 와이어프레임을 제시하고 보완 피드백을 반영한다.
+- `AUTO_MODE=true`: 와이어프레임을 자동 생성/저장하고 핵심 결정 근거를 `auto-decisions.md`에 기록한다.
+
+###### 1A.9.2.3 와이어프레임↔DoD/usecase 상호 정제 (MANDATORY)
+
+1. 와이어프레임을 기준으로 DoD 보완/수정을 수행한다.
+2. 화면별 usecase를 정리하고 `design-wireframe.md`에 함께 저장한다.
+3. 대규모 기능 변경이 필요하면 Step 1A.6(품질 게이트)부터 1A.8까지 재실행한 뒤 1A.9.2로 재진입한다.
+
+`AUTO_MODE` 분기:
+- `AUTO_MODE=false`: DoD/usecase 변경안을 사용자와 합의 후 반영한다.
+- `AUTO_MODE=true`: PM이 자율 반영하고 변경 사유/근거를 `auto-decisions.md`에 기록한다.
+
+###### 1A.9.2.4 Stitch 시안 생성 (MANDATORY)
+
+1. Stitch 호출은 반드시 아래 방식으로 수행한다.
+   - `Skill(skill: "mst:stitch")`
+2. 직접 `mcp__stitch__*` 도구 호출은 금지한다.
+3. 실패 정의: `throw` / `timeout` / `빈 결과`
+4. 실패 시 아래 로그를 출력하고 텍스트 와이어프레임으로 계속 진행한다.
+   - `[Stitch 실패] {오류 요약} — 텍스트 와이어프레임으로 진행`
+
+`AUTO_MODE` 분기:
+- `AUTO_MODE=false`: 생성된 시안을 사용자에게 제시하고 선택/피드백을 반영한다.
+- `AUTO_MODE=true`: 생성된 시안을 PM이 자율 선택하고 근거를 `auto-decisions.md`에 기록한다.
+
+###### 1A.9.2.5 시안 기반 최종 조정 + 회귀 상한 (MANDATORY)
+
+1. 시안을 기준으로 기능 설계/DoD를 최종 점검한다.
+2. 기능 설계로 회귀가 필요하면 Step 1A.6부터 재실행 후 1A.9.2로 재진입한다.
+3. 회귀 카운팅 단위는 다음으로 고정한다.
+   - `디자인 단계에서 기능 설계로 회귀하는 방향 전환 1건 = 1회`
+
+`AUTO_MODE` 분기:
+- `AUTO_MODE=false`: 회귀 횟수 제한 없이 사용자 확정 시까지 반복 가능
+- `AUTO_MODE=true`: `agile.design_regression_max`(기본 3) 상한을 적용한다.
+  - 상한 도달 시 로그를 출력하고 `auto-decisions.md`에 기록한 뒤 Step 1A.9.5로 진행한다.
+
 ##### 1A.9.5 PM 도메인 클러스터링 (MANDATORY)
 
 objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 정리한다.
@@ -455,6 +521,7 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 - 재귀 정제 루프/수렴 판정: Step 1A.4~1A.5
 - DoD 품질 게이트/4중 가드레일/준비도 게이트: Step 1A.6~1A.8
 - 전략 검토 + Confidence Matrix(프로세스 전용): Step 1A.9
+- 디자인 단계: Step 1A.9.2
 - PM 도메인 클러스터링: Step 1A.9.5
 - detail D3 역방향 시뮬레이션: Step 1A.10.5
 
