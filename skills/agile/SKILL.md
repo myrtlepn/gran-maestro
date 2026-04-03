@@ -399,6 +399,38 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
   - 예: `"설정 탭 추가"` 대신 `"설정 페이지에서 포트 변경 후 저장 시 서버 재시작 없이 반영됨"` 형태로 작성한다.
 - 컨텍스트가 비어 있으면 `"N/A"`로 채워 graceful fallback 한다.
 
+##### [추가 섹션] Sprint 중 디자인 수정 경로 (Step 번호 유지 전용)
+
+아래 경로는 기존 Step `2.2.1~2.2.5`를 대체하지 않고, sprint 진행 중 필요한 경우에만 추가로 적용한다.
+
+**경로 1: AI 자율 판단 (AUTO_MODE)**
+- 트리거: `2.2.3`의 `mst:plan -a` 컨텍스트 작성/실행 중, 기존 디자인 baseline과 새 요구사항의 불일치가 감지된 경우 (plan 스킬 Step 4의 UI 감지 키워드/의미 판단 포함).
+- 실행 방법:
+  1. `mst:plan`의 UI 감지 흐름으로 디자인 수정 필요성을 확정한다.
+  2. 확정되면 `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {plan 주제}")`를 재호출한다.
+  3. Stitch 결과를 현재 sprint plan 컨텍스트에 반영한 뒤 루프를 계속 진행한다.
+
+**경로 2: 사용자 명시 요청**
+- 트리거: sprint 중 사용자가 `"디자인 수정해줘"`, `"화면 추가해줘"` 등 디자인 변경을 직접 요청한 경우.
+- 실행 방법:
+  1. 요청을 plan 스킬의 UI 감지 흐름으로 전달하거나, 즉시 `Skill(skill: "mst:stitch", args: "{요청 맥락}")`를 호출한다.
+  2. 생성된 디자인 결과를 sprint 기준선에 반영하고 필요 시 `2.2.3`을 재실행한다.
+
+**경로 3: review 발견**
+- 트리거: 구현 후 review에서 디자인과 구현의 괴리가 감지된 경우.
+- 실행 방법:
+  1. review 결과를 기준으로 `디자인 수정 필요` / `구현 수정 필요`를 분기한다.
+  2. 디자인 수정이 필요하면 plan 스킬 UI 감지 흐름으로 재진입 후 `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {보정 주제}")`를 호출한다.
+  3. 구현 수정만 필요하면 기존 sprint 수정 루프로 처리하고 디자인 baseline은 유지한다.
+
+###### objective.md 디자인 컨텍스트 baseline 업데이트 규칙 (MANDATORY)
+
+디자인이 실제로 수정된 경우(경로 1~3) 아래를 반드시 적용한다.
+1. objective.md `## 디자인 컨텍스트`의 `상태`를 `updated`로 변경한다.
+2. `### 변경 이력`에 변경 시점(Sprint N/날짜), 변경 내용, 변경 사유를 기록한다.
+3. DES-NNN이 새로 생성/교체되었으면 화면 목록과 텍스트 와이어프레임을 최신 기준으로 갱신한다.
+4. objective 갱신 시 direct edit 금지 규칙을 유지하고, 기존 `mst.py` 기반 objective 갱신 절차를 따른다.
+
 ##### 2.2.4 Sprint 결과 기록 + DoD 갱신 제안
 
 Sprint 실행 결과를 기록하고, 이번 Sprint에서 완료 근거가 확보된 DoD에 대해 갱신 제안을 남긴다.
