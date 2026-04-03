@@ -15,7 +15,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer';
 import { MilkdownEditor } from '@/components/shared/MilkdownEditor';
 import { ObjectiveCommentsPanel } from '@/views/ObjectiveCommentsPanel';
-import { ArrowDown, ArrowRight, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
+import { ArrowDown, ChevronLeft, ChevronRight, FileText, GitBranch, ListChecks } from 'lucide-react';
 
 interface AgileSessionSummary {
   id: string;
@@ -153,6 +153,8 @@ interface SprintWhyItem {
   label: string;
   value: string;
 }
+
+type MainTabValue = 'overview' | 'sprint-detail' | 'objective';
 
 
 function linkify(text: string): string {
@@ -530,10 +532,6 @@ function formatGoalDiff(diff: SprintGoalDiff | undefined): string {
   return `files ${filesChanged} · +${insertions} / -${deletions} · commits: ${commitText}`;
 }
 
-function isDodDone(status: string | undefined): boolean {
-  return (status ?? '').trim().toLowerCase() === 'done';
-}
-
 function sprintGoalLine(sprint: AgileSprint): string | null {
   const targetDod = typeof sprint.target_dod === 'string' && sprint.target_dod.trim().length > 0
     ? sprint.target_dod.trim()
@@ -623,18 +621,7 @@ export function AgileView() {
     maxWidth: 560,
     storageKey: 'agile-sidebar-width',
   });
-  const {
-    sidebarWidth: sprintPanelWidth,
-    isResizing: isSprintPanelResizing,
-    startResizing: startSprintPanelResizing,
-    sidebarRef: sprintPanelRef,
-  } = useResizableSidebar({
-    defaultWidth: 340,
-    minWidth: 280,
-    maxWidth: 560,
-    storageKey: 'agile-sprint-panel-width',
-  });
-  const [isSprintPanelCollapsed, setIsSprintPanelCollapsed] = useState(false);
+  const [activeMainTab, setActiveMainTab] = useState<MainTabValue>('overview');
   const [isObjectiveCommentsCollapsed, setIsObjectiveCommentsCollapsed] = useState(() => {
     return localStorage.getItem('agile-objective-comments-collapsed') === 'true';
   });
@@ -1436,6 +1423,7 @@ export function AgileView() {
                 type="button"
                 onClick={() => {
                   setSelectedSessionId(session.id);
+                  setActiveMainTab('overview');
                   setSelectedSprintId(null);
                   setResultMarkdown(null);
                   setRetrospective(null);
@@ -1472,137 +1460,6 @@ export function AgileView() {
         </ScrollArea>
       </div>
       <ResizableHandle isResizing={isResizing} onMouseDown={startResizing} />
-      {isSprintPanelCollapsed ? (
-        <div className="w-11 border-r bg-muted/10 shrink-0 flex items-start justify-center pt-3">
-          <button
-            type="button"
-            onClick={() => setIsSprintPanelCollapsed(false)}
-            className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
-            aria-label="스프린트 패널 펼치기"
-            title="스프린트 패널 펼치기"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      ) : (
-        <>
-          <div
-            ref={sprintPanelRef}
-            style={{ width: sprintPanelWidth }}
-            className="border-r flex flex-col min-h-0 shrink-0"
-          >
-            <div className="p-3 border-b bg-muted/10 flex items-center justify-between gap-2">
-              <h3 className="text-xs font-medium text-muted-foreground">스프린트</h3>
-              <button
-                type="button"
-                onClick={() => setIsSprintPanelCollapsed(true)}
-                className="h-7 w-7 rounded-md border bg-background hover:bg-accent/40 text-muted-foreground flex items-center justify-center"
-                aria-label="스프린트 패널 접기"
-                title="스프린트 패널 접기"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-            </div>
-
-            {detailError && (
-              <div className="px-3 py-2 text-xs text-red-600 border-b border-red-200 bg-red-50">
-                {detailError}
-              </div>
-            )}
-
-            <div className="p-3 border-b bg-muted/10 text-xs font-medium text-muted-foreground">목록</div>
-            <ScrollArea className="h-56 border-b">
-              <div className="p-3 space-y-2">
-                {detailLoading && (
-                  <div className="space-y-2">
-                    <Skeleton className="h-16 w-full" />
-                    <Skeleton className="h-16 w-full" />
-                  </div>
-                )}
-                {!detailLoading && sessionDetail?.sprints.map((sprint) => (
-                  <button
-                    key={sprint.sprint_id}
-                    type="button"
-                    onClick={() => setSelectedSprintId(sprint.sprint_id)}
-                    className={`w-full text-left rounded-md border p-3 transition-colors ${
-                      selectedSprintId === sprint.sprint_id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:bg-accent/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs">{sprint.sprint_id}</span>
-                      <StatusBadge status={sprint.status ?? 'unknown'} />
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-1.5">
-                      planned {toArray(sprint.planned).length} · completed {toArray(sprint.completed).length}
-                    </p>
-                  </button>
-                ))}
-                {!detailLoading && (!sessionDetail || sessionDetail.sprints.length === 0) && (
-                  <p className="text-xs text-muted-foreground px-1 py-2">스프린트가 없습니다.</p>
-                )}
-              </div>
-            </ScrollArea>
-
-            <div className="p-3 border-b bg-muted/10 text-xs font-medium text-muted-foreground">세부 정보</div>
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="p-3 space-y-3">
-                {!selectedSession && (
-                  <p className="text-sm text-muted-foreground">먼저 세션을 선택하세요.</p>
-                )}
-                {selectedSession && detailLoading && (
-                  <div className="space-y-2">
-                    <Skeleton className="h-20 w-full" />
-                    <Skeleton className="h-24 w-full" />
-                  </div>
-                )}
-                {selectedSession && !detailLoading && !selectedSprint && (
-                  <p className="text-sm text-muted-foreground">스프린트를 선택하세요.</p>
-                )}
-                {selectedSession && !detailLoading && selectedSprint && (
-                  <>
-                    <div className="rounded-md border p-3 space-y-2 text-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
-                        <StatusBadge status={selectedSprint.status ?? 'unknown'} />
-                      </div>
-                      <p className="text-xs text-muted-foreground">이름: {selectedSprint.sprint_id}</p>
-                      <p className="text-xs text-muted-foreground">기간: {formatSprintPeriod(selectedSprint)}</p>
-                    </div>
-
-                    <div className="rounded-md border p-3">
-                      <div className="text-xs font-semibold text-muted-foreground mb-2">스토리 목록</div>
-                      {selectedSprintStories.length > 0 ? (
-                        <ul className="list-disc pl-5 text-sm space-y-2">
-                          {selectedSprintStories.map((story, index) => {
-                            const dod = objectiveDodItems.find((d) => d.dod === story);
-                            return (
-                              <li key={`${story}-${index}`}>
-                                {dod?.anchorText ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    <span className="font-medium text-foreground">{dod.anchorText}</span>
-                                    <span className="font-mono text-[11px] text-muted-foreground">{story}</span>
-                                  </div>
-                                ) : (
-                                  story
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">스토리 정보가 없습니다.</p>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-          <ResizableHandle isResizing={isSprintPanelResizing} onMouseDown={startSprintPanelResizing} />
-        </>
-      )}
       <div className="flex-1 min-h-0 flex flex-col bg-card overflow-hidden">
         {!selectedSession ? (
           <EmptyState
@@ -1637,12 +1494,20 @@ export function AgileView() {
               <StatusBadge status={selectedSession.status} />
             </div>
 
-            <Tabs defaultValue="timeline" className="flex-1 flex flex-col min-h-0">
+            <Tabs
+              value={activeMainTab}
+              onValueChange={(value) => {
+                if (value === 'overview' || value === 'sprint-detail' || value === 'objective') {
+                  setActiveMainTab(value);
+                }
+              }}
+              className="flex-1 flex flex-col min-h-0"
+            >
               <div className="px-4 pt-3 border-b">
                 <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="sprint-detail">Sprint Detail</TabsTrigger>
                   <TabsTrigger value="objective">Objective</TabsTrigger>
-                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                  <TabsTrigger value="result">Result</TabsTrigger>
                 </TabsList>
               </div>
 
@@ -1910,62 +1775,44 @@ export function AgileView() {
                     </div>
                   </TabsContent>
 
-                  <TabsContent value="timeline" className="mt-0 outline-none">
+                  <TabsContent value="overview" className="mt-0 outline-none">
                     <Card>
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
                           <GitBranch className="h-4 w-4" /> Sprint Timeline
                         </CardTitle>
                         <CardDescription>
-                          Sprint 카드, Objective DoD 진행률, 스프린트 간 인과를 함께 표시합니다.
+                          Sprint 타임라인과 현재 Sprint 상태를 확인할 수 있습니다.
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        {objectiveDodItems.length > 0 && (() => {
-                          const doneCount = objectiveDodItems.filter((dod) => isDodDone(dod.status)).length;
-                          const completionRate = Math.round((doneCount / objectiveDodItems.length) * 100);
-                          return (
-                            <div className="rounded-md border bg-muted/5 p-3 space-y-3">
+                        {detailError && (
+                          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                            {detailError}
+                          </div>
+                        )}
+                        <div className="rounded-md border bg-muted/5 p-3 space-y-3">
+                          <h3 className="text-sm font-semibold">현재 Sprint 상태</h3>
+                          {selectedSprint ? (
+                            <>
                               <div className="flex items-center justify-between gap-2">
-                                <h3 className="text-sm font-semibold">Objective DoD 진행률</h3>
-                                <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                  {doneCount} / {objectiveDodItems.length} 완료 ({completionRate}%)
-                                </span>
+                                <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
+                                <StatusBadge status={selectedSprint.status ?? 'unknown'} />
                               </div>
-                              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary transition-all duration-500"
-                                  style={{ width: `${completionRate}%` }}
-                                />
+                              <div className="text-xs text-muted-foreground space-y-1">
+                                <div>기간: {formatSprintPeriod(selectedSprint)}</div>
+                                <div>
+                                  planned {toArray(selectedSprint.planned).length} · completed {toArray(selectedSprint.completed).length}
+                                </div>
+                                <div>stories: {selectedSprintStories.length}</div>
                               </div>
-                              <div className="space-y-1">
-                                {objectiveDodItems.map((dod, idx) => {
-                                  const status = isDodDone(dod.status) ? 'done' : 'todo';
-                                  return (
-                                    <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/10 gap-3 transition-colors">
-                                      <div className="min-w-0 flex items-center gap-2">
-                                        <span className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</span>
-                                        {(dod.contentText ?? dod.anchorText) ? (
-                                          <p className="text-sm truncate">{dod.contentText ?? dod.anchorText}</p>
-                                        ) : (
-                                          <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
-                                        )}
-                                      </div>
-                                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
-                                        status === 'done'
-                                          ? 'bg-green-100 text-green-700'
-                                          : 'bg-slate-100 text-slate-600'
-                                      }`}
-                                      >
-                                        {status}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                            </>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              현재 선택된 Sprint가 없습니다.
+                            </p>
+                          )}
+                        </div>
                         {detailLoading ? (
                           <Skeleton className="h-28 w-full" />
                         ) : sessionDetail && sessionDetail.sprints.length > 0 ? (
@@ -1995,7 +1842,10 @@ export function AgileView() {
                                     )}
                                     <button
                                       type="button"
-                                      onClick={() => setSelectedSprintId(sprint.sprint_id)}
+                                      onClick={() => {
+                                        setSelectedSprintId(sprint.sprint_id);
+                                        setActiveMainTab('sprint-detail');
+                                      }}
                                       className={`w-full rounded-lg border p-3 cursor-pointer transition-colors text-left ${
                                         selectedSprintId === sprint.sprint_id
                                           ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
@@ -2030,7 +1880,7 @@ export function AgileView() {
                     </Card>
                   </TabsContent>
 
-                  <TabsContent value="result" className="mt-0 outline-none">
+                  <TabsContent value="sprint-detail" className="mt-0 outline-none">
                     <Card>
                       <CardHeader className="pb-3">
                         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2309,43 +2159,6 @@ export function AgileView() {
                               )}
                                 </div>
 
-                                {/* DoD 진행률 Section */}
-                                {objectiveDodItems && objectiveDodItems.length > 0 && (
-                                  <div className="space-y-3 pt-2">
-                                    <h3 className="text-sm font-semibold flex items-center justify-between gap-2">
-                                      <span>Objective DoD 진행률</span>
-                                      <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                        {objectiveDodItems.filter(d => d.status === 'done').length} / {objectiveDodItems.length} 완료
-                                      </span>
-                                    </h3>
-                                    <div className="rounded-md border bg-background overflow-hidden">
-                                      <div className="h-1.5 w-full bg-muted">
-                                        <div 
-                                          className="h-full bg-primary transition-all duration-500" 
-                                          style={{ width: `${(objectiveDodItems.filter(d => d.status === 'done').length / objectiveDodItems.length) * 100}%` }}
-                                        />
-                                      </div>
-                                      <div className="p-2 space-y-1">
-                                        {objectiveDodItems.map((dod, idx) => (
-                                          <div key={`${dod.dod}-${idx}`} className="flex items-center justify-between rounded-md p-2 text-sm hover:bg-muted/5 gap-3 transition-colors">
-                                            <div className="min-w-0 flex items-center gap-2">
-                                              <div className="font-mono text-xs text-muted-foreground w-16 shrink-0">{dod.dod}</div>
-                                              {(dod.contentText ?? dod.anchorText) ? (
-                                                <p className="text-sm truncate">{dod.contentText ?? dod.anchorText}</p>
-                                              ) : (
-                                                <p className="text-sm truncate text-muted-foreground italic">내용 없음</p>
-                                              )}
-                                            </div>
-                                            <div className="flex items-center gap-2 shrink-0">
-                                              <StatusBadge status={dod.status} />
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
                                 {/* 메타데이터 접힘 유지 */}
                                 <details className="rounded-md border p-4 group mt-4">
                                   <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
@@ -2451,7 +2264,7 @@ export function AgileView() {
                             )}
                           </>
                         ) : (
-                          <div className="text-sm text-muted-foreground">왼쪽에서 스프린트를 선택하세요.</div>
+                          <div className="text-sm text-muted-foreground">Overview 탭에서 스프린트를 선택하세요.</div>
                         )}
                       </CardContent>
                     </Card>
