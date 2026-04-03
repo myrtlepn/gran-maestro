@@ -27,10 +27,6 @@
         {
           "provider": "codex",
           "tier": "economy"
-        },
-        {
-          "provider": "gemini",
-          "tier": "economy"
         }
       ]
     }
@@ -114,8 +110,7 @@
   "code_review": {
     "agents": 1,
     "agent_roster": [
-      "codex",
-      "gemini"
+      "codex"
     ]
   },
   "plan_review": {
@@ -145,7 +140,7 @@
       },
       "broad_scan": {
         "agent": "gemini",
-        "enabled": true,
+        "enabled": false,
         "tier": "economy"
       }
     }

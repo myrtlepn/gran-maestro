@@ -13,10 +13,6 @@
         {
           "provider": "claude",
           "tier": "premium"
-        },
-        {
-          "provider": "gemini",
-          "tier": "premium"
         }
       ],
       "developer_claude": {
@@ -26,10 +22,6 @@
       "reviewer": [
         {
           "provider": "claude",
-          "tier": "premium"
-        },
-        {
-          "provider": "gemini",
           "tier": "premium"
         }
       ]
@@ -109,8 +101,7 @@
   "code_review": {
     "agents": 2,
     "agent_roster": [
-      "codex",
-      "gemini"
+      "claude"
     ]
   },
   "plan_review": {
@@ -135,12 +126,12 @@
     "roles": {
       "symbol_tracing": {
         "agent": "codex",
-        "enabled": true,
+        "enabled": false,
         "tier": "premium"
       },
       "broad_scan": {
         "agent": "gemini",
-        "enabled": true,
+        "enabled": false,
         "tier": "premium"
       }
     }

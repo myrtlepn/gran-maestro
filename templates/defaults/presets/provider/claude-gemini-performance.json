@@ -113,7 +113,6 @@
   "code_review": {
     "agents": 2,
     "agent_roster": [
-      "codex",
       "gemini"
     ]
   },
@@ -139,7 +138,7 @@
     "roles": {
       "symbol_tracing": {
         "agent": "codex",
-        "enabled": true,
+        "enabled": false,
         "tier": "premium"
       },
       "broad_scan": {
