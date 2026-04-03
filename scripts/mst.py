@@ -5583,6 +5583,8 @@ def cmd_preset_apply(args):
     overrides = load_json(BASE_DIR / "config.json") or {}
     current_resolved = deep_merge(defaults, overrides)
     merged = deep_merge(current_resolved, preset_data)
+    if "agent_assignments" in preset_data:
+        merged["agent_assignments"] = preset_data["agent_assignments"]
     next_overrides = _diff_from_base(defaults, merged)
     save_json(BASE_DIR / "config.json", next_overrides)
     save_json(BASE_DIR / "config.resolved.json", merged)
