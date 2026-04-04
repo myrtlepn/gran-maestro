@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useAppContext } from '@/context/AppContext';
-import { useNavigate } from 'react-router-dom';
+import { useMatch, useNavigate, useParams } from 'react-router-dom';
 import { ApiFetchError, apiFetch } from '@/hooks/useApi';
 import { useResizableSidebar } from '@/hooks/useResizableSidebar';
 import { ResizableHandle } from '@/components/shared/ResizableHandle';
@@ -156,6 +156,27 @@ interface SprintWhyItem {
 }
 
 type MainTabValue = 'overview' | 'sprint-detail' | 'objective';
+
+export function resolveAgileMainTab(isObjectiveRoute: boolean): MainTabValue {
+  return isObjectiveRoute ? 'objective' : 'overview';
+}
+
+export function resolveAgileSelectedSessionId(
+  nextSessions: Array<Pick<AgileSessionSummary, 'id'>>,
+  previousSessionId: string | null,
+  agiId: string | undefined,
+): string | null {
+  if (agiId) {
+    const target = nextSessions.find((session) => session.id === agiId);
+    return target?.id ?? nextSessions[0]?.id ?? null;
+  }
+
+  if (previousSessionId && nextSessions.some((session) => session.id === previousSessionId)) {
+    return previousSessionId;
+  }
+
+  return nextSessions[0]?.id ?? null;
+}
 
 
 function linkify(text: string): string {
@@ -681,6 +702,8 @@ function toResultDetailTabLabel(filename: string): string {
 
 export function AgileView() {
   const navigate = useNavigate();
+  const { agiId } = useParams();
+  const isObjectiveRoute = Boolean(useMatch('/agile/:agiId/objective'));
 
   const handleResultClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -761,10 +784,23 @@ export function AgileView() {
     localStorage.setItem('agile-objective-comments-collapsed', String(isObjectiveCommentsCollapsed));
   }, [isObjectiveCommentsCollapsed]);
 
+  useEffect(() => {
+    setActiveMainTab(resolveAgileMainTab(isObjectiveRoute));
+  }, [isObjectiveRoute]);
+
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
     [sessions, selectedSessionId],
   );
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setSelectedSessionId(null);
+      return;
+    }
+
+    setSelectedSessionId((prev) => resolveAgileSelectedSessionId(sessions, prev, agiId));
+  }, [sessions, agiId]);
 
   const selectedSprint = useMemo(
     () => sessionDetail?.sprints.find((sprint) => sprint.sprint_id === selectedSprintId) ?? null,
@@ -1065,15 +1101,10 @@ export function AgileView() {
         if (cancelled) return;
         setSessions(data);
         setSessionsError(null);
-        setSelectedSessionId((prev) => {
-          if (prev && data.some((session) => session.id === prev)) return prev;
-          return data[0]?.id ?? null;
-        });
       })
       .catch((err) => {
         if (cancelled) return;
         setSessions([]);
-        setSelectedSessionId(null);
         setSessionsError(err instanceof Error ? err.message : '세션 목록을 불러오지 못했습니다');
       })
       .finally(() => {
@@ -1347,8 +1378,7 @@ export function AgileView() {
         setSessions(data);
         setSessionsError(null);
         setSelectedSessionId((prev) => {
-          if (prev && data.some((session) => session.id === prev)) return prev;
-          return data[0]?.id ?? null;
+          return resolveAgileSelectedSessionId(data, prev, agiId);
         });
       })
       .catch((err) => {
@@ -1375,7 +1405,7 @@ export function AgileView() {
           console.error('SSE re-fetch agile session detail failed:', err);
         });
     }
-  }, [lastSseEvent, projectId, selectedSessionId, requestSessions, requestSessionDetail]);
+  }, [lastSseEvent, projectId, selectedSessionId, requestSessions, requestSessionDetail, agiId]);
 
   const handleRefresh = async () => {
     if (!projectId) return;
@@ -1386,9 +1416,7 @@ export function AgileView() {
       setSessions(nextSessions);
       setSessionsError(null);
 
-      const resolvedSessionId = selectedSessionId && nextSessions.some((session) => session.id === selectedSessionId)
-        ? selectedSessionId
-        : (nextSessions[0]?.id ?? null);
+      const resolvedSessionId = resolveAgileSelectedSessionId(nextSessions, selectedSessionId, agiId);
 
       setSelectedSessionId(resolvedSessionId);
 
@@ -1562,7 +1590,7 @@ export function AgileView() {
                 type="button"
                 onClick={() => {
                   setSelectedSessionId(session.id);
-                  setActiveMainTab('overview');
+                  setActiveMainTab(isObjectiveRoute ? 'objective' : 'overview');
                   setSelectedSprintId(null);
                   setResultMarkdown(null);
                   setRetrospective(null);

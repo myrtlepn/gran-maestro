@@ -25,6 +25,8 @@ export function AppRoutes() {
       <Route path="/" element={<Navigate to="/overview" replace />} />
       <Route path="/overview" element={<OverviewView />} />
       <Route path="/agile" element={<AgileView />} />
+      <Route path="/agile/:agiId" element={<AgileView />} />
+      <Route path="/agile/:agiId/objective" element={<AgileView />} />
       <Route path="/plans" element={<PlansView />} />
       <Route path="/plans/:planId" element={<PlansView />} />
       <Route path="/plans/:planId/tasks" element={<PlansView />} />
