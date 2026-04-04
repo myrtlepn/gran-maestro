@@ -4,6 +4,26 @@
 
 ---
 
+## [0.56.1] — 2026-04-04
+
+### 새 기능
+
+- **Agile 대시보드 deep link**: `/agile/AGI-NNN/objective` URL로 직접 접속하면 해당 세션과 objective 탭이 자동 선택됨
+- **설계 의도 검증 루프**: approve Step 5.7에 검증 에이전트 디스패치 + 보완 루프 + 모드 분기 삽입
+- **검증 에이전트 프롬프트 템플릿**: approve Step 5.7 설계 의도 검증용 표준 프롬프트 추가
+- **Adversarial Multi-Perspective 코드 리뷰**: Pass B에 adversarial_reviewer 역할 추가, 7개 attack surface 프롬프트, confidence→severity 매핑
+
+### 개선
+
+- **Agile 스티어링 체크포인트**: 정기/비상 스티어링 AskUserQuestion 추가 + off-by-one 조건식 수정 + 금지 패턴 강화
+- **Preset agent_assignments 교체**: deep_merge 후 replace 후처리로 미포함 provider 잔류 방지
+- **Sprint Detail 간결화**: PROVE/Retro Collapsible 접힘 + phase 배지 + 현재 Sprint 강조
+- **Preset 에이전트 정합성**: 12개 preset에 workflow.default_agent + agent_assignments 추가
+- **Sprint 중 디자인 수정**: AI 자율/사용자 요청/review 발견 3가지 경로 지원
+- **Overview DoD 우선순위 그룹**: MoSCoW 그룹 정렬 + Sprint 귀속 + 마크다운 렌더링
+
+---
+
 ## [0.56.0] — 2026-04-02
 
 ### 새 기능
