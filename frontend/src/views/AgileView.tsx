@@ -1968,14 +1968,27 @@ export function AgileView() {
                               <>
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="font-mono text-xs">{selectedSprint.sprint_id}</span>
-                                  <StatusBadge status={selectedSprint.status ?? 'unknown'} />
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className={phaseBadgeClass(resolveSprintPhase(selectedSprint.status))}>
+                                      {resolveSprintPhase(selectedSprint.status)}
+                                    </Badge>
+                                    <StatusBadge status={selectedSprint.status ?? 'unknown'} />
+                                  </div>
                                 </div>
                                 <div className="text-xs text-muted-foreground space-y-1">
                                   <div>기간: {formatSprintPeriod(selectedSprint)}</div>
                                   <div>
                                     planned {toArray(selectedSprint.planned).length} · completed {toArray(selectedSprint.completed).length}
                                   </div>
-                                  <div>stories: {selectedSprintStories.length}</div>
+                                  {selectedSprintStories.length > 0 && (
+                                    <div>stories: {selectedSprintStories.join(', ')}</div>
+                                  )}
+                                  {selectedSprintGoals.length > 0 && (
+                                    <div>goals: {selectedSprintGoals.filter((g) => isGoalAchieved(g.status)).length}/{selectedSprintGoals.length} achieved</div>
+                                  )}
+                                  {typeof selectedSprint.summary === 'string' && selectedSprint.summary.trim().length > 0 && (
+                                    <div className="mt-2 text-xs">{selectedSprint.summary}</div>
+                                  )}
                                 </div>
                               </>
                             ) : (
@@ -2002,6 +2015,16 @@ export function AgileView() {
                                   const isCurrentSprint = currentSprintId === sprint.sprint_id;
                                   const generatedPln = toArray(sprint.generated?.pln);
                                   const generatedReq = toArray(sprint.generated?.req);
+
+                                  const planned = toArray(sprint.planned);
+                                  const completed = toArray(sprint.completed);
+                                  const summaryText = typeof sprint.summary === 'string' && sprint.summary.trim().length > 0
+                                    ? sprint.summary.trim()
+                                    : null;
+                                  const sprintGoals = toArray(sprint.sprint_goals).filter(
+                                    (g): g is SprintGoal => typeof g?.goal === 'string' && typeof g?.status === 'string' && typeof g?.change_summary === 'string',
+                                  );
+                                  const achievedCount = sprintGoals.filter((g) => isGoalAchieved(g.status)).length;
 
                                   return (
                                     <div key={sprint.sprint_id} className="flex flex-col gap-3 w-full">
@@ -2046,12 +2069,23 @@ export function AgileView() {
                                             {goalLine}
                                           </p>
                                         )}
-                                        {hasGoalLine && (
-                                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                                            <div>PLN {generatedPln.length} · REQ {generatedReq.length}</div>
-                                            <div>{formatSprintPeriod(sprint)}</div>
-                                          </div>
+                                        {!hasGoalLine && summaryText && (
+                                          <p className="mt-2 text-sm text-muted-foreground truncate" title={summaryText}>
+                                            {summaryText}
+                                          </p>
                                         )}
+                                        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                                          <div className="flex items-center gap-3 flex-wrap">
+                                            {(generatedPln.length > 0 || generatedReq.length > 0) && (
+                                              <span>PLN {generatedPln.length} · REQ {generatedReq.length}</span>
+                                            )}
+                                            <span>planned {planned.length} · completed {completed.length}</span>
+                                            {sprintGoals.length > 0 && (
+                                              <span>goals {achievedCount}/{sprintGoals.length}</span>
+                                            )}
+                                          </div>
+                                          <div>{formatSprintPeriod(sprint)}</div>
+                                        </div>
                                       </button>
                                     </div>
                                   );
@@ -2189,8 +2223,15 @@ export function AgileView() {
                                           </table>
                                         </div>
                                       ) : (
-                                        <div className="text-sm text-muted-foreground border rounded-md p-3 bg-background italic">
-                                          달성 목표 데이터 없음
+                                        <div className="rounded-md border bg-background p-3 space-y-2">
+                                          <div className="text-sm text-muted-foreground italic">기본 결과</div>
+                                          <div className="text-xs space-y-1">
+                                            <div>planned: {toArray(sprint.planned).length > 0 ? toArray(sprint.planned).join(', ') : '-'}</div>
+                                            <div>completed: {toArray(sprint.completed).length > 0 ? toArray(sprint.completed).join(', ') : '-'}</div>
+                                            {typeof sprint.summary === 'string' && sprint.summary.trim().length > 0 && (
+                                              <div>summary: {sprint.summary}</div>
+                                            )}
+                                          </div>
                                         </div>
                                       )}
                                     </div>
@@ -2199,6 +2240,31 @@ export function AgileView() {
                               </div>
                             ) : (
                               <>
+                                {/* Sprint Info Header */}
+                                <div className="rounded-md border bg-muted/5 p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-sm font-semibold">{selectedSprint.sprint_id}</span>
+                                      <Badge variant="outline" className={phaseBadgeClass(resolveSprintPhase(selectedSprint.status))}>
+                                        {resolveSprintPhase(selectedSprint.status)}
+                                      </Badge>
+                                      {currentSprintId === selectedSprint.sprint_id && (
+                                        <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wide">
+                                          Current
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <StatusBadge status={selectedSprint.status ?? 'unknown'} />
+                                  </div>
+                                  <div className="mt-2 text-xs text-muted-foreground flex flex-wrap gap-3">
+                                    <span>기간: {formatSprintPeriod(selectedSprint)}</span>
+                                    <span>planned {toArray(selectedSprint.planned).length} · completed {toArray(selectedSprint.completed).length}</span>
+                                    {selectedSprintGoals.length > 0 && (
+                                      <span>goals {selectedSprintGoals.filter((g) => isGoalAchieved(g.status)).length}/{selectedSprintGoals.length}</span>
+                                    )}
+                                  </div>
+                                </div>
+
                                 {/* WHY Section */}
                                 {selectedSprintWhyItems.length > 0 ? (
                                   <div className="space-y-3">
@@ -2254,8 +2320,58 @@ export function AgileView() {
                                       </table>
                                     </div>
                                   ) : (
-                                    <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/5 italic">
-                                      달성 목표 데이터 없음
+                                    <div className="rounded-md border bg-muted/5 p-4 space-y-3">
+                                      <div className="text-sm text-muted-foreground italic mb-3">구조화된 목표(sprint_goals) 데이터 없음 — 기본 결과 표시</div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="rounded-md border bg-background p-3 space-y-1">
+                                          <div className="text-xs font-semibold text-muted-foreground">Planned</div>
+                                          <div className="text-sm">
+                                            {toArray(selectedSprint.planned).length > 0
+                                              ? toArray(selectedSprint.planned).join(', ')
+                                              : '-'}
+                                          </div>
+                                        </div>
+                                        <div className="rounded-md border bg-background p-3 space-y-1">
+                                          <div className="text-xs font-semibold text-muted-foreground">Completed</div>
+                                          <div className="text-sm">
+                                            {toArray(selectedSprint.completed).length > 0
+                                              ? toArray(selectedSprint.completed).join(', ')
+                                              : '-'}
+                                          </div>
+                                        </div>
+                                        {typeof selectedSprint.summary === 'string' && selectedSprint.summary.trim().length > 0 && (
+                                          <div className="rounded-md border bg-background p-3 space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-muted-foreground">Summary</div>
+                                            <div className="text-sm prose prose-sm max-w-none" onClick={handleResultClick}>
+                                              <MarkdownRenderer content={rewriteLinkedMarkdown(selectedSprint.summary)} />
+                                            </div>
+                                          </div>
+                                        )}
+                                        {typeof selectedSprint.outcome === 'string' && selectedSprint.outcome.trim().length > 0 && (
+                                          <div className="rounded-md border bg-background p-3 space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-muted-foreground">Outcome</div>
+                                            <div className="text-sm prose prose-sm max-w-none" onClick={handleResultClick}>
+                                              <MarkdownRenderer content={rewriteLinkedMarkdown(selectedSprint.outcome)} />
+                                            </div>
+                                          </div>
+                                        )}
+                                        {(toArray(selectedSprint.generated?.pln).length > 0 || toArray(selectedSprint.generated?.req).length > 0) && (
+                                          <div className="rounded-md border bg-background p-3 space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-muted-foreground">Generated</div>
+                                            <div className="text-sm">
+                                              PLN: {toArray(selectedSprint.generated?.pln).length > 0 ? toArray(selectedSprint.generated?.pln).join(', ') : '-'}
+                                              {' · '}
+                                              REQ: {toArray(selectedSprint.generated?.req).length > 0 ? toArray(selectedSprint.generated?.req).join(', ') : '-'}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {getSprintStories(selectedSprint).length > 0 && (
+                                          <div className="rounded-md border bg-background p-3 space-y-1 md:col-span-2">
+                                            <div className="text-xs font-semibold text-muted-foreground">Stories</div>
+                                            <div className="text-sm">{getSprintStories(selectedSprint).join(', ')}</div>
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -2264,7 +2380,7 @@ export function AgileView() {
 
                             {!isResultCompareMode && (
                               <>
-                                <Collapsible defaultOpen={false} className="rounded-md border p-4">
+                                <Collapsible defaultOpen={selectedSprintGoals.length === 0} className="rounded-md border p-4">
                                   <div className="flex items-center justify-between gap-3">
                                     <h3 className="text-sm font-semibold flex items-center gap-2">
                                       어떻게 증명하는가
@@ -2356,7 +2472,7 @@ export function AgileView() {
                                   </CollapsibleContent>
                                 </Collapsible>
 
-                                <Collapsible defaultOpen={false} className="rounded-md border p-4">
+                                <Collapsible defaultOpen={selectedSprintGoals.length === 0} className="rounded-md border p-4">
                                   <div className="flex items-center justify-between gap-3">
                                     <h3 className="text-sm font-semibold flex items-center gap-2">
                                       <ListChecks className="h-4 w-4" /> Retrospective
@@ -2444,8 +2560,8 @@ export function AgileView() {
                                   </CollapsibleContent>
                                 </Collapsible>
 
-                                {/* 메타데이터 접힘 유지 */}
-                                <details className="rounded-md border p-4 group mt-4">
+                                {/* 메타데이터 — sprint_goals 없을 때 기본 열림 */}
+                                <details className="rounded-md border p-4 group mt-4" open={selectedSprintGoals.length === 0 ? true : undefined}>
                                   <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2 outline-none">
                                     <FileText className="h-4 w-4" /> 스프린트 메타데이터 (result.md / retrospective.md)
                                   </summary>

@@ -116,6 +116,11 @@ contains_agile_allow_marker() {
     || printf '%s' "$text" | grep -Fq "[자동 중단]"
 }
 
+extract_return_to() {
+  local text="$1"
+  printf '%s' "$text" | grep -oE 'return_to=[a-zA-Z0-9_:/-]+' | tail -1 | sed 's/return_to=//'
+}
+
 contains_agile_text_question() {
   local text="$1"
   printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요|요약하고[[:space:]]*계속|정리하고[[:space:]]*계속|컨텍스트.*길'
@@ -352,6 +357,18 @@ if [ "$AGILE_LOOP_ACTIVE" = "true" ] || [ "$CURRENT_SKILL" = "mst:agile" ]; then
   AGILE_GUARD_ACTIVE="true"
 fi
 
+RETURN_TO_RAW="$(extract_return_to "$LAST_ASSISTANT_MESSAGE")"
+if [ -z "$RETURN_TO_RAW" ] || [ "$RETURN_TO_RAW" = "null" ]; then
+  RETURN_TO_RAW="$(extract_return_to "$STDIN_RAW")"
+fi
+RETURN_TO_SKILL=""
+RETURN_TO_STEP=""
+if [ -n "$RETURN_TO_RAW" ] && [ "$RETURN_TO_RAW" != "null" ]; then
+  RETURN_TO_SKILL="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f1)"
+  RETURN_TO_STEP="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f2)"
+  debug_log "info" "return_to_detected skill=$RETURN_TO_SKILL step=$RETURN_TO_STEP raw=$RETURN_TO_RAW"
+fi
+
 AGILE_AUTO_MODE_ACTIVE="false"
 if [ "$AGILE_AUTO_MODE_HINT" = "true" ]; then
   AGILE_AUTO_MODE_ACTIVE="true"
@@ -428,6 +445,28 @@ else
   else
     debug_log "block_decision" "reason=next_action_present skip_allow_pattern=true next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO"
   fi
+fi
+
+if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
+  REASON="[RETURN-TO] Sub-skill returned with return_to=$RETURN_TO_RAW. Do NOT stop or pause."
+  REASON="$REASON You MUST immediately return to mst:$RETURN_TO_SKILL and continue from step $RETURN_TO_STEP."
+  REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
+  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+  emit_block_json "$REASON"
+  debug_log "block" "reason=return_to_detected return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
+fi
+
+if [ "$AGILE_GUARD_ACTIVE" = "true" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
+  REASON="[AGILE-CONTINUE] Sprint loop active (agile_loop_active=$AGILE_LOOP_ACTIVE, skill=$CURRENT_SKILL). Do NOT stop or pause."
+  REASON="$REASON You MUST immediately continue the current sprint loop: run objective-check, then proceed to the next sprint step."
+  REASON="$REASON Specifically: execute 'python3 ... agile objective-check {AGI_ID} --json' or the next pending step in the sprint backlog."
+  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+  emit_block_json "$REASON"
+  debug_log "block" "reason=agile_loop_no_next_action_continue current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
 fi
 
 REASON="Workflow active, continue current skill and context without stopping."

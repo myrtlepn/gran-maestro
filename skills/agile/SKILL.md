@@ -321,7 +321,7 @@ git show-ref --verify --quiet refs/heads/gran-maestro/{PREV_REQ_ID}
 ```text
 Skill(skill: "mst:accept", args: "{PREV_REQ_ID}")
 ```
-6. accept 실행 결과를 확인한다.
+6. `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` accept 반환 후 어떤 사유(컨텍스트 정리, 요약, 확인 질문, 토큰 절약 등)로든 정지를 **절대 금지**하고 즉시 아래 결과 확인 + objective-check를 실행한다. accept 실행 결과를 확인한다.
 - 성공 조건:
   - `request.json.status`가 `done`, `completed`, `accepted` 중 하나
   - `refs/heads/gran-maestro/{PREV_REQ_ID}` 및 `refs/heads/gran-maestro/{PREV_REQ_ID}-T*`가 정리됨
