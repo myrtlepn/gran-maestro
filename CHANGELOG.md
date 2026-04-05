@@ -4,6 +4,24 @@
 
 ---
 
+## [0.56.2] — 2026-04-05
+
+### 새 기능
+
+- **return_to 스킬 복귀 가드**: 서브 스킬 완료 후 `return_to=` 마커를 감지하여 부모 스킬로 자동 복귀, 불필요한 정지 차단
+- **Agile 루프 무동작 계속 가드**: 스프린트 루프 활성 상태에서 다음 액션이 없을 때 자동으로 계속 진행
+
+### 개선
+
+- **스프린트 상세 UI 강화**: phase badge, goals 달성률, summary/outcome 표시 추가 + sprint_goals 미존재 시 planned/completed/summary/outcome/generated 카드 형태 fallback
+- **스프린트 목록 카드**: planned/completed 수량, goals 달성률, summary 미리보기 표시
+- **STEERING_DISABLED 정지 차단**: `steering_disabled=true` 시 AUTO_MODE 무관하게 스프린트 간 정지 완전 차단
+- **Agile -a 모드 정지 제거**: 자동 모드에서 스프린트 간 불필요한 정지를 유발하는 금지 패턴 3종 + 우회 패턴 3종 추가
+- **위임 기능 권한/모니터링**: stdin null 처리, Codex sandbox 분기, config delegation, 실행 모니터링 개선
+- **accept 후 정지 금지 강화**: accept 반환 후 어떤 사유로든 정지를 절대 금지하는 가드레일 추가
+
+---
+
 ## [0.56.1] — 2026-04-04
 
 ### 새 기능
