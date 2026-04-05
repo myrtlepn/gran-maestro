@@ -145,7 +145,7 @@ run_stop '{"stop_hook_active":false,"last_assistant_message":"{\"tool_name\":\"A
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion(no marker) exits 0" "0" "$STOP_EXIT"
 assert_contains "agile + AskUserQuestion(no marker) -> block" '"decision": "block"' "$output"
-assert_contains "agile + AskUserQuestion(no marker) reason includes continuation guard" 'Sprint loop active; continue to next sprint without stopping.' "$output"
+assert_contains "agile + AskUserQuestion(no marker) reason includes continuation guard" 'AskUserQuestion is allowed only with agile whitelist markers.' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":2,"updated_at":"2026-03-31T00:00:00Z"}'
@@ -174,6 +174,22 @@ run_stop '{"stop_hook_active":false,"last_assistant_message":"[자동 중단] {\
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion([자동 중단]) exits 0" "0" "$STOP_EXIT"
 assert_empty "agile + AskUserQuestion([자동 중단]) -> allow" "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-577","iteration":6,"updated_at":"2026-04-05T00:00:00Z","agile_loop_active":true,"next_action":{"auto":true}}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"요약하고 계속합니다. 계속 진행할까요?"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile AUTO_MODE + 요약하고 계속 + 확인 질문 exits 0" "0" "$STOP_EXIT"
+assert_contains "agile AUTO_MODE + 요약하고 계속 + 확인 질문 -> block" '"decision": "block"' "$output"
+assert_contains "agile AUTO_MODE + 요약하고 계속 + 확인 질문 -> text-question branch" 'text-based question patterns are blocked.' "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-577","iteration":7,"updated_at":"2026-04-05T00:00:00Z","agile_loop_active":true,"next_action":{"auto":true}}'
+run_stop '{"stop_hook_active":false,"last_assistant_message":"컨텍스트가 길어지고 있으므로 정리하고 계속합니다"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile AUTO_MODE + 컨텍스트 길이 사유 정리하고 계속 exits 0" "0" "$STOP_EXIT"
+assert_contains "agile AUTO_MODE + 컨텍스트 길이 사유 정리하고 계속 -> block" '"decision": "block"' "$output"
+assert_contains "agile AUTO_MODE + 컨텍스트 길이 사유 정리하고 계속 -> text-question branch" 'text-based question patterns are blocked.' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:request","active_req":"REQ-541","iteration":1,"updated_at":"2026-03-31T00:00:00Z"}'
