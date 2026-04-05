@@ -41,6 +41,8 @@ export interface CLIOptions {
   ephemeral?: boolean;
   /** Model identifier to pass via --model flag (e.g. "gemini-3-pro-preview", "gpt-5.3-codex"). */
   model?: string;
+  /** Sandbox mode used for Codex execution strategy selection. */
+  sandboxMode?: 'workspace-write' | 'danger-full-access';
 }
 
 /** Provider-agnostic interface for invoking an external AI CLI. */
@@ -86,6 +88,7 @@ export async function runWithTimeout(
   const command = new Deno.Command(shell, {
     args: shellArgs,
     cwd,
+    stdin: 'null',
     stdout: 'piped',
     stderr: 'piped',
   });
@@ -131,10 +134,14 @@ export class CodexAdapter implements CLIAdapter {
   name = 'codex';
 
   async execute(prompt: string, opts: CLIOptions): Promise<CLIResult> {
-    // Verified: `codex --full-auto` is the non-interactive mode.
+    // Verified: `codex --full-auto` is the non-interactive default mode.
+    // For network-required tasks, sandbox can be widened via explicit mode.
     // -C flag / cwd may differ -- using cwd via process spawn.
     const escapedPrompt = prompt.replace(/"/g, '\\"');
-    let cmd = `codex --full-auto "${escapedPrompt}"`;
+    const useDangerSandbox = opts.sandboxMode === 'danger-full-access';
+    let cmd = useDangerSandbox
+      ? `codex -s danger-full-access -a on-request "${escapedPrompt}"`
+      : `codex --full-auto "${escapedPrompt}"`;
     if (opts.model) {
       cmd += ` --model ${opts.model}`;
     }

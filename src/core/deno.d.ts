@@ -9,6 +9,7 @@ declare namespace Deno {
   interface CommandOptions {
     args?: string[];
     cwd?: string;
+    stdin?: 'piped' | 'inherit' | 'null';
     stdout?: 'piped' | 'inherit' | 'null';
     stderr?: 'piped' | 'inherit' | 'null';
   }
@@ -74,4 +75,6 @@ declare namespace Deno {
   namespace errors {
     class AlreadyExists extends Error {}
   }
+
+  function test(name: string, fn: () => void | Promise<void>): void;
 }

@@ -94,6 +94,12 @@
     "max_fallback_depth": 1,
     "backoff_base_ms": 1000
   },
+  "delegation": {
+    "codex_sandbox": "workspace-write",
+    "monitor_interval_ms": 180000,
+    "monitor_tail_lines": 50,
+    "monitor_anomaly_patterns": ["ENOTFOUND", "ECONNREFUSED", "stdin", "SIGTERM", "OOM", "killed"]
+  },
   "history": {
     "retention_days": 30,
     "auto_archive": true

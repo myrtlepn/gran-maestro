@@ -1,4 +1,3 @@
-import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { readJsonFile } from "./utils.ts";
 
 export interface ValidationWarning {
@@ -16,6 +15,17 @@ export interface ValidationResult {
 }
 
 export type SettingOptions = Record<string, string[]>;
+
+function joinPath(...segments: string[]): string {
+  return segments
+    .map((segment, index) => {
+      if (index === 0) {
+        return segment.replace(/[\\/]+$/, "");
+      }
+      return segment.replace(/^[/\\]+|[/\\]+$/g, "");
+    })
+    .join("/");
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,7 +60,7 @@ function flattenConfig(config: Record<string, unknown>): FlatConfig {
 }
 
 export async function loadSettingOptions(pluginRoot: string): Promise<SettingOptions | null> {
-  const filePath = join(pluginRoot, "templates", "defaults", "setting-options.json");
+  const filePath = joinPath(pluginRoot, "templates", "defaults", "setting-options.json");
   const loaded = await readJsonFile<unknown>(filePath);
   if (!loaded || !isPlainObject(loaded)) {
     return null;
