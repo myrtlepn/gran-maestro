@@ -192,6 +192,24 @@ assert_contains "agile AUTO_MODE + 컨텍스트 길이 사유 정리하고 계�
 assert_contains "agile AUTO_MODE + 컨텍스트 길이 사유 정리하고 계속 -> text-question branch" 'text-based question patterns are blocked.' "$output"
 
 cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-578","iteration":8,"updated_at":"2026-04-05T00:00:00Z","agile_loop_active":true,"steering_disabled":true,"next_action":{"auto":false}}'
+run_stop '{"stop_hook_active":false,"agile_auto_mode":false,"last_assistant_message":"계속 진행할까요?"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile STEERING_DISABLED + AUTO_MODE=false + 확인 질문 exits 0" "0" "$STOP_EXIT"
+assert_contains "agile STEERING_DISABLED + AUTO_MODE=false + 확인 질문 -> block" '"decision": "block"' "$output"
+assert_contains "agile STEERING_DISABLED + AUTO_MODE=false + 확인 질문 -> steering branch reason" 'AUTO_MODE=true or STEERING_DISABLED=true' "$output"
+assert_contains "agile STEERING_DISABLED + AUTO_MODE=false + 확인 질문 -> text-question branch" 'text-based question patterns are blocked.' "$output"
+
+cleanup
+write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-578","iteration":9,"updated_at":"2026-04-05T00:00:00Z","agile_loop_active":true,"steering_disabled":false,"next_action":{"auto":false}}'
+run_stop '{"stop_hook_active":false,"agile_auto_mode":false,"last_assistant_message":"계속 진행할까요?"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile STEERING_DISABLED=false + AUTO_MODE=false + 확인 질문 exits 0" "0" "$STOP_EXIT"
+assert_contains "agile STEERING_DISABLED=false + AUTO_MODE=false + 확인 질문 -> 기존 workflow block 유지" '"decision": "block"' "$output"
+assert_contains "agile STEERING_DISABLED=false + AUTO_MODE=false + 확인 질문 -> 기존 이유 유지" 'Workflow active, continue current skill' "$output"
+assert_not_contains "agile STEERING_DISABLED=false + AUTO_MODE=false + 확인 질문 -> text-question branch 미진입" 'text-based question patterns are blocked.' "$output"
+
+cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:request","active_req":"REQ-541","iteration":1,"updated_at":"2026-03-31T00:00:00Z"}'
 run_stop '{"stop_hook_active":false,"last_assistant_message":"{\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"

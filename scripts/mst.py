@@ -73,7 +73,7 @@ Subcommands:
   state set          --skill NAME --step N --total M [--return-to SKILL/STEP]
   state set-workflow --active true|false [--skill NAME] [--req REQ-NNN]
                      [--next-skill NAME] [--next-source ID] [--source-skill NAME] [--auto true|false]
-                     [--agile-loop-active true|false]
+                     [--agile-loop-active true|false] [--steering-disabled true|false]
   state get
   state clear
   measure stop-rate   [--snapshots-dir PATH] [--pretty]
@@ -603,6 +603,7 @@ def _workflow_state_default_payload(now: str):
         "active_req": "",
         "iteration": 0,
         "agile_loop_active": False,
+        "steering_disabled": False,
         "block_count": 0,
         "last_block_reason": "",
         "updated_at": now,
@@ -655,6 +656,11 @@ def cmd_state_set_workflow(args):
             if isinstance(payload.get("agile_loop_active"), bool)
             else False
         )
+        payload["steering_disabled"] = (
+            payload.get("steering_disabled")
+            if isinstance(payload.get("steering_disabled"), bool)
+            else False
+        )
         block_count = payload.get("block_count")
         payload["block_count"] = (
             block_count
@@ -671,6 +677,8 @@ def cmd_state_set_workflow(args):
             payload["agile_loop_active"] = bool(args.agile_loop_active)
             if not payload["agile_loop_active"]:
                 payload["block_count"] = 0
+        if args.steering_disabled is not None:
+            payload["steering_disabled"] = bool(args.steering_disabled)
 
         payload["updated_at"] = now
 
@@ -6053,6 +6061,7 @@ def build_parser():
     state_set_workflow.add_argument("--source-skill", dest="source_skill", default="")
     state_set_workflow.add_argument("--auto", type=_parse_bool_arg, default=False)
     state_set_workflow.add_argument("--agile-loop-active", dest="agile_loop_active", type=_parse_bool_arg)
+    state_set_workflow.add_argument("--steering-disabled", dest="steering_disabled", type=_parse_bool_arg)
 
     state_sub.add_parser("get")
     state_sub.add_parser("clear")

@@ -62,9 +62,9 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
 - 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
 - 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
-- `AUTO_MODE=true`인 스프린트 루프에서 텍스트 출력으로 `"계속할까요?"`, `"진행할까요?"`, `"멈추고"` 등 질문을 생성하는 행위.
+- `AUTO_MODE=true`이거나 `STEERING_DISABLED=true(STEERING_EVERY=0)`인 스프린트 루프에서 텍스트 출력으로 `"계속할까요?"`, `"진행할까요?"`, `"멈추고"` 등 질문을 생성하는 행위.
 - `"컨텍스트가 길어지고 있으므로"`, `"요약하고 계속"`, `"정리하고 계속"`, `"컨텍스트를 줄이기 위해"` 등 컨텍스트 길이/요약/정리를 사유로 스프린트 간 정지하는 행위.
-- `AUTO_MODE=true`에서 스프린트 완료 후 `"다음 Sprint로 진행합니다"`라고 선언한 뒤 확인 질문을 삽입하는 행위.
+- `AUTO_MODE=true`이거나 `STEERING_DISABLED=true(STEERING_EVERY=0)`에서 스프린트 완료 후 `"다음 Sprint로 진행합니다"`라고 선언한 뒤 확인 질문을 삽입하는 행위.
 - 스프린트 루프 중 어떤 자체 판단 사유(컨텍스트 길이, 세션 정리, 토큰 절약 등)로든 자발적으로 정지하는 행위.
 - 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
 - 정기 스티어링 해당 Sprint에서 Step 3을 건너뛰고 Step 2를 계속 진행하는 행위.
@@ -126,6 +126,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
   3. `auto_mode.agile == true`면 `AUTO_MODE=true`, 아니면 `false`
 - 우선순위: CLI 플래그(`-a`/`--auto`)가 config보다 우선한다.
 - `--steering-every` 미지정 시: `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.steering_every` 값을 사용한다. config에도 없으면 기본값 `3`.
+- `STEERING_DISABLED`는 `STEERING_EVERY == 0`이면 `true`, 아니면 `false`로 계산한다.
 
 #### 0.2 분기: --resume 있는 경우
 
@@ -137,6 +138,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
   --active true \
   --skill mst:agile \
   --auto {AUTO_MODE} \
+  --steering-disabled {STEERING_DISABLED} \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 4. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status}`
@@ -155,6 +157,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
   --active true \
   --skill mst:agile \
   --auto {AUTO_MODE} \
+  --steering-disabled {STEERING_DISABLED} \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 4. Step 1로 진행

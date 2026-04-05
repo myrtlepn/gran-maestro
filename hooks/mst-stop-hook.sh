@@ -197,6 +197,7 @@ def emit(
     agile_loop_active=False,
     block_count=0,
     last_block_reason="",
+    steering_disabled=False,
 ):
     if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
         block_count = 0
@@ -204,7 +205,7 @@ def emit(
         last_block_reason = ""
     last_block_reason = last_block_reason.replace("\t", " ").replace("\n", " ").strip()
     print(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
             status,
             "true" if workflow_active else "false",
             current_skill,
@@ -219,6 +220,7 @@ def emit(
             "true" if agile_loop_active else "false",
             block_count,
             last_block_reason,
+            "true" if steering_disabled else "false",
         )
     )
 
@@ -253,6 +255,10 @@ if not isinstance(block_count, int) or isinstance(block_count, bool) or block_co
 last_block_reason = payload.get("last_block_reason")
 if not isinstance(last_block_reason, str):
     last_block_reason = ""
+
+steering_disabled = payload.get("steering_disabled")
+if not isinstance(steering_disabled, bool):
+    steering_disabled = False
 
 iteration = payload.get("iteration")
 if not isinstance(iteration, int):
@@ -311,6 +317,7 @@ emit(
     agile_loop_active=agile_loop_active,
     block_count=block_count,
     last_block_reason=last_block_reason,
+    steering_disabled=steering_disabled,
 )
 PY
 )"
@@ -328,7 +335,8 @@ HAS_NEXT_ACTION="$(printf '%s' "$STATE_INFO" | cut -f10)"
 UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f11)"
 AGILE_LOOP_ACTIVE="$(printf '%s' "$STATE_INFO" | cut -f12)"
 BLOCK_COUNT="$(printf '%s' "$STATE_INFO" | cut -f13)"
-LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14-)"
+LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
+STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
 
 if [ "$WORKFLOW_ACTIVE" != "true" ]; then
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
@@ -361,9 +369,9 @@ fi
 AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
 ${STDIN_RAW}"
 
-if [ "$AGILE_LOOP_ACTIVE" = "true" ] && [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ] && contains_agile_text_question "$AGILE_ALLOW_CONTEXT"; then
+if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ] || [ "$STEERING_DISABLED" = "true" ]; } && contains_agile_text_question "$AGILE_ALLOW_CONTEXT"; then
   NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
-  REASON="Sprint loop active in AUTO_MODE=true; text-based question patterns are blocked."
+  REASON="Sprint loop active in AUTO_MODE=true or STEERING_DISABLED=true; text-based question patterns are blocked."
   REASON="$REASON Remove phrases like '계속할까요?', '진행할까요?', '멈추고' and continue autonomously."
   REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
   if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
