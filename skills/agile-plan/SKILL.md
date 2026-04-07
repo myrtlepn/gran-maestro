@@ -534,6 +534,8 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
 - detail 파일(`objective/details/*.md`)에는 해당 도메인의 **모든 상세 내용**을 원본 수준으로 보존한다(요약/축약 금지).
   - Q&A 모드(1A): 사용자와의 대화에서 논의된 **모든** 설계 내용을 포함한다 — 설계 결정과 그 근거, 기술 선택과 비교 대안, 디렉토리 구조, 프로세스 흐름, Gate/체크리스트, 스키마/템플릿, 예시, 합의 사항 등. PM은 사용자 발화를 기반으로 **더 구체화·체계화**하여 기록한다 (단순 복사가 아니라 개발 기반이 되도록 정제). 대화에서 논의되었으나 details/에 없는 내용이 있으면 안 된다.
   - `--doc` 모드(1B): 원본 문서의 해당 도메인 내용 전체 + Q&A로 추가 보완된 내용. 원본 문서에 기술된 내용이 details/에서 누락되어서는 안 된다.
+  - 각 `details/{domain}.md` 파일의 **첫 줄**에는 반드시 `<!-- source-mapping: original=<원본경로> sections=[<H1/H2 헤더 목록>] -->` 메타데이터를 작성한다.
+  - detail 파일 저장 직후 `python3 {PLUGIN_ROOT}/scripts/mst.py agile detail validate-mapping {details_file_path}` 명령으로 source-mapping 메타데이터를 검증한다.
 - **detail 파일 내부 구조 규칙 (MANDATORY)**: 각 `details/{domain}.md` 파일은 아래 구조를 따른다.
   ```markdown
   # {도메인명}

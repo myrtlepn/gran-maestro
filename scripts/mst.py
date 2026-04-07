@@ -53,6 +53,7 @@ Subcommands:
   agile objective-check <AGI-ID> [--json]
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
+  agile detail validate-mapping <details_path> [--json]
 
   archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap|agi] [--max N] [--dir PATH]
   archive run-all     [--max N]
@@ -1831,6 +1832,71 @@ def _split_csv_values(raw_values) -> List[str]:
     return values
 
 
+_SOURCE_MAPPING_RE = re.compile(
+    r"^<!--\s*source-mapping:\s*original=(?P<original>\S+)\s+sections=\[(?P<sections>.*?)\]\s*-->$"
+)
+
+
+def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
+    sections: list[str] = []
+    errors: list[str] = []
+
+    for raw_token in str(raw_sections).split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if token.startswith(("'", '"')):
+            if len(token) < 2 or token[-1] != token[0]:
+                errors.append(f"invalid section token: {raw_token.strip()}")
+                continue
+            token = token[1:-1].strip()
+        elif token.endswith(("'", '"')):
+            errors.append(f"invalid section token: {raw_token.strip()}")
+            continue
+        if not token:
+            errors.append(f"invalid section token: {raw_token.strip()}")
+            continue
+        sections.append(token)
+
+    if not sections:
+        errors.append("sections list is empty")
+
+    return sections, errors
+
+
+def parse_source_mapping(text: str) -> dict:
+    result = {
+        "original": None,
+        "sections": [],
+        "valid": False,
+        "errors": [],
+    }
+    lines = str(text).splitlines()
+    if not lines:
+        result["errors"].append("source-mapping metadata is missing in first line")
+        return result
+
+    first_line = lines[0].strip()
+    if not first_line:
+        result["errors"].append("source-mapping metadata is missing in first line")
+        return result
+
+    match = _SOURCE_MAPPING_RE.fullmatch(first_line)
+    if match is None:
+        result["errors"].append("source-mapping metadata is missing or malformed in first line")
+        return result
+
+    sections, section_errors = _parse_source_mapping_sections(match.group("sections"))
+    if section_errors:
+        result["errors"].extend(section_errors)
+        return result
+
+    result["original"] = match.group("original")
+    result["sections"] = sections
+    result["valid"] = True
+    return result
+
+
 def _parse_agile_failed_items(raw_values) -> List[dict]:
     if not raw_values:
         return []
@@ -2793,6 +2859,73 @@ def cmd_agile_known_issues(args):
     fn = dispatch.get(subcommand)
     if fn is None:
         print("Error: known-issues subcommand is required (add|resolve|list)", file=sys.stderr)
+        return 1
+    return fn(args)
+
+
+def _source_mapping_failure_payload(path: str, reason: str) -> dict:
+    return {
+        "path": path,
+        "original": None,
+        "sections": [],
+        "valid": False,
+        "errors": [reason],
+    }
+
+
+def _emit_source_mapping_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    print(f"Path: {payload.get('path')}")
+    print(f"Valid: {'true' if payload.get('valid') else 'false'}")
+    print(f"Original: {payload.get('original') or '-'}")
+    sections = payload.get("sections") or []
+    print(f"Sections: {', '.join(str(item) for item in sections) if sections else '-'}")
+    errors = payload.get("errors") or []
+    print(f"Errors: {'; '.join(str(item) for item in errors) if errors else 'none'}")
+
+
+def cmd_agile_detail_validate_mapping(args):
+    details_path = str(args.details_path)
+    details_file = Path(details_path)
+    if not details_file.exists():
+        payload = _source_mapping_failure_payload(details_path, f"file not found: {details_path}")
+        _emit_source_mapping_payload(payload, args.json)
+        return 1
+    if not details_file.is_file():
+        payload = _source_mapping_failure_payload(details_path, f"not a file: {details_path}")
+        _emit_source_mapping_payload(payload, args.json)
+        return 1
+
+    try:
+        content = details_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        payload = _source_mapping_failure_payload(details_path, f"failed to read file: {exc}")
+        _emit_source_mapping_payload(payload, args.json)
+        return 1
+
+    parsed = parse_source_mapping(content)
+    payload = {
+        "path": details_path,
+        "original": parsed.get("original"),
+        "sections": parsed.get("sections", []),
+        "valid": bool(parsed.get("valid")),
+        "errors": parsed.get("errors", []),
+    }
+    _emit_source_mapping_payload(payload, args.json)
+    return 0 if payload["valid"] else 1
+
+
+def cmd_agile_detail(args):
+    subcommand = getattr(args, "detail_subcommand", None)
+    dispatch = {
+        "validate-mapping": cmd_agile_detail_validate_mapping,
+    }
+    fn = dispatch.get(subcommand)
+    if fn is None:
+        print("Error: detail subcommand is required (validate-mapping)", file=sys.stderr)
         return 1
     return fn(args)
 
@@ -6313,6 +6446,13 @@ def build_parser():
     agile_known_issues_list.add_argument("--status", choices=["open", "resolved"])
     agile_known_issues_list.add_argument("--json", action="store_true")
 
+    agile_detail = agile_sub.add_parser("detail")
+    agile_detail_sub = agile_detail.add_subparsers(dest="detail_subcommand")
+
+    agile_detail_validate_mapping = agile_detail_sub.add_parser("validate-mapping")
+    agile_detail_validate_mapping.add_argument("details_path")
+    agile_detail_validate_mapping.add_argument("--json", action="store_true")
+
     agile_objective_transition = agile_sub.add_parser("objective-transition")
     agile_objective_transition.add_argument("agi_id")
     agile_objective_transition.add_argument("--story", required=True)
@@ -6584,6 +6724,7 @@ def main():
         ("agile", "result"): cmd_agile_result,
         ("agile", "retrospective"): cmd_agile_retrospective,
         ("agile", "known-issues"): cmd_agile_known_issues,
+        ("agile", "detail"): cmd_agile_detail,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
         ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,
