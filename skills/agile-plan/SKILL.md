@@ -319,11 +319,12 @@ END WHILE
    - `D_t = (N_t + E_t + S_t + P_t) / 4`
 3. 추세 계산(최근 3라운드)
    - `EMA3_t = alpha * D_t + (1 - alpha) * EMA3_(t-1)` (`alpha=0.5`, 초기값=`D_1`)
-4. 종료 권장 2중 게이트 + 보조 조건
+4. 종료 권장 2중 게이트 + 보조 조건 + 커버리지 AND 조건
    - 절대 조건: `D_t <= convergence_threshold_abs` (기본 0.12)
    - 추세 조건: `EMA3_t <= convergence_threshold_trend` (기본 0.18)
    - 보조 조건: 미해결 코멘트 `<= 1`
-5. 3개 조건을 모두 만족하면 종료 권장 문구를 출력한다.
+   - 커버리지 조건(MANDATORY, AND): `coverage_ratio >= config.agile.coverage_threshold` (기본 0.85) — `--doc` 모드 1A.10 직전 details/*.md 집합에 대해 `python3 {PLUGIN_ROOT}/scripts/mst.py agile coverage-check {원본문서경로} --details-dir {details_dir}`를 실행해 `coverage` 값을 사용한다. 이 조건이 미충족이면 다른 3개 조건이 통과해도 수렴 종료를 권장하지 않는다.
+5. 4개 조건을 모두 만족하면 종료 권장 문구를 출력한다.
    - `[수렴 감지] 변경량이 임계값 이하입니다. 현재 상태로 확정할까요?`
 6. 루프 종료는 사용자의 명시적 종료 선언으로만 확정한다.
 
@@ -532,7 +533,7 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
   ```
 - `## 상세 문서 (Details)`에는 domain별 detail 파일 링크 + 도메인명 + 1줄 요약을 기록한다.
 - detail 파일(`objective/details/*.md`)에는 해당 도메인의 **모든 상세 내용**을 원본 수준으로 보존한다(요약/축약 금지).
-  - Q&A 모드(1A): 사용자와의 대화에서 논의된 **모든** 설계 내용을 포함한다 — 설계 결정과 그 근거, 기술 선택과 비교 대안, 디렉토리 구조, 프로세스 흐름, Gate/체크리스트, 스키마/템플릿, 예시, 합의 사항 등. PM은 사용자 발화를 기반으로 **더 구체화·체계화**하여 기록한다 (단순 복사가 아니라 개발 기반이 되도록 정제). 대화에서 논의되었으나 details/에 없는 내용이 있으면 안 된다.
+  - Q&A 모드(1A): 사용자와의 대화에서 논의된 **모든** 설계 내용을 원본 그대로 `## 상세 명세` 하위에 1:1 보존한다 — 설계 결정과 그 근거, 기술 선택과 비교 대안, 디렉토리 구조, 프로세스 흐름, Gate/체크리스트, 스키마/템플릿, 예시, 합의 사항 등. PM은 사용자 발화를 누락 없이 기록하며, 대화에서 논의되었으나 details/에 없는 내용이 있으면 안 된다.
   - `--doc` 모드(1B): 원본 문서의 해당 도메인 내용 전체 + Q&A로 추가 보완된 내용. 원본 문서에 기술된 내용이 details/에서 누락되어서는 안 된다.
   - 각 `details/{domain}.md` 파일의 **첫 줄**에는 반드시 `<!-- source-mapping: original=<원본경로> sections=[<H1/H2 헤더 목록>] -->` 메타데이터를 작성한다.
   - detail 파일 저장 직후 `python3 {PLUGIN_ROOT}/scripts/mst.py agile detail validate-mapping {details_file_path}` 명령으로 source-mapping 메타데이터를 검증한다.
