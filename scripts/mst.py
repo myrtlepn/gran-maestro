@@ -54,6 +54,7 @@ Subcommands:
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
   agile detail validate-mapping <details_path> [--json]
+  agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
   archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap|agi] [--max N] [--dir PATH]
@@ -1838,6 +1839,7 @@ _SOURCE_MAPPING_RE = re.compile(
     r"^<!--\s*source-mapping:\s*original=(?P<original>\S+)\s+sections=\[(?P<sections>.*?)\]\s*-->$"
 )
 _H12_HEADER_RE = re.compile(r"^(#{1,2})\s+(.+?)$", flags=re.MULTILINE)
+_CHUNK_MARKER_RE = re.compile(r"<!-- chunk:(\d+) -->")
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -2977,6 +2979,171 @@ def _read_first_line(path: Path) -> str:
         return file.readline().strip()
 
 
+def _chunk_append_payload(target_path: Path, chunk_id: int, action: str, valid: bool, errors: list[str]) -> dict:
+    return {
+        "target_path": str(target_path),
+        "chunk_id": chunk_id,
+        "action": action,
+        "valid": valid,
+        "errors": errors,
+    }
+
+
+def _find_chunk_markers(text: str) -> list[dict]:
+    markers: list[dict] = []
+    for match in _CHUNK_MARKER_RE.finditer(text):
+        marker_end = match.end()
+        if marker_end < len(text) and text[marker_end] == "\n":
+            marker_end += 1
+        markers.append(
+            {
+                "chunk_id": int(match.group(1)),
+                "start": match.start(),
+                "end": marker_end,
+            }
+        )
+    return markers
+
+
+def _replace_chunk_content(existing_text: str, markers: list[dict], marker_index: int, replacement_text: str) -> str:
+    current_marker = markers[marker_index]
+    region_end = current_marker["end"]
+    if marker_index == 0:
+        region_start = 0
+    else:
+        previous_marker = markers[marker_index - 1]
+        region_start = previous_marker["end"]
+        if region_start < len(existing_text) and existing_text[region_start] == "\n":
+            region_start += 1
+
+    return f"{existing_text[:region_start]}{replacement_text}{existing_text[region_end:]}"
+
+
+def apply_chunk_append(target_path, chunk_id, content) -> dict:
+    path = Path(target_path)
+    chunk_number = int(chunk_id)
+    chunk_content = str(content)
+
+    if chunk_number < 1:
+        return _chunk_append_payload(
+            path,
+            chunk_number,
+            "",
+            False,
+            ["chunk-id must be >= 1"],
+        )
+
+    if chunk_number >= 2 and not path.exists():
+        return _chunk_append_payload(
+            path,
+            chunk_number,
+            "",
+            False,
+            ["target not found, run chunk-id=1 first"],
+        )
+
+    marker_line = f"<!-- chunk:{chunk_number} -->"
+    replacement = f"{chunk_content}\n{marker_line}\n"
+
+    if chunk_number == 1:
+        if path.exists():
+            try:
+                existing_text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return _chunk_append_payload(
+                    path,
+                    chunk_number,
+                    "",
+                    False,
+                    [f"failed to read target: {exc}"],
+                )
+
+            markers = _find_chunk_markers(existing_text)
+            for marker_index, marker in enumerate(markers):
+                if marker["chunk_id"] != 1:
+                    continue
+                updated_text = _replace_chunk_content(existing_text, markers, marker_index, replacement)
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(updated_text, encoding="utf-8")
+                except OSError as exc:
+                    return _chunk_append_payload(
+                        path,
+                        chunk_number,
+                        "",
+                        False,
+                        [f"failed to write target: {exc}"],
+                    )
+                return _chunk_append_payload(path, chunk_number, "replaced", True, [])
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(replacement, encoding="utf-8")
+        except OSError as exc:
+            return _chunk_append_payload(
+                path,
+                chunk_number,
+                "",
+                False,
+                [f"failed to write target: {exc}"],
+            )
+        return _chunk_append_payload(path, chunk_number, "created", True, [])
+
+    try:
+        existing_text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _chunk_append_payload(
+            path,
+            chunk_number,
+            "",
+            False,
+            [f"failed to read target: {exc}"],
+        )
+
+    markers = _find_chunk_markers(existing_text)
+    for marker_index, marker in enumerate(markers):
+        if marker["chunk_id"] != chunk_number:
+            continue
+        updated_text = _replace_chunk_content(existing_text, markers, marker_index, replacement)
+        try:
+            path.write_text(updated_text, encoding="utf-8")
+        except OSError as exc:
+            return _chunk_append_payload(
+                path,
+                chunk_number,
+                "",
+                False,
+                [f"failed to write target: {exc}"],
+            )
+        return _chunk_append_payload(path, chunk_number, "replaced", True, [])
+
+    appended_text = f"{existing_text}\n{replacement}"
+    try:
+        path.write_text(appended_text, encoding="utf-8")
+    except OSError as exc:
+        return _chunk_append_payload(
+            path,
+            chunk_number,
+            "",
+            False,
+            [f"failed to write target: {exc}"],
+        )
+    return _chunk_append_payload(path, chunk_number, "appended", True, [])
+
+
+def _emit_chunk_append_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    print(f"Target: {payload.get('target_path')}")
+    print(f"Chunk ID: {payload.get('chunk_id')}")
+    print(f"Action: {payload.get('action') or '-'}")
+    print(f"Valid: {'true' if payload.get('valid') else 'false'}")
+    errors = payload.get("errors") or []
+    print(f"Errors: {'; '.join(str(item) for item in errors) if errors else 'none'}")
+
+
 def _print_coverage_check_fail(payload: dict):
     print(
         f"[coverage-check] FAIL — {payload.get('coverage', 0.0):.2%} < {payload.get('threshold', 0.0):.2%}",
@@ -3101,14 +3268,59 @@ def cmd_agile_detail_validate_mapping(args):
     return 0 if payload["valid"] else 1
 
 
+def cmd_agile_detail_append(args):
+    target_dir = Path(str(args.target_dir)).resolve()
+    target_path = target_dir / f"{args.domain}.md"
+    chunk_id = int(args.chunk_id)
+    content_path = Path(str(args.content_file))
+    if not content_path.exists():
+        payload = _chunk_append_payload(
+            target_path,
+            chunk_id,
+            "",
+            False,
+            [f"content-file not found: {content_path}"],
+        )
+        _emit_chunk_append_payload(payload, args.json)
+        return 1
+    if not content_path.is_file():
+        payload = _chunk_append_payload(
+            target_path,
+            chunk_id,
+            "",
+            False,
+            [f"content-file not found: {content_path}"],
+        )
+        _emit_chunk_append_payload(payload, args.json)
+        return 1
+
+    try:
+        content = content_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        payload = _chunk_append_payload(
+            target_path,
+            chunk_id,
+            "",
+            False,
+            [f"failed to read content-file: {exc}"],
+        )
+        _emit_chunk_append_payload(payload, args.json)
+        return 1
+
+    payload = apply_chunk_append(target_path, chunk_id, content)
+    _emit_chunk_append_payload(payload, args.json)
+    return 0 if payload.get("valid") else 1
+
+
 def cmd_agile_detail(args):
     subcommand = getattr(args, "detail_subcommand", None)
     dispatch = {
         "validate-mapping": cmd_agile_detail_validate_mapping,
+        "append": cmd_agile_detail_append,
     }
     fn = dispatch.get(subcommand)
     if fn is None:
-        print("Error: detail subcommand is required (validate-mapping)", file=sys.stderr)
+        print("Error: detail subcommand is required (validate-mapping|append)", file=sys.stderr)
         return 1
     return fn(args)
 
@@ -6635,6 +6847,13 @@ def build_parser():
     agile_detail_validate_mapping = agile_detail_sub.add_parser("validate-mapping")
     agile_detail_validate_mapping.add_argument("details_path")
     agile_detail_validate_mapping.add_argument("--json", action="store_true")
+
+    agile_detail_append = agile_detail_sub.add_parser("append")
+    agile_detail_append.add_argument("--domain", required=True)
+    agile_detail_append.add_argument("--chunk-id", type=int, required=True, dest="chunk_id")
+    agile_detail_append.add_argument("--content-file", required=True, dest="content_file")
+    agile_detail_append.add_argument("--target-dir", default=".", dest="target_dir")
+    agile_detail_append.add_argument("--json", action="store_true")
 
     agile_coverage_check = agile_sub.add_parser("coverage-check")
     agile_coverage_check.add_argument("original_path")
