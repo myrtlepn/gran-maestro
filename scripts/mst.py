@@ -54,6 +54,7 @@ Subcommands:
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
   agile detail validate-mapping <details_path> [--json]
+  agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
   archive run         [--type req|idn|dsc|dbg|exp|pln|des|cap|agi] [--max N] [--dir PATH]
   archive run-all     [--max N]
@@ -110,6 +111,7 @@ import sys
 import glob
 import tarfile
 import time
+import unicodedata
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -1835,6 +1837,7 @@ def _split_csv_values(raw_values) -> List[str]:
 _SOURCE_MAPPING_RE = re.compile(
     r"^<!--\s*source-mapping:\s*original=(?P<original>\S+)\s+sections=\[(?P<sections>.*?)\]\s*-->$"
 )
+_H12_HEADER_RE = re.compile(r"^(#{1,2})\s+(.+?)$", flags=re.MULTILINE)
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -1895,6 +1898,64 @@ def parse_source_mapping(text: str) -> dict:
     result["sections"] = sections
     result["valid"] = True
     return result
+
+
+def _slugify_header_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFC", str(text))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[\t ]+", "-", normalized)
+    normalized = re.sub(r"[^a-z0-9가-힣\-]", "", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized)
+    return normalized.strip("-")
+
+
+def extract_h12_slugs(markdown_text: str) -> List[str]:
+    slugs: List[str] = []
+    seen = set()
+    for match in _H12_HEADER_RE.finditer(str(markdown_text)):
+        slug = _slugify_header_text(match.group(2))
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        slugs.append(slug)
+    return slugs
+
+
+def compute_coverage(original_slugs: List[str], mapped_slugs: set[str]) -> dict:
+    unique_original = set(original_slugs)
+    mapped = set(mapped_slugs)
+    matched = unique_original & mapped
+    missing = sorted(unique_original - mapped)
+    total_sections = len(original_slugs)
+    matched_sections = len(matched)
+    coverage = (matched_sections / total_sections) if total_sections > 0 else 1.0
+    return {
+        "coverage": coverage,
+        "total_sections": total_sections,
+        "matched_sections": matched_sections,
+        "missing_sections": missing,
+    }
+
+
+def _load_coverage_threshold_default() -> float:
+    fallback = 0.85
+    config_paths = [
+        BASE_DIR / "config.resolved.json",
+        _plugin_root() / "templates" / "defaults" / "config.json",
+    ]
+    for path in config_paths:
+        config = load_json(path)
+        if not isinstance(config, dict):
+            continue
+        agile_config = config.get("agile")
+        if not isinstance(agile_config, dict):
+            continue
+        raw_threshold = agile_config.get("coverage_threshold")
+        try:
+            return float(raw_threshold)
+        except (TypeError, ValueError):
+            continue
+    return fallback
 
 
 def _parse_agile_failed_items(raw_values) -> List[dict]:
@@ -2885,6 +2946,128 @@ def _emit_source_mapping_payload(payload: dict, as_json: bool):
     print(f"Sections: {', '.join(str(item) for item in sections) if sections else '-'}")
     errors = payload.get("errors") or []
     print(f"Errors: {'; '.join(str(item) for item in errors) if errors else 'none'}")
+
+
+def _emit_coverage_check_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    print(
+        "Coverage: "
+        f"{payload.get('coverage', 0.0):.2%} "
+        f"({payload.get('matched_sections', 0)}/{payload.get('total_sections', 0)}) "
+        f"- Threshold: {payload.get('threshold', 0.0):.2%} "
+        f"- Valid: {'true' if payload.get('valid') else 'false'}"
+    )
+    missing_sections = payload.get("missing_sections") or []
+    if missing_sections:
+        print("Missing sections:")
+        for slug in missing_sections:
+            print(f"- {slug}")
+    errors = payload.get("errors") or []
+    if errors:
+        print("Errors:")
+        for error in errors:
+            print(f"- {error}")
+
+
+def _read_first_line(path: Path) -> str:
+    with path.open("r", encoding="utf-8") as file:
+        return file.readline().strip()
+
+
+def _print_coverage_check_fail(payload: dict):
+    print(
+        f"[coverage-check] FAIL — {payload.get('coverage', 0.0):.2%} < {payload.get('threshold', 0.0):.2%}",
+        file=sys.stderr,
+    )
+    for slug in payload.get("missing_sections", []):
+        print(f"[coverage-check] missing: {slug}", file=sys.stderr)
+
+
+def cmd_agile_coverage_check(args):
+    original = str(args.original_path)
+    details_dir = str(args.details_dir)
+    threshold = float(args.threshold) if args.threshold is not None else _load_coverage_threshold_default()
+    payload = {
+        "original": original,
+        "details_dir": details_dir,
+        "total_sections": 0,
+        "matched_sections": 0,
+        "missing_sections": [],
+        "coverage": 0.0,
+        "threshold": threshold,
+        "valid": False,
+        "errors": [],
+    }
+
+    original_path = Path(original)
+    if not original_path.exists():
+        payload["errors"].append(f"original not found: {original}")
+        _emit_coverage_check_payload(payload, args.json)
+        _print_coverage_check_fail(payload)
+        return 1
+    if not original_path.is_file():
+        payload["errors"].append(f"original is not a file: {original}")
+        _emit_coverage_check_payload(payload, args.json)
+        _print_coverage_check_fail(payload)
+        return 1
+
+    details_path = Path(details_dir)
+    if not details_path.exists():
+        payload["errors"].append(f"details dir not found: {details_dir}")
+        _emit_coverage_check_payload(payload, args.json)
+        _print_coverage_check_fail(payload)
+        return 1
+    if not details_path.is_dir():
+        payload["errors"].append(f"details dir is not a directory: {details_dir}")
+        _emit_coverage_check_payload(payload, args.json)
+        _print_coverage_check_fail(payload)
+        return 1
+
+    try:
+        original_content = original_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        payload["errors"].append(f"failed to read original: {exc}")
+        _emit_coverage_check_payload(payload, args.json)
+        _print_coverage_check_fail(payload)
+        return 1
+
+    original_slugs = extract_h12_slugs(original_content)
+    mapped_slugs = set()
+
+    for details_file in sorted(details_path.glob("*.md")):
+        try:
+            first_line = _read_first_line(details_file)
+        except (OSError, UnicodeDecodeError) as exc:
+            payload["errors"].append(f"mapping read error: {details_file}: {exc}")
+            continue
+        parsed = parse_source_mapping(first_line)
+        if not bool(parsed.get("valid")):
+            errors = parsed.get("errors") or ["unknown mapping error"]
+            payload["errors"].append(
+                f"mapping invalid: {details_file}: {'; '.join(str(err) for err in errors)}"
+            )
+            continue
+
+        for raw_section in parsed.get("sections", []):
+            slug = _slugify_header_text(raw_section)
+            if slug:
+                mapped_slugs.add(slug)
+
+    coverage_result = compute_coverage(original_slugs, mapped_slugs)
+    payload["total_sections"] = coverage_result["total_sections"]
+    payload["matched_sections"] = coverage_result["matched_sections"]
+    payload["missing_sections"] = coverage_result["missing_sections"]
+    payload["coverage"] = coverage_result["coverage"]
+    payload["valid"] = payload["coverage"] >= threshold
+
+    _emit_coverage_check_payload(payload, args.json)
+    if not payload["valid"]:
+        _print_coverage_check_fail(payload)
+        return 1
+    return 0
 
 
 def cmd_agile_detail_validate_mapping(args):
@@ -6453,6 +6636,12 @@ def build_parser():
     agile_detail_validate_mapping.add_argument("details_path")
     agile_detail_validate_mapping.add_argument("--json", action="store_true")
 
+    agile_coverage_check = agile_sub.add_parser("coverage-check")
+    agile_coverage_check.add_argument("original_path")
+    agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
+    agile_coverage_check.add_argument("--threshold", type=float)
+    agile_coverage_check.add_argument("--json", action="store_true")
+
     agile_objective_transition = agile_sub.add_parser("objective-transition")
     agile_objective_transition.add_argument("agi_id")
     agile_objective_transition.add_argument("--story", required=True)
@@ -6725,6 +6914,7 @@ def main():
         ("agile", "retrospective"): cmd_agile_retrospective,
         ("agile", "known-issues"): cmd_agile_known_issues,
         ("agile", "detail"): cmd_agile_detail,
+        ("agile", "coverage-check"): cmd_agile_coverage_check,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
         ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,

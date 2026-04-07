@@ -48,6 +48,7 @@
     "soft_limit_small": 8,
     "soft_limit_large": 12,
     "round_history_max_summary_lines": 50,
+    "coverage_threshold": 0.85,
     "retrospective": {
       "enabled": true,
       "max_fix_sprint_depth": 2,
