@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """Gran Maestro CLI utility (mst.py)
 
 Usage:
@@ -76,7 +78,15 @@ Subcommands:
   state set          --skill NAME --step N --total M [--return-to SKILL/STEP]
   state set-workflow --active true|false [--skill NAME] [--req REQ-NNN]
                      [--next-skill NAME] [--next-source ID] [--source-skill NAME] [--auto true|false]
+                     [--enqueue true|false]
                      [--agile-loop-active true|false] [--steering-disabled true|false]
+  queue enqueue      --skill NAME --args TEXT [--source-skill NAME] [--source-id ID] [--resource-id ID] [--auto true|false] [--json]
+  queue peek         [--json]
+  queue pop          [--json]
+  queue list         [--status queued|running|done|failed|cancelled|all] [--json]
+  queue complete     --id ACTION_ID [--result TEXT] [--json]
+  queue fail         --id ACTION_ID [--error TEXT] [--json]
+  queue count        [--status queued|running|done|failed|cancelled] [--json]
   state get
   state clear
   measure stop-rate   [--snapshots-dir PATH] [--pretty]
@@ -102,6 +112,7 @@ Subcommands:
 
 import argparse
 import copy
+import fcntl
 import hashlib
 import json
 import re
@@ -111,8 +122,10 @@ import subprocess
 import sys
 import glob
 import tarfile
+import tempfile
 import time
 import unicodedata
+import uuid
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -637,6 +650,280 @@ def _workflow_state_atomic_write(path: Path, payload):
     os.replace(tmp_path, path)
 
 
+def _queue_path() -> Path:
+    path = _skill_state_base_dir() / "pending.ndjson"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _queue_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
+    entries: list[dict] = []
+    for line in raw_lines:
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            entries.append(value)
+    return entries
+
+
+def _queue_build_entry(data: dict) -> dict:
+    return {
+        "id": uuid.uuid4().hex,
+        "skill": str(data.get("skill", "")),
+        "args": str(data.get("args", "")),
+        "source_skill": str(data.get("source_skill", "")),
+        "source_id": str(data.get("source_id", "")),
+        "resource_id": str(data.get("resource_id", "")),
+        "auto": bool(data.get("auto", False)),
+        "status": "queued",
+        "created_at": _queue_timestamp(),
+        "consumed_at": None,
+        "completed_at": None,
+        "error": None,
+        "result": None,
+    }
+
+
+def _queue_read_entries() -> list[dict]:
+    path = _queue_path()
+    if not path.exists():
+        return []
+
+    with open(path, "r", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+        try:
+            return _queue_parse_entries(f.read().splitlines())
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def _queue_compact(mutator):
+    path = _queue_path()
+    if not path.exists():
+        return mutator([])[1]
+
+    with open(path, "r+", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            entries = _queue_parse_entries(f.read().splitlines())
+            new_entries, result = mutator(entries)
+
+            tmp_name = None
+            try:
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    delete=False,
+                    dir=str(path.parent),
+                    prefix=".pending.",
+                    suffix=".tmp",
+                )
+                tmp_name = tmp.name
+                for entry in new_entries:
+                    tmp.write(_compact_json(entry) + "\n")
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                tmp.close()
+                os.replace(tmp_name, path)
+            except Exception:
+                if tmp_name:
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+                raise
+            return result
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def queue_enqueue(data: dict) -> dict:
+    entry = _queue_build_entry(data)
+    path = _queue_path()
+    line = _compact_json(entry) + "\n"
+
+    with open(path, "a", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    return entry
+
+
+def queue_peek() -> dict | None:
+    for entry in _queue_read_entries():
+        if entry.get("status") == "queued":
+            return copy.deepcopy(entry)
+    return None
+
+
+def queue_pop() -> dict | None:
+    now = _queue_timestamp()
+
+    def _mutator(entries):
+        for entry in entries:
+            if entry.get("status") == "queued":
+                entry["status"] = "running"
+                entry["consumed_at"] = now
+                return entries, copy.deepcopy(entry)
+        return entries, None
+
+    return _queue_compact(_mutator)
+
+
+def queue_list(status: str | None) -> list[dict]:
+    entries = _queue_read_entries()
+    if not status or status == "all":
+        return entries
+    return [entry for entry in entries if entry.get("status") == status]
+
+
+def queue_complete(action_id: str, result: str | None = None) -> dict | None:
+    now = _queue_timestamp()
+    warn = None
+
+    def _mutator(entries):
+        nonlocal warn
+        for entry in entries:
+            if entry.get("id") != action_id:
+                continue
+            status = str(entry.get("status", ""))
+            if status in ("done", "failed"):
+                warn = f"already terminal: {action_id}"
+                return entries, copy.deepcopy(entry)
+            entry["status"] = "done"
+            entry["completed_at"] = now
+            if result is not None:
+                entry["result"] = result
+            return entries, copy.deepcopy(entry)
+        warn = f"action not found: {action_id}"
+        return entries, None
+
+    output = _queue_compact(_mutator)
+    if warn:
+        print(f"[mst] warning: {warn}", file=sys.stderr)
+    return output
+
+
+def queue_fail(action_id: str, error: str | None = None) -> dict | None:
+    now = _queue_timestamp()
+    warn = None
+
+    def _mutator(entries):
+        nonlocal warn
+        for entry in entries:
+            if entry.get("id") != action_id:
+                continue
+            status = str(entry.get("status", ""))
+            if status in ("done", "failed"):
+                warn = f"already terminal: {action_id}"
+                return entries, copy.deepcopy(entry)
+            entry["status"] = "failed"
+            entry["completed_at"] = now
+            if error is not None:
+                entry["error"] = error
+            return entries, copy.deepcopy(entry)
+        warn = f"action not found: {action_id}"
+        return entries, None
+
+    output = _queue_compact(_mutator)
+    if warn:
+        print(f"[mst] warning: {warn}", file=sys.stderr)
+    return output
+
+
+def queue_count(status: str = "queued") -> int:
+    return len(queue_list(status))
+
+
+def _print_queue_value(value, as_json: bool):
+    if value is None:
+        print("null")
+        return
+
+    if as_json:
+        print(_compact_json(value))
+        return
+
+    if isinstance(value, list):
+        if not value:
+            print("(empty)")
+            return
+        for entry in value:
+            print(
+                f"{entry.get('id', '')}  {entry.get('status', '')}  "
+                f"{entry.get('skill', '')}  {entry.get('args', '')}"
+            )
+        return
+
+    print(
+        f"{value.get('id', '')}  {value.get('status', '')}  "
+        f"{value.get('skill', '')}  {value.get('args', '')}"
+    )
+
+
+def cmd_queue_enqueue(args):
+    entry = queue_enqueue(
+        {
+            "skill": args.skill,
+            "args": args.args,
+            "source_skill": args.source_skill,
+            "source_id": args.source_id,
+            "resource_id": args.resource_id,
+            "auto": args.auto,
+        }
+    )
+    _print_queue_value(entry, args.json)
+    return 0
+
+
+def cmd_queue_peek(args):
+    _print_queue_value(queue_peek(), args.json)
+    return 0
+
+
+def cmd_queue_pop(args):
+    _print_queue_value(queue_pop(), args.json)
+    return 0
+
+
+def cmd_queue_list(args):
+    _print_queue_value(queue_list(args.status), args.json)
+    return 0
+
+
+def cmd_queue_complete(args):
+    _print_queue_value(queue_complete(args.id, result=args.result), args.json)
+    return 0
+
+
+def cmd_queue_fail(args):
+    _print_queue_value(queue_fail(args.id, error=args.error), args.json)
+    return 0
+
+
+def cmd_queue_count(args):
+    count = queue_count(args.status)
+    if args.json:
+        print(_compact_json({"status": args.status, "count": count}))
+    else:
+        print(count)
+    return 0
+
+
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     state_path = _workflow_state_file(state_base_dir)
@@ -717,6 +1004,24 @@ def cmd_state_set_workflow(args):
 
         payload["next_action"] = next_action
         _workflow_state_atomic_write(state_path, payload)
+
+        if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
+            na = payload.get("next_action", {})
+            if isinstance(na, dict) and na.get("expected_skill"):
+                try:
+                    queue_enqueue(
+                        {
+                            "skill": str(na.get("expected_skill", "")),
+                            "args": "",
+                            "source_skill": str(na.get("source_skill", "")),
+                            "source_id": str(na.get("source_id", "")),
+                            "resource_id": str(na.get("source_id", "")),
+                            "auto": bool(na.get("auto_mode", na.get("auto", False))),
+                        }
+                    )
+                except Exception as queue_exc:
+                    print(f"[mst] warning: failed to enqueue next_action: {queue_exc}", file=sys.stderr)
+
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     except Exception as exc:
         print(f"[mst] warning: failed to update workflow state: {exc}", file=sys.stderr)
@@ -6588,11 +6893,57 @@ def build_parser():
     state_set_workflow.add_argument("--next-source", dest="next_source", default="")
     state_set_workflow.add_argument("--source-skill", dest="source_skill", default="")
     state_set_workflow.add_argument("--auto", type=_parse_bool_arg, default=False)
+    state_set_workflow.add_argument("--enqueue", type=_parse_bool_arg, default=False)
     state_set_workflow.add_argument("--agile-loop-active", dest="agile_loop_active", type=_parse_bool_arg)
     state_set_workflow.add_argument("--steering-disabled", dest="steering_disabled", type=_parse_bool_arg)
 
     state_sub.add_parser("get")
     state_sub.add_parser("clear")
+
+    # --- queue ---
+    queue = sub.add_parser("queue")
+    queue_sub = queue.add_subparsers(dest="subcommand")
+
+    queue_enqueue_cmd = queue_sub.add_parser("enqueue")
+    queue_enqueue_cmd.add_argument("--skill", required=True)
+    queue_enqueue_cmd.add_argument("--args", required=True)
+    queue_enqueue_cmd.add_argument("--source-skill", dest="source_skill", default="")
+    queue_enqueue_cmd.add_argument("--source-id", dest="source_id", default="")
+    queue_enqueue_cmd.add_argument("--resource-id", dest="resource_id", default="")
+    queue_enqueue_cmd.add_argument("--auto", type=_parse_bool_arg, default=False)
+    queue_enqueue_cmd.add_argument("--json", action="store_true")
+
+    queue_peek_cmd = queue_sub.add_parser("peek")
+    queue_peek_cmd.add_argument("--json", action="store_true")
+
+    queue_pop_cmd = queue_sub.add_parser("pop")
+    queue_pop_cmd.add_argument("--json", action="store_true")
+
+    queue_list_cmd = queue_sub.add_parser("list")
+    queue_list_cmd.add_argument(
+        "--status",
+        choices=["queued", "running", "done", "failed", "cancelled", "all"],
+        default="all",
+    )
+    queue_list_cmd.add_argument("--json", action="store_true")
+
+    queue_complete_cmd = queue_sub.add_parser("complete")
+    queue_complete_cmd.add_argument("--id", required=True)
+    queue_complete_cmd.add_argument("--result", default=None)
+    queue_complete_cmd.add_argument("--json", action="store_true")
+
+    queue_fail_cmd = queue_sub.add_parser("fail")
+    queue_fail_cmd.add_argument("--id", required=True)
+    queue_fail_cmd.add_argument("--error", default=None)
+    queue_fail_cmd.add_argument("--json", action="store_true")
+
+    queue_count_cmd = queue_sub.add_parser("count")
+    queue_count_cmd.add_argument(
+        "--status",
+        choices=["queued", "running", "done", "failed", "cancelled"],
+        default="queued",
+    )
+    queue_count_cmd.add_argument("--json", action="store_true")
 
     # --- measure ---
     measure = sub.add_parser("measure")
@@ -7099,6 +7450,13 @@ def main():
         ("state", "set-workflow"): cmd_state_set_workflow,
         ("state", "get"): cmd_state_get,
         ("state", "clear"): cmd_state_clear,
+        ("queue", "enqueue"): cmd_queue_enqueue,
+        ("queue", "peek"): cmd_queue_peek,
+        ("queue", "pop"): cmd_queue_pop,
+        ("queue", "list"): cmd_queue_list,
+        ("queue", "complete"): cmd_queue_complete,
+        ("queue", "fail"): cmd_queue_fail,
+        ("queue", "count"): cmd_queue_count,
         ("measure", "stop-rate"): cmd_measure_stop_rate,
         ("plan", "list"): cmd_plan_list,
         ("plan", "count"): cmd_plan_count,
