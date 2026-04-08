@@ -473,6 +473,16 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
 
 ##### 1A.10 objective.md + details/*.md 저장
 
+###### evidence 필드별 강제 시점 표
+
+| 필드 | plan-time | sprint-runtime | sprint-end |
+|------|-----------|----------------|------------|
+| `artifact_paths` | 필수 (자동 채움) | - | 파일 실존 검증 |
+| `entrypoint_path` | 필수 (`entrypoint: none` + `reason` 예외 허용) | - | grep 실매칭 검증 |
+| `integration_smoke_id` | 예약 필수 (ID + user flow + 성공의도) | 선택 보강 | tests/ 실존 경로 강제 |
+| `verify_cmd` | 골격 필수 (비대화식 실행 정의) | 실제 명령 확정 | 실행 + 신호 매칭, `true`/`exit 0`/`echo` 단독 거부 |
+| `expected_signal` | TBD 허용 | TBD 해소 | 정규식/문자열 매칭 |
+
 `templates/objective.md` 포맷으로 아래 경로에 저장:
 
 ```

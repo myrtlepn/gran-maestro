@@ -58,6 +58,7 @@ Subcommands:
   agile integration-review <AGI-ID> --sprint N [--depth N] [--threshold N] [--escape-reason TEXT] [--reference-pattern REGEX] [--json]
   agile alignment-package <AGI-ID> --sprint N [--depth N] [--json]
   agile detail validate-mapping <details_path> [--json]
+  agile detail validate-evidence <details_path> [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
@@ -2147,6 +2148,8 @@ _SOURCE_MAPPING_RE = re.compile(
 )
 _H12_HEADER_RE = re.compile(r"^(#{1,2})\s+(.+?)$", flags=re.MULTILINE)
 _CHUNK_MARKER_RE = re.compile(r"<!-- chunk:(\d+) -->")
+_EVIDENCE_LEGACY_WARNING = "evidence fields not defined (legacy format)"
+_GOODHART_DUMMY_VERIFY_ERROR = "Goodhart linter: verify_cmd rejected (dummy command)"
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -2207,6 +2210,311 @@ def parse_source_mapping(text: str) -> dict:
     result["sections"] = sections
     result["valid"] = True
     return result
+
+
+def _strip_balanced_quotes(value: str) -> str:
+    token = str(value).strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
+        return token[1:-1].strip()
+    return token
+
+
+def _extract_frontmatter_block(content: str) -> dict:
+    lines = str(content).splitlines(keepends=True)
+    payload = {
+        "has_frontmatter": False,
+        "frontmatter": "",
+        "prefix": "",
+        "suffix": str(content),
+        "errors": [],
+    }
+    if not lines:
+        return payload
+
+    probe_index = 0
+    first_line = lines[0].strip()
+    if _SOURCE_MAPPING_RE.fullmatch(first_line):
+        probe_index = 1
+
+    while probe_index < len(lines) and not lines[probe_index].strip():
+        probe_index += 1
+
+    if probe_index >= len(lines) or lines[probe_index].strip() != "---":
+        return payload
+
+    for end_index in range(probe_index + 1, len(lines)):
+        if lines[end_index].strip() != "---":
+            continue
+        payload["has_frontmatter"] = True
+        payload["frontmatter"] = "".join(lines[probe_index + 1:end_index])
+        payload["prefix"] = "".join(lines[:probe_index])
+        payload["suffix"] = "".join(lines[end_index + 1:])
+        return payload
+
+    payload["errors"].append("frontmatter block is malformed")
+    return payload
+
+
+def _extract_yaml_scalar(frontmatter: str, key: str):
+    pattern = re.compile(rf"(?m)^[ \t]*{re.escape(str(key))}[ \t]*:[ \t]*([^\n\r]*)[ \t]*$")
+    match = pattern.search(str(frontmatter))
+    if match is None:
+        return None
+    return _strip_balanced_quotes(match.group(1))
+
+
+def _extract_yaml_list(frontmatter: str, key: str):
+    lines = str(frontmatter).splitlines()
+    key_re = re.compile(rf"^(\s*){re.escape(str(key))}\s*:\s*(.*?)\s*$")
+    item_re = re.compile(r"^\s*-\s*(.*?)\s*$")
+
+    for index, line in enumerate(lines):
+        key_match = key_re.match(line)
+        if key_match is None:
+            continue
+
+        inline = key_match.group(2).strip()
+        if inline:
+            if inline.startswith("[") and inline.endswith("]"):
+                tokens, token_errors = _parse_source_mapping_sections(inline[1:-1])
+                return [] if token_errors else tokens
+            parsed = _strip_balanced_quotes(inline)
+            return [parsed] if parsed else []
+
+        key_indent = len(key_match.group(1))
+        items = []
+        probe = index + 1
+        while probe < len(lines):
+            next_line = lines[probe]
+            if not next_line.strip():
+                probe += 1
+                continue
+            leading_spaces = len(next_line) - len(next_line.lstrip(" "))
+            if leading_spaces <= key_indent:
+                break
+            item_match = item_re.match(next_line)
+            if item_match is None:
+                break
+            token = _strip_balanced_quotes(item_match.group(1))
+            if token:
+                items.append(token)
+            probe += 1
+        return items
+    return None
+
+
+def _normalize_tbd(value):
+    if value is None:
+        return "TBD"
+    token = str(value).strip()
+    if not token or token.upper() == "TBD":
+        return "TBD"
+    return token
+
+
+def _is_dummy_verify_cmd(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(value).strip().lower())
+    if normalized in {"true", "exit 0"}:
+        return True
+    if not normalized.startswith("echo"):
+        return False
+    shell_control_tokens = ("&&", "||", ";", "|", "`", "$(")
+    return not any(token in normalized for token in shell_control_tokens)
+
+
+def parse_agile_detail_metadata(content: str) -> dict:
+    source_mapping = parse_source_mapping(content)
+    frontmatter = _extract_frontmatter_block(content)
+    evidence = {}
+
+    artifact_paths = _extract_yaml_list(frontmatter.get("frontmatter"), "artifact_paths")
+    entrypoint_path = _extract_yaml_scalar(frontmatter.get("frontmatter"), "entrypoint_path")
+    entrypoint = _extract_yaml_scalar(frontmatter.get("frontmatter"), "entrypoint")
+    reason = _extract_yaml_scalar(frontmatter.get("frontmatter"), "reason")
+    integration_smoke_id = _extract_yaml_scalar(frontmatter.get("frontmatter"), "integration_smoke_id")
+    verify_cmd = _extract_yaml_scalar(frontmatter.get("frontmatter"), "verify_cmd")
+    expected_signal = _extract_yaml_scalar(frontmatter.get("frontmatter"), "expected_signal")
+
+    has_plan_fields = any(
+        field is not None
+        for field in (artifact_paths, entrypoint_path, entrypoint, reason)
+    )
+    has_runtime_fields = any(
+        field is not None
+        for field in (integration_smoke_id, verify_cmd, expected_signal)
+    )
+
+    if has_plan_fields:
+        plan = {}
+        if artifact_paths is not None:
+            plan["artifact_paths"] = artifact_paths
+        if entrypoint_path is not None:
+            plan["entrypoint_path"] = entrypoint_path
+        if entrypoint is not None:
+            plan["entrypoint"] = entrypoint
+        if reason is not None:
+            plan["reason"] = reason
+        evidence["plan"] = plan
+
+    if has_runtime_fields:
+        runtime = {}
+        if integration_smoke_id is not None:
+            runtime["integration_smoke_id"] = integration_smoke_id
+        if verify_cmd is not None:
+            runtime["verify_cmd"] = verify_cmd
+        if expected_signal is not None:
+            runtime["expected_signal"] = expected_signal
+        evidence["runtime"] = runtime
+
+    return {
+        "source_mapping": source_mapping,
+        "evidence": evidence,
+        "has_frontmatter": bool(frontmatter.get("has_frontmatter")),
+        "errors": list(frontmatter.get("errors") or []),
+    }
+
+
+def _yaml_quote(value: str) -> str:
+    token = str(value)
+    if not token:
+        return '""'
+    if re.fullmatch(r"[A-Za-z0-9_./:\-]+", token):
+        return token
+    return json.dumps(token, ensure_ascii=False)
+
+
+def _render_agile_detail_evidence_frontmatter(evidence: dict) -> str:
+    plan = evidence.get("plan") if isinstance(evidence, dict) else {}
+    runtime = evidence.get("runtime") if isinstance(evidence, dict) else {}
+    plan = plan if isinstance(plan, dict) else {}
+    runtime = runtime if isinstance(runtime, dict) else {}
+
+    artifact_paths = plan.get("artifact_paths")
+    if not isinstance(artifact_paths, list):
+        artifact_paths = []
+
+    lines = [
+        "---",
+        "evidence:",
+        "  plan:",
+        "    artifact_paths:",
+    ]
+    for item in artifact_paths:
+        lines.append(f"      - {_yaml_quote(str(item).strip())}")
+
+    entrypoint_tag = str(plan.get("entrypoint") or "").strip().lower()
+    reason = str(plan.get("reason") or "").strip()
+    entrypoint_path = str(plan.get("entrypoint_path") or "").strip()
+    if entrypoint_tag == "none":
+        lines.append("    entrypoint: none")
+        lines.append(f"    reason: {_yaml_quote(reason)}")
+    else:
+        lines.append(f"    entrypoint_path: {_yaml_quote(entrypoint_path)}")
+
+    lines.extend(
+        [
+            "  runtime:",
+            f"    integration_smoke_id: {_yaml_quote(_normalize_tbd(runtime.get('integration_smoke_id')))}",
+            f"    verify_cmd: {_yaml_quote(_normalize_tbd(runtime.get('verify_cmd')))}",
+            f"    expected_signal: {_yaml_quote(_normalize_tbd(runtime.get('expected_signal')))}",
+            "---",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def upsert_agile_detail_evidence(content: str, evidence: dict) -> str:
+    text = str(content)
+    replacement_frontmatter = _render_agile_detail_evidence_frontmatter(evidence)
+    frontmatter = _extract_frontmatter_block(text)
+    if frontmatter.get("errors"):
+        raise ValueError("; ".join(str(err) for err in frontmatter["errors"]))
+
+    if frontmatter.get("has_frontmatter"):
+        return f"{frontmatter.get('prefix')}{replacement_frontmatter}{frontmatter.get('suffix')}"
+
+    lines = text.splitlines(keepends=True)
+    if lines and _SOURCE_MAPPING_RE.fullmatch(lines[0].strip()):
+        head = lines[0]
+        tail = "".join(lines[1:])
+        return f"{head}{replacement_frontmatter}{tail}"
+
+    return f"{replacement_frontmatter}{text}"
+
+
+def validate_agile_detail_evidence(parsed_metadata: dict) -> dict:
+    warnings = []
+    errors = list(parsed_metadata.get("errors") or [])
+    evidence = parsed_metadata.get("evidence") if isinstance(parsed_metadata, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+
+    if not evidence:
+        warnings.append(_EVIDENCE_LEGACY_WARNING)
+        return {
+            "valid": len(errors) == 0,
+            "warnings": warnings,
+            "errors": errors,
+            "legacy": True,
+            "evidence": {},
+        }
+
+    plan = evidence.get("plan") if isinstance(evidence.get("plan"), dict) else {}
+    runtime = evidence.get("runtime") if isinstance(evidence.get("runtime"), dict) else {}
+
+    artifact_paths = plan.get("artifact_paths")
+    normalized_artifacts = []
+    if isinstance(artifact_paths, list):
+        for item in artifact_paths:
+            token = str(item).strip()
+            if token:
+                normalized_artifacts.append(token)
+    elif artifact_paths is not None:
+        token = str(artifact_paths).strip()
+        if token:
+            normalized_artifacts = [token]
+
+    if not normalized_artifacts:
+        errors.append("artifact_paths missing")
+
+    entrypoint_path = str(plan.get("entrypoint_path") or "").strip()
+    entrypoint = str(plan.get("entrypoint") or "").strip().lower()
+    reason = str(plan.get("reason") or "").strip()
+    if not entrypoint_path:
+        if entrypoint == "none":
+            if not reason:
+                errors.append("entrypoint reason missing")
+        else:
+            errors.append("entrypoint_path missing")
+            errors.append("For exceptions, use entrypoint: none + reason")
+
+    normalized_runtime = {
+        "integration_smoke_id": _normalize_tbd(runtime.get("integration_smoke_id")),
+        "verify_cmd": _normalize_tbd(runtime.get("verify_cmd")),
+        "expected_signal": _normalize_tbd(runtime.get("expected_signal")),
+    }
+    if normalized_runtime["verify_cmd"] != "TBD" and _is_dummy_verify_cmd(normalized_runtime["verify_cmd"]):
+        errors.append(_GOODHART_DUMMY_VERIFY_ERROR)
+
+    normalized_plan = {
+        "artifact_paths": normalized_artifacts,
+    }
+    if entrypoint_path:
+        normalized_plan["entrypoint_path"] = entrypoint_path
+    if entrypoint == "none":
+        normalized_plan["entrypoint"] = "none"
+        normalized_plan["reason"] = reason
+
+    return {
+        "valid": len(errors) == 0,
+        "warnings": warnings,
+        "errors": errors,
+        "legacy": False,
+        "evidence": {
+            "plan": normalized_plan,
+            "runtime": normalized_runtime,
+        },
+    }
 
 
 def _slugify_header_text(text: str) -> str:
@@ -3295,6 +3603,29 @@ def _emit_source_mapping_payload(payload: dict, as_json: bool):
     print(f"Errors: {'; '.join(str(item) for item in errors) if errors else 'none'}")
 
 
+def _emit_evidence_validation_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    print(f"Path: {payload.get('path')}")
+    print(f"Valid: {'true' if payload.get('valid') else 'false'}")
+    print(f"Legacy: {'true' if payload.get('legacy') else 'false'}")
+
+    source_mapping = payload.get("source_mapping") or {}
+    print(f"Source Mapping Valid: {'true' if source_mapping.get('valid') else 'false'}")
+    print(f"Source Original: {source_mapping.get('original') or '-'}")
+    source_sections = source_mapping.get("sections") or []
+    print(f"Source Sections: {', '.join(str(item) for item in source_sections) if source_sections else '-'}")
+
+    evidence = payload.get("evidence") or {}
+    print(f"Evidence: {'present' if evidence else 'none'}")
+    warnings = payload.get("warnings") or []
+    print(f"Warnings: {'; '.join(str(item) for item in warnings) if warnings else 'none'}")
+    errors = payload.get("errors") or []
+    print(f"Errors: {'; '.join(str(item) for item in errors) if errors else 'none'}")
+
+
 def _emit_coverage_check_payload(payload: dict, as_json: bool):
     if as_json:
         print(json.dumps(payload, ensure_ascii=False))
@@ -3613,6 +3944,74 @@ def cmd_agile_detail_validate_mapping(args):
     return 0 if payload["valid"] else 1
 
 
+def cmd_agile_detail_validate_evidence(args):
+    details_path = str(args.details_path)
+    details_file = Path(details_path)
+    if not details_file.exists():
+        payload = {
+            "path": details_path,
+            "valid": False,
+            "legacy": False,
+            "source_mapping": _source_mapping_failure_payload(details_path, f"file not found: {details_path}"),
+            "evidence": {},
+            "warnings": [],
+            "errors": [f"file not found: {details_path}"],
+        }
+        _emit_evidence_validation_payload(payload, args.json)
+        print(payload["errors"][0], file=sys.stderr)
+        return 1
+    if not details_file.is_file():
+        payload = {
+            "path": details_path,
+            "valid": False,
+            "legacy": False,
+            "source_mapping": _source_mapping_failure_payload(details_path, f"not a file: {details_path}"),
+            "evidence": {},
+            "warnings": [],
+            "errors": [f"not a file: {details_path}"],
+        }
+        _emit_evidence_validation_payload(payload, args.json)
+        print(payload["errors"][0], file=sys.stderr)
+        return 1
+
+    try:
+        content = details_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = f"failed to read file: {exc}"
+        payload = {
+            "path": details_path,
+            "valid": False,
+            "legacy": False,
+            "source_mapping": _source_mapping_failure_payload(details_path, reason),
+            "evidence": {},
+            "warnings": [],
+            "errors": [reason],
+        }
+        _emit_evidence_validation_payload(payload, args.json)
+        print(reason, file=sys.stderr)
+        return 1
+
+    parsed = parse_agile_detail_metadata(content)
+    validation = validate_agile_detail_evidence(parsed)
+    payload = {
+        "path": details_path,
+        "valid": bool(validation.get("valid")),
+        "legacy": bool(validation.get("legacy")),
+        "source_mapping": parsed.get("source_mapping"),
+        "evidence": validation.get("evidence"),
+        "warnings": validation.get("warnings", []),
+        "errors": validation.get("errors", []),
+    }
+    _emit_evidence_validation_payload(payload, args.json)
+
+    for warning in payload["warnings"]:
+        print(str(warning), file=sys.stderr)
+    for error in payload["errors"]:
+        print(str(error), file=sys.stderr)
+
+    return 0 if payload["valid"] else 1
+
+
 def cmd_agile_detail_append(args):
     target_dir = Path(str(args.target_dir)).resolve()
     target_path = target_dir / f"{args.domain}.md"
@@ -3661,11 +4060,12 @@ def cmd_agile_detail(args):
     subcommand = getattr(args, "detail_subcommand", None)
     dispatch = {
         "validate-mapping": cmd_agile_detail_validate_mapping,
+        "validate-evidence": cmd_agile_detail_validate_evidence,
         "append": cmd_agile_detail_append,
     }
     fn = dispatch.get(subcommand)
     if fn is None:
-        print("Error: detail subcommand is required (validate-mapping|append)", file=sys.stderr)
+        print("Error: detail subcommand is required (validate-mapping|validate-evidence|append)", file=sys.stderr)
         return 1
     return fn(args)
 
@@ -7612,6 +8012,10 @@ def build_parser():
     agile_detail_validate_mapping = agile_detail_sub.add_parser("validate-mapping")
     agile_detail_validate_mapping.add_argument("details_path")
     agile_detail_validate_mapping.add_argument("--json", action="store_true")
+
+    agile_detail_validate_evidence = agile_detail_sub.add_parser("validate-evidence")
+    agile_detail_validate_evidence.add_argument("details_path")
+    agile_detail_validate_evidence.add_argument("--json", action="store_true")
 
     agile_detail_append = agile_detail_sub.add_parser("append")
     agile_detail_append.add_argument("--domain", required=True)
