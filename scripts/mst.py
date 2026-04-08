@@ -5380,7 +5380,7 @@ def cmd_agile_unlock(args):
     payload["dod_id"] = dod_id
 
     unlock_cfg = _load_agile_unlock_config()
-    if not bool(unlock_cfg.get("enabled", False)):
+    if not bool(unlock_cfg.get("enabled", True)):
         return _fail("unlock disabled by config")
 
     reason_error = _validate_unlock_reason(args.reason, _load_unlock_forbidden_patterns(unlock_cfg))
@@ -5656,7 +5656,7 @@ def cmd_agile_recall(args):
         return _fail("reason must be fail or drift")
 
     recall_cfg = _load_agile_recall_config()
-    enabled = bool(recall_cfg.get("enabled", False))
+    enabled = bool(recall_cfg.get("enabled", True))
     if not enabled:
         payload["status"] = "SKIP"
         payload["warnings"].append("recall disabled (agile.recall.enabled=false)")
@@ -5979,7 +5979,7 @@ def cmd_agile_drift_check(args):
             return 1
 
     drift_cfg = _load_agile_drift_config()
-    enabled = bool(drift_cfg.get("enabled", False))
+    enabled = bool(drift_cfg.get("enabled", True))
     try:
         warn_streak_limit = int(drift_cfg.get("warn_streak_limit", 2))
     except (TypeError, ValueError):
@@ -6158,7 +6158,7 @@ def cmd_agile_evidence_check(args):
             return 1
 
     evidence_gate_cfg = _load_agile_evidence_gate_config()
-    gate_enabled = bool(evidence_gate_cfg.get("enabled", False))
+    gate_enabled = bool(evidence_gate_cfg.get("enabled", True))
     project_root = BASE_DIR.parent
 
     payload = {

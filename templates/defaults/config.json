@@ -50,16 +50,16 @@
     "round_history_max_summary_lines": 50,
     "coverage_threshold": 0.85,
     "evidence_gate": {
-      "enabled": false,
+      "enabled": true,
       "required_globs": []
     },
     "drift": {
-      "enabled": false,
+      "enabled": true,
       "threshold": 0.7,
       "warn_streak_limit": 2
     },
     "recall": {
-      "enabled": false,
+      "enabled": true,
       "cooldown_ratio": 0.1,
       "cooldown_floor": 1,
       "cooldown_ceiling": 4,
@@ -71,7 +71,7 @@
       "patch_budget_ratio": 0.2
     },
     "unlock": {
-      "enabled": false,
+      "enabled": true,
       "reason_min_length": 20,
       "reason_max_length": 500,
       "forbidden_patterns": [

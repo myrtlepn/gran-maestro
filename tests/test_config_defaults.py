@@ -10,16 +10,16 @@ MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 
 EXPECTED_AGILE_DEFAULTS = {
     "evidence_gate": {
-        "enabled": False,
+        "enabled": True,
         "required_globs": [],
     },
     "drift": {
-        "enabled": False,
+        "enabled": True,
         "threshold": 0.7,
         "warn_streak_limit": 2,
     },
     "recall": {
-        "enabled": False,
+        "enabled": True,
         "cooldown_ratio": 0.10,
         "cooldown_floor": 1,
         "cooldown_ceiling": 4,
@@ -31,7 +31,7 @@ EXPECTED_AGILE_DEFAULTS = {
         "patch_budget_ratio": 0.20,
     },
     "unlock": {
-        "enabled": False,
+        "enabled": True,
         "reason_min_length": 20,
         "reason_max_length": 500,
         "forbidden_patterns": ["lgtm", "ok", "fix"],
