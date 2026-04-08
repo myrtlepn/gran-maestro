@@ -4,6 +4,35 @@
 
 ---
 
+## [0.57.0] — 2026-04-08
+
+> **agile 스킬 통합 결여 해결 — "Sprint가 사용자에게 전달할 수 있는 변화"를 단위로 삼는 재프레이밍**
+>
+> slide-craft 사례(Sprint 추적상 DoD done 22/22인데 실제 플러그인 미동작)처럼 "격리된 단위 헬퍼만 만들고 통합 없이 done 처리되는" 패턴을 구조적으로 차단합니다.
+
+### 새 기능
+
+- **Sprint 종류 자기선언 + 지연 승격**: 모든 Sprint는 `user_observable`(사용자가 이제 볼/할 수 있는 변화 포함) 또는 `foundational`(기반 작업, 사용자 관찰 불가) 중 하나로 자기선언합니다. `foundational` Sprint에 포함된 DoD는 `proposed_done`으로 대기하고, 첫 번째 후속 `user_observable` Sprint 완료 시 `--deferred-promote`로 일괄 `done` 승격됩니다. `foundational` 연속 한도는 2(Sprint 0 제외).
+- **누적 통합 리뷰 (2.2.0.7)**: Sprint 시작 시 직전 3 Sprint의 변경 파일을 `modify / wire / new-island` 3분류로 판정합니다. `new_island` 비율이 `agile.new_island_threshold`(기본 0.20)를 초과하면 이번 Sprint를 강제로 "통합(wire) 작업"으로 전환하여 새 DoD 진행보다 기존 산출물 통합을 우선합니다.
+- **기획-구현 정합성 점검 (2.2.0.8)**: 누적 통합 리뷰 직후 PM이 3축(DoD-변경 매핑/DoD 현실 가능성/기획 노후화)으로 판정합니다. `objective_stale` 판정 시 비상 스티어링 강제 진입으로 `objective.md` 재계획을 요구합니다.
+- **plan -a `[누적층]` 컨텍스트**: `mst:plan -a` 호출 시 직전 K Sprint의 통합 컨텍스트 파일(`integration-context.md`)을 **필수 Read 대상**으로 전달합니다. plan은 이 파일을 기반으로 "이전 산출물 위에 쌓을지 / 고칠지 / 엮을지"를 결정합니다.
+- **스티어링 보고서 통합 건강 지표**: 정기 스티어링 체크포인트에서 직전 K Sprint 분류 비율, 연속 user_observable/foundational Sprint 수, `proposed_done` 대기 DoD 수, alignment 판정 분포, Escape Hatch override 횟수를 한 섹션으로 표시합니다.
+- **결정론 헬퍼 2종**: `mst.py agile integration-review`(3분류 + verdict + integration-context.md 자동 생성) / `mst.py agile alignment-package`(objective + 누적 결과 경로 JSON 패키지). 각 헬퍼는 git 상태만으로 결정론적 출력을 보장하여 pytest 회귀 11건으로 전수 검증됩니다.
+
+### 개선
+
+- **PM Escape Hatch**: `integration-review`가 false positive를 낼 수 있는 환경(동적 import/매크로 기반 언어 등)을 고려해, PM이 `auto-decisions.md` 또는 `retrospective.md`에 명시적 사유를 기록한 경우에만 verdict 무시를 허용합니다. 사유 없는 무시와 연속 2회 이상 override는 금지 패턴으로 명시됩니다.
+- **agile-plan 1A.7 가드레일 5중 확장**: DoD 작성 시 "이 DoD가 어떤 Sprint에서 사용자 관찰 가능하게 만들어질 것인가?" 사고 프롬프트를 추가합니다 (비차단, quality-gate-log 메타데이터 권장).
+- **config agile 키 4개 추가**: `integration_review_depth=3`, `new_island_threshold=0.20`, `foundational_streak_max=2`, `integration_wire_streak_max=3`.
+
+### 호환성 / 마이그레이션
+
+- 진행 중인 AGI 세션은 **자동 마이그레이션되지 않습니다.** 기존 `done` 상태 DoD는 그대로 유지되며 강등되지 않습니다.
+- 새 룰(Sprint 자기선언, 통합 부채 게이트, alignment check)을 적용하려면 **새 AGI 세션을 시작**하세요. 기존 세션을 그대로 진행하면 기존 룰로 계속 동작합니다.
+- `agile objective-transition`, `agile result` 등 기존 명령의 신규 인자(`--sprint-kind`, `--deferred-promote`)는 모두 선택적이며, 미지정 시 기존 동작을 그대로 유지합니다 (하위 호환).
+
+---
+
 ## [0.56.2] — 2026-04-05
 
 ### 새 기능

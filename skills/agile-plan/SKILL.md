@@ -354,12 +354,13 @@ soft limit:
 3. `결과=fail`인 DoD만 `<details>`로 상세(`기준명`, `미충족 사유`)를 추가한다.
 4. 모든 DoD가 9개 기준 전체 pass일 때만 다음 단계로 진행한다.
 
-##### 1A.7 4중 가드레일 검증 (MANDATORY)
+##### 1A.7 5중 가드레일 검증 (MANDATORY)
 
 1. **How-free (DoD 전용)**: DoD 항목에 구현 방법(API 엔드포인트, 함수명, 파일명, 기술 스택)이 포함되면 거부하고 관찰 가능한 결과 문장으로 재질문한다. 단, `## 설계 결정 (Architecture Decisions)` 및 `objective/details/*.md`에서는 기술 상세를 허용한다.
 2. **범위 가이드**: DoD 수량은 추천 범위(`dod_count_min`/`dod_count_max`, 기본 5~15)를 안내하되 차단하지 않는다
 3. **So-that 검증**: 각 DoD가 `X 한다, so that 사용자는 Y 할 수 있다`로 연결되는지 확인
 4. **Sprint 동결**: 진행 중 Sprint의 체크리스트 변경 금지, 변경은 스티어링 체크포인트에서만 반영
+5. **Observable-by-Sprint 사고 프롬프트** (비차단): 각 DoD에 대해 PM은 내부적으로 다음 질문을 점검한다 - "이 DoD가 사용자 관찰 가능하게 만들어지는 Sprint는 어떤 형태인가?" (사용자 진입점 1개 이상이 추가/변경되는 Sprint, 또는 기존 진입점의 동작이 가시적으로 변하는 Sprint). 답이 모호하거나 "단위 헬퍼만"으로 끝나면 DoD를 더 작게 분해하거나 통합 진입점과 연결되도록 보강할 것을 권장한다. 답이 모호해도 저장은 허용하되, `quality-gate-log.md`에 `observable_by_sprint: unclear` 메타데이터 기록을 권장한다. 이 항목은 강제 게이트가 아닌 사고 보조 프롬프트다.
 
 ##### 1A.8 저장 전 준비도 게이트 (MANDATORY)
 
@@ -617,7 +618,7 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 - 구조화 수집 단계: Step 1A.3
 - Reference Lookup Protocol: Step 1A.3.4
 - 재귀 정제 루프/수렴 판정: Step 1A.4~1A.5
-- DoD 품질 게이트/4중 가드레일/준비도 게이트: Step 1A.6~1A.8
+- DoD 품질 게이트/5중 가드레일/준비도 게이트: Step 1A.6~1A.8
 - 전략 검토 + Confidence Matrix(프로세스 전용): Step 1A.9
 - 디자인 단계: Step 1A.9.2
 - PM 도메인 클러스터링: Step 1A.9.5

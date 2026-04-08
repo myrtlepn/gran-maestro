@@ -1,0 +1,409 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+
+
+def _make_workspace(tmp_path: Path) -> Path:
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    proc = subprocess.run(
+        ["git", "init"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    for key, value in (
+        ("user.email", "test@example.com"),
+        ("user.name", "Test User"),
+    ):
+        proc = subprocess.run(
+            ["git", "config", key, value],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    return workspace
+
+
+def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(MST_SCRIPT), *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _git(workspace: Path, *args: str):
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def _git_commit_all(workspace: Path, message: str):
+    _git(workspace, "add", "-A")
+    _git(workspace, "commit", "-m", message)
+
+
+def _init_agi(workspace: Path) -> str:
+    proc = _run_mst(workspace, "agile", "init", "--json")
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    return payload["agi_id"]
+
+
+def _write(path: Path, content: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _prepare_base_commit(workspace: Path):
+    _write(
+        workspace / "src" / "app.py",
+        "def app_entrypoint():\n    return 'ok'\n",
+    )
+    _git_commit_all(workspace, "base")
+
+
+def _apply_change_set(workspace: Path, wire_count: int, island_count: int):
+    app_path = workspace / "src" / "app.py"
+    current = app_path.read_text(encoding="utf-8")
+    import_lines = []
+
+    for idx in range(1, wire_count + 1):
+        module_name = f"wire_{idx}"
+        _write(workspace / "src" / f"{module_name}.py", f"def {module_name}():\n    return {idx}\n")
+        import_lines.append(f"import {module_name}")
+
+    for idx in range(1, island_count + 1):
+        module_name = f"island_{idx}"
+        _write(workspace / "src" / f"{module_name}.py", f"def {module_name}():\n    return {idx}\n")
+
+    updated = current + "\n" + "\n".join(import_lines) + "\n"
+    app_path.write_text(updated, encoding="utf-8")
+    _git_commit_all(workspace, "changes")
+
+
+def _integration_review(
+    workspace: Path,
+    agi_id: str,
+    sprint: int,
+    *,
+    depth: Optional[int] = None,
+    threshold: Optional[float] = None,
+    escape_reason: Optional[str] = None,
+):
+    args = ["agile", "integration-review", agi_id, "--sprint", str(sprint), "--json"]
+    if depth is not None:
+        args.extend(["--depth", str(depth)])
+    if threshold is not None:
+        args.extend(["--threshold", str(threshold)])
+    if escape_reason is not None:
+        args.extend(["--escape-reason", escape_reason])
+
+    proc = _run_mst(workspace, *args)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@pytest.mark.parametrize(
+    "wire_count,island_count,expected_ratio,expected_exceeded",
+    [
+        (18, 1, 0.05, False),
+        (3, 1, 0.20, False),
+        (1, 2, 0.50, True),
+    ],
+)
+def test_classification_three_ratios(
+    tmp_path,
+    wire_count: int,
+    island_count: int,
+    expected_ratio: float,
+    expected_exceeded: bool,
+):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+    _apply_change_set(workspace, wire_count=wire_count, island_count=island_count)
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["sprint"] == "S05"
+    assert payload["depth"] == 1
+    assert payload["window_sprints"] == ["S05"]
+
+    expected_total = 1 + wire_count + island_count
+    assert payload["files"]["total"] == expected_total
+    assert payload["files"]["modify"] == 1
+    assert payload["files"]["wire"] == wire_count
+    assert payload["files"]["new_island"] == island_count
+    assert len(payload["files"]["new_island_files"]) == island_count
+
+    assert payload["ratios"]["new_island"] == pytest.approx(expected_ratio, abs=1e-9)
+    assert payload["verdict"]["new_island_threshold"] == 0.20
+    assert payload["verdict"]["exceeded"] is expected_exceeded
+    assert payload["verdict"]["force_wire_recommended"] is expected_exceeded
+
+
+def test_integration_context_md_generated(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+    _apply_change_set(workspace, wire_count=1, island_count=1)
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "integration-review",
+        agi_id,
+        "--sprint",
+        "5",
+        "--depth",
+        "1",
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    context_path = (
+        workspace
+        / ".gran-maestro"
+        / "agile"
+        / agi_id
+        / "sprints"
+        / "S05"
+        / "integration-context.md"
+    )
+    assert context_path.exists()
+
+    content = context_path.read_text(encoding="utf-8")
+    assert "## 1. 변경 파일 트리 (분류별)" in content
+    assert "## 2. Entrypoint 상태" in content
+    assert "## 4. wire 파일별 통합 지점" in content
+
+
+def test_tests_directory_new_file_is_wire(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "tests" / "test_new_feature.py",
+        "def test_placeholder():\n    assert True\n",
+    )
+    _git_commit_all(workspace, "add test only")
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["total"] == 1
+    assert payload["files"]["modify"] == 0
+    assert payload["files"]["wire"] == 1
+    assert payload["files"]["new_island"] == 0
+
+
+def test_wire_streak_counted_from_previous_reviews(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+    _apply_change_set(workspace, wire_count=1, island_count=2)
+
+    _write(
+        workspace / ".gran-maestro" / "config.resolved.json",
+        json.dumps({"agile": {"integration_wire_streak_max": 2, "new_island_threshold": 0.2}}),
+    )
+
+    _write(
+        workspace
+        / ".gran-maestro"
+        / "agile"
+        / agi_id
+        / "sprints"
+        / "S04"
+        / "integration-review.json",
+        json.dumps({"verdict": {"force_wire_recommended": True}}),
+    )
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1)
+
+    assert payload["wire_streak"] == {
+        "current": 2,
+        "max": 2,
+        "exceeded": True,
+    }
+
+
+def test_escape_hatch_reason_recorded(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+    _apply_change_set(workspace, wire_count=1, island_count=2)
+
+    payload = _integration_review(
+        workspace,
+        agi_id,
+        sprint=5,
+        depth=1,
+        threshold=0.20,
+        escape_reason="동적 import는 grep 미감지",
+    )
+
+    assert payload["verdict"]["exceeded"] is True
+    assert payload["verdict"]["force_wire_recommended"] is True
+    assert payload["verdict"]["escape_hatch_used"] is True
+    assert payload["verdict"]["escape_reason"] == "동적 import는 grep 미감지"
+
+
+def test_result_sprint_kind_fields(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+
+    default_proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "1",
+        "--status",
+        "done",
+        "--json",
+    )
+    assert default_proc.returncode == 0, default_proc.stderr
+    default_payload = json.loads(default_proc.stdout)
+    assert default_payload["sprint_kind"] == "user_observable"
+    assert "user_observable_change" in default_payload
+    assert "foundational_reason" in default_payload
+    assert default_payload["user_observable_change"] is None
+    assert default_payload["foundational_reason"] is None
+
+    foundational_proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "2",
+        "--status",
+        "done",
+        "--sprint-kind",
+        "foundational",
+        "--foundational-reason",
+        "테스트 인프라 구축",
+        "--json",
+    )
+    assert foundational_proc.returncode == 0, foundational_proc.stderr
+    foundational_payload = json.loads(foundational_proc.stdout)
+    assert foundational_payload["sprint_kind"] == "foundational"
+    assert foundational_payload["foundational_reason"] == "테스트 인프라 구축"
+    assert foundational_payload["user_observable_change"] is None
+
+    user_observable_proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "3",
+        "--status",
+        "done",
+        "--sprint-kind",
+        "user_observable",
+        "--user-observable-change",
+        "사용자가 /sc:plan을 호출하면 Q&A가 시작된다",
+        "--json",
+    )
+    assert user_observable_proc.returncode == 0, user_observable_proc.stderr
+    user_observable_payload = json.loads(user_observable_proc.stdout)
+    assert user_observable_payload["sprint_kind"] == "user_observable"
+    assert user_observable_payload["user_observable_change"] == "사용자가 /sc:plan을 호출하면 Q&A가 시작된다"
+    assert user_observable_payload["foundational_reason"] is None
+
+
+def test_objective_transition_deferred_promote(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+
+    objective_path = workspace / ".gran-maestro" / "agile" / agi_id / "objective" / "objective.md"
+    _write(
+        objective_path,
+        (
+            "# Objective\n\n"
+            "- [ ] DOD-001\n"
+            "<!-- dod:DOD-001 status:proposed_done priority:must -->\n"
+            "- [ ] DOD-002\n"
+            "<!-- dod:DOD-002 status:proposed_done priority:must -->\n"
+            "- [ ] DOD-005\n"
+            "<!-- dod:DOD-005 status:todo priority:must -->\n"
+        ),
+    )
+
+    for sprint, dod in ((3, "DOD-001"), (4, "DOD-002")):
+        proc = _run_mst(
+            workspace,
+            "agile",
+            "result",
+            agi_id,
+            "--sprint",
+            str(sprint),
+            "--status",
+            "done",
+            "--completed",
+            dod,
+            "--sprint-kind",
+            "foundational",
+            "--json",
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    transition_proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-transition",
+        agi_id,
+        "--story",
+        "DOD-005",
+        "--status",
+        "done",
+        "--deferred-promote",
+        "--sprint",
+        "5",
+        "--json",
+    )
+    assert transition_proc.returncode == 0, transition_proc.stderr
+    transition_payload = json.loads(transition_proc.stdout)
+    assert transition_payload["status"] == "done"
+
+    updated_objective = objective_path.read_text(encoding="utf-8")
+    assert "<!-- dod:DOD-001 status:done priority:must -->" in updated_objective
+    assert "<!-- dod:DOD-002 status:done priority:must -->" in updated_objective
+    assert "<!-- dod:DOD-005 status:done priority:must -->" in updated_objective
+
+    changelog_path = workspace / ".gran-maestro" / "agile" / agi_id / "objective" / "changelog.ndjson"
+    entries = [
+        json.loads(line)
+        for line in changelog_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    deferred = [entry for entry in entries if entry.get("event") == "deferred-promote"]
+    assert deferred, "deferred-promote event must be recorded"
+    assert deferred[-1]["sprints"] == ["S04", "S03"]
+    assert deferred[-1]["dods"] == ["DOD-001", "DOD-002"]

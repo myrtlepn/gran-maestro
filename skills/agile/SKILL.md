@@ -69,7 +69,13 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
 - 정기 스티어링 해당 Sprint에서 Step 3을 건너뛰고 Step 2를 계속 진행하는 행위.
 - 정기 스티어링 미해당 Sprint에서 자의적으로 `"계속할까요?"`, `"멈출까요?"` 질문을 삽입하는 행위.
-- 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계.
+- 2.2.0.7 누적 통합 리뷰의 `verdict.force_wire_recommended=true`를 **사유 기록 없이** 무시하는 행위 (Escape Hatch는 반드시 `auto-decisions.md` 또는 `retrospective.md`에 사유를 남길 때만 허용).
+- 2.2.0.7 Escape Hatch를 동일 세션에서 **연속 2회 이상** 사용하는 행위 (통합 부채 누적 위장).
+- 2.2.4 Sprint 종류 자기선언을 누락(`sprint_kind` 미지정)하거나 `foundational`로 선언하면서 `--foundational-reason`을 생략하는 행위.
+- `foundational` Sprint를 `config.agile.foundational_streak_max` 초과로 연속 선언하는 행위 (Sprint 0 제외).
+- `foundational` Sprint에서 DoD를 곧바로 `done`으로 승격하는 행위 (반드시 `proposed_done`으로만 기록하고, 후속 `user_observable` Sprint에서 `--deferred-promote`로만 승격).
+- 2.2.0.8 alignment 판정 `objective_stale`에서 비상 스티어링 진입 없이 Sprint를 계속 진행하는 행위.
+- 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계, `proposed_done` 대기 DoD 수, 분류별 변경 파일 비율, alignment 판정 분포.
 
 ### AskUserQuestion 허용 지점 (Whitelist)
 
@@ -338,6 +344,91 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 - `[CRITICAL][NO-AD-HOC-PAUSE]` 정기 스티어링 미해당 Sprint에서는 `"계속할까요?"`/`"멈출까요?"` 질문 없이 즉시 Step 2.2.1로 진행한다.
 - `STEERING_EVERY > 0` 이고 `CURRENT_SPRINT > 0` 이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3(스티어링 체크포인트)를 수행 후 이 루프로 복귀한다.
 
+##### 2.2.0.7 누적 통합 리뷰 (MANDATORY)
+
+**목적**: 이번 Sprint가 "이전 산출물 위에 쌓는가, 아니면 옆에 격리된 단위 헬퍼를 또 만드는가"를 결정론 헬퍼로 선검증한다. slide-craft 재발(Sprint 추적상 DoD done 22/22인데 플러그인 미동작) 패턴을 선제 차단한다.
+
+`CURRENT_SPRINT <= 1`이면 직전 Sprint 윈도우가 비어 있으므로 본 단계를 skip하고 2.2.0.8로 진행한다.
+
+1. 결정론 헬퍼 호출:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --depth 3 \
+  --json
+```
+
+  - `--depth`는 `config.agile.integration_review_depth`(기본 3)를 사용한다. 인자 생략 시 헬퍼가 자동으로 config fallback을 적용한다.
+  - `--threshold`도 생략 시 `config.agile.new_island_threshold`(기본 0.20)를 사용한다.
+
+2. 헬퍼 출력 JSON에서 아래 필드를 확인한다.
+   - `files.total / modify / wire / new_island`
+   - `ratios.new_island`
+   - `verdict.exceeded` (= `ratios.new_island > threshold`)
+   - `verdict.force_wire_recommended`
+   - `wire_streak.current / max / exceeded`
+3. 헬퍼는 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/integration-context.md`를 자동 생성한다. 이 파일은 (1) 분류별 변경 파일 트리, (2) entrypoint 상태, (3) wire 파일별 통합 지점 참조, (4) 직전 K Sprint의 `user_observable_change` 요약을 포함하며, 2.2.3 plan -a 호출 시 `[누적층]` 컨텍스트에서 **반드시 Read 강제 대상**으로 전달한다.
+4. 분기:
+   - `verdict.exceeded=false`이면 일반 경로 — 2.2.0.8로 진행
+   - `verdict.exceeded=true`이면 **강제 wire 전환**:
+     - `SELECTED_WORK_ITEM`을 새 DoD 진행 대신 "이번 Sprint는 직전 누적 new-island(`new_island_files` 목록)를 기존 진입점과 통합하는 작업"으로 재지정한다.
+     - 2.2.2 DoD 선택은 이 Sprint에서 skip하고, `selection_reason`에 `integration-review forced wire`를 기록한다.
+     - `wire_streak.exceeded=true`(연속 `agile.integration_wire_streak_max`=3회 wire)이면 비상 스티어링(Step 3)으로 즉시 강제 진입한다 — 근본적으로 DoD 설계가 잘못됐을 가능성.
+
+5. **PM Escape Hatch**: PM이 구조적 판단으로 verdict를 무시해야 하는 경우(예: 프로젝트 특성상 grep 휴리스틱이 false positive를 낸 경우, 동적 import/매크로 기반 언어 등) 아래 조건을 모두 만족할 때만 허용:
+   - `AUTO_MODE=true`: `auto-decisions.md`에 `[integration-review override] reason: {...}` 행을 반드시 기록
+   - `AUTO_MODE=false`: 다음 `retrospective.md`에 `integration_review_override` 섹션으로 사유 기록
+   - Escape Hatch 사용 시 `verdict.force_wire_recommended`를 무시하고 기존 DoD 진행을 허용하되, 동일 세션에서 **연속 2회 이상 override 금지** (드리프트 누적 방지)
+   - 사유 없이 무시하는 것은 금지 패턴(`### 금지 패턴` 참조)
+
+##### 2.2.0.8 기획-구현 정합성 점검 (MANDATORY)
+
+**목적**: 2.2.0.7가 "코드 통합 부채"를 잡는다면, 본 단계는 "**기획(objective.md) ↔ 구현(누적 변경)**의 정합성"을 점검한다. slide-craft 재발의 또 다른 축인 "DoD가 코드의 현실과 어긋나는 기획 노후화"를 감지한다.
+
+`CURRENT_SPRINT <= 1`이면 직전 데이터가 없으므로 본 단계를 skip하고 2.2.1로 진행한다.
+
+1. alignment 데이터 패키지 조회:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile alignment-package {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --depth 3 \
+  --json
+```
+
+  - 반환: `{objective_dods[], integration_context_path, recent_results[], recent_retrospectives[]}`
+  - objective.md가 없으면 `warning: "objective file missing"` 포함 → 본 단계를 graceful skip하고 2.2.1로 진행한다.
+
+2. 패키지의 `integration_context_path`와 `recent_results`/`recent_retrospectives`를 Read한 뒤, PM이 3축으로 정합성을 판정한다:
+   - **A. DoD-변경 매핑 충실도**: 직전 K Sprint의 변경 내용이 objective.md의 어떤 DoD를 충족시키는가? 상당수 변경이 어떤 DoD에도 매핑되지 않으면 `drift_warning` 후보
+   - **B. DoD 현실 가능성**: objective.md의 DoD가 현재 코드 상태에서 "관찰 가능"하게 만들어지고 있는가? DoD가 "사용자가 X 화면에서 Y를 본다"인데 변경 파일에 X 화면이 없으면 `drift_warning` 후보
+   - **C. 기획 노후화**: objective.md의 DoD/제약/우선순위가 현재 코드 현실과 모순되는가? 코드가 기획 가정 구조를 이미 떠났는데 objective.md가 안 갱신됐으면 `objective_stale` 후보
+
+3. 판정 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/alignment-check.md`에 기록한다.
+
+   ```markdown
+   # Alignment Check — S{CURRENT_SPRINT}
+
+   ## 판정: aligned | drift_warning | objective_stale
+
+   ## A. DoD-변경 매핑 충실도
+   (매핑된 DoD 목록 + 매핑되지 않은 변경 파일)
+
+   ## B. DoD 현실 가능성
+   (각 DoD별 "관찰 가능한가" 판단)
+
+   ## C. 기획 노후화
+   (기획이 현실을 반영하는가 + 노후화 증거)
+   ```
+
+4. 분기:
+   - `aligned` — 일반 경로, 2.2.1로 진행
+   - `drift_warning` — `drift_count += 1` (기존 Drift 감지 카운터와 공유). 경고 출력 + 2.2.1 진행. 단, `drift_count >= agile.drift_count_trigger`이면 기존 Drift 감지 규칙대로 비상 스티어링 진입
+   - `objective_stale` — **비상 스티어링 강제 진입**(Step 3). 기획 자체가 코드와 어긋나므로 `mst:agile-plan --resume`으로 objective 재계획이 필요할 가능성 높음. 진행 보고서에 `alignment: objective_stale` 마커 포함
+
+5. `AUTO_MODE=true`에서는 PM이 3축 판정과 분기를 자율적으로 수행하고, 판정 근거를 `alignment-check.md`에 기록한 뒤 해당 분기로 진행한다.
+
 ##### 2.2.1 프로젝트 건강 점검 (Sprint 시작 시 MANDATORY)
 
 Sprint 시작 즉시 `in_progress` 결과를 기록한 뒤 건강 점검을 수행한다.
@@ -384,7 +475,7 @@ Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
   - `AUTO_MODE=true`: AskUserQuestion 없이 의존성 해소 작업을 자동 생성하고 즉시 진행한다. `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
   - `AUTO_MODE=false`: 기존 동작을 유지한다. 의존성 해소 작업을 생성하고 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
 
-##### 2.2.3 plan -a 호출 (3계층 컨텍스트)
+##### 2.2.3 plan -a 호출 (N계층 컨텍스트)
 
 `mst:plan -a` 호출 시 아래 컨텍스트를 반드시 전달한다.
 
@@ -393,6 +484,7 @@ Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
 - `[변화층]`: 직전 Sprint 결과
 - `[회고층]`: 직전 retrospective
 - `[이슈층]`: open known issues
+- `[누적층]`: 직전 K Sprint의 누적 통합 컨텍스트 (2.2.0.7에서 생성한 `integration-context.md`). plan -a는 이 파일을 반드시 Read하여 "이전 산출물 위에 쌓을지 / 고칠지"를 판단한다.
 - `[제약층]`: 프로젝트 DoD + 성공 지표
 
 ```text
@@ -402,6 +494,7 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 [변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
 [회고층] 직전 회고: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md | 직전 교훈: {PREVIOUS_LESSONS}
 [이슈층] open known issues: {OPEN_ISSUE_LIST}
+[누적층] 통합 컨텍스트 파일(MANDATORY Read): {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/integration-context.md — 직전 K Sprint 분류(modify/wire/new-island), entrypoint 상태, wire 파일별 통합 지점, user_observable_change 요약을 확인하고 이번 Sprint가 어디에 쌓을지 결정한다
 [제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL}")
 ```
 
@@ -443,9 +536,20 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 3. DES-NNN이 새로 생성/교체되었으면 화면 목록과 텍스트 와이어프레임을 최신 기준으로 갱신한다.
 4. objective 갱신 시 direct edit 금지 규칙을 유지하고, 기존 `mst.py` 기반 objective 갱신 절차를 따른다.
 
-##### 2.2.4 Sprint 결과 기록 + DoD 갱신 제안
+##### 2.2.4 Sprint 결과 기록 + Sprint 종류 자기선언 + DoD 갱신 제안
 
 Sprint 실행 결과를 기록하고, 이번 Sprint에서 완료 근거가 확보된 DoD에 대해 갱신 제안을 남긴다.
+
+**Sprint 종류 자기선언 (MANDATORY — 재프레이밍 핵심)**:
+
+이 Sprint는 시작 시점 또는 결과 기록 시점에 **반드시 종류를 자기선언**한다:
+
+- `user_observable` (기본값): 사용자가 이 Sprint 전에는 할 수 없었던 것을 이제는 할/볼 수 있게 됨. 진입점(CLI 명령, SKILL 호출, UI 클릭 경로, 생성된 산출물 등) 중 최소 1개가 추가/변경되어 관찰 가능. `--user-observable-change` 필드로 "사용자가 이제 무엇을 볼/할 수 있는가"를 자유 텍스트로 기록한다.
+- `foundational` (예외): 사용자 관찰이 불가능한 기반 작업(테스트 인프라, 빌드 파이프라인, 내부 스키마 정의, 타입 선언 등). `--foundational-reason` 필드로 "왜 사용자 관찰 불가한지 + 어느 후속 Sprint에서 사용자 관찰 가능해질 예정인지"를 기록한다.
+
+**연속 한도 (MANDATORY)**: `foundational` Sprint는 `config.agile.foundational_streak_max`(기본 2) 이상 연속 선언할 수 없다. 한도 도달 후 다음 Sprint가 또 `foundational`을 시도하면 비상 스티어링(Step 3) 강제 진입. Sprint 0(테스트 환경 구축)은 이 카운트에 포함하지 않는다.
+
+**지연 승격 (MANDATORY)**: `foundational` Sprint에 포함된 DoD는 `proposed_done` 상태로만 기록한다(=아직 `done` 승격 불가). 첫 번째 후속 `user_observable` Sprint가 완료되는 시점에 `agile objective-transition --deferred-promote --sprint {N}` 호출로 누적된 `proposed_done` DoD를 **일괄 `done`으로 승격**한다.
 
 1. Sprint 결과 기록:
 ```bash
@@ -456,10 +560,29 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --completed "{COMPLETED_ITEM_IF_DONE}" \
   --pln {PLN_ID} \
   --req {REQ_ID} \
+  --sprint-kind {user_observable|foundational} \
+  --user-observable-change "{사용자가 이제 할/볼 수 있는 것}" \
+  --foundational-reason "{foundational 사유 + 후속 계획}" \
   --sprint-goals '{SPRINT_GOALS_JSON_IF_AVAILABLE}' \
   --previous-lessons "{PREVIOUS_LESSONS}" \
   --json
 ```
+  - `--sprint-kind` 생략 시 기본값 `user_observable`.
+  - `--sprint-kind user_observable`인 경우 `--user-observable-change`를 반드시 지정한다. 비어 있으면 경보 출력.
+  - `--sprint-kind foundational`인 경우 `--foundational-reason`을 반드시 지정한다.
+  - 동일 Sprint에서 한 필드만 지정하고 다른 필드는 생략한다 (두 종류는 상호 배타).
+
+1.5. `user_observable` Sprint 완료 시 지연 승격 호출:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} \
+  --story {SELECTED_DOD_OR_PLACEHOLDER} \
+  --status done \
+  --deferred-promote \
+  --sprint {CURRENT_SPRINT} \
+  --json
+```
+  - 이 호출은 이번 Sprint가 실제로 기여한 DoD를 `done`으로 승격하면서, 동시에 `--sprint {CURRENT_SPRINT}` 이전의 foundational Sprint 체인에 포함된 모든 `proposed_done` DoD를 역추적하여 일괄 `done`으로 승격한다.
+  - 직전 `foundational` Sprint가 없으면 `--deferred-promote`는 단일 DoD 전이와 동일하게 동작한다 (graceful).
   - `--sprint-goals`는 **optional**이다. sprint_goals를 구성할 수 없는 경우 인자를 생략하고 기존 방식으로 기록한다.
   - `SPRINT_GOALS_JSON_IF_AVAILABLE` 구조:
     ```json
@@ -634,6 +757,14 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - pass: {VERIFY_PASS_COUNT}
 - fail: {VERIFY_FAIL_COUNT}
 - 주요 이슈: {VERIFY_TOP_FINDINGS}
+
+통합 건강 (integration-review + alignment-check)
+- 직전 {STEERING_EVERY} Sprint 분류: modify {MODIFY_COUNT} / wire {WIRE_COUNT} / new-island {NEW_ISLAND_COUNT}
+- 누적 new-island 비율: {NEW_ISLAND_RATIO:.2%} (임계: {NEW_ISLAND_THRESHOLD:.2%})
+- 연속 user_observable Sprint: {USER_OBSERVABLE_STREAK} / 연속 foundational: {FOUNDATIONAL_STREAK} (한도 {FOUNDATIONAL_STREAK_MAX})
+- proposed_done 대기 DoD: {DEFERRED_DOD_COUNT}건 (다음 user_observable Sprint 완료 시 일괄 승격 예정)
+- alignment 판정: aligned {ALIGNED_COUNT} / drift_warning {DRIFT_WARNING_COUNT} / objective_stale {OBJECTIVE_STALE_COUNT}
+- Escape Hatch override: {ESCAPE_OVERRIDE_COUNT}건 {ESCAPE_REASONS}
 
 DoD 체크 갱신 제안 (pending)
 | DOD-ID | 제안 상태 | evidence_ref | 근거 요약 |

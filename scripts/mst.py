@@ -46,15 +46,17 @@ Subcommands:
   agile init         [--steering-every N] [--json]
   agile status       <AGI-ID> [--json]
   agile update       <AGI-ID> [--status TEXT] [--current-sprint N] [--steering-every N] [--objective-version N] [--json]
-  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--sprint-goals JSON] [--json]
+  agile result       <AGI-ID> --sprint N --status TEXT [--planned IDS] [--completed IDS] [--pln IDS] [--req IDS] [--summary TEXT] [--outcome TEXT] [--sprint-goals JSON] [--sprint-kind user_observable|foundational] [--user-observable-change TEXT] [--foundational-reason TEXT] [--json]
   agile retrospective <AGI-ID> --sprint N --status TEXT --succeeded IDS --failed JSON [--failed JSON ...] --velocity-planned N --velocity-completed N --limitations TEXT --lessons TEXT --direction TEXT [--json]
   agile known-issues add <AGI-ID> --description TEXT --severity MINOR|MAJOR|CRITICAL --sprint N [--json]
   agile known-issues resolve <AGI-ID> --issue-id KI-NNN [--json]
   agile known-issues list <AGI-ID> [--status open|resolved] [--json]
-  agile objective-transition <AGI-ID> --story DOD-ID --status TEXT [--json]
+  agile objective-transition <AGI-ID> --story DOD-ID --status TEXT [--deferred-promote] [--sprint N] [--json]
   agile objective-check <AGI-ID> [--json]
   agile objective-snapshot <AGI-ID> --reason TEXT [--json]
   agile link         <AGI-ID> [--pln PLN-NNN] [--req REQ-NNN] [--json]
+  agile integration-review <AGI-ID> --sprint N [--depth N] [--threshold N] [--escape-reason TEXT] [--reference-pattern REGEX] [--json]
+  agile alignment-package <AGI-ID> --sprint N [--depth N] [--json]
   agile detail validate-mapping <details_path> [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
@@ -2696,6 +2698,35 @@ def _update_objective_dod_status(content: str, dod_id: str, new_status: str):
     return updated, found, changed
 
 
+def _extract_dod_ids_from_result_payload(result_payload: dict) -> List[str]:
+    if not isinstance(result_payload, dict):
+        return []
+
+    raw_candidates: List[str] = []
+    completed = result_payload.get("completed")
+    if isinstance(completed, list):
+        raw_candidates.extend(str(item) for item in completed)
+    elif isinstance(completed, str):
+        raw_candidates.extend(_split_csv_values(completed))
+
+    target_dod = result_payload.get("target_dod")
+    if isinstance(target_dod, str) and target_dod.strip():
+        raw_candidates.append(target_dod)
+
+    normalized: List[str] = []
+    seen = set()
+    for token in raw_candidates:
+        try:
+            dod_id = _normalize_dod_id(token)
+        except ValueError:
+            continue
+        if dod_id in seen:
+            continue
+        seen.add(dod_id)
+        normalized.append(dod_id)
+    return normalized
+
+
 def cmd_agile_init(args):
     if args.steering_every < 1:
         print("Error: --steering-every must be >= 1", file=sys.stderr)
@@ -2857,7 +2888,16 @@ def cmd_agile_result(args):
         },
         "sprint_goals": sprint_goals,
         "timestamp": timestamp,
+        "sprint_kind": str(args.sprint_kind or "user_observable"),
+        "user_observable_change": None,
+        "foundational_reason": None,
     }
+    if payload["sprint_kind"] == "foundational":
+        if args.foundational_reason is not None:
+            payload["foundational_reason"] = str(args.foundational_reason)
+    else:
+        if args.user_observable_change is not None:
+            payload["user_observable_change"] = str(args.user_observable_change)
     if args.summary is not None:
         payload["summary"] = str(args.summary)
     if args.outcome is not None:
@@ -3660,7 +3700,63 @@ def cmd_agile_objective_transition(args):
         print(f"Error: DoD item not found ({dod_id})", file=sys.stderr)
         return 1
 
-    if changed:
+    deferred_promoted: List[str] = []
+    deferred_sprints: List[str] = []
+
+    if getattr(args, "deferred_promote", False):
+        if args.sprint is None:
+            print("Error: --deferred-promote requires --sprint", file=sys.stderr)
+            return 1
+        if args.sprint < 0:
+            print("Error: --sprint must be >= 0", file=sys.stderr)
+            return 1
+
+        streak_limit = _load_agile_int_config("foundational_streak_max", 2) + 1
+        sprint_cursor = int(args.sprint) - 1
+        chain_payloads: List[tuple[str, dict]] = []
+        while sprint_cursor >= 0 and len(chain_payloads) < streak_limit:
+            sprint_id = f"S{sprint_cursor:02d}"
+            result_path = _agi_session_dir(agi_id) / "sprints" / sprint_id / "result.json"
+            result_payload = load_json(result_path)
+            if not isinstance(result_payload, dict):
+                break
+            sprint_kind = str(result_payload.get("sprint_kind", "user_observable")).strip().lower()
+            if sprint_kind != "foundational":
+                break
+            deferred_sprints.append(sprint_id)
+            chain_payloads.append((sprint_id, result_payload))
+            sprint_cursor -= 1
+
+        working_items = _collect_objective_dod_items(updated_content)
+        for _, result_payload in chain_payloads:
+            for candidate_dod in _extract_dod_ids_from_result_payload(result_payload):
+                status = str(working_items.get(candidate_dod, {}).get("status", "")).strip().lower()
+                if status != "proposed_done":
+                    continue
+                updated_content, candidate_found, candidate_changed = _update_objective_dod_status(
+                    updated_content,
+                    candidate_dod,
+                    "done",
+                )
+                if not candidate_found or not candidate_changed:
+                    continue
+                deferred_promoted.append(candidate_dod)
+                item = working_items.get(candidate_dod)
+                if isinstance(item, dict):
+                    item["status"] = "done"
+
+        if deferred_promoted:
+            deduped: List[str] = []
+            seen = set()
+            for dod in deferred_promoted:
+                if dod in seen:
+                    continue
+                seen.add(dod)
+                deduped.append(dod)
+            deferred_promoted = sorted(deduped)
+
+    overall_changed = changed or bool(deferred_promoted)
+    if overall_changed:
         objective_path.write_text(updated_content, encoding="utf-8")
 
     after_items = _collect_objective_dod_items(updated_content)
@@ -3679,6 +3775,17 @@ def cmd_agile_objective_transition(args):
             "changed": changed,
         },
     )
+    if getattr(args, "deferred_promote", False):
+        _append_ndjson(
+            _agi_objective_changelog_path(agi_id),
+            {
+                "timestamp": _now_iso(),
+                "event": "deferred-promote",
+                "sprint": f"S{int(args.sprint):02d}" if args.sprint is not None and args.sprint >= 0 else None,
+                "sprints": deferred_sprints,
+                "dods": deferred_promoted,
+            },
+        )
     _append_agile_event(
         agi_id,
         "agile.objective-transition",
@@ -3699,6 +3806,11 @@ def cmd_agile_objective_transition(args):
         "priority": priority,
         "changed": changed,
     }
+    if getattr(args, "deferred_promote", False):
+        output["deferred_promote"] = {
+            "sprints": deferred_sprints,
+            "dods": deferred_promoted,
+        }
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
@@ -3824,6 +3936,301 @@ def cmd_agile_objective_snapshot(args):
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
         print(agi_id)
+    return 0
+
+
+def _window_sprint_ids(sprint: int, depth: int) -> List[str]:
+    return [f"S{idx:02d}" for idx in range(max(0, sprint - depth + 1), sprint + 1)]
+
+
+def _load_agile_config_cast(key: str, default, caster):
+    for path in (BASE_DIR / "config.resolved.json", _plugin_root() / "templates" / "defaults" / "config.json"):
+        cfg = load_json(path)
+        agile_cfg = cfg.get("agile") if isinstance(cfg, dict) else None
+        if not isinstance(agile_cfg, dict) or key not in agile_cfg:
+            continue
+        try:
+            return caster(agile_cfg.get(key))
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
+def _load_agile_int_config(key: str, fallback: int) -> int:
+    return _load_agile_config_cast(key, fallback, int)
+
+
+def _load_agile_float_config(key: str, fallback: float) -> float:
+    return _load_agile_config_cast(key, fallback, float)
+
+
+def _git_output(repo_root: Path, *args: str) -> str:
+    proc = subprocess.run(["git", *args], cwd=str(repo_root), capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or f"git {' '.join(args)} failed")
+    return proc.stdout
+
+
+def _resolve_git_window_refs(repo_root: Path, depth: int) -> tuple[str, str]:
+    commits = [line.strip() for line in _git_output(repo_root, "rev-list", "--max-count", str(depth + 1), "HEAD").splitlines() if line.strip()]
+    if not commits:
+        raise RuntimeError("no commits found")
+    return (commits[-1] if len(commits) > depth else "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "HEAD")
+
+
+def _classify_changed_files(repo_root, since_ref, until_ref, reference_pattern=None):
+    diff_range = f"{since_ref}..{until_ref}"
+    changed = [line.split("\t")[-1].strip() for line in _git_output(repo_root, "diff", "--name-status", "--diff-filter=AM", diff_range).splitlines() if "\t" in line]
+    changed = sorted({path for path in changed if path})
+    added = {line.strip() for line in _git_output(repo_root, "diff", "--name-only", "--diff-filter=A", diff_range).splitlines() if line.strip()}
+    tracked = [line.strip() for line in _git_output(repo_root, "ls-files").splitlines() if line.strip() and not line.startswith(".gran-maestro/")]
+    content_cache: dict[str, str] = {}
+
+    def _regex_for(path: str):
+        stem = re.escape(Path(path).stem)
+        dotted = re.escape(str(Path(path).with_suffix("")).replace("/", "."))
+        escaped_path = re.escape(path)
+        if reference_pattern:
+            try:
+                return re.compile(str(reference_pattern).format(module=stem, module_path=dotted, path=escaped_path), flags=re.IGNORECASE)
+            except Exception:
+                return re.compile(str(reference_pattern), flags=re.IGNORECASE)
+        pattern = "|".join(
+            [
+                rf"\bfrom\s+{stem}\b",
+                rf"\bimport\s+{stem}\b",
+                rf"\bfrom\s+{dotted}\b",
+                rf"\bimport\s+{dotted}\b",
+                rf"require\([^)]*{stem}[^)]*\)",
+                rf"\b{escaped_path}\b",
+                rf"\]\({escaped_path}\)",
+            ]
+        )
+        return re.compile(pattern, flags=re.IGNORECASE)
+
+    def _refs_for(path: str) -> List[str]:
+        regex = _regex_for(path)
+        refs = []
+        for candidate in tracked:
+            if candidate == path:
+                continue
+            if candidate not in content_cache:
+                p = repo_root / candidate
+                content_cache[candidate] = p.read_text(encoding="utf-8", errors="ignore") if p.exists() and p.is_file() else ""
+            text = content_cache[candidate]
+            match = regex.search(text)
+            if match:
+                refs.append(f"{candidate}:{text.count(chr(10), 0, match.start()) + 1}")
+        return refs
+
+    modify_files: List[str] = []
+    wire_files: List[str] = []
+    new_island_files: List[str] = []
+    wire_refs: dict[str, List[str]] = {}
+    for path in changed:
+        if path not in added:
+            modify_files.append(path)
+            continue
+        if path.startswith("tests/"):
+            wire_files.append(path)
+            wire_refs[path] = ["tests/* 신규 파일은 wire로 분류"]
+            continue
+        refs = _refs_for(path)
+        if refs:
+            wire_files.append(path)
+            wire_refs[path] = refs
+        else:
+            new_island_files.append(path)
+
+    entrypoint_prefix = ("scripts/", "skills/", "templates/", "hooks/", "agents/", "src/", "extension/", "frontend/")
+    return {
+        "total": len(changed),
+        "modify": len(modify_files),
+        "wire": len(wire_files),
+        "new_island": len(new_island_files),
+        "new_island_files": sorted(new_island_files),
+        "modify_files": sorted(modify_files),
+        "wire_files": sorted(wire_files),
+        "wire_references": wire_refs,
+        "entrypoint_touched_count": sum(1 for path in changed if path.startswith(entrypoint_prefix)),
+    }
+
+
+def _compute_integration_verdict(classification, threshold):
+    total = int(classification.get("total", 0))
+    ratio = (float(classification.get("new_island", 0)) / total) if total > 0 else 0.0
+    exceeded = ratio > float(threshold)
+    return {"new_island_threshold": float(threshold), "exceeded": exceeded, "force_wire_recommended": exceeded}
+
+
+def _render_integration_context_md(payload, output_path):
+    files = payload.get("files", {})
+    ratios = payload.get("ratios", {})
+    verdict = payload.get("verdict", {})
+    lines = [f"# Integration Context ({payload.get('sprint', '-')})", "", "## 1. 변경 파일 트리 (분류별)", ""]
+    lines.extend([f"- total: {files.get('total', 0)}", f"- modify: {files.get('modify', 0)}"])
+    lines.extend([f"  - {path}" for path in payload.get("modify_files", [])])
+    lines.append(f"- wire: {files.get('wire', 0)}")
+    lines.extend([f"  - {path}" for path in payload.get("wire_files", [])])
+    lines.append(f"- new_island: {files.get('new_island', 0)}")
+    lines.extend([f"  - {path}" for path in payload.get("new_island_files", [])])
+    lines.extend(
+        [
+            "",
+            "## 2. Entrypoint 상태",
+            "",
+            f"- entrypoint_touched_ratio: {ratios.get('entrypoint_touched', 0.0):.2%}",
+            f"- new_island_ratio: {ratios.get('new_island', 0.0):.2%}",
+            f"- threshold: {verdict.get('new_island_threshold', 0.0):.2f}",
+            f"- force_wire_recommended: {verdict.get('force_wire_recommended', False)}",
+            "",
+            "## 3. 직전 Sprint 사용자 관찰 변화 요약",
+        ]
+    )
+    changes = payload.get("recent_user_observable_changes", [])
+    lines.extend([f"- {item.get('sprint', '-')}: {item.get('user_observable_change', '-')}" for item in changes] if changes else ["- 없음"])
+    lines.extend(["", "## 4. wire 파일별 통합 지점"])
+    if payload.get("wire_files"):
+        for path in payload.get("wire_files", []):
+            lines.append(f"- {path}")
+            lines.extend([f"  - {ref}" for ref in payload.get("wire_references", {}).get(path, [])] or ["  - reference not found"])
+    else:
+        lines.append("- 없음")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _collect_alignment_payload(agi_id, sprint, depth):
+    sprint_id = f"S{int(sprint):02d}"
+    window_sprints = _window_sprint_ids(int(sprint), max(1, int(depth)))
+    session_dir = _agi_session_dir(agi_id)
+    objective_path = _agi_objective_path(agi_id)
+    dods = []
+    warning = None
+    if objective_path.exists():
+        dods = [{"id": dod_id, "status": item.get("status"), "priority": item.get("priority")} for dod_id, item in sorted(_collect_objective_dod_items(objective_path.read_text(encoding="utf-8")).items())]
+    else:
+        warning = "objective file missing"
+    payload = {
+        "agi_id": agi_id,
+        "sprint": sprint_id,
+        "depth": max(1, int(depth)),
+        "objective_dods": dods,
+        "integration_context_path": str(session_dir / "sprints" / sprint_id / "integration-context.md"),
+        "recent_results": [],
+        "recent_retrospectives": [],
+    }
+    for sid in reversed(window_sprints):
+        result_path = session_dir / "sprints" / sid / "result.json"
+        retro_path = session_dir / "sprints" / sid / "retrospective.json"
+        if result_path.exists():
+            payload["recent_results"].append(str(result_path))
+        if retro_path.exists():
+            payload["recent_retrospectives"].append(str(retro_path))
+    if warning:
+        payload["warning"] = warning
+    return payload
+
+
+def cmd_agile_integration_review(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if args.sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+
+    depth = int(args.depth) if args.depth is not None else _load_agile_int_config("integration_review_depth", 3)
+    threshold = float(args.threshold) if args.threshold is not None else _load_agile_float_config("new_island_threshold", 0.20)
+    if depth < 1:
+        print("Error: --depth must be >= 1", file=sys.stderr)
+        return 1
+
+    try:
+        since_ref, until_ref = _resolve_git_window_refs(Path.cwd().resolve(), depth)
+        classification = _classify_changed_files(Path.cwd().resolve(), since_ref, until_ref, args.reference_pattern)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    verdict = _compute_integration_verdict(classification, threshold)
+    escape_reason = str(args.escape_reason).strip() if args.escape_reason else None
+    verdict["escape_hatch_used"] = bool(escape_reason) and bool(verdict.get("exceeded"))
+    verdict["escape_reason"] = escape_reason
+
+    total = int(classification.get("total", 0))
+    ratios = {
+        "new_island": (float(classification.get("new_island", 0)) / total) if total else 0.0,
+        "entrypoint_touched": (float(classification.get("entrypoint_touched_count", 0)) / total) if total else 0.0,
+    }
+    sprint_id = f"S{args.sprint:02d}"
+    window_sprints = _window_sprint_ids(args.sprint, depth)
+    session_dir = _agi_session_dir(agi_id)
+    sprint_dir = session_dir / "sprints" / sprint_id
+    sprint_dir.mkdir(parents=True, exist_ok=True)
+
+    streak_max = max(1, _load_agile_int_config("integration_wire_streak_max", 3))
+    streak = 0
+    for idx in range(args.sprint, -1, -1):
+        if idx == args.sprint:
+            force_wire = bool(verdict.get("force_wire_recommended"))
+        else:
+            prev = load_json(session_dir / "sprints" / f"S{idx:02d}" / "integration-review.json")
+            force_wire = bool(prev.get("verdict", {}).get("force_wire_recommended")) if isinstance(prev, dict) else False
+        if not force_wire:
+            break
+        streak += 1
+
+    payload = {
+        "sprint": sprint_id,
+        "depth": depth,
+        "window_sprints": window_sprints,
+        "files": {k: classification.get(k, 0) for k in ("total", "modify", "wire", "new_island")} | {"new_island_files": classification.get("new_island_files", [])},
+        "ratios": ratios,
+        "verdict": verdict,
+        "wire_streak": {"current": streak, "max": streak_max, "exceeded": streak >= streak_max},
+    }
+    save_json(sprint_dir / "integration-review.json", payload)
+
+    changes = []
+    for sid in reversed(window_sprints):
+        result = load_json(session_dir / "sprints" / sid / "result.json")
+        change = result.get("user_observable_change") if isinstance(result, dict) else None
+        if change:
+            changes.append({"sprint": sid, "user_observable_change": str(change)})
+    _render_integration_context_md(
+        {
+            **payload,
+            "modify_files": classification.get("modify_files", []),
+            "wire_files": classification.get("wire_files", []),
+            "new_island_files": classification.get("new_island_files", []),
+            "wire_references": classification.get("wire_references", {}),
+            "recent_user_observable_changes": changes,
+        },
+        sprint_dir / "integration-context.md",
+    )
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(str(sprint_dir / "integration-context.md"))
+    return 0
+
+
+def cmd_agile_alignment_package(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if args.sprint < 0 or args.depth < 1:
+        print("Error: --sprint must be >= 0 and --depth must be >= 1", file=sys.stderr)
+        return 1
+    payload = _collect_alignment_payload(agi_id, args.sprint, args.depth)
+    print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else json.dumps(payload, ensure_ascii=False))
     return 0
 
 
@@ -7153,6 +7560,13 @@ def build_parser():
     agile_result.add_argument("--target-dod-text")
     agile_result.add_argument("--previous-direction")
     agile_result.add_argument("--previous-lessons")
+    agile_result.add_argument(
+        "--sprint-kind",
+        choices=["user_observable", "foundational"],
+        default="user_observable",
+    )
+    agile_result.add_argument("--user-observable-change", dest="user_observable_change")
+    agile_result.add_argument("--foundational-reason", dest="foundational_reason")
     agile_result.add_argument("--json", action="store_true")
 
     agile_retrospective = agile_sub.add_parser("retrospective")
@@ -7216,6 +7630,8 @@ def build_parser():
     agile_objective_transition.add_argument("agi_id")
     agile_objective_transition.add_argument("--story", required=True)
     agile_objective_transition.add_argument("--status", required=True)
+    agile_objective_transition.add_argument("--deferred-promote", action="store_true")
+    agile_objective_transition.add_argument("--sprint", type=int)
     agile_objective_transition.add_argument("--json", action="store_true")
 
     agile_objective_check = agile_sub.add_parser("objective-check")
@@ -7232,6 +7648,21 @@ def build_parser():
     agile_link.add_argument("--pln", action="append")
     agile_link.add_argument("--req", action="append")
     agile_link.add_argument("--json", action="store_true")
+
+    agile_integration_review = agile_sub.add_parser("integration-review")
+    agile_integration_review.add_argument("agi_id")
+    agile_integration_review.add_argument("--sprint", type=int, required=True)
+    agile_integration_review.add_argument("--depth", type=int, default=None)
+    agile_integration_review.add_argument("--threshold", type=float, default=None)
+    agile_integration_review.add_argument("--escape-reason", default=None)
+    agile_integration_review.add_argument("--reference-pattern", default=None)
+    agile_integration_review.add_argument("--json", action="store_true")
+
+    agile_alignment_package = agile_sub.add_parser("alignment-package")
+    agile_alignment_package.add_argument("agi_id")
+    agile_alignment_package.add_argument("--sprint", type=int, required=True)
+    agile_alignment_package.add_argument("--depth", type=int, default=3)
+    agile_alignment_package.add_argument("--json", action="store_true")
 
     # --- counter ---
     ctr = sub.add_parser("counter")
@@ -7496,6 +7927,8 @@ def main():
         ("agile", "objective-check"): cmd_agile_objective_check,
         ("agile", "objective-snapshot"): cmd_agile_objective_snapshot,
         ("agile", "link"): cmd_agile_link,
+        ("agile", "integration-review"): cmd_agile_integration_review,
+        ("agile", "alignment-package"): cmd_agile_alignment_package,
         ("counter", "next"): cmd_counter_next,
         ("counter", "peek"): cmd_counter_peek,
         ("version", "get"):    cmd_version_get,
