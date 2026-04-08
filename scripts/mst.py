@@ -61,6 +61,7 @@ Subcommands:
   agile detail validate-evidence <details_path> [--json]
   agile evidence-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--accept-evidence-gap REASON] [--json]
   agile drift-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--json]
+  agile recall [--agi-id AGI-ID] [--level 2] --reason fail|drift [--trigger ID] [--bypass-cooldown] [--fingerprint ID] [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
@@ -120,6 +121,7 @@ import copy
 import fcntl
 import hashlib
 import json
+import math
 import re
 import os
 import shutil
@@ -2185,6 +2187,50 @@ _DRIFT_SURFACE_STOPWORDS = {
     "완료",
     "레이어",
 }
+_RECALL_DEFAULT_COOLDOWN_RATIO = 0.10
+_RECALL_DEFAULT_CAP_RATIO = 0.10
+_RECALL_DEFAULT_LEVEL = 2
+_RECALL_HARD_FAIL_TOKENS = (
+    "hard-fail",
+    "hard_fail",
+    "smoke-red",
+    "smoke_red",
+    "entrypoint-down",
+    "entrypoint_down",
+)
+_RECALL_OBJECTIVE_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "when",
+    "want",
+    "can",
+    "user",
+    "users",
+    "project",
+    "sprint",
+    "objective",
+    "to",
+    "is",
+    "are",
+    "of",
+    "on",
+    "in",
+    "it",
+    "be",
+    "i",
+    "we",
+    "you",
+    "목표",
+    "프로젝트",
+    "스프린트",
+    "사용자",
+}
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -4051,6 +4097,342 @@ def _load_agile_evidence_gate_config() -> dict:
     return evidence_gate if isinstance(evidence_gate, dict) else {}
 
 
+def _load_agile_recall_config() -> dict:
+    agile_config = _load_agile_config_merged()
+    recall = agile_config.get("recall")
+    return recall if isinstance(recall, dict) else {}
+
+
+def _agi_recall_dir(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "recall"
+
+
+def _agi_recall_history_path(agi_id: str) -> Path:
+    return _agi_recall_dir(agi_id) / "history.json"
+
+
+def _agi_recall_pending_manifest_path(agi_id: str) -> Path:
+    return _agi_recall_dir(agi_id) / "pending-level2-manifest.json"
+
+
+def _agi_recall_invocation_log_path(agi_id: str) -> Path:
+    return _agi_recall_dir(agi_id) / "agile-plan-patch.ndjson"
+
+
+def _safe_float(value, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if math.isnan(parsed) or math.isinf(parsed):
+        return float(default)
+    return parsed
+
+
+def _clamp_int(min_value: int, max_value: int, value: int) -> int:
+    return max(min_value, min(max_value, int(value)))
+
+
+def _count_session_sprints(agi_id: str) -> int:
+    sprint_root = _agi_session_dir(agi_id) / "sprints"
+    if not sprint_root.exists():
+        return 0
+    count = 0
+    for candidate in sprint_root.glob("S*"):
+        if not candidate.is_dir():
+            continue
+        if re.fullmatch(r"S\d+", candidate.name):
+            count += 1
+    return count
+
+
+def _compute_recall_project_size(session: dict, agi_id: str) -> int:
+    current_sprint_raw = 0
+    if isinstance(session, dict):
+        current_sprint_raw = session.get("current_sprint", 0)
+    try:
+        current_sprint = int(current_sprint_raw)
+    except (TypeError, ValueError):
+        current_sprint = 0
+    return max(1, current_sprint, _count_session_sprints(agi_id))
+
+
+def _compute_recall_cooldown(project_size: int, ratio: float) -> int:
+    raw = math.ceil(project_size * ratio)
+    return _clamp_int(1, 4, raw)
+
+
+def _compute_recall_cap(project_size: int, ratio: float) -> int:
+    raw = math.ceil(project_size * ratio)
+    return _clamp_int(3, 6, raw)
+
+
+def _create_recall_rollback_token() -> Path:
+    state_payload = load_json(_agile_state_ledger_path())
+    if state_payload is None:
+        state_payload = []
+    token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    snapshot_path = agile_dir() / "snapshots" / f"{token}.json"
+    save_json(snapshot_path, state_payload)
+    return snapshot_path
+
+
+def _load_agile_recall_history(agi_id: str) -> list[dict]:
+    data = load_json(_agi_recall_history_path(agi_id))
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _save_agile_recall_history(agi_id: str, rows: list[dict]):
+    save_json(_agi_recall_history_path(agi_id), rows)
+
+
+def _find_last_successful_recall(history: list[dict]) -> Optional[dict]:
+    for entry in reversed(history):
+        if str(entry.get("status") or "").upper() == "PASS":
+            return entry
+    return None
+
+
+def _is_within_cooldown_window(current_sprint: int, candidate_sprint: int, cooldown_window: int) -> bool:
+    window = max(1, int(cooldown_window))
+    return current_sprint - int(candidate_sprint) < window
+
+
+def _is_evidence_hard_fail(reason: str, trigger: str) -> bool:
+    if str(reason or "").strip().lower() != "fail":
+        return False
+    normalized = str(trigger or "").strip().lower()
+    if not normalized:
+        return False
+    if "evidence" not in normalized:
+        return False
+    return any(token in normalized for token in _RECALL_HARD_FAIL_TOKENS)
+
+
+def _extract_manifest_dod_actions(manifest: dict) -> list[dict]:
+    actions: list[dict] = []
+
+    direct_actions = manifest.get("dod_actions")
+    if isinstance(direct_actions, list):
+        for item in direct_actions:
+            if isinstance(item, dict):
+                actions.append(dict(item))
+
+    dod_patch = manifest.get("dod_patch")
+    if isinstance(dod_patch, dict):
+        for op_name, raw_entries in dod_patch.items():
+            if not isinstance(raw_entries, list):
+                continue
+            for raw_entry in raw_entries:
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = dict(raw_entry)
+                entry.setdefault("op", str(op_name))
+                actions.append(entry)
+    return actions
+
+
+def _estimate_done_modifications(manifest: dict, done_dod_ids: set[str]) -> int:
+    stats = manifest.get("stats")
+    if isinstance(stats, dict):
+        raw = stats.get("done_dod_modifications")
+        if isinstance(raw, int) and raw >= 0:
+            return raw
+
+    count = 0
+    for action in _extract_manifest_dod_actions(manifest):
+        if bool(action.get("affects_done")):
+            raw_count = action.get("count", 1)
+            try:
+                action_count = int(raw_count)
+            except (TypeError, ValueError):
+                action_count = 1
+            count += max(1, action_count)
+            continue
+
+        touched: set[str] = set()
+        for key in ("dod_id", "source_dod", "target_dod", "left_dod", "right_dod"):
+            value = action.get(key)
+            if isinstance(value, str) and value.strip():
+                touched.add(value.strip().upper())
+        for key in ("dod_ids", "targets", "sources", "split_from", "merge_from"):
+            value = action.get(key)
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    touched.add(item.strip().upper())
+        done_hits = touched.intersection(done_dod_ids)
+        if done_hits:
+            count += len(done_hits)
+            continue
+
+        op_name = str(action.get("op") or "").strip().lower()
+        status = str(action.get("status") or action.get("target_status") or "").strip().lower()
+        if status == "done" and op_name in {"remove", "reorder", "split", "merge"}:
+            count += 1
+    return count
+
+
+def _extract_objective_scope_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-z0-9가-힣]+", str(text or "").lower()):
+        token = raw_token.strip()
+        if len(token) < 2:
+            continue
+        if token in _RECALL_OBJECTIVE_STOPWORDS:
+            continue
+        tokens.add(token)
+    return tokens
+
+
+def _manifest_exceeds_level2_scope(manifest: dict) -> bool:
+    if bool(manifest.get("level2_scope_exceeded")):
+        return True
+
+    refinements = manifest.get("objective_refinements")
+    if not isinstance(refinements, list):
+        objective_patch = manifest.get("objective_patch")
+        if isinstance(objective_patch, dict):
+            refinements = objective_patch.get("refinements")
+    if not isinstance(refinements, list):
+        return False
+
+    for item in refinements:
+        if not isinstance(item, dict):
+            continue
+        if bool(item.get("semantic_change")):
+            return True
+
+        signal = " ".join(
+            str(item.get(key) or "")
+            for key in ("change_type", "intent", "mode", "type", "note")
+        ).lower()
+        if any(keyword in signal for keyword in ("semantic", "pivot", "reframe", "essence change", "본질 변경")):
+            return True
+
+        before = str(item.get("before") or "").strip()
+        after = str(item.get("after") or "").strip()
+        if before and after:
+            before_tokens = _extract_objective_scope_tokens(before)
+            after_tokens = _extract_objective_scope_tokens(after)
+            if before_tokens and after_tokens:
+                overlap = len(before_tokens.intersection(after_tokens)) / len(before_tokens)
+                if overlap < 0.5:
+                    return True
+    return False
+
+
+def _default_level2_recall_manifest(reason: str, trigger: str) -> dict:
+    trigger_token = str(trigger or "").strip()
+    return {
+        "level": 2,
+        "reason": str(reason or "").strip().lower() or "fail",
+        "trigger": trigger_token,
+        "generated_at": _now_iso(),
+        "dod_patch": {
+            "add": [],
+            "remove": [],
+            "reorder": [],
+            "split": [],
+            "merge": [],
+        },
+        "objective_refinements": [
+            {
+                "field": "objective.wording",
+                "change_type": "precision",
+                "before": "Keep objective wording precise for iterative delivery.",
+                "after": "Keep objective wording precise for iterative delivery and evidence alignment.",
+                "semantic_change": False,
+            }
+        ],
+        "integration_sprint": {
+            "insert": True,
+            "title": "Integration Sprint",
+            "rationale": f"trigger={trigger_token or 'n/a'}",
+        },
+        "stats": {
+            "done_dod_modifications": 0,
+        },
+    }
+
+
+def _load_level2_recall_manifest(agi_id: str, reason: str, trigger: str) -> dict:
+    pending_path = _agi_recall_pending_manifest_path(agi_id)
+    loaded = load_json(pending_path)
+    if loaded is None:
+        return _default_level2_recall_manifest(reason, trigger)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"invalid recall manifest: {pending_path}")
+    manifest = dict(loaded)
+    manifest.setdefault("level", 2)
+    manifest.setdefault("reason", str(reason or "").strip().lower())
+    manifest.setdefault("trigger", str(trigger or "").strip())
+    manifest.setdefault("generated_at", _now_iso())
+    if not isinstance(manifest.get("dod_patch"), dict):
+        manifest["dod_patch"] = {
+            "add": [],
+            "remove": [],
+            "reorder": [],
+            "split": [],
+            "merge": [],
+        }
+    if not isinstance(manifest.get("objective_refinements"), list):
+        manifest["objective_refinements"] = []
+    if not isinstance(manifest.get("integration_sprint"), dict):
+        manifest["integration_sprint"] = {"insert": True}
+    if not isinstance(manifest.get("stats"), dict):
+        manifest["stats"] = {}
+    return manifest
+
+
+def _record_agile_plan_patch_invocation(
+    agi_id: str,
+    *,
+    level: int,
+    reason: str,
+    trigger: str,
+    manifest_path: Path,
+) -> dict:
+    invocation_id = f"recall-{uuid.uuid4().hex[:12]}"
+    payload = {
+        "timestamp": _now_iso(),
+        "invocation_id": invocation_id,
+        "mode": "patch",
+        "level": int(level),
+        "reason": str(reason or "").strip(),
+        "trigger": str(trigger or "").strip(),
+        "manifest_path": str(manifest_path),
+    }
+    _append_ndjson(_agi_recall_invocation_log_path(agi_id), payload)
+    return {
+        "called": True,
+        "invocation_id": invocation_id,
+        "log_path": str(_agi_recall_invocation_log_path(agi_id)),
+    }
+
+
+def _emit_recall_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = str(payload.get("status") or "FAIL").upper()
+    if status == "PASS":
+        print("PASS")
+    elif status == "SKIP":
+        print("WARN: recall disabled")
+    else:
+        errors = payload.get("errors") or []
+        print(str(errors[0]) if errors else "FAIL")
+    print(f"agi_id: {payload.get('agi_id') or '-'}")
+    print(f"reason: {payload.get('reason') or '-'}")
+    print(f"trigger: {payload.get('trigger') or '-'}")
+    print(f"cooldown: {payload.get('cooldown_window')}")
+    print(f"cap: {payload.get('cap_used')}/{payload.get('cap_limit')}")
+
 def _resolve_required_globs_config(evidence_gate_cfg: dict) -> tuple[str, list[str]]:
     project_type = str(evidence_gate_cfg.get("project_type") or "plugin").strip().lower() or "plugin"
     configured = evidence_gate_cfg.get("required_globs")
@@ -4337,6 +4719,247 @@ def _resolve_drift_check_target(args) -> tuple[Optional[str], Path, Path]:
     agi_id, details_dir = _resolve_evidence_check_target(args)
     objective_path = _agi_objective_path(agi_id) if agi_id else details_dir.parent / "objective.md"
     return agi_id, details_dir, objective_path
+
+
+def cmd_agile_recall(args):
+    level_raw = args.level if args.level is not None else _RECALL_DEFAULT_LEVEL
+    try:
+        level = int(level_raw)
+    except (TypeError, ValueError):
+        level = _RECALL_DEFAULT_LEVEL
+
+    reason = str(args.reason or "").strip().lower()
+    trigger = str(args.trigger or "").strip()
+    bypass_requested = bool(args.bypass_cooldown)
+    fingerprint = str(args.fingerprint or trigger or "").strip()
+
+    payload = {
+        "status": "FAIL",
+        "level": level,
+        "agi_id": None,
+        "reason": reason,
+        "trigger": trigger,
+        "project_size": 0,
+        "sprint_index": 0,
+        "cooldown_window": None,
+        "cap_limit": None,
+        "cap_used": 0,
+        "rollback_token": None,
+        "manifest_path": None,
+        "agile_plan_patch": {"called": False},
+        "patch_budget": {
+            "done_total": 0,
+            "requested_modifications": 0,
+            "max_modifications": 0,
+        },
+        "bypass": {
+            "requested": bypass_requested,
+            "used": False,
+            "fingerprint": fingerprint or None,
+        },
+        "warnings": [],
+        "errors": [],
+    }
+
+    def _fail(message: str) -> int:
+        payload["status"] = "FAIL"
+        payload["errors"] = [str(message)]
+        _emit_recall_payload(payload, args.json)
+        print(str(message), file=sys.stderr)
+        return 1
+
+    if level != 2:
+        return _fail("Level 2 only: use --level 2")
+    if reason not in {"fail", "drift"}:
+        return _fail("reason must be fail or drift")
+
+    recall_cfg = _load_agile_recall_config()
+    enabled = bool(recall_cfg.get("enabled", False))
+    if not enabled:
+        payload["status"] = "SKIP"
+        payload["warnings"].append("recall disabled (agile.recall.enabled=false)")
+        _emit_recall_payload(payload, args.json)
+        print(payload["warnings"][0], file=sys.stderr)
+        return 0
+
+    try:
+        if args.agi_id:
+            agi_id = _normalize_agi_id(str(args.agi_id))
+        else:
+            agi_id = _find_latest_agi_id()
+            if agi_id is None:
+                raise ValueError("AGI session not found; provide --agi-id")
+        session, _ = _load_agile_session(agi_id)
+    except ValueError as exc:
+        return _fail(str(exc))
+
+    payload["agi_id"] = agi_id
+
+    try:
+        sprint_index = int(session.get("current_sprint", 0))
+    except (TypeError, ValueError):
+        sprint_index = 0
+    payload["sprint_index"] = max(0, sprint_index)
+
+    project_size = _compute_recall_project_size(session, agi_id)
+    cooldown_ratio = _safe_float(recall_cfg.get("cooldown_ratio"), _RECALL_DEFAULT_COOLDOWN_RATIO)
+    cap_ratio = _safe_float(recall_cfg.get("cap_ratio"), _RECALL_DEFAULT_CAP_RATIO)
+    cooldown_window = _compute_recall_cooldown(project_size, cooldown_ratio)
+    cap_limit = _compute_recall_cap(project_size, cap_ratio)
+    payload["project_size"] = project_size
+    payload["cooldown_window"] = cooldown_window
+    payload["cap_limit"] = cap_limit
+
+    rollback_token_path = _create_recall_rollback_token()
+    payload["rollback_token"] = str(rollback_token_path)
+
+    history = _load_agile_recall_history(agi_id)
+    cap_used = sum(1 for row in history if str(row.get("status") or "").upper() == "PASS")
+    payload["cap_used"] = cap_used
+    if cap_used >= cap_limit:
+        return _fail("Cap exceeded, steering checkpoint required")
+
+    last_success = _find_last_successful_recall(history)
+    cooldown_active = False
+    if isinstance(last_success, dict):
+        try:
+            last_sprint = int(last_success.get("sprint_index", -10**6))
+        except (TypeError, ValueError):
+            last_sprint = -10**6
+        try:
+            last_window = int(last_success.get("cooldown_window", cooldown_window))
+        except (TypeError, ValueError):
+            last_window = cooldown_window
+        cooldown_active = _is_within_cooldown_window(payload["sprint_index"], last_sprint, last_window)
+
+    if cooldown_active:
+        if not bypass_requested:
+            return _fail("Cooldown active")
+        if not _is_evidence_hard_fail(reason, trigger):
+            return _fail("Cooldown bypass allowed only for evidence hard fail")
+        if not fingerprint:
+            return _fail("Cooldown bypass requires fingerprint")
+        for row in reversed(history):
+            bypass = row.get("bypass")
+            if not isinstance(bypass, dict):
+                continue
+            if not bool(bypass.get("used")):
+                continue
+            if str(bypass.get("fingerprint") or "") != fingerprint:
+                continue
+            try:
+                row_sprint = int(row.get("sprint_index", -10**6))
+            except (TypeError, ValueError):
+                row_sprint = -10**6
+            try:
+                row_window = int(row.get("cooldown_window", cooldown_window))
+            except (TypeError, ValueError):
+                row_window = cooldown_window
+            if _is_within_cooldown_window(payload["sprint_index"], row_sprint, row_window):
+                return _fail("fingerprint already bypassed in cooldown")
+        payload["bypass"]["used"] = True
+    elif bypass_requested:
+        payload["warnings"].append("bypass requested but cooldown inactive")
+
+    objective_path = _agi_objective_path(agi_id)
+    if not objective_path.exists():
+        return _fail(f"objective file missing: {objective_path}")
+
+    try:
+        objective_content = objective_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _fail(f"failed to read objective: {exc}")
+
+    dod_items = _collect_objective_dod_items(objective_content)
+    done_dod_ids = {
+        dod_id
+        for dod_id, meta in dod_items.items()
+        if str(meta.get("status") or "").strip().lower() == "done"
+    }
+    done_total = len(done_dod_ids)
+    patch_budget_max = min(3, math.ceil(done_total * 0.20)) if done_total > 0 else 0
+    payload["patch_budget"]["done_total"] = done_total
+    payload["patch_budget"]["max_modifications"] = patch_budget_max
+
+    try:
+        manifest = _load_level2_recall_manifest(agi_id, reason, trigger)
+    except ValueError as exc:
+        return _fail(str(exc))
+
+    if _manifest_exceeds_level2_scope(manifest):
+        return _fail("Level 2 scope exceeded, use Level 3 with user approval")
+
+    requested_mods = _estimate_done_modifications(manifest, done_dod_ids)
+    payload["patch_budget"]["requested_modifications"] = requested_mods
+    if requested_mods > patch_budget_max:
+        return _fail("Patch budget exceeded (max 3 or 20%)")
+
+    recall_dir = _agi_recall_dir(agi_id)
+    recall_dir.mkdir(parents=True, exist_ok=True)
+    manifest_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    manifest_path = recall_dir / f"manifest-{manifest_token}.json"
+    save_json(manifest_path, manifest)
+    save_json(recall_dir / "manifest-latest.json", manifest)
+    payload["manifest_path"] = str(manifest_path)
+
+    patch_call = _record_agile_plan_patch_invocation(
+        agi_id,
+        level=level,
+        reason=reason,
+        trigger=trigger,
+        manifest_path=manifest_path,
+    )
+    payload["agile_plan_patch"] = patch_call
+
+    history_entry = {
+        "timestamp": _now_iso(),
+        "status": "PASS",
+        "level": level,
+        "agi_id": agi_id,
+        "sprint_index": payload["sprint_index"],
+        "reason": reason,
+        "trigger": trigger,
+        "cooldown_window": cooldown_window,
+        "cap_limit": cap_limit,
+        "rollback_token": str(rollback_token_path),
+        "manifest_path": str(manifest_path),
+        "bypass": {
+            "requested": bypass_requested,
+            "used": bool(payload["bypass"]["used"]),
+            "fingerprint": fingerprint or None,
+        },
+        "patch_budget": dict(payload["patch_budget"]),
+    }
+    history.append(history_entry)
+    _save_agile_recall_history(agi_id, history)
+
+    _append_agile_event(
+        agi_id,
+        "agile.recall",
+        {
+            "status": "PASS",
+            "level": level,
+            "reason": reason,
+            "trigger": trigger,
+            "bypass": bool(payload["bypass"]["used"]),
+        },
+    )
+    _append_agile_sprint_log(
+        {
+            "timestamp": _now_iso(),
+            "event": "agile-recall",
+            "agi_id": agi_id,
+            "reason": reason,
+            "trigger": trigger,
+            "manifest_path": str(manifest_path),
+        }
+    )
+
+    payload["status"] = "PASS"
+    _emit_recall_payload(payload, args.json)
+    for warning in payload["warnings"]:
+        print(str(warning), file=sys.stderr)
+    return 0
 
 
 def cmd_agile_drift_check(args):
@@ -8825,6 +9448,15 @@ def build_parser():
     agile_drift_check.add_argument("--agi-id", dest="agi_id")
     agile_drift_check.add_argument("--json", action="store_true")
 
+    agile_recall = agile_sub.add_parser("recall")
+    agile_recall.add_argument("--agi-id", dest="agi_id")
+    agile_recall.add_argument("--level", type=int, default=2)
+    agile_recall.add_argument("--reason", required=True, choices=["fail", "drift"])
+    agile_recall.add_argument("--trigger", default="")
+    agile_recall.add_argument("--bypass-cooldown", action="store_true", dest="bypass_cooldown")
+    agile_recall.add_argument("--fingerprint")
+    agile_recall.add_argument("--json", action="store_true")
+
     agile_coverage_check = agile_sub.add_parser("coverage-check")
     agile_coverage_check.add_argument("original_path")
     agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
@@ -9129,6 +9761,7 @@ def main():
         ("agile", "detail"): cmd_agile_detail,
         ("agile", "evidence-check"): cmd_agile_evidence_check,
         ("agile", "drift-check"): cmd_agile_drift_check,
+        ("agile", "recall"): cmd_agile_recall,
         ("agile", "coverage-check"): cmd_agile_coverage_check,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,

@@ -668,6 +668,28 @@ drift-check config:
 - `config.agile.drift.threshold` 기본값 `0.7`
 - `config.agile.drift.warn_streak_limit` 기본값 `2`
 
+recall 트리거 조건 (Step 2.2.5 내부, Level 2 patch만):
+- `evidence-check == FAIL`이면 아래를 실행한다.
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile recall \
+  --agi-id {AGI_ID} \
+  --level 2 \
+  --reason fail \
+  --trigger evidence \
+  --json
+```
+- `drift-check` 결과에서 `ESCALATE`면 아래를 실행한다.
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile recall \
+  --agi-id {AGI_ID} \
+  --level 2 \
+  --reason drift \
+  --trigger drift-warn-streak \
+  --json
+```
+- `config.agile.recall.enabled=false`면 recall은 skip + warn으로 처리하고 기존 스프린트 워크플로우를 유지한다.
+- cooldown bypass는 evidence hard fail에서만 허용한다 (`--bypass-cooldown --fingerprint <hard-fail-id>`). drift 트리거에는 bypass를 사용하지 않는다.
+
 `required_globs` 규칙:
 - 프로젝트 타입별 `required_globs`는 `config.agile.evidence_gate.required_globs`에서 읽는다.
 - 어떤 패턴이든 매치가 0건이면 **hard fail**로 처리한다 (slide-craft 패턴 차단).

@@ -175,6 +175,18 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--steering-every N] 
 
 `--doc`가 있으면 **1B**, 없으면 **1A**를 수행한다.
 
+#### Step 1P: Recall Patch 재진입 모드 (Level 2 only)
+
+`mst.py agile recall`이 patch manifest를 전달한 경우에는 아래 규칙을 우선 적용한다.
+
+- **금지**: Step 1A 전체(Q&A/재귀 정제 루프) 재실행
+- **허용**: manifest diff만 적용
+  - DoD add/remove/reorder/split/merge
+  - objective 문구 정밀화(의미 불변)
+  - 통합 sprint 삽입
+- 적용 후에는 Step 1A.10 저장 규칙(포맷/마커/evidence 필드)만 재검증하고 저장한다.
+- objective 본질 변경(의미 변경)으로 판단되면 patch를 중단하고 Level 3 승인 경로로 에스컬레이트한다.
+
 ---
 
 #### Step 1A: JTBD + 프로젝트 DoD Q&A 생성 모드
