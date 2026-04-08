@@ -4,6 +4,38 @@
 
 ---
 
+## [0.57.1] — 2026-04-08
+
+> **PLN-435 Phase 1 ~ 6 전면 구축 — agile 스프린트 Sprint Review Gate + Objective Surface Coverage drift + recall Level 2/3 + Done DoD unlock 경로**
+
+> slide-craft 패턴(DoD done 22/22인데 실 산출물 미검증)을 evidence/drift/recall 3단 방어로 구조적으로 차단합니다. 전체 7개 REQ(REQ-586~592) 릴리스.
+
+### 새 기능
+
+- **Sprint Review Gate (Step 2.2.5)**: 매 스프린트 마지막에 `mst.py agile evidence-check`로 모든 done DoD의 evidence(artifact_paths 실재성 + verify_cmd 실행 가능성 + Goodhart 린터로 `true`/`exit 0`/`echo` 거부)를 검증합니다. 3-tier 결과(PASS/WARN/FAIL), `required_globs` 프로젝트 타입별 계약 산출물 검사(0건 시 hard fail), `--accept-evidence-gap REASON` bypass(sprint-log 영구 기록)를 지원합니다. `agile.evidence_gate.enabled=false` 기본값으로 하위 호환.
+- **Objective Surface Coverage drift-check**: `mst.py agile drift-check`가 `objective.md`의 JTBD + 프로젝트 DoD surface를 lexical 매칭으로 추출해 Coverage 점수를 계산하고, `agile-state.json` append-only ledger에 누적합니다. `drift_score < threshold`(기본 0.7)가 2회 연속이면 `escalate_flag=true`로 자동 에스컬레이션 신호를 발생시킵니다. `agile.drift.enabled=false` 기본값.
+- **agile recall Level 2 patch 모드**: `mst.py agile recall`로 evidence fail / drift escalate 발생 시 agile-plan을 patch 모드로 재호출합니다. DoD CRUD + objective 문구 정밀화 + 통합 sprint 삽입을 지원합니다. Cooldown 적응 공식 `clamp(1,4,⌈N*0.10⌉)`, cap `clamp(3,6,⌈N/10⌉)`, `--bypass-cooldown` (evidence hard fail fingerprint 1회, 동일 fingerprint 중복 거부), patch budget `min(3, done*20%)` 상한, rollback token 선저장(`.gran-maestro/agile/snapshots/<ts>.json`), Level 2 scope guard(objective 본질 변경 감지 시 Level 3 유도).
+- **agile recall Level 3 사용자 명시 승인 + audit trail**: `agile recall --level 3 --approval-ticket <id>`는 objective JTBD 재정의까지 허용하지만 `--approval-ticket` 없으면 AUTO_MODE에서도 실행을 차단합니다. `objective.md` frontmatter에 `version`/`last_event_id`/`semantic_hash` 필드를 추가하고, `.gran-maestro/objective/history/<ts>_L3_<reason>.json`에 append-only 로그(before_hash/after_hash/diff/affected_dods/drift_evidence)를 기록합니다. Level 3 cooldown은 Level 2의 2배.
+- **agile classify-change 자동 분류기**: `mst.py agile classify-change <manifest>`가 heuristic 기반으로 변경을 Level 2/3 후보로 자동 분류하고 confidence 점수를 반환합니다. 혼합 manifest는 Level 2, JTBD 핵심 단어 변경은 Level 3.
+- **Done DoD unlock explicit reason 경로**: `mst.py agile unlock --dod <id> --category <cat> --reason "<text>" --evidence <path>`로 done DoD를 재수정 가능 상태로 전환합니다. 카테고리 4종(`upstream_evidence_changed`/`integration_regression`/`new_dependency_dod`/`objective_precision_fix`)별 증빙 필드 강제, reason 20~500자 + 금칙어(`lgtm`/`ok`/`fix`) 거부, `unlock_history[]` append-only, 의존 DoD는 즉시 강등 없이 `revalidation_required` 표식만 부여합니다. `mst.py agile revalidate-done <id>`로 표식을 해제합니다.
+- **evidence 파서 + validator + 1A.10 evidence 필드별 강제 시점 표**: REQ-579 source-mapping 파서를 확장해 `details/*.md` frontmatter에 evidence 필드(`plan.artifact_paths`/`entrypoint_path`, `runtime.integration_smoke_id`/`verify_cmd`/`expected_signal`)를 read/write 지원합니다. `mst.py agile detail validate-evidence <file>` CLI, `entrypoint: none + reason` 예외 태그, Goodhart 린터, legacy graceful 로드(warn-only) 구현. `skills/agile-plan/SKILL.md` 1A.10 섹션에 필드별 plan-time/sprint-runtime/sprint-end 강제 시점 표 추가.
+- **Dashboard Settings agile 섹션 확장**: `agile.evidence_gate` / `agile.drift` / `agile.recall` / `agile.unlock` 4개 섹션이 Settings 탭에서 직접 토글/편집 가능하게 되었습니다.
+
+### 개선
+
+- **`templates/defaults/config.json` agile 섹션 정리**: REQ-586~591에서 부분적으로 추가된 설정 키를 spec 기준으로 정렬하고 누락된 기본값을 보강했습니다. 전부 `enabled=false` 기본값이므로 기존 프로젝트는 변경 없이 그대로 동작합니다.
+
+### 버그 수정
+
+- **`_resolve_required_globs_config` 빈 배열 fallback**: `templates/defaults/config.json`이 `required_globs: []`를 주입하면 REQ-587의 프로젝트 타입 기본값 fallback이 발동하지 않아 `test_required_globs_fallback`이 회귀하는 문제를 수정했습니다. 이제 빈 배열과 missing 모두 fallback 대상입니다.
+
+### 호환성 / 마이그레이션
+
+- 모든 신규 agile 기능은 `enabled=false` 기본값이므로 기존 프로젝트는 자동 활성화되지 않습니다. 사용하려면 `/mst:settings agile.evidence_gate.enabled true`와 같이 명시적으로 토글하세요.
+- 기존 `details/*.md`는 evidence 필드 없이도 graceful 로드(stderr에 "evidence fields not defined (legacy format)" warning만)되어 무수정 호환됩니다.
+
+---
+
 ## [0.57.0] — 2026-04-08
 
 > **agile 스킬 통합 결여 해결 — "Sprint가 사용자에게 전달할 수 있는 변화"를 단위로 삼는 재프레이밍**
