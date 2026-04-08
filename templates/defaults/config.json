@@ -75,6 +75,12 @@
         "asdf"
       ]
     },
+    "recall": {
+      "enabled": false,
+      "cooldown_ratio": 0.1,
+      "cap_ratio": 0.1,
+      "level3_cooldown_multiplier": 2
+    },
     "integration_wire_streak_max": 3,
     "retrospective": {
       "enabled": true,

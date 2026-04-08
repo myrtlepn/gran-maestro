@@ -61,7 +61,8 @@ Subcommands:
   agile detail validate-evidence <details_path> [--json]
   agile evidence-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--accept-evidence-gap REASON] [--json]
   agile drift-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--json]
-  agile recall [--agi-id AGI-ID] [--level 2] --reason fail|drift [--trigger ID] [--bypass-cooldown] [--fingerprint ID] [--json]
+  agile recall [--agi-id AGI-ID] [--level 2|3] --reason fail|drift [--trigger ID] [--approval-ticket ID] [--bypass-cooldown] [--fingerprint ID] [--json]
+  agile classify-change <manifest>
   agile unlock --dod DOD-ID --category upstream_evidence_changed|integration_regression|new_dependency_dod|objective_precision_fix [--reason TEXT] [--evidence TEXT] [--agi-id AGI-ID] [--json]
   agile revalidate-done DOD-ID [--agi-id AGI-ID] [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
@@ -2192,6 +2193,7 @@ _DRIFT_SURFACE_STOPWORDS = {
 _RECALL_DEFAULT_COOLDOWN_RATIO = 0.10
 _RECALL_DEFAULT_CAP_RATIO = 0.10
 _RECALL_DEFAULT_LEVEL = 2
+_RECALL_DEFAULT_LEVEL3_COOLDOWN_MULTIPLIER = 2
 _RECALL_HARD_FAIL_TOKENS = (
     "hard-fail",
     "hard_fail",
@@ -4263,6 +4265,12 @@ def _load_agile_recall_config() -> dict:
     return recall if isinstance(recall, dict) else {}
 
 
+def _load_auto_mode_config() -> dict:
+    config = _load_config_for_get()
+    auto_mode = config.get("auto_mode") if isinstance(config, dict) else {}
+    return auto_mode if isinstance(auto_mode, dict) else {}
+
+
 def _load_agile_unlock_config() -> dict:
     agile_config = _load_agile_config_merged()
     unlock = agile_config.get("unlock")
@@ -4279,6 +4287,11 @@ def _agi_recall_history_path(agi_id: str) -> Path:
 
 def _agi_recall_pending_manifest_path(agi_id: str) -> Path:
     return _agi_recall_dir(agi_id) / "pending-level2-manifest.json"
+
+
+def _agi_recall_pending_manifest_path_for_level(agi_id: str, level: int) -> Path:
+    level_int = max(2, int(level))
+    return _agi_recall_dir(agi_id) / f"pending-level{level_int}-manifest.json"
 
 
 def _agi_recall_invocation_log_path(agi_id: str) -> Path:
@@ -4572,6 +4585,257 @@ def _load_level2_recall_manifest(agi_id: str, reason: str, trigger: str) -> dict
     if not isinstance(manifest.get("stats"), dict):
         manifest["stats"] = {}
     return manifest
+
+
+def _coerce_string_list(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value is None:
+        return []
+    token = str(value).strip()
+    return [token] if token else []
+
+
+def _normalize_recall_reason_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "").strip()).strip("-").lower()
+    return token or "change"
+
+
+def _load_level3_recall_manifest(agi_id: str, reason: str, trigger: str) -> dict:
+    pending_path = _agi_recall_pending_manifest_path_for_level(agi_id, 3)
+    loaded = load_json(pending_path)
+    if loaded is None:
+        raise ValueError(f"level 3 recall manifest not found: {pending_path}")
+    if not isinstance(loaded, dict):
+        raise ValueError(f"invalid recall manifest: {pending_path}")
+
+    manifest = dict(loaded)
+    manifest["level"] = 3
+    manifest.setdefault("reason", str(reason or "").strip().lower())
+    manifest.setdefault("trigger", str(trigger or "").strip())
+    manifest.setdefault("generated_at", _now_iso())
+    if not isinstance(manifest.get("dod_patch"), dict):
+        manifest["dod_patch"] = {
+            "add": [],
+            "remove": [],
+            "reorder": [],
+            "split": [],
+            "merge": [],
+        }
+    if not isinstance(manifest.get("objective_refinements"), list):
+        manifest["objective_refinements"] = []
+    manifest["affected_dods"] = _coerce_string_list(manifest.get("affected_dods"))
+    manifest["drift_evidence"] = _coerce_string_list(manifest.get("drift_evidence"))
+    return manifest
+
+
+def _compute_objective_semantic_hash(content: str) -> str:
+    entries = _extract_objective_surface_entries(content)
+    if entries:
+        canonical = "\n".join(_normalize_drift_surface_entry(entry).lower() for entry in entries)
+    else:
+        canonical = re.sub(r"\s+", " ", str(content or "").strip()).lower()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _upsert_objective_frontmatter_fields(content: str, fields: dict[str, object]) -> str:
+    frontmatter = _extract_frontmatter_block(content)
+    errors = list(frontmatter.get("errors") or [])
+    if errors:
+        raise ValueError("; ".join(str(err) for err in errors))
+
+    frontmatter_text = str(frontmatter.get("frontmatter") or "")
+    for key, value in fields.items():
+        if isinstance(value, bool):
+            rendered_value = "true" if value else "false"
+        elif isinstance(value, int):
+            rendered_value = str(value)
+        else:
+            rendered_value = _yaml_quote(str(value))
+        frontmatter_text = _upsert_frontmatter_key_block(frontmatter_text, key, [f"{key}: {rendered_value}"])
+    return _upsert_detail_frontmatter(content, frontmatter_text)
+
+
+def _apply_level3_objective_refinements(content: str, manifest: dict) -> tuple[str, list[dict]]:
+    updated_content = str(content or "")
+    diff_rows: list[dict] = []
+
+    refinements = manifest.get("objective_refinements")
+    if not isinstance(refinements, list):
+        return updated_content, diff_rows
+
+    for raw_item in refinements:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        before = str(item.get("before") or "")
+        after = str(item.get("after") or "")
+        applied = False
+        if before and after and before in updated_content:
+            updated_content = updated_content.replace(before, after, 1)
+            applied = True
+        diff_rows.append(
+            {
+                "field": str(item.get("field") or ""),
+                "change_type": str(item.get("change_type") or ""),
+                "before": before,
+                "after": after,
+                "semantic_change": bool(item.get("semantic_change")),
+                "applied": applied,
+            }
+        )
+    return updated_content, diff_rows
+
+
+def _collect_level3_affected_dods(manifest: dict, done_dod_ids: set[str]) -> list[str]:
+    affected: list[str] = []
+    seen = set()
+
+    for token in _coerce_string_list(manifest.get("affected_dods")):
+        try:
+            dod_id = _normalize_dod_id(token)
+        except ValueError:
+            continue
+        if dod_id in seen:
+            continue
+        seen.add(dod_id)
+        affected.append(dod_id)
+
+    for dod_id in sorted(_collect_manifest_touched_done_dods(manifest, done_dod_ids)):
+        if dod_id in seen:
+            continue
+        seen.add(dod_id)
+        affected.append(dod_id)
+    return affected
+
+
+def _build_level3_diff_payload(manifest: dict, objective_diff: list[dict]) -> dict:
+    dod_patch = manifest.get("dod_patch") if isinstance(manifest.get("dod_patch"), dict) else {}
+    dod_summary = {}
+    for op_name, entries in dod_patch.items():
+        if isinstance(entries, list) and entries:
+            dod_summary[str(op_name)] = len(entries)
+    return {
+        "objective_refinements": objective_diff,
+        "dod_patch": dod_summary,
+    }
+
+
+def _build_level3_approval_payload(
+    manifest: dict,
+    current_objective: str,
+    done_dod_ids: set[str],
+    *,
+    reason: str,
+    trigger: str,
+    auto_mode_request: bool,
+) -> dict:
+    preview_content, objective_diff = _apply_level3_objective_refinements(current_objective, manifest)
+    before_hash = _compute_objective_semantic_hash(current_objective)
+    after_hash = _compute_objective_semantic_hash(preview_content)
+    return {
+        "approval_required": True,
+        "level": 3,
+        "reason": str(reason or "").strip(),
+        "trigger": str(trigger or "").strip(),
+        "before_hash": before_hash,
+        "after_hash": after_hash,
+        "diff": _build_level3_diff_payload(manifest, objective_diff),
+        "affected_dods": _collect_level3_affected_dods(manifest, done_dod_ids),
+        "drift_evidence": _coerce_string_list(manifest.get("drift_evidence")),
+        "auto_mode": auto_mode_request,
+    }
+
+
+def _write_level3_history_entry(
+    agi_id: str,
+    *,
+    event_token: str,
+    reason: str,
+    event_id: str,
+    before_hash: str,
+    after_hash: str,
+    diff: dict,
+    affected_dods: list[str],
+    drift_evidence: list[str],
+    approval_ticket: str,
+) -> Path:
+    history_dir = _agi_session_dir(agi_id) / "objective" / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    history_path = history_dir / f"{event_token}_L3_{_normalize_recall_reason_token(reason)}.json"
+    save_json(
+        history_path,
+        {
+            "event_id": event_id,
+            "level": 3,
+            "approval_ticket": str(approval_ticket or "").strip(),
+            "before_hash": before_hash,
+            "after_hash": after_hash,
+            "diff": diff,
+            "affected_dods": list(affected_dods),
+            "drift_evidence": list(drift_evidence),
+        },
+    )
+    return history_path
+
+
+def _compute_level3_cooldown(project_size: int, recall_cfg: dict) -> int:
+    base_cooldown = _compute_recall_cooldown(
+        project_size,
+        _safe_float(recall_cfg.get("cooldown_ratio"), _RECALL_DEFAULT_COOLDOWN_RATIO),
+    )
+    multiplier = recall_cfg.get("level3_cooldown_multiplier", _RECALL_DEFAULT_LEVEL3_COOLDOWN_MULTIPLIER)
+    try:
+        multiplier_value = int(multiplier)
+    except (TypeError, ValueError):
+        multiplier_value = _RECALL_DEFAULT_LEVEL3_COOLDOWN_MULTIPLIER
+    return base_cooldown * max(1, multiplier_value)
+
+
+def _classify_change_manifest(manifest: dict, recall_cfg: dict) -> dict:
+    level = 2
+    confidence = 0.78
+    summary = "Objective wording remains semantically stable; DoD patch stays within Level 2."
+
+    if _manifest_exceeds_level2_scope(manifest):
+        level = 3
+        confidence = 0.92
+        summary = "JTBD core intent changed; objective essence was redefined and requires Level 3 approval."
+
+    payload = {
+        "level": level,
+        "confidence": confidence,
+        "summary": summary,
+    }
+
+    project_size_raw = manifest.get("project_size")
+    if project_size_raw is not None:
+        try:
+            project_size = max(1, int(project_size_raw))
+        except (TypeError, ValueError):
+            project_size = None
+        if project_size is not None:
+            level2_cooldown_raw = manifest.get("level2_cooldown")
+            if level2_cooldown_raw is not None:
+                try:
+                    level2_cooldown = max(1, int(level2_cooldown_raw))
+                except (TypeError, ValueError):
+                    level2_cooldown = _compute_recall_cooldown(
+                        project_size,
+                        _safe_float(recall_cfg.get("cooldown_ratio"), _RECALL_DEFAULT_COOLDOWN_RATIO),
+                    )
+            else:
+                level2_cooldown = _compute_recall_cooldown(
+                    project_size,
+                    _safe_float(recall_cfg.get("cooldown_ratio"), _RECALL_DEFAULT_COOLDOWN_RATIO),
+                )
+            multiplier = recall_cfg.get("level3_cooldown_multiplier", _RECALL_DEFAULT_LEVEL3_COOLDOWN_MULTIPLIER)
+            try:
+                multiplier_value = max(1, int(multiplier))
+            except (TypeError, ValueError):
+                multiplier_value = _RECALL_DEFAULT_LEVEL3_COOLDOWN_MULTIPLIER
+            payload["cooldown"] = level2_cooldown * multiplier_value
+    return payload
 
 
 def _record_agile_plan_patch_invocation(
@@ -5311,6 +5575,32 @@ def cmd_agile_revalidate_done(args):
     return 0
 
 
+def cmd_agile_classify_change(args):
+    manifest_path = Path(str(args.manifest))
+    if not manifest_path.exists():
+        print(f"Error: manifest not found ({manifest_path})", file=sys.stderr)
+        return 1
+
+    loaded = load_json(manifest_path)
+    if not isinstance(loaded, dict):
+        print(f"Error: invalid manifest ({manifest_path})", file=sys.stderr)
+        return 1
+
+    payload = _classify_change_manifest(dict(loaded), _load_agile_recall_config())
+    level = int(payload.get("level", 2))
+    label = f"Level {level}"
+    confidence = float(payload.get("confidence", 0.0))
+    summary = str(payload.get("summary") or "").strip()
+
+    print(label)
+    print(f"confidence: {confidence:.2f}")
+    if payload.get("cooldown") is not None:
+        print(f"cooldown: {payload['cooldown']}")
+    if summary:
+        print(f"summary: {summary}")
+    return 0
+
+
 def cmd_agile_recall(args):
     level_raw = args.level if args.level is not None else _RECALL_DEFAULT_LEVEL
     try:
@@ -5320,6 +5610,7 @@ def cmd_agile_recall(args):
 
     reason = str(args.reason or "").strip().lower()
     trigger = str(args.trigger or "").strip()
+    approval_ticket = str(getattr(args, "approval_ticket", "") or "").strip()
     bypass_requested = bool(args.bypass_cooldown)
     fingerprint = str(args.fingerprint or trigger or "").strip()
 
@@ -5358,8 +5649,8 @@ def cmd_agile_recall(args):
         print(str(message), file=sys.stderr)
         return 1
 
-    if level != 2:
-        return _fail("Level 2 only: use --level 2")
+    if level not in {2, 3}:
+        return _fail("recall level must be 2 or 3")
     if reason not in {"fail", "drift"}:
         return _fail("reason must be fail or drift")
 
@@ -5394,7 +5685,11 @@ def cmd_agile_recall(args):
     project_size = _compute_recall_project_size(session, agi_id)
     cooldown_ratio = _safe_float(recall_cfg.get("cooldown_ratio"), _RECALL_DEFAULT_COOLDOWN_RATIO)
     cap_ratio = _safe_float(recall_cfg.get("cap_ratio"), _RECALL_DEFAULT_CAP_RATIO)
-    cooldown_window = _compute_recall_cooldown(project_size, cooldown_ratio)
+    cooldown_window = (
+        _compute_level3_cooldown(project_size, recall_cfg)
+        if level == 3
+        else _compute_recall_cooldown(project_size, cooldown_ratio)
+    )
     cap_limit = _compute_recall_cap(project_size, cap_ratio)
     payload["project_size"] = project_size
     payload["cooldown_window"] = cooldown_window
@@ -5472,11 +5767,15 @@ def cmd_agile_recall(args):
     payload["patch_budget"]["max_modifications"] = patch_budget_max
 
     try:
-        manifest = _load_level2_recall_manifest(agi_id, reason, trigger)
+        manifest = (
+            _load_level3_recall_manifest(agi_id, reason, trigger)
+            if level == 3
+            else _load_level2_recall_manifest(agi_id, reason, trigger)
+        )
     except ValueError as exc:
         return _fail(str(exc))
 
-    if _manifest_exceeds_level2_scope(manifest):
+    if level == 2 and _manifest_exceeds_level2_scope(manifest):
         return _fail("Level 2 scope exceeded, use Level 3 with user approval")
 
     touched_done_dods = _collect_manifest_touched_done_dods(manifest, done_dod_ids)
@@ -5497,6 +5796,31 @@ def cmd_agile_recall(args):
     save_json(recall_dir / "manifest-latest.json", manifest)
     payload["manifest_path"] = str(manifest_path)
 
+    auto_mode_request = bool(_load_auto_mode_config().get("request", False))
+    approval_payload = None
+    if level == 3:
+        approval_payload = _build_level3_approval_payload(
+            manifest,
+            objective_content,
+            done_dod_ids,
+            reason=reason,
+            trigger=trigger,
+            auto_mode_request=auto_mode_request,
+        )
+        payload["approval_required"] = True
+        payload["approval"] = approval_payload
+        if not approval_ticket:
+            message = "Level 3 requires --approval-ticket (user approval required)"
+            payload["status"] = "FAIL"
+            payload["errors"] = [message]
+            if args.json:
+                print(json.dumps(payload, ensure_ascii=False))
+            else:
+                print("USER APPROVAL REQUIRED")
+                print(json.dumps(approval_payload, ensure_ascii=False))
+            print(message, file=sys.stderr)
+            return 1
+
     patch_call = _record_agile_plan_patch_invocation(
         agi_id,
         level=level,
@@ -5505,6 +5829,65 @@ def cmd_agile_recall(args):
         manifest_path=manifest_path,
     )
     payload["agile_plan_patch"] = patch_call
+
+    objective_version = None
+    event_id = None
+    objective_history_path = None
+    if level == 3 and approval_payload is not None:
+        updated_objective, objective_diff = _apply_level3_objective_refinements(objective_content, manifest)
+        event_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        event_id = f"EVT-L3-{event_token}"
+
+        frontmatter = _extract_frontmatter_block(objective_content)
+        frontmatter_text = str(frontmatter.get("frontmatter") or "")
+        version_raw = _extract_yaml_scalar(frontmatter_text, "version")
+        if version_raw is None:
+            objective_data = session.get("objective") if isinstance(session.get("objective"), dict) else {}
+            version_raw = objective_data.get("version", 0)
+        try:
+            current_version = int(version_raw)
+        except (TypeError, ValueError):
+            current_version = 0
+        objective_version = current_version + 1
+
+        updated_objective = _upsert_objective_frontmatter_fields(
+            updated_objective,
+            {
+                "version": objective_version,
+                "last_event_id": event_id,
+                "semantic_hash": approval_payload["after_hash"],
+            },
+        )
+        try:
+            objective_path.write_text(updated_objective, encoding="utf-8")
+        except OSError as exc:
+            return _fail(f"failed to write objective: {exc}")
+
+        objective_data = session.get("objective")
+        if not isinstance(objective_data, dict):
+            objective_data = {"path": "objective/objective.md"}
+            session["objective"] = objective_data
+        objective_data["version"] = objective_version
+        _save_agile_session(agi_id, session)
+
+        objective_history_path = _write_level3_history_entry(
+            agi_id,
+            event_token=event_token,
+            reason=reason,
+            event_id=event_id,
+            before_hash=approval_payload["before_hash"],
+            after_hash=approval_payload["after_hash"],
+            diff=_build_level3_diff_payload(manifest, objective_diff),
+            affected_dods=list(approval_payload["affected_dods"]),
+            drift_evidence=list(approval_payload["drift_evidence"]),
+            approval_ticket=approval_ticket,
+        )
+        payload["objective"] = {
+            "version": objective_version,
+            "last_event_id": event_id,
+            "semantic_hash": approval_payload["after_hash"],
+            "history_path": str(objective_history_path),
+        }
 
     history_entry = {
         "timestamp": _now_iso(),
@@ -5525,6 +5908,10 @@ def cmd_agile_recall(args):
         },
         "patch_budget": dict(payload["patch_budget"]),
     }
+    if level == 3:
+        history_entry["approval_ticket"] = approval_ticket
+        history_entry["objective_version"] = objective_version
+        history_entry["last_event_id"] = event_id
     history.append(history_entry)
     _save_agile_recall_history(agi_id, history)
 
@@ -5537,6 +5924,8 @@ def cmd_agile_recall(args):
             "reason": reason,
             "trigger": trigger,
             "bypass": bool(payload["bypass"]["used"]),
+            "approval_ticket": approval_ticket or None,
+            "last_event_id": event_id,
         },
     )
     _append_agile_sprint_log(
@@ -5547,6 +5936,7 @@ def cmd_agile_recall(args):
             "reason": reason,
             "trigger": trigger,
             "manifest_path": str(manifest_path),
+            "level": level,
         }
     )
 
@@ -10048,9 +10438,13 @@ def build_parser():
     agile_recall.add_argument("--level", type=int, default=2)
     agile_recall.add_argument("--reason", required=True, choices=["fail", "drift"])
     agile_recall.add_argument("--trigger", default="")
+    agile_recall.add_argument("--approval-ticket", dest="approval_ticket")
     agile_recall.add_argument("--bypass-cooldown", action="store_true", dest="bypass_cooldown")
     agile_recall.add_argument("--fingerprint")
     agile_recall.add_argument("--json", action="store_true")
+
+    agile_classify_change = agile_sub.add_parser("classify-change")
+    agile_classify_change.add_argument("manifest")
 
     agile_unlock = agile_sub.add_parser("unlock")
     agile_unlock.add_argument("--dod", required=True)
@@ -10379,6 +10773,7 @@ def main():
         ("agile", "evidence-check"): cmd_agile_evidence_check,
         ("agile", "drift-check"): cmd_agile_drift_check,
         ("agile", "recall"): cmd_agile_recall,
+        ("agile", "classify-change"): cmd_agile_classify_change,
         ("agile", "unlock"): cmd_agile_unlock,
         ("agile", "revalidate-done"): cmd_agile_revalidate_done,
         ("agile", "coverage-check"): cmd_agile_coverage_check,
