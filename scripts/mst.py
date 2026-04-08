@@ -60,6 +60,7 @@ Subcommands:
   agile detail validate-mapping <details_path> [--json]
   agile detail validate-evidence <details_path> [--json]
   agile evidence-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--accept-evidence-gap REASON] [--json]
+  agile drift-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
@@ -2154,6 +2155,36 @@ _GOODHART_DUMMY_VERIFY_ERROR = "Goodhart linter: verify_cmd rejected (dummy comm
 _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE = {
     "plugin": ["skills/*/SKILL.md"],
 }
+_DRIFT_SURFACE_TOKEN_RE = re.compile(r"[A-Za-z0-9가-힣]+")
+_DRIFT_SURFACE_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "when",
+    "want",
+    "can",
+    "to",
+    "so",
+    "is",
+    "are",
+    "of",
+    "on",
+    "in",
+    "it",
+    "do",
+    "be",
+    "i",
+    "we",
+    "you",
+    "사용자",
+    "프로젝트",
+    "기준",
+    "완료",
+    "레이어",
+}
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -3697,6 +3728,32 @@ def _emit_evidence_check_payload(payload: dict, as_json: bool):
     if patterns:
         print(f"required_globs: {', '.join(str(pattern) for pattern in patterns)}")
 
+
+def _emit_drift_check_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = str(payload.get("status") or "WARN").upper()
+    if status == "SKIP":
+        print("WARN: drift-check skipped")
+    else:
+        print(str(payload.get("warn_level") or status))
+
+    if payload.get("escalate_flag"):
+        print("ESCALATE")
+
+    drift_score = payload.get("drift_score")
+    if isinstance(drift_score, (int, float)):
+        print(f"drift_score: {float(drift_score):.4f}")
+    else:
+        print("drift_score: -")
+    print(f"covered_surface: {len(payload.get('covered_surface') or [])}")
+    print(f"uncovered_surface: {len(payload.get('uncovered_surface') or [])}")
+    print(f"warn_streak: {payload.get('warn_streak', 0)}")
+    print(f"threshold: {payload.get('threshold')}")
+    print(f"warn_streak_limit: {payload.get('warn_streak_limit')}")
+
 def _read_first_line(path: Path) -> str:
     with path.open("r", encoding="utf-8") as file:
         return file.readline().strip()
@@ -4101,6 +4158,370 @@ def _resolve_project_matches(project_root: Path, expression: str) -> list[Path]:
 
     candidate = project_root / token
     return [candidate] if candidate.exists() else []
+
+
+def _load_agile_drift_config() -> dict:
+    agile_config = _load_agile_config_merged()
+    drift = agile_config.get("drift")
+    return drift if isinstance(drift, dict) else {}
+
+
+def _normalize_drift_surface_entry(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+    return cleaned.strip(" -")
+
+
+def _extract_drift_surface_tokens(text: str) -> list[str]:
+    tokens = []
+    seen = set()
+    for token in _DRIFT_SURFACE_TOKEN_RE.findall(str(text or "").lower()):
+        cleaned = token.strip()
+        if len(cleaned) < 2:
+            continue
+        if cleaned in _DRIFT_SURFACE_STOPWORDS:
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        tokens.append(cleaned)
+    return tokens
+
+
+def _extract_drift_surface_candidate(raw_line: str) -> str:
+    line = str(raw_line or "").strip()
+    if not line or line.startswith("<!--"):
+        return ""
+
+    bullet_match = re.match(r"^\s*(?:[-*+]|\d+\.)\s+(.+)$", line)
+    if bullet_match is None:
+        return ""
+    candidate = bullet_match.group(1).strip()
+    candidate = re.sub(r"^\[[xX ]\]\s*", "", candidate)
+    candidate = re.sub(r"^DOD-[A-Za-z0-9_-]+\s*:\s*", "", candidate, flags=re.IGNORECASE)
+    return _normalize_drift_surface_entry(candidate)
+
+
+def _extract_objective_surface_entries(content: str) -> list[str]:
+    entries: list[str] = []
+    seen = set()
+    section_kind = None
+
+    for raw_line in str(content or "").splitlines():
+        heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", raw_line)
+        if heading is not None:
+            title = re.sub(r"[*`_]+", "", heading.group(1)).strip().lower()
+            if "jtbd" in title:
+                section_kind = "jtbd"
+            elif "project dod" in title or "프로젝트 dod" in title or "프로젝트 완료 기준" in title:
+                section_kind = "dod"
+            else:
+                section_kind = None
+            continue
+
+        if section_kind not in {"jtbd", "dod"}:
+            continue
+
+        candidate = _extract_drift_surface_candidate(raw_line)
+        if not candidate:
+            continue
+        dedupe_key = candidate.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        entries.append(candidate)
+
+    if entries:
+        return entries
+
+    # Fallback for legacy objective formats.
+    for raw_line in str(content or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        candidate = _extract_drift_surface_candidate(stripped)
+        if not candidate:
+            continue
+        if not (
+            re.search(r"\b(?:when i|i want to|so i can)\b", candidate, flags=re.IGNORECASE)
+            or re.search(r"\bDOD-\w+", stripped, flags=re.IGNORECASE)
+        ):
+            continue
+        dedupe_key = candidate.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        entries.append(candidate)
+    return entries
+
+
+def _collect_drift_corpus_tokens(details_dir: Path) -> tuple[set[str], list[Path], list[str]]:
+    tokens: set[str] = set()
+    warnings: list[str] = []
+    detail_files = sorted(details_dir.glob("*.md"))
+
+    for detail_file in detail_files:
+        try:
+            content = detail_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            warnings.append(f"{detail_file.name}: failed to read detail ({exc})")
+            continue
+
+        tokens.update(_extract_drift_surface_tokens(content))
+        parsed = parse_agile_detail_metadata(content)
+        validation = validate_agile_detail_evidence(parsed)
+        evidence = validation.get("evidence") if isinstance(validation.get("evidence"), dict) else {}
+        plan = evidence.get("plan") if isinstance(evidence.get("plan"), dict) else {}
+        artifacts = plan.get("artifact_paths") if isinstance(plan.get("artifact_paths"), list) else []
+        for artifact in artifacts:
+            tokens.update(_extract_drift_surface_tokens(str(artifact)))
+
+    return tokens, detail_files, warnings
+
+
+def _compute_drift_surface_coverage(surface_entries: list[str], corpus_tokens: set[str]) -> tuple[list[str], list[str]]:
+    covered: list[str] = []
+    uncovered: list[str] = []
+
+    for entry in surface_entries:
+        entry_tokens = set(_extract_drift_surface_tokens(entry))
+        if entry_tokens and entry_tokens.intersection(corpus_tokens):
+            covered.append(entry)
+        else:
+            uncovered.append(entry)
+    return covered, uncovered
+
+
+def _agile_state_ledger_path() -> Path:
+    return agile_dir() / "agile-state.json"
+
+
+def _load_agile_state_ledger_entries() -> list[dict]:
+    data = load_json(_agile_state_ledger_path())
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict) and isinstance(data.get("entries"), list):
+        return [item for item in data["entries"] if isinstance(item, dict)]
+    return []
+
+
+def _previous_drift_warn_streak(entries: list[dict]) -> int:
+    if not entries:
+        return 0
+
+    latest = entries[-1]
+    latest_level = str(latest.get("warn_level") or "").strip().upper()
+    if latest_level != "WARN":
+        return 0
+
+    raw_streak = latest.get("warn_streak")
+    if isinstance(raw_streak, int) and raw_streak >= 0:
+        return raw_streak
+
+    streak = 0
+    for row in reversed(entries):
+        level = str(row.get("warn_level") or "").strip().upper()
+        if level != "WARN":
+            break
+        streak += 1
+    return streak
+
+
+def _append_agile_state_ledger_entry(entry: dict) -> list[dict]:
+    rows = _load_agile_state_ledger_entries()
+    rows.append(entry)
+    save_json(_agile_state_ledger_path(), rows)
+    return rows
+
+
+def _resolve_drift_check_target(args) -> tuple[Optional[str], Path, Path]:
+    agi_id, details_dir = _resolve_evidence_check_target(args)
+    objective_path = _agi_objective_path(agi_id) if agi_id else details_dir.parent / "objective.md"
+    return agi_id, details_dir, objective_path
+
+
+def cmd_agile_drift_check(args):
+    sprint_id = None
+    if args.sprint:
+        try:
+            sprint_id = _normalize_sprint_id_token(str(args.sprint))
+        except ValueError as exc:
+            payload = {
+                "status": "FAIL",
+                "warn_level": "WARN",
+                "sprint_id": None,
+                "agi_id": None,
+                "details_dir": None,
+                "objective_path": None,
+                "threshold": None,
+                "warn_streak_limit": 2,
+                "drift_score": None,
+                "surface_total": 0,
+                "covered_surface": [],
+                "uncovered_surface": [],
+                "warn_streak": 0,
+                "escalate_flag": False,
+                "ledger_path": str(_agile_state_ledger_path()),
+                "checked_files": [],
+                "warnings": [],
+                "errors": [str(exc)],
+            }
+            _emit_drift_check_payload(payload, args.json)
+            print(str(exc), file=sys.stderr)
+            return 1
+
+    drift_cfg = _load_agile_drift_config()
+    enabled = bool(drift_cfg.get("enabled", False))
+    try:
+        warn_streak_limit = int(drift_cfg.get("warn_streak_limit", 2))
+    except (TypeError, ValueError):
+        warn_streak_limit = 2
+    if warn_streak_limit < 1:
+        warn_streak_limit = 2
+
+    payload = {
+        "status": "SKIP",
+        "warn_level": "WARN",
+        "sprint_id": sprint_id,
+        "agi_id": None,
+        "details_dir": None,
+        "objective_path": None,
+        "threshold": drift_cfg.get("threshold"),
+        "warn_streak_limit": warn_streak_limit,
+        "drift_score": None,
+        "surface_total": 0,
+        "covered_surface": [],
+        "uncovered_surface": [],
+        "warn_streak": 0,
+        "escalate_flag": False,
+        "ledger_path": str(_agile_state_ledger_path()),
+        "checked_files": [],
+        "warnings": [],
+        "errors": [],
+    }
+
+    if not enabled:
+        payload["warnings"].append("drift-check skipped: agile.drift.enabled=false")
+        _emit_drift_check_payload(payload, args.json)
+        for warning in payload["warnings"]:
+            print(str(warning), file=sys.stderr)
+        return 0
+
+    threshold_raw = drift_cfg.get("threshold")
+    try:
+        threshold = float(threshold_raw)
+    except (TypeError, ValueError):
+        threshold = None
+    if threshold is None:
+        payload["warnings"].append("drift-check skipped: agile.drift.threshold is missing")
+        _emit_drift_check_payload(payload, args.json)
+        for warning in payload["warnings"]:
+            print(str(warning), file=sys.stderr)
+        return 0
+    if threshold < 0.0 or threshold > 1.0:
+        payload["warnings"].append("drift-check skipped: agile.drift.threshold must be between 0 and 1")
+        payload["threshold"] = threshold
+        _emit_drift_check_payload(payload, args.json)
+        for warning in payload["warnings"]:
+            print(str(warning), file=sys.stderr)
+        return 0
+    payload["threshold"] = threshold
+
+    try:
+        agi_id, details_dir, objective_path = _resolve_drift_check_target(args)
+    except ValueError as exc:
+        payload["status"] = "FAIL"
+        payload["errors"].append(str(exc))
+        _emit_drift_check_payload(payload, args.json)
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload["agi_id"] = agi_id
+    payload["details_dir"] = str(details_dir)
+    payload["objective_path"] = str(objective_path)
+
+    if not details_dir.exists():
+        reason = f"details dir not found: {details_dir}"
+        payload["status"] = "FAIL"
+        payload["errors"].append(reason)
+        _emit_drift_check_payload(payload, args.json)
+        print(reason, file=sys.stderr)
+        return 1
+    if not details_dir.is_dir():
+        reason = f"details dir is not a directory: {details_dir}"
+        payload["status"] = "FAIL"
+        payload["errors"].append(reason)
+        _emit_drift_check_payload(payload, args.json)
+        print(reason, file=sys.stderr)
+        return 1
+    if not objective_path.exists():
+        reason = f"objective file missing: {objective_path}"
+        payload["status"] = "FAIL"
+        payload["errors"].append(reason)
+        _emit_drift_check_payload(payload, args.json)
+        print(reason, file=sys.stderr)
+        return 1
+
+    try:
+        objective_content = objective_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = f"failed to read objective: {exc}"
+        payload["status"] = "FAIL"
+        payload["errors"].append(reason)
+        _emit_drift_check_payload(payload, args.json)
+        print(reason, file=sys.stderr)
+        return 1
+
+    surface_entries = _extract_objective_surface_entries(objective_content)
+    payload["surface_total"] = len(surface_entries)
+    if not surface_entries:
+        payload["warnings"].append("objective surface not found (JTBD + Project DoD)")
+
+    corpus_tokens, detail_files, detail_warnings = _collect_drift_corpus_tokens(details_dir)
+    payload["checked_files"] = [_relpath_display(path, BASE_DIR.parent) for path in detail_files]
+    payload["warnings"].extend(detail_warnings)
+    if not detail_files:
+        payload["warnings"].append(f"no detail files found: {details_dir}")
+
+    covered_surface, uncovered_surface = _compute_drift_surface_coverage(surface_entries, corpus_tokens)
+    drift_score = (len(covered_surface) / len(surface_entries)) if surface_entries else 0.0
+    warn_level = "PASS" if surface_entries and drift_score >= threshold else "WARN"
+
+    existing_entries = _load_agile_state_ledger_entries()
+    prev_warn_streak = _previous_drift_warn_streak(existing_entries)
+    warn_streak = (prev_warn_streak + 1) if warn_level == "WARN" else 0
+    escalate_flag = warn_level == "WARN" and warn_streak >= warn_streak_limit
+
+    ledger_entry = {
+        "timestamp": _now_iso(),
+        "agi_id": agi_id,
+        "sprint_id": sprint_id,
+        "drift_score": drift_score,
+        "covered_surface": covered_surface,
+        "uncovered_surface": uncovered_surface,
+        "warn_level": warn_level,
+        "warn_streak": warn_streak,
+        "escalate_flag": escalate_flag,
+    }
+    _append_agile_state_ledger_entry(ledger_entry)
+
+    payload.update(
+        {
+            "status": warn_level,
+            "warn_level": warn_level,
+            "drift_score": drift_score,
+            "covered_surface": covered_surface,
+            "uncovered_surface": uncovered_surface,
+            "warn_streak": warn_streak,
+            "escalate_flag": escalate_flag,
+        }
+    )
+    if escalate_flag:
+        payload["warnings"].append("warn streak limit reached; ESCALATE")
+
+    _emit_drift_check_payload(payload, args.json)
+    for warning in payload["warnings"]:
+        print(str(warning), file=sys.stderr)
+    return 0
 
 
 def cmd_agile_evidence_check(args):
@@ -8397,6 +8818,13 @@ def build_parser():
     agile_evidence_check.add_argument("--accept-evidence-gap", dest="accept_evidence_gap")
     agile_evidence_check.add_argument("--json", action="store_true")
 
+    agile_drift_check = agile_sub.add_parser("drift-check")
+    agile_drift_check_scope = agile_drift_check.add_mutually_exclusive_group(required=True)
+    agile_drift_check_scope.add_argument("--sprint")
+    agile_drift_check_scope.add_argument("--details-dir", dest="details_dir")
+    agile_drift_check.add_argument("--agi-id", dest="agi_id")
+    agile_drift_check.add_argument("--json", action="store_true")
+
     agile_coverage_check = agile_sub.add_parser("coverage-check")
     agile_coverage_check.add_argument("original_path")
     agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
@@ -8700,6 +9128,7 @@ def main():
         ("agile", "known-issues"): cmd_agile_known_issues,
         ("agile", "detail"): cmd_agile_detail,
         ("agile", "evidence-check"): cmd_agile_evidence_check,
+        ("agile", "drift-check"): cmd_agile_drift_check,
         ("agile", "coverage-check"): cmd_agile_coverage_check,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,

@@ -49,6 +49,11 @@
     "soft_limit_large": 12,
     "round_history_max_summary_lines": 50,
     "coverage_threshold": 0.85,
+    "drift": {
+      "enabled": false,
+      "threshold": 0.7,
+      "warn_streak_limit": 2
+    },
     "integration_review_depth": 3,
     "new_island_threshold": 0.20,
     "foundational_streak_max": 2,

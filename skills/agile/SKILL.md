@@ -650,6 +650,24 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile evidence-check \
 - `WARN`: 차단하지 않음(예: `TBD`, gate disabled 경고). 경고를 Sprint 메모에 남기고 Step 2.2.6으로 진행.
 - `FAIL`: 스프린트 진행 차단. 위반(artifact 미존재, `required_globs` 미충족 등)을 수정한 뒤 `evidence-check`를 재실행한다.
 
+Objective Surface Coverage drift-check (MANDATORY):
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile drift-check \
+  --agi-id {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --json
+```
+
+drift-check 판정:
+- `PASS`: objective surface coverage가 threshold 이상. Step 2.2.6으로 진행.
+- `WARN`: coverage가 threshold 미만. 스프린트 메모에 `covered_surface`/`uncovered_surface`를 기록하고 계속 진행.
+- `ESCALATE`: WARN이 `warn_streak_limit` 이상 연속되면 `escalate_flag=true`. 비상 스티어링 트리거로 간주하고 Step 3 진입 또는 recall 정책(사용 가능 시)을 실행한다.
+
+drift-check config:
+- `config.agile.drift.enabled`가 `false`면 drift-check는 skip WARN으로 처리하고 차단하지 않는다.
+- `config.agile.drift.threshold` 기본값 `0.7`
+- `config.agile.drift.warn_streak_limit` 기본값 `2`
+
 `required_globs` 규칙:
 - 프로젝트 타입별 `required_globs`는 `config.agile.evidence_gate.required_globs`에서 읽는다.
 - 어떤 패턴이든 매치가 0건이면 **hard fail**로 처리한다 (slide-craft 패턴 차단).
