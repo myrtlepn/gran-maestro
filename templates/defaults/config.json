@@ -66,6 +66,15 @@
         ]
       }
     },
+    "unlock": {
+      "enabled": false,
+      "forbidden_patterns": [
+        "lgtm",
+        "ok",
+        "fix",
+        "asdf"
+      ]
+    },
     "integration_wire_streak_max": 3,
     "retrospective": {
       "enabled": true,

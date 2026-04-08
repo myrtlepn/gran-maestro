@@ -83,6 +83,36 @@ def _write_objective_done_dods(workspace: Path, agi_id: str, done_count: int):
     _write_file(objective_path, "\n".join(lines) + "\n")
 
 
+def _write_unlocked_detail(workspace: Path, agi_id: str, dod_id: str):
+    detail_path = workspace / ".gran-maestro" / "agile" / agi_id / "objective" / "details" / f"{dod_id}.md"
+    _write_file(
+        detail_path,
+        "\n".join(
+            [
+                "---",
+                "status: in_progress",
+                "unlock_history:",
+                "  - timestamp: 2026-04-01T00:00:00Z",
+                "    category: upstream_evidence_changed",
+                "    reason: upstream DOD-005 evidence fingerprint changed from old to new",
+                "    evidence: DOD-005,fingerprint.diff",
+                "evidence:",
+                "  plan:",
+                "    artifact_paths:",
+                "      - src/app.py",
+                "    entrypoint_path: src/app.py:main",
+                "  runtime:",
+                "    integration_smoke_id: smoke-001",
+                "    verify_cmd: \"python -m pytest tests/test_smoke.py -q\"",
+                "    expected_signal: \"1 passed\"",
+                "---",
+                f"# {dod_id}",
+                "",
+            ]
+        ),
+    )
+
+
 def _recall_dir(workspace: Path, agi_id: str) -> Path:
     return workspace / ".gran-maestro" / "agile" / agi_id / "recall"
 
@@ -293,6 +323,7 @@ def test_patch_budget(tmp_path):
     _write_recall_config(workspace, enabled=True)
     _set_current_sprint(workspace, agi_id, sprint=12)
     _write_objective_done_dods(workspace, agi_id, done_count=10)
+    _write_unlocked_detail(workspace, agi_id, "DOD-001")
     _write_pending_manifest(
         workspace,
         agi_id,

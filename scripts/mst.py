@@ -62,6 +62,8 @@ Subcommands:
   agile evidence-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--accept-evidence-gap REASON] [--json]
   agile drift-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--json]
   agile recall [--agi-id AGI-ID] [--level 2] --reason fail|drift [--trigger ID] [--bypass-cooldown] [--fingerprint ID] [--json]
+  agile unlock --dod DOD-ID --category upstream_evidence_changed|integration_regression|new_dependency_dod|objective_precision_fix [--reason TEXT] [--evidence TEXT] [--agi-id AGI-ID] [--json]
+  agile revalidate-done DOD-ID [--agi-id AGI-ID] [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
@@ -2198,6 +2200,13 @@ _RECALL_HARD_FAIL_TOKENS = (
     "entrypoint-down",
     "entrypoint_down",
 )
+_UNLOCK_FORBIDDEN_REASON_PATTERNS = ("lgtm", "ok", "fix", "asdf")
+_UNLOCK_CATEGORY_HINTS = {
+    "upstream_evidence_changed": "upstream DoD ID + evidence fingerprint diff",
+    "integration_regression": "smoke run ID + failure log",
+    "new_dependency_dod": "new dependency DoD ID",
+    "objective_precision_fix": "objective precision diff",
+}
 _RECALL_OBJECTIVE_STOPWORDS = {
     "the",
     "and",
@@ -2384,6 +2393,134 @@ def _extract_yaml_list(frontmatter: str, key: str):
     return None
 
 
+def _find_top_level_yaml_key_range(lines: list[str], key: str) -> Optional[tuple[int, int]]:
+    key_re = re.compile(rf"^{re.escape(str(key))}\s*:")
+    top_level_key_re = re.compile(r"^[A-Za-z0-9_-]+\s*:")
+    start = None
+    for idx, raw_line in enumerate(lines):
+        if key_re.match(raw_line):
+            start = idx
+            break
+    if start is None:
+        return None
+
+    end = start + 1
+    while end < len(lines):
+        candidate = lines[end]
+        if top_level_key_re.match(candidate):
+            break
+        end += 1
+    return start, end
+
+
+def _extract_frontmatter_key_block_lines(frontmatter: str, key: str) -> list[str]:
+    lines = str(frontmatter or "").splitlines()
+    key_range = _find_top_level_yaml_key_range(lines, key)
+    if key_range is None:
+        return []
+    start, end = key_range
+    return lines[start:end]
+
+
+def _upsert_frontmatter_key_block(frontmatter: str, key: str, block_lines: list[str]) -> str:
+    lines = str(frontmatter or "").splitlines()
+    key_range = _find_top_level_yaml_key_range(lines, key)
+    if key_range is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(block_lines)
+    else:
+        start, end = key_range
+        lines[start:end] = block_lines
+    return "\n".join(lines)
+
+
+def _remove_frontmatter_key_block(frontmatter: str, key: str) -> str:
+    lines = str(frontmatter or "").splitlines()
+    key_range = _find_top_level_yaml_key_range(lines, key)
+    if key_range is None:
+        return "\n".join(lines)
+
+    start, end = key_range
+    del lines[start:end]
+
+    compact: list[str] = []
+    previous_blank = False
+    for raw_line in lines:
+        blank = not raw_line.strip()
+        if blank and previous_blank:
+            continue
+        compact.append(raw_line)
+        previous_blank = blank
+    while compact and not compact[-1].strip():
+        compact.pop()
+    return "\n".join(compact)
+
+
+def _upsert_detail_frontmatter(content: str, frontmatter_text: str) -> str:
+    text = str(content)
+    normalized = str(frontmatter_text or "").strip()
+    replacement_frontmatter = f"---\n{normalized}\n---\n\n" if normalized else ""
+    frontmatter = _extract_frontmatter_block(text)
+    if frontmatter.get("errors"):
+        raise ValueError("; ".join(str(err) for err in frontmatter["errors"]))
+
+    if frontmatter.get("has_frontmatter"):
+        return f"{frontmatter.get('prefix')}{replacement_frontmatter}{frontmatter.get('suffix')}"
+
+    lines = text.splitlines(keepends=True)
+    if lines and _SOURCE_MAPPING_RE.fullmatch(lines[0].strip()):
+        head = lines[0]
+        tail = "".join(lines[1:])
+        return f"{head}{replacement_frontmatter}{tail}"
+
+    return f"{replacement_frontmatter}{text}"
+
+
+def _parse_unlock_history(frontmatter: str) -> list[dict]:
+    block = _extract_frontmatter_key_block_lines(frontmatter, "unlock_history")
+    if not block:
+        return []
+
+    rows: list[dict] = []
+    current: Optional[dict] = None
+    item_re = re.compile(r"^-\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$")
+    field_re = re.compile(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$")
+    for raw_line in block[1:]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        match = item_re.match(stripped)
+        if match:
+            if current is not None:
+                rows.append(current)
+            current = {match.group(1): _strip_balanced_quotes(match.group(2))}
+            continue
+        if current is None:
+            continue
+        match = field_re.match(stripped)
+        if match:
+            current[match.group(1)] = _strip_balanced_quotes(match.group(2))
+
+    if current is not None:
+        rows.append(current)
+    return rows
+
+
+def _render_unlock_history_block(rows: list[dict]) -> list[str]:
+    lines = ["unlock_history:"]
+    for row in rows:
+        timestamp = _yaml_quote(str(row.get("timestamp") or "").strip())
+        category = _yaml_quote(str(row.get("category") or "").strip())
+        reason = _yaml_quote(str(row.get("reason") or "").strip())
+        evidence = _yaml_quote(str(row.get("evidence") or "").strip())
+        lines.append(f"  - timestamp: {timestamp}")
+        lines.append(f"    category: {category}")
+        lines.append(f"    reason: {reason}")
+        lines.append(f"    evidence: {evidence}")
+    return lines
+
+
 def _normalize_tbd(value):
     if value is None:
         return "TBD"
@@ -2464,7 +2601,7 @@ def _yaml_quote(value: str) -> str:
     return json.dumps(token, ensure_ascii=False)
 
 
-def _render_agile_detail_evidence_frontmatter(evidence: dict) -> str:
+def _render_agile_detail_evidence_block(evidence: dict) -> list[str]:
     plan = evidence.get("plan") if isinstance(evidence, dict) else {}
     runtime = evidence.get("runtime") if isinstance(evidence, dict) else {}
     plan = plan if isinstance(plan, dict) else {}
@@ -2474,12 +2611,7 @@ def _render_agile_detail_evidence_frontmatter(evidence: dict) -> str:
     if not isinstance(artifact_paths, list):
         artifact_paths = []
 
-    lines = [
-        "---",
-        "evidence:",
-        "  plan:",
-        "    artifact_paths:",
-    ]
+    lines = ["evidence:", "  plan:", "    artifact_paths:"]
     for item in artifact_paths:
         lines.append(f"      - {_yaml_quote(str(item).strip())}")
 
@@ -2498,30 +2630,28 @@ def _render_agile_detail_evidence_frontmatter(evidence: dict) -> str:
             f"    integration_smoke_id: {_yaml_quote(_normalize_tbd(runtime.get('integration_smoke_id')))}",
             f"    verify_cmd: {_yaml_quote(_normalize_tbd(runtime.get('verify_cmd')))}",
             f"    expected_signal: {_yaml_quote(_normalize_tbd(runtime.get('expected_signal')))}",
-            "---",
-            "",
         ]
     )
-    return "\n".join(lines)
+    return lines
+
+
+def _render_agile_detail_evidence_frontmatter(evidence: dict) -> str:
+    return "\n".join(["---", *_render_agile_detail_evidence_block(evidence), "---", ""])
 
 
 def upsert_agile_detail_evidence(content: str, evidence: dict) -> str:
     text = str(content)
-    replacement_frontmatter = _render_agile_detail_evidence_frontmatter(evidence)
     frontmatter = _extract_frontmatter_block(text)
     if frontmatter.get("errors"):
         raise ValueError("; ".join(str(err) for err in frontmatter["errors"]))
 
-    if frontmatter.get("has_frontmatter"):
-        return f"{frontmatter.get('prefix')}{replacement_frontmatter}{frontmatter.get('suffix')}"
-
-    lines = text.splitlines(keepends=True)
-    if lines and _SOURCE_MAPPING_RE.fullmatch(lines[0].strip()):
-        head = lines[0]
-        tail = "".join(lines[1:])
-        return f"{head}{replacement_frontmatter}{tail}"
-
-    return f"{replacement_frontmatter}{text}"
+    current_frontmatter = str(frontmatter.get("frontmatter") or "")
+    updated_frontmatter = _upsert_frontmatter_key_block(
+        current_frontmatter,
+        "evidence",
+        _render_agile_detail_evidence_block(evidence),
+    )
+    return _upsert_detail_frontmatter(text, updated_frontmatter)
 
 
 def validate_agile_detail_evidence(parsed_metadata: dict) -> dict:
@@ -3800,6 +3930,36 @@ def _emit_drift_check_payload(payload: dict, as_json: bool):
     print(f"threshold: {payload.get('threshold')}")
     print(f"warn_streak_limit: {payload.get('warn_streak_limit')}")
 
+
+def _emit_unlock_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = str(payload.get("status") or "FAIL").upper()
+    if status == "PASS":
+        print(f"UNLOCKED: {payload.get('dod_id')}")
+    else:
+        errors = payload.get("errors") or []
+        print(str(errors[0]) if errors else "FAIL")
+    dependents = payload.get("dependents_marked") or []
+    print(f"dependents_marked: {len(dependents)}")
+    print(f"reopened_count: {payload.get('reopened_count', 0)}")
+
+
+def _emit_revalidate_done_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = str(payload.get("status") or "FAIL").upper()
+    if status == "PASS":
+        print(f"REVALIDATED: {payload.get('dod_id')}")
+    else:
+        errors = payload.get("errors") or []
+        print(str(errors[0]) if errors else "FAIL")
+
+
 def _read_first_line(path: Path) -> str:
     with path.open("r", encoding="utf-8") as file:
         return file.readline().strip()
@@ -4103,6 +4263,12 @@ def _load_agile_recall_config() -> dict:
     return recall if isinstance(recall, dict) else {}
 
 
+def _load_agile_unlock_config() -> dict:
+    agile_config = _load_agile_config_merged()
+    unlock = agile_config.get("unlock")
+    return unlock if isinstance(unlock, dict) else {}
+
+
 def _agi_recall_dir(agi_id: str) -> Path:
     return _agi_session_dir(agi_id) / "recall"
 
@@ -4274,6 +4440,26 @@ def _estimate_done_modifications(manifest: dict, done_dod_ids: set[str]) -> int:
         if status == "done" and op_name in {"remove", "reorder", "split", "merge"}:
             count += 1
     return count
+
+
+def _collect_manifest_touched_done_dods(manifest: dict, done_dod_ids: set[str]) -> set[str]:
+    touched_done: set[str] = set()
+    for action in _extract_manifest_dod_actions(manifest):
+        touched: set[str] = set()
+        for key in ("dod_id", "source_dod", "target_dod", "left_dod", "right_dod"):
+            value = action.get(key)
+            if isinstance(value, str) and value.strip():
+                touched.add(value.strip().upper())
+        for key in ("dod_ids", "targets", "sources", "split_from", "merge_from"):
+            value = action.get(key)
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    touched.add(item.strip().upper())
+        for dod_id in touched.intersection(done_dod_ids):
+            touched_done.add(dod_id)
+    return touched_done
 
 
 def _extract_objective_scope_tokens(text: str) -> set[str]:
@@ -4518,6 +4704,130 @@ def _resolve_evidence_check_target(args) -> tuple[Optional[str], Path]:
     return agi_id, _agi_session_dir(agi_id) / "objective" / "details"
 
 
+def _resolve_agi_target(agi_id_raw: Optional[str]) -> str:
+    if agi_id_raw:
+        agi_id = _normalize_agi_id(str(agi_id_raw))
+    else:
+        agi_id = _find_latest_agi_id()
+        if agi_id is None:
+            raise ValueError("AGI session not found; provide --agi-id")
+    _load_agile_session(agi_id)
+    return agi_id
+
+
+def _detail_file_for_dod(details_dir: Path, dod_id: str) -> Path:
+    direct = details_dir / f"{dod_id}.md"
+    if direct.exists() and direct.is_file():
+        return direct
+
+    for candidate in sorted(details_dir.glob("*.md")):
+        if candidate.stem.upper() == dod_id:
+            return candidate
+    raise ValueError(f"detail file not found for {dod_id}")
+
+
+def _detail_frontmatter_or_fail(content: str) -> tuple[dict, str]:
+    parsed = parse_agile_detail_metadata(content)
+    frontmatter = _extract_frontmatter_block(content)
+    errors = list(frontmatter.get("errors") or [])
+    errors.extend(parsed.get("errors") or [])
+    if errors:
+        raise ValueError("; ".join(str(err) for err in errors))
+    if not frontmatter.get("has_frontmatter"):
+        raise ValueError("detail frontmatter is missing")
+    return parsed, str(frontmatter.get("frontmatter") or "")
+
+
+def _frontmatter_truthy(frontmatter: str, key: str) -> bool:
+    value = _extract_yaml_scalar(frontmatter, key)
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _frontmatter_int(frontmatter: str, key: str, default: int = 0) -> int:
+    value = _extract_yaml_scalar(frontmatter, key)
+    if value is None:
+        return default
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _load_unlock_forbidden_patterns(unlock_cfg: dict) -> list[str]:
+    raw_patterns = unlock_cfg.get("forbidden_patterns") if isinstance(unlock_cfg, dict) else None
+    if isinstance(raw_patterns, list):
+        patterns = [str(token).strip().lower() for token in raw_patterns if str(token).strip()]
+        if patterns:
+            return patterns
+    return list(_UNLOCK_FORBIDDEN_REASON_PATTERNS)
+
+
+def _reason_has_forbidden_pattern(reason: str, patterns: list[str]) -> bool:
+    normalized = str(reason or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9가-힣]+", " ", normalized)
+    tokens = {token for token in normalized.split() if token}
+    for pattern in patterns:
+        target = str(pattern or "").strip().lower()
+        if not target:
+            continue
+        if target in tokens:
+            return True
+        if re.search(rf"\b{re.escape(target)}\b", normalized):
+            return True
+    return False
+
+
+def _validate_unlock_reason(reason: str, forbidden_patterns: list[str]) -> Optional[str]:
+    token = str(reason or "").strip()
+    if not token:
+        return "reason required (min 20 chars)"
+    if len(token) < 20 or len(token) > 500:
+        return "reason rejected (too short or forbidden pattern)"
+    if _reason_has_forbidden_pattern(token, forbidden_patterns):
+        return "reason rejected (too short or forbidden pattern)"
+    return None
+
+
+def _validate_unlock_evidence(category: str, evidence: str) -> Optional[str]:
+    category_token = str(category or "").strip()
+    evidence_token = str(evidence or "").strip()
+    hint = _UNLOCK_CATEGORY_HINTS.get(category_token, "supporting evidence")
+
+    fail_message = f"evidence required for category {category_token} ({hint})"
+    if not evidence_token:
+        return fail_message
+
+    parts = _split_csv_values(evidence_token)
+    if category_token == "upstream_evidence_changed":
+        if len(parts) < 2:
+            return fail_message
+        try:
+            _normalize_dod_id(parts[0])
+        except ValueError:
+            return fail_message
+        return None
+    if category_token == "integration_regression":
+        if len(parts) < 2:
+            return fail_message
+        return None
+    if category_token == "new_dependency_dod":
+        if not parts:
+            return fail_message
+        try:
+            _normalize_dod_id(parts[0])
+        except ValueError:
+            return fail_message
+        return None
+    if category_token == "objective_precision_fix":
+        if not parts:
+            return fail_message
+        return None
+    return f"invalid unlock category: {category_token}"
+
+
 def _relpath_display(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))
@@ -4677,13 +4987,39 @@ def _agile_state_ledger_path() -> Path:
     return agile_dir() / "agile-state.json"
 
 
-def _load_agile_state_ledger_entries() -> list[dict]:
+def _load_agile_state_payload() -> tuple[list[dict], int, str]:
     data = load_json(_agile_state_ledger_path())
     if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
-    if isinstance(data, dict) and isinstance(data.get("entries"), list):
-        return [item for item in data["entries"] if isinstance(item, dict)]
-    return []
+        entries = [item for item in data if isinstance(item, dict)]
+        return entries, 0, "list"
+    if isinstance(data, dict):
+        raw_entries = data.get("entries")
+        entries = [item for item in raw_entries if isinstance(item, dict)] if isinstance(raw_entries, list) else []
+        raw_reopened = data.get("reopened_count", 0)
+        try:
+            reopened_count = int(raw_reopened)
+        except (TypeError, ValueError):
+            reopened_count = 0
+        return entries, max(0, reopened_count), "dict"
+    return [], 0, "none"
+
+
+def _save_agile_state_payload(entries: list[dict], reopened_count: int, *, as_dict: bool):
+    if as_dict:
+        save_json(
+            _agile_state_ledger_path(),
+            {
+                "entries": list(entries),
+                "reopened_count": max(0, int(reopened_count)),
+            },
+        )
+        return
+    save_json(_agile_state_ledger_path(), list(entries))
+
+
+def _load_agile_state_ledger_entries() -> list[dict]:
+    entries, _, _ = _load_agile_state_payload()
+    return entries
 
 
 def _previous_drift_warn_streak(entries: list[dict]) -> int:
@@ -4709,16 +5045,270 @@ def _previous_drift_warn_streak(entries: list[dict]) -> int:
 
 
 def _append_agile_state_ledger_entry(entry: dict) -> list[dict]:
-    rows = _load_agile_state_ledger_entries()
+    rows, reopened_count, state_format = _load_agile_state_payload()
     rows.append(entry)
-    save_json(_agile_state_ledger_path(), rows)
+    _save_agile_state_payload(rows, reopened_count, as_dict=(state_format == "dict"))
     return rows
+
+
+def _increment_agile_state_reopened_count() -> int:
+    entries, reopened_count, _ = _load_agile_state_payload()
+    updated_count = reopened_count + 1
+    _save_agile_state_payload(entries, updated_count, as_dict=True)
+    return updated_count
 
 
 def _resolve_drift_check_target(args) -> tuple[Optional[str], Path, Path]:
     agi_id, details_dir = _resolve_evidence_check_target(args)
     objective_path = _agi_objective_path(agi_id) if agi_id else details_dir.parent / "objective.md"
     return agi_id, details_dir, objective_path
+
+
+def _recall_done_dods_missing_unlock(agi_id: str, done_dod_ids: set[str]) -> list[str]:
+    if not done_dod_ids:
+        return []
+
+    details_dir = _agi_session_dir(agi_id) / "objective" / "details"
+    missing: list[str] = []
+    for dod_id in sorted(done_dod_ids):
+        try:
+            detail_file = _detail_file_for_dod(details_dir, dod_id)
+            content = detail_file.read_text(encoding="utf-8")
+            _, frontmatter = _detail_frontmatter_or_fail(content)
+        except (OSError, UnicodeDecodeError, ValueError):
+            missing.append(dod_id)
+            continue
+
+        status = str(_extract_yaml_scalar(frontmatter, "status") or "").strip().lower()
+        history = _parse_unlock_history(frontmatter)
+        if status != "in_progress" or not history:
+            missing.append(dod_id)
+    return missing
+
+
+def cmd_agile_unlock(args):
+    payload = {
+        "status": "FAIL",
+        "agi_id": None,
+        "dod_id": None,
+        "detail_path": None,
+        "category": str(args.category or "").strip(),
+        "reason": str(args.reason or "").strip(),
+        "evidence": str(args.evidence or "").strip(),
+        "reopened_count": 0,
+        "dependents_marked": [],
+        "warnings": [],
+        "errors": [],
+    }
+
+    def _fail(message: str) -> int:
+        payload["status"] = "FAIL"
+        payload["errors"] = [str(message)]
+        _emit_unlock_payload(payload, args.json)
+        print(str(message), file=sys.stderr)
+        return 1
+
+    try:
+        dod_id = _normalize_dod_id(str(args.dod))
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["dod_id"] = dod_id
+
+    unlock_cfg = _load_agile_unlock_config()
+    if not bool(unlock_cfg.get("enabled", False)):
+        return _fail("unlock disabled by config")
+
+    reason_error = _validate_unlock_reason(args.reason, _load_unlock_forbidden_patterns(unlock_cfg))
+    if reason_error:
+        return _fail(reason_error)
+
+    evidence_error = _validate_unlock_evidence(args.category, args.evidence)
+    if evidence_error:
+        return _fail(evidence_error)
+
+    try:
+        agi_id = _resolve_agi_target(args.agi_id)
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["agi_id"] = agi_id
+
+    details_dir = _agi_session_dir(agi_id) / "objective" / "details"
+    if not details_dir.exists():
+        return _fail(f"details dir not found: {details_dir}")
+    if not details_dir.is_dir():
+        return _fail(f"details dir is not a directory: {details_dir}")
+
+    try:
+        detail_path = _detail_file_for_dod(details_dir, dod_id)
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["detail_path"] = str(detail_path)
+
+    try:
+        current_content = detail_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _fail(f"failed to read detail: {exc}")
+
+    try:
+        parsed, frontmatter = _detail_frontmatter_or_fail(current_content)
+    except ValueError as exc:
+        return _fail(str(exc))
+
+    if parsed.get("evidence"):
+        current_content = upsert_agile_detail_evidence(current_content, parsed.get("evidence"))
+        try:
+            _, frontmatter = _detail_frontmatter_or_fail(current_content)
+        except ValueError as exc:
+            return _fail(str(exc))
+
+    current_status = str(_extract_yaml_scalar(frontmatter, "status") or "").strip().lower()
+    if current_status != "done":
+        return _fail(f"unlock allowed only for done DoD (current status: {current_status or 'unknown'})")
+
+    history = _parse_unlock_history(frontmatter)
+    history.append(
+        {
+            "timestamp": _now_iso(),
+            "category": str(args.category).strip(),
+            "reason": str(args.reason).strip(),
+            "evidence": str(args.evidence).strip(),
+        }
+    )
+
+    reopened_count = max(_frontmatter_int(frontmatter, "reopened_count", 0) + 1, len(history))
+    updated_frontmatter = _remove_frontmatter_key_block(frontmatter, "revalidation_required")
+    updated_frontmatter = _upsert_frontmatter_key_block(updated_frontmatter, "status", ["status: in_progress"])
+    updated_frontmatter = _upsert_frontmatter_key_block(
+        updated_frontmatter,
+        "unlock_history",
+        _render_unlock_history_block(history),
+    )
+    updated_frontmatter = _upsert_frontmatter_key_block(
+        updated_frontmatter,
+        "reopened_count",
+        [f"reopened_count: {reopened_count}"],
+    )
+
+    updated_content = _upsert_detail_frontmatter(current_content, updated_frontmatter)
+    try:
+        detail_path.write_text(updated_content, encoding="utf-8")
+    except OSError as exc:
+        return _fail(f"failed to write detail: {exc}")
+
+    dependents_marked: list[str] = []
+    for candidate in sorted(details_dir.glob("*.md")):
+        if candidate == detail_path:
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8")
+            _, candidate_frontmatter = _detail_frontmatter_or_fail(raw)
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+
+        blocked_by = _extract_yaml_list(candidate_frontmatter, "blocked_by") or []
+        blocked_set = set()
+        for token in blocked_by:
+            try:
+                blocked_set.add(_normalize_dod_id(str(token)))
+            except ValueError:
+                continue
+        if dod_id not in blocked_set:
+            continue
+
+        if _frontmatter_truthy(candidate_frontmatter, "revalidation_required"):
+            dependents_marked.append(candidate.stem.upper())
+            continue
+
+        candidate_frontmatter = _upsert_frontmatter_key_block(
+            candidate_frontmatter,
+            "revalidation_required",
+            ["revalidation_required: true"],
+        )
+        patched = _upsert_detail_frontmatter(raw, candidate_frontmatter)
+        try:
+            candidate.write_text(patched, encoding="utf-8")
+        except OSError:
+            continue
+        dependents_marked.append(candidate.stem.upper())
+
+    global_reopened_count = _increment_agile_state_reopened_count()
+    _append_agile_event(
+        agi_id,
+        "agile.unlock",
+        {
+            "dod_id": dod_id,
+            "category": str(args.category).strip(),
+            "dependents_marked": dependents_marked,
+            "reopened_count": global_reopened_count,
+        },
+    )
+
+    payload["status"] = "PASS"
+    payload["dependents_marked"] = dependents_marked
+    payload["reopened_count"] = global_reopened_count
+    _emit_unlock_payload(payload, args.json)
+    return 0
+
+
+def cmd_agile_revalidate_done(args):
+    payload = {
+        "status": "FAIL",
+        "agi_id": None,
+        "dod_id": None,
+        "detail_path": None,
+        "warnings": [],
+        "errors": [],
+    }
+
+    def _fail(message: str) -> int:
+        payload["status"] = "FAIL"
+        payload["errors"] = [str(message)]
+        _emit_revalidate_done_payload(payload, args.json)
+        print(str(message), file=sys.stderr)
+        return 1
+
+    try:
+        dod_id = _normalize_dod_id(str(args.dod))
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["dod_id"] = dod_id
+
+    try:
+        agi_id = _resolve_agi_target(args.agi_id)
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["agi_id"] = agi_id
+
+    details_dir = _agi_session_dir(agi_id) / "objective" / "details"
+    if not details_dir.exists():
+        return _fail(f"details dir not found: {details_dir}")
+    if not details_dir.is_dir():
+        return _fail(f"details dir is not a directory: {details_dir}")
+
+    try:
+        detail_path = _detail_file_for_dod(details_dir, dod_id)
+    except ValueError as exc:
+        return _fail(str(exc))
+    payload["detail_path"] = str(detail_path)
+
+    try:
+        current_content = detail_path.read_text(encoding="utf-8")
+        _, frontmatter = _detail_frontmatter_or_fail(current_content)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return _fail(str(exc))
+
+    updated_frontmatter = _remove_frontmatter_key_block(frontmatter, "revalidation_required")
+    updated_content = _upsert_detail_frontmatter(current_content, updated_frontmatter)
+
+    try:
+        detail_path.write_text(updated_content, encoding="utf-8")
+    except OSError as exc:
+        return _fail(f"failed to write detail: {exc}")
+
+    _append_agile_event(agi_id, "agile.revalidate_done", {"dod_id": dod_id})
+    payload["status"] = "PASS"
+    _emit_revalidate_done_payload(payload, args.json)
+    return 0
 
 
 def cmd_agile_recall(args):
@@ -4888,6 +5478,11 @@ def cmd_agile_recall(args):
 
     if _manifest_exceeds_level2_scope(manifest):
         return _fail("Level 2 scope exceeded, use Level 3 with user approval")
+
+    touched_done_dods = _collect_manifest_touched_done_dods(manifest, done_dod_ids)
+    missing_unlock = _recall_done_dods_missing_unlock(agi_id, touched_done_dods)
+    if missing_unlock:
+        return _fail(f"unlock required before recall for done DoD: {', '.join(missing_unlock)}")
 
     requested_mods = _estimate_done_modifications(manifest, done_dod_ids)
     payload["patch_budget"]["requested_modifications"] = requested_mods
@@ -9457,6 +10052,28 @@ def build_parser():
     agile_recall.add_argument("--fingerprint")
     agile_recall.add_argument("--json", action="store_true")
 
+    agile_unlock = agile_sub.add_parser("unlock")
+    agile_unlock.add_argument("--dod", required=True)
+    agile_unlock.add_argument(
+        "--category",
+        required=True,
+        choices=[
+            "upstream_evidence_changed",
+            "integration_regression",
+            "new_dependency_dod",
+            "objective_precision_fix",
+        ],
+    )
+    agile_unlock.add_argument("--reason")
+    agile_unlock.add_argument("--evidence")
+    agile_unlock.add_argument("--agi-id", dest="agi_id")
+    agile_unlock.add_argument("--json", action="store_true")
+
+    agile_revalidate_done = agile_sub.add_parser("revalidate-done")
+    agile_revalidate_done.add_argument("dod")
+    agile_revalidate_done.add_argument("--agi-id", dest="agi_id")
+    agile_revalidate_done.add_argument("--json", action="store_true")
+
     agile_coverage_check = agile_sub.add_parser("coverage-check")
     agile_coverage_check.add_argument("original_path")
     agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
@@ -9762,6 +10379,8 @@ def main():
         ("agile", "evidence-check"): cmd_agile_evidence_check,
         ("agile", "drift-check"): cmd_agile_drift_check,
         ("agile", "recall"): cmd_agile_recall,
+        ("agile", "unlock"): cmd_agile_unlock,
+        ("agile", "revalidate-done"): cmd_agile_revalidate_done,
         ("agile", "coverage-check"): cmd_agile_coverage_check,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
