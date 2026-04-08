@@ -13,6 +13,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 
 ### 활성화 시 차단되는 스킬
 - `/autopilot`, `/ralph`, `/ultrawork`, `/team`, `/pipeline`, `/ultrapilot`, `/swarm`, `/ecomode`
+  (구 오토파일럿/루프 계열 슬래시 스킬 차단 목적. `/ralph`는 과거 이름으로 유지하며, 현재 mst-loop 재진입은 `/mst:resume` + `scripts/mst-loop.sh`로 대체되었습니다.)
 
 ### Maestro 모드에서 사용 가능한 스킬
 - Maestro 오케스트레이션: `/mst:request`, `/mst:list`, `/mst:inspect`, `/mst:approve`, `/mst:accept`, `/mst:feedback`, `/mst:cancel`, `/mst:dashboard`, `/mst:priority`, `/mst:history`, `/mst:settings`

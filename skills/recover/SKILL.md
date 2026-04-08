@@ -1,6 +1,6 @@
 ---
 name: recover
-description: "미완료 요청을 복구하고 마지막 Phase부터 재개합니다. 사용자가 '복구', '재개', '이어서', '계속해줘'를 말하거나 /mst:recover를 호출할 때 사용. 새 요청 시작에는 /mst:request를 사용."
+description: "미완료 요청을 복구하고 마지막 Phase부터 재개합니다. 사용자가 '복구', '재개', '이어서', '계속해줘'를 말하거나 /mst:recover를 호출할 때 사용. 새 요청 시작에는 /mst:request를 사용. queue(pending.ndjson) 기반 단일 pop 재진입은 /mst:resume을 사용하며, mst-loop wrapper가 이 경로를 호출합니다."
 user-invocable: true
 argument-hint: "[{REQ-ID}] [{TASK-ID}]"
 ---

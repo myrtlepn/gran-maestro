@@ -4,6 +4,27 @@
 
 ---
 
+## [0.57.2] — 2026-04-08
+
+> **mst-loop 재진입 경로 복구 + 문서 정합성 정리 (PLN-440 / REQ-593)**
+
+0.57.1에서 커밋된 `ralph-loop → mst-loop` 리네이밍 이후, `scripts/mst-loop.sh`가 호출하는 `/mst:resume` 스킬과 스크립트 자체가 플러그인 캐시로 아직 배포되지 않아 mst-loop 재진입이 실질적으로 동작하지 않던 문제를 해결합니다.
+
+### 버그 수정
+
+- **mst-loop 재진입 경로 복구**: 버전 bump를 통해 `skills/resume/` 스킬과 `scripts/mst-loop.sh`를 플러그인 캐시에 배포합니다. 이 버전 이후 `/mst:on` 재실행 또는 Claude Code 재시작으로 플러그인 캐시가 `0.57.2`로 갱신되면, `/mst:resume` 슬래시 커맨드가 사용자 호출 가능 목록에 노출되고 `bash scripts/mst-loop.sh`가 정상 동작합니다.
+
+### 개선
+
+- **`skills/recover/SKILL.md` description 분리**: "queue(pending.ndjson) 기반 단일 pop 재진입은 `/mst:resume`을 사용" 취지 안내를 추가했습니다. "재개/이어서/계속해줘" 사용자 자연어가 `/mst:recover`와 `/mst:resume` 사이에서 혼동되지 않도록 경로를 명시합니다.
+- **stale `ralph` 문서 참조 정리**: `skills/ideation/SKILL.md`의 AUTO-CONTINUE 원칙 설명 문구를 `ralph/ultrawork` → `mst-loop/ultrawork`로 교체했습니다. `skills/on/SKILL.md`의 차단 스킬 목록 `/ralph` 엔트리는 구 오토파일럿/루프 계열 차단 목적으로 유지하되, 현재 mst-loop 재진입 경로 안내 주석을 추가했습니다.
+
+### 주의사항
+
+이 버전의 `mst:resume` 스킬과 `mst-loop.sh`를 사용하려면 bump 후 반드시 `/mst:on`을 재실행하거나 Claude Code를 재시작하여 플러그인 캐시를 `0.57.2`로 갱신해야 합니다.
+
+---
+
 ## [0.57.1] — 2026-04-08
 
 > **PLN-435 Phase 1 ~ 6 전면 구축 — agile 스프린트 Sprint Review Gate + Objective Surface Coverage drift + recall Level 2/3 + Done DoD unlock 경로**
