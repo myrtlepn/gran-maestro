@@ -129,7 +129,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
    **6a. Hook 파일 복사**: `{PLUGIN_ROOT}/hooks/` → `{PROJECT_ROOT}/.claude/hooks/`
    - 원본 위치: `{PLUGIN_ROOT}/hooks/` (플러그인 소유 원본)
    - 대상 파일 2개:
-     - `mst-stop-hook.sh` (Stop hook — ralph-loop 스타일 re-feed로 워크플로우 연속 실행 보장)
+     - `mst-stop-hook.sh` (Stop hook — mst-loop 스타일 re-feed로 워크플로우 연속 실행 보장)
      - `mst-session-init.sh` (SessionStart hook — 세션 초기화 + 버전 게이트)
    - `{PROJECT_ROOT}/.claude/hooks/` 디렉토리가 없으면 생성
    - 각 파일을 복사하고 실행 권한 부여 (`chmod +x`)

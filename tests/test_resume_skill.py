@@ -153,10 +153,10 @@ def test_resume_skill_queue_empty_graceful(tmp_path, monkeypatch):
     assert count.stdout.strip() == "0"
 
 
-def test_ralph_loop_script_help():
-    """scripts/ralph-loop.sh --help이 0으로 종료하고 usage + 옵션 3개를 출력한다."""
-    script = ROOT / "scripts/ralph-loop.sh"
-    assert script.exists(), f"scripts/ralph-loop.sh must exist at {script}"
+def test_mst_loop_script_help():
+    """scripts/mst-loop.sh --help이 0으로 종료하고 usage + 옵션 3개를 출력한다."""
+    script = ROOT / "scripts/mst-loop.sh"
+    assert script.exists(), f"scripts/mst-loop.sh must exist at {script}"
 
     result = subprocess.run(
         ["bash", str(script), "--help"],
@@ -169,25 +169,25 @@ def test_ralph_loop_script_help():
     assert "dry-run" in result.stdout or "dry-run" in result.stderr
 
 
-def test_ralph_loop_script_content():
-    """scripts/ralph-loop.sh가 queue count 체크와 claude 호출을 포함한다."""
-    script = ROOT / "scripts/ralph-loop.sh"
+def test_mst_loop_script_content():
+    """scripts/mst-loop.sh가 queue count 체크와 claude 호출을 포함한다."""
+    script = ROOT / "scripts/mst-loop.sh"
     content = script.read_text(encoding="utf-8")
-    assert "queue count" in content, "ralph-loop.sh must call 'queue count'"
-    assert "max-iterations" in content, "ralph-loop.sh must support --max-iterations"
+    assert "queue count" in content, "mst-loop.sh must call 'queue count'"
+    assert "max-iterations" in content, "mst-loop.sh must support --max-iterations"
     assert "dangerously-skip-permissions" in content, (
-        "ralph-loop.sh must use --dangerously-skip-permissions"
+        "mst-loop.sh must use --dangerously-skip-permissions"
     )
-    assert "/mst:resume" in content, "ralph-loop.sh must call /mst:resume"
+    assert "/mst:resume" in content, "mst-loop.sh must call /mst:resume"
 
 
-def test_ralph_loop_docs_exist():
-    """docs/ralph-loop.md 문서에 필수 섹션이 포함되어 있다."""
-    doc = ROOT / "docs/ralph-loop.md"
-    assert doc.exists(), f"docs/ralph-loop.md must exist at {doc}"
+def test_mst_loop_docs_exist():
+    """docs/mst-loop.md 문서에 필수 섹션이 포함되어 있다."""
+    doc = ROOT / "docs/mst-loop.md"
+    assert doc.exists(), f"docs/mst-loop.md must exist at {doc}"
     content = doc.read_text(encoding="utf-8")
     # 4가지 핵심 섹션 키워드
-    assert "인라인" in content, "docs must compare inline chaining vs ralph-loop"
-    assert "ralph-loop.sh" in content, "docs must show ralph-loop.sh usage"
+    assert "인라인" in content, "docs must compare inline chaining vs mst-loop"
+    assert "mst-loop.sh" in content, "docs must show mst-loop.sh usage"
     assert "queue " in content, "docs must document queue commands"
     assert "제한" in content, "docs must list current limitations"

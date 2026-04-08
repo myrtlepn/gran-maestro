@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# ralph-loop.sh — Gran Maestro external re-entry wrapper
+# mst-loop.sh — Gran Maestro external re-entry wrapper
 #
 # Repeatedly calls `claude -p /mst:resume` to drain the pending queue.
 # Exits when the queue is empty, max iterations reached, or claude fails.
 #
-# Usage: bash scripts/ralph-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
+# Usage: bash scripts/mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
 
 set -euo pipefail
 
@@ -14,7 +14,7 @@ DRY_RUN=0
 
 usage() {
     cat <<'EOF'
-Usage: ralph-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
+Usage: mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
 
 Options:
   --max-iterations N   Maximum loop iterations (default: 100)
@@ -23,9 +23,9 @@ Options:
   --help, -h           Show this help
 
 Description:
-  Gran Maestro external re-entry wrapper that implements the Ralph-loop pattern.
-  Each iteration calls `claude --dangerously-skip-permissions -p /mst:resume`
-  which pops one action from .gran-maestro/pending.ndjson and executes it.
+  Gran Maestro external re-entry wrapper. Each iteration calls
+  `claude --dangerously-skip-permissions -p /mst:resume` which pops one action
+  from .gran-maestro/pending.ndjson and executes it.
   Loop exits when:
     - mst.py queue count returns 0
     - max iterations reached
@@ -37,9 +37,9 @@ Environment:
                (default: $HOME/.claude/plugins/marketplaces/gran-maestro)
 
 Examples:
-  bash scripts/ralph-loop.sh                             # default 100 iter, 3s sleep
-  bash scripts/ralph-loop.sh --max-iterations 20 --sleep 5
-  bash scripts/ralph-loop.sh --dry-run                   # simulate without calling claude
+  bash scripts/mst-loop.sh                             # default 100 iter, 3s sleep
+  bash scripts/mst-loop.sh --max-iterations 20 --sleep 5
+  bash scripts/mst-loop.sh --dry-run                   # simulate without calling claude
 EOF
 }
 
@@ -71,23 +71,23 @@ if [[ ! -f "$MST_PY" ]]; then
     exit 1
 fi
 
-echo "[ralph-loop] starting (max=$MAX_ITERATIONS, sleep=${SLEEP_SECONDS}s, dry_run=$DRY_RUN)"
+echo "[mst-loop] starting (max=$MAX_ITERATIONS, sleep=${SLEEP_SECONDS}s, dry_run=$DRY_RUN)"
 
 for ((i=1; i<=MAX_ITERATIONS; i++)); do
     # queue count check — exit early if nothing to do
     COUNT=$(python3 "$MST_PY" queue count 2>/dev/null || echo "0")
     if [[ "$COUNT" == "0" ]]; then
-        echo "[ralph-loop] queue empty (iteration $i/$MAX_ITERATIONS) — exiting"
+        echo "[mst-loop] queue empty (iteration $i/$MAX_ITERATIONS) — exiting"
         break
     fi
 
-    echo "[ralph-loop] iteration $i/$MAX_ITERATIONS — queued=$COUNT"
+    echo "[mst-loop] iteration $i/$MAX_ITERATIONS — queued=$COUNT"
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[ralph-loop] would run: claude --dangerously-skip-permissions -p /mst:resume"
+        echo "[mst-loop] would run: claude --dangerously-skip-permissions -p /mst:resume"
     else
         if ! claude --dangerously-skip-permissions -p "/mst:resume"; then
-            echo "[ralph-loop] claude failed at iteration $i — exiting" >&2
+            echo "[mst-loop] claude failed at iteration $i — exiting" >&2
             exit 1
         fi
     fi
@@ -98,4 +98,4 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
     fi
 done
 
-echo "[ralph-loop] done"
+echo "[mst-loop] done"

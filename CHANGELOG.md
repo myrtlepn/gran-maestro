@@ -121,7 +121,7 @@
 - **Review 검증 체계화**: Static Validation Gate + 커버리지 매트릭스 + PM 판정 기계화 + Full Backend Test Gate
 - **DoD 품질 게이트**: IEEE 830 + IREB + ODI 기반 DoD 검증 + DoR 준비도 체크
 - **Result 탭 재설계**: 도메인별 계층 탐색 + 테스트 4단 구조(의도/전략/흐름/결과) + 시각 자료 인라인 렌더링
-- **Hook 시스템 단순화**: ralph-loop 스타일 단일 re-feed stop hook으로 교체
+- **Hook 시스템 단순화**: mst-loop 스타일 단일 re-feed stop hook으로 교체
 - **agile-plan 대화 문서화**: 재귀 탐색 루프 재설계(갯수 제한 제거 + 수렴 판정) + 상세 보존 원칙
 - **Windows 호환성**: SIGTERM OS 분기, 경로 구분자 정규식, 대시보드 Windows 명령어 지원
 - **Agile Comments 패널**: 접기/펼치기 토글 버튼 + localStorage 상태 유지

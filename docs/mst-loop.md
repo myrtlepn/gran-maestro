@@ -1,21 +1,21 @@
-# Ralph Loop — Gran Maestro 외부 재진입 실행
+# MST Loop — Gran Maestro 외부 재진입 실행
 
 Gran Maestro의 워크플로우를 **세션 외부에서 반복 호출**로 이어갈 수 있는 경로입니다. 인라인 Skill 체이닝이 세션 경계·프로세스·동시성 문제로 끊길 때, disk를 single source of truth로 사용해 어떤 세션에서 들어와도 다음 액션을 결정론적으로 수행합니다.
 
-## 인라인 체이닝 vs ralph-loop
+## 인라인 체이닝 vs mst-loop
 
-| 구분 | 인라인 체이닝 (기본) | ralph-loop (외부 재진입) |
+| 구분 | 인라인 체이닝 (기본) | mst-loop (외부 재진입) |
 |---|---|---|
 | 실행 단위 | 세션 내부 연속 호출 | `claude -p /mst:resume` 반복 호출 |
 | 상태 | 메모리 + PPID 임시 파일 | `.gran-maestro/pending.ndjson` (FIFO) |
 | 세션 교차 | 불가 — 동일 세션 내에서만 | 가능 — 다른 세션에서 이어가기 |
 | 크래시 복구 | 세션 재시작 시 일부 상실 | queue 기반 완전 복구 |
 | 동시 실행 | 중복 위험 | lease로 직렬화 (Phase 3 예정) |
-| 장점 | 빠름, 컨텍스트 공유 | 결정론, 외부 제어, ralph 철학 |
+| 장점 | 빠름, 컨텍스트 공유 | 결정론, 외부 제어, 파일 기반 재진입 |
 | 단점 | 세션 제약 | 매 iteration 시작 비용 |
 | 권장 | 기본 워크플로우 | 장시간 루프, 배치, 재개, 백그라운드 |
 
-**하이브리드 권장**: 기본은 인라인 체이닝. ralph-loop는 "세션 밖에서 이어가야 할 때"만 사용.
+**하이브리드 권장**: 기본은 인라인 체이닝. mst-loop는 "세션 밖에서 이어가야 할 때"만 사용.
 
 ## 실행 예시
 
@@ -23,23 +23,23 @@ Gran Maestro의 워크플로우를 **세션 외부에서 반복 호출**로 이�
 
 ```bash
 # 기본: 100 iteration, iteration 사이 3초 sleep
-bash scripts/ralph-loop.sh
+bash scripts/mst-loop.sh
 
 # 최대 20번만, 5초 sleep
-bash scripts/ralph-loop.sh --max-iterations 20 --sleep 5
+bash scripts/mst-loop.sh --max-iterations 20 --sleep 5
 
 # dry-run (실제 claude 호출 없이 시뮬레이션)
-bash scripts/ralph-loop.sh --dry-run
+bash scripts/mst-loop.sh --dry-run
 
 # 도움말
-bash scripts/ralph-loop.sh --help
+bash scripts/mst-loop.sh --help
 ```
 
 ### 환경 변수
 
 ```bash
 # PLUGIN_ROOT 커스터마이징 (기본: $HOME/.claude/plugins/marketplaces/gran-maestro)
-PLUGIN_ROOT=/custom/path bash scripts/ralph-loop.sh
+PLUGIN_ROOT=/custom/path bash scripts/mst-loop.sh
 ```
 
 ### 작동 원리
@@ -98,8 +98,8 @@ python3 scripts/mst.py queue enqueue \
     --auto true \
     --json
 
-# 이후 세션 B에서 ralph-loop 실행하면 자동으로 pop되어 실행됨
-bash scripts/ralph-loop.sh
+# 이후 세션 B에서 mst-loop 실행하면 자동으로 pop되어 실행됨
+bash scripts/mst-loop.sh
 ```
 
 ### state set-workflow + queue 동시 기록 (선택)
@@ -122,9 +122,9 @@ python3 scripts/mst.py state set-workflow \
 
 ### Phase 3 예정: Lease Manager
 
-현재는 queue 파일 자체의 원자성은 보장되지만, **동일 리소스에 대한 도메인 레벨 직렬화**는 없습니다. 예를 들어 세션 A와 세션 B가 동시에 ralph-loop를 실행하면 각자 다른 action을 pop하지만, 같은 REQ/AGI에 대한 작업이면 git/파일 충돌이 날 수 있습니다.
+현재는 queue 파일 자체의 원자성은 보장되지만, **동일 리소스에 대한 도메인 레벨 직렬화**는 없습니다. 예를 들어 세션 A와 세션 B가 동시에 mst-loop를 실행하면 각자 다른 action을 pop하지만, 같은 REQ/AGI에 대한 작업이면 git/파일 충돌이 날 수 있습니다.
 
-**우회 방법 (현재)**: 한 리소스(같은 AGI/REQ/PLN)에 대해서는 한 번에 하나의 ralph-loop만 실행하세요.
+**우회 방법 (현재)**: 한 리소스(같은 AGI/REQ/PLN)에 대해서는 한 번에 하나의 mst-loop만 실행하세요.
 
 ### Phase 4 예정: Outbox 패턴 + Event log
 
@@ -143,13 +143,13 @@ python3 scripts/mst.py state set-workflow \
 - `scripts/mst.py` — `queue` 서브커맨드 그룹 (enqueue/peek/pop/list/complete/fail/count)
 - `.gran-maestro/pending.ndjson` — queue 파일 (append-only NDJSON)
 - `skills/resume/SKILL.md` — `/mst:resume` 스킬 정의
-- `scripts/ralph-loop.sh` — 외부 wrapper 스크립트
+- `scripts/mst-loop.sh` — 외부 wrapper 스크립트
 - `tests/test_queue.py` — queue 단위 테스트 (9건)
 - `tests/test_resume_skill.py` — resume + queue 통합 테스트
 
 ## 로드맵
 
 - **Phase 1** (완료): Intent Queue 인프라 — `mst.py queue` 서브커맨드 + NDJSON + fcntl 락
-- **Phase 2** (완료): `/mst:resume` 스킬 + `scripts/ralph-loop.sh` + 이 문서
+- **Phase 2** (완료): `/mst:resume` 스킬 + `scripts/mst-loop.sh` + 이 문서
 - **Phase 3** (예정): Lease manager — `.gran-maestro/locks/{resource}.lease` 기반 동시성 직렬화
 - **Phase 4** (예정): Outbox 패턴 + 전역 event log + stop-hook queue 우선 drain

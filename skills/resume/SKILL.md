@@ -1,13 +1,13 @@
 ---
 name: resume
-description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. ralph-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 즉시 종료."
+description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 즉시 종료."
 user-invocable: true
 argument-hint: ""
 ---
 
 # maestro:resume
 
-**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/ralph-loop.sh`) 또는 `claude -p "/mst:resume"` 한 줄로 재진입할 수 있는 **단일 진입점**. 세션 교차/재진입/동시 세션에서 디스크 상태(queue)만 보고 다음 action을 결정한다.
+**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/mst-loop.sh`) 또는 `claude -p "/mst:resume"` 한 줄로 재진입할 수 있는 **단일 진입점**. 세션 교차/재진입/동시 세션에서 디스크 상태(queue)만 보고 다음 action을 결정한다.
 
 ## Gate
 
@@ -20,7 +20,7 @@ argument-hint: ""
 
 - 한 action의 Skill 호출이 완료되면 `complete` 또는 `fail`로 queue 상태를 확정한 뒤 **정상 종료**한다.
 - queue가 비어있으면 "queue empty" 메시지 출력 후 즉시 종료.
-- 한 iteration에서 2개 이상의 action을 pop하지 않는다 (ralph-loop wrapper가 다음 iteration을 담당).
+- 한 iteration에서 2개 이상의 action을 pop하지 않는다 (mst-loop wrapper가 다음 iteration을 담당).
 
 ### 금지 패턴
 
@@ -109,11 +109,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py queue fail --id {action.id} --error "{요�
 - "한 iteration = 한 action" 원칙. 루프 내부에서 여러 action을 처리하지 않는다.
 - 종료 메시지 예시: `[resume] completed action {id} ({action.skill})` 또는 `[resume] failed action {id}: {error}`
 
-## 예시: ralph-loop wrapper에서 호출
+## 예시: mst-loop wrapper에서 호출
 
 ```bash
 # 무한 루프 (wrapper가 queue count=0 감지 시 break)
-bash scripts/ralph-loop.sh
+bash scripts/mst-loop.sh
 
 # 또는 사용자가 직접 한 번만 호출
 claude --dangerously-skip-permissions -p "/mst:resume"
