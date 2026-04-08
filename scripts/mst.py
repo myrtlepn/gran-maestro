@@ -4887,7 +4887,8 @@ def _resolve_required_globs_config(evidence_gate_cfg: dict) -> tuple[str, list[s
     project_type = str(evidence_gate_cfg.get("project_type") or "plugin").strip().lower() or "plugin"
     configured = evidence_gate_cfg.get("required_globs")
 
-    if configured is None:
+    # fallback when missing or empty (defaults config may inject []): use project-type defaults
+    if configured is None or (isinstance(configured, list) and len(configured) == 0):
         defaults = (
             _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get(project_type)
             or _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get("plugin")

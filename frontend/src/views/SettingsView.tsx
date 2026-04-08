@@ -119,6 +119,10 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
     'soft_limit_small',
     'soft_limit_large',
     'round_history_max_summary_lines',
+    'evidence_gate',
+    'drift',
+    'recall',
+    'unlock',
   ],
   reference: ['cache_ttl_days', 'cutoff_threshold_months', 'auto_search', 'max_searches_per_step'],
   test_enforcement: ['enabled', 'backend_tdd', 'web_execution_test', 'exempt_patterns', 'require_exemption_reason'],
@@ -1350,6 +1354,24 @@ export function SettingsView() {
   const selectedModelRoleRows = selectedNode.id === 'models.roles' ? buildModelRoleAssignmentRows(merged) : [];
   const selectedInfoRows = selectedNode.kind === 'info' ? buildInfoFieldRows(merged, selectedNode) : [];
   const selectedNodeEnabled = isNodeEnabled(merged, selectedNode);
+  const selectedAgileFields =
+    selectedNode.id === 'agile' && isObject(merged?.agile)
+      ? [
+          'steering_every',
+          'drift_threshold',
+          'drift_count_trigger',
+          'no_diff_count_trigger',
+          'convergence_threshold_abs',
+          'convergence_threshold_trend',
+          'soft_limit_small',
+          'soft_limit_large',
+          'round_history_max_summary_lines',
+          'evidence_gate',
+          'drift',
+          'recall',
+          'unlock',
+        ].filter((key) => key in merged.agile)
+      : [];
   const saveAriaLabel = isDirty ? 'Save : 미저장 변경사항이 있습니다' : 'Save : 변경된 설정을 저장합니다';
 
   return (
@@ -1707,6 +1729,13 @@ export function SettingsView() {
                             연결된 설정 경로에 표시할 값이 없습니다.
                           </div>
                         )
+                      ) : selectedNode.id === 'agile' && selectedAgileFields.length > 0 ? (
+                        <div className="space-y-4">
+                          {selectedAgileFields.map((key) => renderField(['agile'], key, merged.agile[key], 0, key))}
+                          <p className="text-xs text-muted-foreground">
+                            agile 하위 섹션은 여기서 직접 편집할 수 있습니다. 값을 변경한 뒤 Save 버튼으로 저장하세요.
+                          </p>
+                        </div>
                       ) : selectedInfoRows.length > 0 ? (
                         <div className="space-y-3">
                           {selectedInfoRows.map((row) => (

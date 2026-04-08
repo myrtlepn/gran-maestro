@@ -49,38 +49,40 @@
     "soft_limit_large": 12,
     "round_history_max_summary_lines": 50,
     "coverage_threshold": 0.85,
+    "evidence_gate": {
+      "enabled": false,
+      "required_globs": []
+    },
     "drift": {
       "enabled": false,
       "threshold": 0.7,
       "warn_streak_limit": 2
     },
-    "integration_review_depth": 3,
-    "new_island_threshold": 0.20,
-    "foundational_streak_max": 2,
-    "evidence_gate": {
-      "enabled": false,
-      "project_type": "plugin",
-      "required_globs": {
-        "plugin": [
-          "skills/*/SKILL.md"
-        ]
-      }
-    },
-    "unlock": {
-      "enabled": false,
-      "forbidden_patterns": [
-        "lgtm",
-        "ok",
-        "fix",
-        "asdf"
-      ]
-    },
     "recall": {
       "enabled": false,
       "cooldown_ratio": 0.1,
+      "cooldown_floor": 1,
+      "cooldown_ceiling": 4,
       "cap_ratio": 0.1,
-      "level3_cooldown_multiplier": 2
+      "cap_floor": 3,
+      "cap_ceiling": 6,
+      "level3_cooldown_multiplier": 2,
+      "patch_budget_max": 3,
+      "patch_budget_ratio": 0.2
     },
+    "unlock": {
+      "enabled": false,
+      "reason_min_length": 20,
+      "reason_max_length": 500,
+      "forbidden_patterns": [
+        "lgtm",
+        "ok",
+        "fix"
+      ]
+    },
+    "integration_review_depth": 3,
+    "new_island_threshold": 0.20,
+    "foundational_streak_max": 2,
     "integration_wire_streak_max": 3,
     "retrospective": {
       "enabled": true,
