@@ -88,7 +88,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 허용 지점 3: Step 2.1 Sprint 0 smoke test 실패 후 재시도/중단 확인
   - 필수 마커: `[Sprint 0]`
   - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 재시도/중단을 자율 판단한다.
-- 허용 지점 4: Step 2.2.5 소스 검증 3회 실패 초과 시 사용자 에스컬레이션
+- 허용 지점 4: Step 2.2.6 소스 검증 3회 실패 초과 시 사용자 에스컬레이션
   - 필수 마커: `[자동 중단]`
   - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 자동 중단 절차로 즉시 전환한다.
 - 허용 지점 5: Step 3.5 변경 후 정합성 정책 레벨 확인
@@ -506,7 +506,7 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 
 ##### [추가 섹션] Sprint 중 디자인 수정 경로 (Step 번호 유지 전용)
 
-아래 경로는 기존 Step `2.2.1~2.2.5`를 대체하지 않고, sprint 진행 중 필요한 경우에만 추가로 적용한다.
+아래 경로는 기존 Step `2.2.1~2.2.6`를 대체하지 않고, sprint 진행 중 필요한 경우에만 추가로 적용한다.
 
 **경로 1: AI 자율 판단 (AUTO_MODE)**
 - 트리거: `2.2.3`의 `mst:plan -a` 컨텍스트 작성/실행 중, 기존 디자인 baseline과 새 요구사항의 불일치가 감지된 경우 (plan 스킬 Step 4의 UI 감지 키워드/의미 판단 포함).
@@ -633,7 +633,40 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues resolve {AGI_ID} --issue
   - `evidence_ref`는 `result.md`, 테스트/빌드 로그, `source-verify.md` 경로를 포함한다.
   - authoritative 상태 확정(`done`)은 Step 3 승인 절차(3.3)에서만 수행한다.
 
-##### 2.2.5 외부 에이전트 소스 검증 (Sprint 완료 후 MANDATORY)
+##### Step 2.2.5 Sprint Review Gate (Step 2.2.4 직후 MANDATORY)
+
+Sprint 결과/회고 기록 직후, objective details evidence를 스프린트 게이트로 검증한다.
+
+기본 호출:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile evidence-check \
+  --agi-id {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --json
+```
+
+판정 규칙 (3-tier):
+- `PASS`: evidence 충족, 위반 0건. 즉시 Step 2.2.6으로 진행.
+- `WARN`: 차단하지 않음(예: `TBD`, gate disabled 경고). 경고를 Sprint 메모에 남기고 Step 2.2.6으로 진행.
+- `FAIL`: 스프린트 진행 차단. 위반(artifact 미존재, `required_globs` 미충족 등)을 수정한 뒤 `evidence-check`를 재실행한다.
+
+`required_globs` 규칙:
+- 프로젝트 타입별 `required_globs`는 `config.agile.evidence_gate.required_globs`에서 읽는다.
+- 어떤 패턴이든 매치가 0건이면 **hard fail**로 처리한다 (slide-craft 패턴 차단).
+- 기본 fallback은 플러그인 타입의 `skills/*/SKILL.md`다.
+
+예외 bypass (긴급 시에만):
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile evidence-check \
+  --agi-id {AGI_ID} \
+  --sprint {CURRENT_SPRINT} \
+  --accept-evidence-gap "{REASON}" \
+  --json
+```
+- `REASON`은 필수다.
+- bypass 사용 시 `.gran-maestro/agile/sprint-log.json`에 사유가 영구 기록된다.
+
+##### 2.2.6 외부 에이전트 소스 검증 (Sprint 완료 후 MANDATORY)
 
 Sprint 완료 직후 `explore`(또는 동등한 코드베이스 탐색)를 실행해 소스를 검증한다.
 
@@ -873,7 +906,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 **정의**: 스프린트 결과물이 objective.md의 활성 DoD 항목과 **관련성**이 없는 경우.
 
-**감지 시점**: 매 스프린트 완료(2.2.5 소스 검증 통과 직후) 수행.
+**감지 시점**: 매 스프린트 완료(2.2.6 소스 검증 통과 직후) 수행.
 
 > **Agile config fallback (MANDATORY)**: drift_threshold, drift_count_trigger, no_diff_count_trigger는 `config.resolved.json`의 `agile.{key}` 값을 우선 사용하고, 없으면 기본값(80, 2, 2)을 사용한다.
 

@@ -52,6 +52,15 @@
     "integration_review_depth": 3,
     "new_island_threshold": 0.20,
     "foundational_streak_max": 2,
+    "evidence_gate": {
+      "enabled": false,
+      "project_type": "plugin",
+      "required_globs": {
+        "plugin": [
+          "skills/*/SKILL.md"
+        ]
+      }
+    },
     "integration_wire_streak_max": 3,
     "retrospective": {
       "enabled": true,

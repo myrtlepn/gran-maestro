@@ -59,6 +59,7 @@ Subcommands:
   agile alignment-package <AGI-ID> --sprint N [--depth N] [--json]
   agile detail validate-mapping <details_path> [--json]
   agile detail validate-evidence <details_path> [--json]
+  agile evidence-check [--sprint N | --details-dir PATH] [--agi-id AGI-ID] [--accept-evidence-gap REASON] [--json]
   agile detail append --domain DOMAIN --chunk-id N --content-file PATH [--target-dir DIR] [--json]
   agile coverage-check <original_path> --details-dir <details_dir> [--threshold N] [--json]
 
@@ -2150,6 +2151,9 @@ _H12_HEADER_RE = re.compile(r"^(#{1,2})\s+(.+?)$", flags=re.MULTILINE)
 _CHUNK_MARKER_RE = re.compile(r"<!-- chunk:(\d+) -->")
 _EVIDENCE_LEGACY_WARNING = "evidence fields not defined (legacy format)"
 _GOODHART_DUMMY_VERIFY_ERROR = "Goodhart linter: verify_cmd rejected (dummy command)"
+_DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE = {
+    "plugin": ["skills/*/SKILL.md"],
+}
 
 
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
@@ -2733,6 +2737,18 @@ def _agi_links_path(agi_id: str) -> Path:
 
 def _agi_known_issues_path(agi_id: str) -> Path:
     return _agi_session_dir(agi_id) / "known-issues.json"
+
+
+def _agile_sprint_log_path() -> Path:
+    return agile_dir() / "sprint-log.json"
+
+
+def _append_agile_sprint_log(entry: dict):
+    path = _agile_sprint_log_path()
+    existing = load_json(path)
+    rows = existing if isinstance(existing, list) else []
+    rows.append(entry)
+    save_json(path, rows)
 
 
 def _load_agile_known_issues(agi_id: str) -> List[dict]:
@@ -3650,6 +3666,37 @@ def _emit_coverage_check_payload(payload: dict, as_json: bool):
             print(f"- {error}")
 
 
+def _emit_evidence_check_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    status = str(payload.get("status") or "FAIL")
+    warnings = payload.get("warnings") or []
+    violations = payload.get("violations") or []
+    details_dir = payload.get("details_dir")
+
+    if status == "BYPASSED":
+        print(f"BYPASSED: {payload.get('bypass_reason')}")
+    elif status == "WARN" and payload.get("gate_enabled") is False:
+        print("WARN: evidence gate disabled")
+    elif status == "FAIL" and any(
+        "required_globs unsatisfied" in str(item) for item in violations
+    ):
+        print("FAIL: required_globs unsatisfied")
+    else:
+        print(status)
+
+    print(f"details_dir: {details_dir or '-'}")
+    print(f"checked_files: {len(payload.get('checked_files') or [])}")
+    print(f"warnings: {len(warnings)}")
+    print(f"violations: {len(violations)}")
+
+    required_globs = payload.get("required_globs") if isinstance(payload.get("required_globs"), dict) else {}
+    patterns = required_globs.get("patterns") or []
+    if patterns:
+        print(f"required_globs: {', '.join(str(pattern) for pattern in patterns)}")
+
 def _read_first_line(path: Path) -> str:
     with path.open("r", encoding="utf-8") as file:
         return file.readline().strip()
@@ -3911,6 +3958,324 @@ def cmd_agile_coverage_check(args):
         _print_coverage_check_fail(payload)
         return 1
     return 0
+
+
+def _normalize_required_glob_patterns(raw_value) -> list[str]:
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, str):
+        raw_items = [raw_value]
+    elif isinstance(raw_value, list):
+        raw_items = raw_value
+    else:
+        return []
+
+    normalized = []
+    for item in raw_items:
+        token = str(item).strip()
+        if token and token not in normalized:
+            normalized.append(token)
+    return normalized
+
+
+def _load_agile_config_merged() -> dict:
+    defaults_config = load_json(_plugin_root() / "templates" / "defaults" / "config.json")
+    resolved_config = load_json(BASE_DIR / "config.resolved.json")
+    defaults_agile = defaults_config.get("agile") if isinstance(defaults_config, dict) else {}
+    resolved_agile = resolved_config.get("agile") if isinstance(resolved_config, dict) else {}
+    defaults_agile = defaults_agile if isinstance(defaults_agile, dict) else {}
+    resolved_agile = resolved_agile if isinstance(resolved_agile, dict) else {}
+    return deep_merge(defaults_agile, resolved_agile)
+
+
+def _load_agile_evidence_gate_config() -> dict:
+    agile_config = _load_agile_config_merged()
+    evidence_gate = agile_config.get("evidence_gate")
+    return evidence_gate if isinstance(evidence_gate, dict) else {}
+
+
+def _resolve_required_globs_config(evidence_gate_cfg: dict) -> tuple[str, list[str]]:
+    project_type = str(evidence_gate_cfg.get("project_type") or "plugin").strip().lower() or "plugin"
+    configured = evidence_gate_cfg.get("required_globs")
+
+    if configured is None:
+        defaults = (
+            _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get(project_type)
+            or _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get("plugin")
+            or []
+        )
+        return project_type, _normalize_required_glob_patterns(defaults)
+
+    if isinstance(configured, dict):
+        selected = configured.get(project_type)
+        if selected is None:
+            selected = configured.get("default")
+        if selected is None:
+            selected = (
+                _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get(project_type)
+                or _DEFAULT_REQUIRED_GLOBS_BY_PROJECT_TYPE.get("plugin")
+                or []
+            )
+        return project_type, _normalize_required_glob_patterns(selected)
+
+    return project_type, _normalize_required_glob_patterns(configured)
+
+
+def _find_latest_agi_id() -> Optional[str]:
+    latest_id = None
+    latest_number = -1
+    root = agile_dir()
+    if not root.exists():
+        return None
+
+    for candidate in root.glob("AGI-*"):
+        if not candidate.is_dir():
+            continue
+        matched = re.fullmatch(r"AGI-(\d+)", candidate.name)
+        if matched is None:
+            continue
+        number = int(matched.group(1))
+        if number > latest_number:
+            latest_number = number
+            latest_id = candidate.name
+    return latest_id
+
+
+def _normalize_sprint_id_token(raw_value: str) -> str:
+    token = str(raw_value or "").strip()
+    if not token:
+        raise ValueError("sprint is required")
+
+    if re.fullmatch(r"s\d+", token, flags=re.IGNORECASE):
+        number = int(token[1:])
+    elif re.fullmatch(r"\d+", token):
+        number = int(token)
+    else:
+        raise ValueError(f"invalid sprint id: {raw_value}")
+
+    if number < 0:
+        raise ValueError("sprint must be >= 0")
+    return f"S{number:02d}"
+
+
+def _resolve_evidence_check_target(args) -> tuple[Optional[str], Path]:
+    if args.details_dir:
+        agi_id = None
+        if args.agi_id:
+            agi_id = _normalize_agi_id(str(args.agi_id))
+        return agi_id, Path(str(args.details_dir))
+
+    if not args.sprint:
+        raise ValueError("either --sprint or --details-dir is required")
+
+    if args.agi_id:
+        agi_id = _normalize_agi_id(str(args.agi_id))
+    else:
+        agi_id = _find_latest_agi_id()
+        if agi_id is None:
+            raise ValueError("AGI session not found; provide --agi-id or --details-dir")
+
+    _load_agile_session(agi_id)
+    return agi_id, _agi_session_dir(agi_id) / "objective" / "details"
+
+
+def _relpath_display(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _resolve_project_matches(project_root: Path, expression: str) -> list[Path]:
+    token = str(expression or "").strip()
+    if not token:
+        return []
+
+    candidate_path = Path(token)
+    if candidate_path.is_absolute():
+        return [candidate_path] if candidate_path.exists() else []
+
+    is_glob = any(ch in token for ch in "*?[")
+    if is_glob:
+        return sorted(path for path in project_root.glob(token) if path.exists())
+
+    candidate = project_root / token
+    return [candidate] if candidate.exists() else []
+
+
+def cmd_agile_evidence_check(args):
+    sprint_id = None
+    if args.sprint:
+        try:
+            sprint_id = _normalize_sprint_id_token(str(args.sprint))
+        except ValueError as exc:
+            payload = {
+                "status": "FAIL",
+                "tier": "FAIL",
+                "gate_enabled": False,
+                "sprint_id": None,
+                "agi_id": None,
+                "details_dir": None,
+                "project_root": str(BASE_DIR.parent),
+                "checked_files": [],
+                "warnings": [],
+                "violations": [str(exc)],
+                "required_globs": {"project_type": "plugin", "patterns": [], "matches": {}},
+                "bypass_reason": None,
+            }
+            _emit_evidence_check_payload(payload, args.json)
+            print(str(exc), file=sys.stderr)
+            return 1
+
+    evidence_gate_cfg = _load_agile_evidence_gate_config()
+    gate_enabled = bool(evidence_gate_cfg.get("enabled", False))
+    project_root = BASE_DIR.parent
+
+    payload = {
+        "status": "FAIL",
+        "tier": "FAIL",
+        "gate_enabled": gate_enabled,
+        "sprint_id": sprint_id,
+        "agi_id": None,
+        "details_dir": None,
+        "project_root": str(project_root),
+        "checked_files": [],
+        "warnings": [],
+        "violations": [],
+        "required_globs": {"project_type": "plugin", "patterns": [], "matches": {}},
+        "bypass_reason": None,
+    }
+
+    if not gate_enabled:
+        payload["status"] = "WARN"
+        payload["tier"] = "WARN"
+        payload["warnings"].append("evidence gate disabled by config (agile.evidence_gate.enabled=false)")
+        _emit_evidence_check_payload(payload, args.json)
+        for warning in payload["warnings"]:
+            print(str(warning), file=sys.stderr)
+        return 0
+
+    try:
+        agi_id, details_dir = _resolve_evidence_check_target(args)
+    except ValueError as exc:
+        payload["violations"].append(str(exc))
+        _emit_evidence_check_payload(payload, args.json)
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload["agi_id"] = agi_id
+    payload["details_dir"] = str(details_dir)
+
+    if not details_dir.exists():
+        payload["violations"].append(f"details dir not found: {details_dir}")
+        _emit_evidence_check_payload(payload, args.json)
+        print(payload["violations"][-1], file=sys.stderr)
+        return 1
+    if not details_dir.is_dir():
+        payload["violations"].append(f"details dir is not a directory: {details_dir}")
+        _emit_evidence_check_payload(payload, args.json)
+        print(payload["violations"][-1], file=sys.stderr)
+        return 1
+
+    project_type, required_globs = _resolve_required_globs_config(evidence_gate_cfg)
+    payload["required_globs"]["project_type"] = project_type
+    payload["required_globs"]["patterns"] = list(required_globs)
+
+    if not required_globs:
+        payload["warnings"].append("required_globs not configured; contract artifact check skipped")
+
+    required_matches = {}
+    for pattern in required_globs:
+        matched = [path for path in project_root.glob(pattern) if path.is_file()]
+        required_matches[pattern] = [_relpath_display(path, project_root) for path in matched]
+        if not matched:
+            payload["violations"].append(f"required_globs unsatisfied: {pattern}")
+    payload["required_globs"]["matches"] = required_matches
+
+    detail_files = sorted(details_dir.glob("*.md"))
+    if not detail_files:
+        payload["violations"].append(f"no detail files found: {details_dir}")
+
+    for detail_file in detail_files:
+        detail_label = _relpath_display(detail_file, project_root)
+        payload["checked_files"].append(detail_label)
+        try:
+            content = detail_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            payload["violations"].append(f"{detail_label}: failed to read detail ({exc})")
+            continue
+
+        parsed = parse_agile_detail_metadata(content)
+        validation = validate_agile_detail_evidence(parsed)
+
+        for warning in validation.get("warnings", []):
+            payload["warnings"].append(f"{detail_label}: {warning}")
+        for error in validation.get("errors", []):
+            payload["violations"].append(f"{detail_label}: {error}")
+
+        if not validation.get("valid"):
+            continue
+
+        evidence = validation.get("evidence") if isinstance(validation.get("evidence"), dict) else {}
+        plan = evidence.get("plan") if isinstance(evidence.get("plan"), dict) else {}
+        runtime = evidence.get("runtime") if isinstance(evidence.get("runtime"), dict) else {}
+
+        artifacts = plan.get("artifact_paths") if isinstance(plan.get("artifact_paths"), list) else []
+        for artifact in artifacts:
+            artifact_token = str(artifact).strip()
+            if not artifact_token:
+                continue
+            matches = _resolve_project_matches(project_root, artifact_token)
+            if not matches:
+                payload["violations"].append(f"{detail_label}: artifact missing: {artifact_token}")
+
+        entrypoint_path = str(plan.get("entrypoint_path") or "").strip()
+        if entrypoint_path:
+            entrypoint_file = entrypoint_path.split(":", 1)[0].strip()
+            if entrypoint_file and not _resolve_project_matches(project_root, entrypoint_file):
+                payload["violations"].append(f"{detail_label}: entrypoint missing: {entrypoint_file}")
+
+        for field in ("integration_smoke_id", "verify_cmd", "expected_signal"):
+            normalized = _normalize_tbd(runtime.get(field))
+            if normalized == "TBD":
+                payload["warnings"].append(f"{detail_label}: {field} is TBD")
+
+    if payload["violations"]:
+        payload["tier"] = "FAIL"
+    elif payload["warnings"]:
+        payload["tier"] = "WARN"
+    else:
+        payload["tier"] = "PASS"
+
+    bypass_reason = str(args.accept_evidence_gap or "").strip()
+    if payload["tier"] == "FAIL" and bypass_reason:
+        payload["status"] = "BYPASSED"
+        payload["bypass_reason"] = bypass_reason
+        _append_agile_sprint_log(
+            {
+                "timestamp": _now_iso(),
+                "event": "evidence-gap-accepted",
+                "reason": bypass_reason,
+                "agi_id": agi_id,
+                "sprint_id": sprint_id,
+                "details_dir": str(details_dir),
+                "violations": list(payload["violations"]),
+            }
+        )
+        _emit_evidence_check_payload(payload, args.json)
+        for warning in payload["warnings"]:
+            print(str(warning), file=sys.stderr)
+        for violation in payload["violations"]:
+            print(str(violation), file=sys.stderr)
+        return 0
+
+    payload["status"] = payload["tier"]
+    _emit_evidence_check_payload(payload, args.json)
+    for warning in payload["warnings"]:
+        print(str(warning), file=sys.stderr)
+    for violation in payload["violations"]:
+        print(str(violation), file=sys.stderr)
+    return 1 if payload["status"] == "FAIL" else 0
 
 
 def cmd_agile_detail_validate_mapping(args):
@@ -8024,6 +8389,14 @@ def build_parser():
     agile_detail_append.add_argument("--target-dir", default=".", dest="target_dir")
     agile_detail_append.add_argument("--json", action="store_true")
 
+    agile_evidence_check = agile_sub.add_parser("evidence-check")
+    agile_evidence_check_scope = agile_evidence_check.add_mutually_exclusive_group(required=True)
+    agile_evidence_check_scope.add_argument("--sprint")
+    agile_evidence_check_scope.add_argument("--details-dir", dest="details_dir")
+    agile_evidence_check.add_argument("--agi-id", dest="agi_id")
+    agile_evidence_check.add_argument("--accept-evidence-gap", dest="accept_evidence_gap")
+    agile_evidence_check.add_argument("--json", action="store_true")
+
     agile_coverage_check = agile_sub.add_parser("coverage-check")
     agile_coverage_check.add_argument("original_path")
     agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
@@ -8326,6 +8699,7 @@ def main():
         ("agile", "retrospective"): cmd_agile_retrospective,
         ("agile", "known-issues"): cmd_agile_known_issues,
         ("agile", "detail"): cmd_agile_detail,
+        ("agile", "evidence-check"): cmd_agile_evidence_check,
         ("agile", "coverage-check"): cmd_agile_coverage_check,
         ("agile", "objective-transition"): cmd_agile_objective_transition,
         ("agile", "objective-check"): cmd_agile_objective_check,
