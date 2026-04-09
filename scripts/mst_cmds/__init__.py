@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import argparse
+
+from scripts.mst_cmds import _common
+from scripts.mst_cmds import request
+from scripts.mst_cmds import workflow
+from scripts.mst_cmds import worktree
+from scripts.mst_cmds import timestamp
+from scripts.mst_cmds import set as set_mod
+from scripts.mst_cmds import state
+from scripts.mst_cmds import queue
+from scripts.mst_cmds import measure
+from scripts.mst_cmds import plan
+from scripts.mst_cmds import intent
+from scripts.mst_cmds import fact_check
+from scripts.mst_cmds import reference
+from scripts.mst_cmds import agile
+from scripts.mst_cmds import counter
+from scripts.mst_cmds import archive
+from scripts.mst_cmds import gardening
+from scripts.mst_cmds import capture
+from scripts.mst_cmds import version
+from scripts.mst_cmds import context
+from scripts.mst_cmds import agents
+from scripts.mst_cmds import cleanup
+from scripts.mst_cmds import session
+from scripts.mst_cmds import priority
+from scripts.mst_cmds import task
+from scripts.mst_cmds import explore
+from scripts.mst_cmds import wait_files
+from scripts.mst_cmds import resolve_model
+from scripts.mst_cmds import stitch
+from scripts.mst_cmds import notify
+from scripts.mst_cmds import extension
+from scripts.mst_cmds import config
+from scripts.mst_cmds import preset
+from scripts.mst_cmds import hooks
+from scripts.mst_cmds import agile_detail
+from scripts.mst_cmds import agile_governance
+
+
+def set_base_dir(base_dir):
+    return _common.set_base_dir(base_dir)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mst.py",
+        description="Gran Maestro CLI utility"
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    request.register(sub)
+    workflow.register(sub)
+    worktree.register(sub)
+    timestamp.register(sub)
+    set_mod.register(sub)
+    state.register(sub)
+    queue.register(sub)
+    measure.register(sub)
+    plan.register(sub)
+    intent.register(sub)
+    fact_check.register(sub)
+    reference.register(sub)
+    agile.register(sub)
+    counter.register(sub)
+    archive.register(sub)
+    gardening.register(sub)
+    capture.register(sub)
+    version.register(sub)
+    context.register(sub)
+    agents.register(sub)
+    cleanup.register(sub)
+    session.register(sub)
+    priority.register(sub)
+    task.register(sub)
+    explore.register(sub)
+    wait_files.register(sub)
+    resolve_model.register(sub)
+    stitch.register(sub)
+    notify.register(sub)
+    extension.register(sub)
+    config.register(sub)
+    preset.register(sub)
+    hooks.register(sub)
+
+    return parser
+
+
+DISPATCH = {
+    ("request", "list"): request.cmd_request_list,
+    ("request", "inspect"): request.cmd_request_inspect,
+    ("request", "history"): request.cmd_request_history,
+    ("request", "filter"): request.cmd_request_filter,
+    ("request", "count"): request.cmd_request_count,
+    ("request", "cancel"): request.cmd_request_cancel,
+    ("request", "set-phase"): request.cmd_request_set_phase,
+    ("workflow", "run"): workflow.cmd_workflow_run,
+    ("worktree", "create"): worktree.cmd_worktree_create,
+    ("worktree", "remove"): worktree.cmd_worktree_remove,
+    ("timestamp", "now"): timestamp.cmd_timestamp,
+    ("set-status", None): set_mod.cmd_set_status,
+    ("set-field", None): set_mod.cmd_set_field,
+    ("state", "set"): state.cmd_state_set,
+    ("state", "set-workflow"): state.cmd_state_set_workflow,
+    ("state", "get"): state.cmd_state_get,
+    ("state", "clear"): state.cmd_state_clear,
+    ("queue", "enqueue"): queue.cmd_queue_enqueue,
+    ("queue", "peek"): queue.cmd_queue_peek,
+    ("queue", "pop"): queue.cmd_queue_pop,
+    ("queue", "list"): queue.cmd_queue_list,
+    ("queue", "complete"): queue.cmd_queue_complete,
+    ("queue", "fail"): queue.cmd_queue_fail,
+    ("queue", "count"): queue.cmd_queue_count,
+    ("measure", "stop-rate"): measure.cmd_measure_stop_rate,
+    ("plan", "list"): plan.cmd_plan_list,
+    ("plan", "count"): plan.cmd_plan_count,
+    ("plan", "inspect"): plan.cmd_plan_inspect,
+    ("plan", "complete"): plan.cmd_plan_complete,
+    ("plan", "sync"): plan.cmd_plan_sync,
+    ("plan", "render-review"): plan.cmd_plan_render_review,
+    ("intent", "add"): intent.cmd_intent_add,
+    ("intent", "get"): intent.cmd_intent_get,
+    ("intent", "list"): intent.cmd_intent_list,
+    ("intent", "update"): intent.cmd_intent_update,
+    ("intent", "delete"): intent.cmd_intent_delete,
+    ("intent", "search"): intent.cmd_intent_search,
+    ("intent", "lookup"): intent.cmd_intent_lookup,
+    ("intent", "related"): intent.cmd_intent_related,
+    ("intent", "rebuild"): intent.cmd_intent_rebuild,
+    ("fact-check", "add"): fact_check.cmd_fact_check_add,
+    ("fact-check", "get"): fact_check.cmd_fact_check_get,
+    ("fact-check", "list"): fact_check.cmd_fact_check_list,
+    ("fact-check", "search"): fact_check.cmd_fact_check_search,
+    ("fact-check", "update"): fact_check.cmd_fact_check_update,
+    ("fact-check", "claim-update"): fact_check.cmd_fact_check_claim_update,
+    ("reference", "add"): reference.cmd_reference_add,
+    ("reference", "get"): reference.cmd_reference_get,
+    ("reference", "list"): reference.cmd_reference_list,
+    ("reference", "search"): reference.cmd_reference_search,
+    ("reference", "update"): reference.cmd_reference_update,
+    ("agile", "init"): agile.cmd_agile_init,
+    ("agile", "status"): agile.cmd_agile_status,
+    ("agile", "update"): agile.cmd_agile_update,
+    ("agile", "result"): agile.cmd_agile_result,
+    ("agile", "retrospective"): agile.cmd_agile_retrospective,
+    ("agile", "known-issues"): agile.cmd_agile_known_issues,
+    ("agile", "detail"): agile_detail.cmd_agile_detail,
+    ("agile", "evidence-check"): agile_detail.cmd_agile_evidence_check,
+    ("agile", "drift-check"): agile_detail.cmd_agile_drift_check,
+    ("agile", "recall"): agile_governance.cmd_agile_recall,
+    ("agile", "classify-change"): agile_governance.cmd_agile_classify_change,
+    ("agile", "unlock"): agile_governance.cmd_agile_unlock,
+    ("agile", "revalidate-done"): agile_governance.cmd_agile_revalidate_done,
+    ("agile", "coverage-check"): agile_detail.cmd_agile_coverage_check,
+    ("agile", "objective-transition"): agile_governance.cmd_agile_objective_transition,
+    ("agile", "objective-check"): agile_governance.cmd_agile_objective_check,
+    ("agile", "objective-snapshot"): agile_governance.cmd_agile_objective_snapshot,
+    ("agile", "link"): agile_detail.cmd_agile_link,
+    ("agile", "integration-review"): agile_detail.cmd_agile_integration_review,
+    ("agile", "alignment-package"): agile_detail.cmd_agile_alignment_package,
+    ("counter", "next"): counter.cmd_counter_next,
+    ("counter", "peek"): counter.cmd_counter_peek,
+    ("version", "get"): version.cmd_version_get,
+    ("version", "check"): version.cmd_version_check,
+    ("version", "bump"): version.cmd_version_bump,
+    ("context", "gather"): context.cmd_context_gather,
+    ("agents", "check"): agents.cmd_agents_check,
+    ("agents", "sync"): agents.cmd_agents_sync,
+    ("capture", "ttl-check"): capture.cmd_capture_ttl_check,
+    ("capture", "mark-consumed"): capture.cmd_capture_mark_consumed,
+    ("archive", "run"): archive.cmd_archive_run,
+    ("archive", "run-all"): archive.cmd_archive_run_all,
+    ("archive", "list"): archive.cmd_archive_list,
+    ("archive", "restore"): archive.cmd_archive_restore,
+    ("gardening", "scan"): gardening.cmd_gardening_scan,
+    ("cleanup", None): cleanup.cmd_cleanup,
+    ("session", "list"): session.cmd_session_list,
+    ("session", "inspect"): session.cmd_session_inspect,
+    ("session", "complete"): session.cmd_session_complete,
+    ("session", "split-prompts"): session.cmd_session_split_prompts,
+    ("priority", None): priority.cmd_priority,
+    ("task", "set-commit"): task.cmd_task_set_commit,
+    ("explore", "index"): explore.cmd_explore_index,
+    ("notify", None): notify.cmd_notify,
+    ("stitch", "sleep"): stitch.cmd_stitch_sleep,
+    ("wait-files", None): wait_files.cmd_wait_files,
+    ("resolve-model", None): resolve_model.cmd_resolve_model,
+    ("extension", "ensure-copy"): extension.cmd_extension_ensure_copy,
+    ("config", "resolve"): config.cmd_config_resolve,
+    ("config", "get"): config.cmd_config_get,
+    ("config", "migrate"): config.cmd_config_migrate,
+    ("preset", "list"): preset.cmd_preset_list,
+    ("preset", "apply"): preset.cmd_preset_apply,
+    ("preset", "diff"): preset.cmd_preset_diff,
+    ("preset", "save"): preset.cmd_preset_save,
+    ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
+}
