@@ -93,11 +93,13 @@ save_transcript_bridge() {
 build_mst_line() {
   local state_file="$1"
   local transcript_path="${2:-}"
+  local dispatch_run_dir="${3:-}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
 state_path = sys.argv[1] if len(sys.argv) > 1 else ""
 transcript_path = sys.argv[2] if len(sys.argv) > 2 else ""
+dispatch_run_dir = sys.argv[3] if len(sys.argv) > 3 else ""
 MAX_TAIL_BYTES = 512 * 1024
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
@@ -324,26 +326,77 @@ def render_from_transcript(path):
     return render_line(labels, context_id)
 
 
+def build_dispatch_prefix(run_dir):
+    if not run_dir or not os.path.isdir(run_dir):
+        return ""
+
+    now = datetime.now(timezone.utc)
+    count = 0
+    oldest_age = 0
+    for name in os.listdir(run_dir):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(run_dir, name)
+        if not os.path.isfile(path):
+            continue
+
+        count += 1
+        age = 10**9
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                heartbeat = payload.get("last_heartbeat")
+                heartbeat_dt = parse_iso(heartbeat) if isinstance(heartbeat, str) else None
+                if heartbeat_dt is not None:
+                    age = int((now - heartbeat_dt).total_seconds())
+                    if age < 0:
+                        age = 0
+        except Exception:
+            age = 10**9
+
+        if age > oldest_age:
+            oldest_age = age
+
+    if count == 0:
+        return ""
+    return f"MST {count} run · oldest {oldest_age}s"
+
+
+def merge_with_dispatch_prefix(base_line, run_dir):
+    prefix = build_dispatch_prefix(run_dir)
+    if not prefix:
+        return base_line
+
+    suffix = base_line
+    if isinstance(suffix, str) and suffix.startswith("MST "):
+        suffix = suffix[4:]
+    if suffix:
+        return f"{prefix} · {suffix}"
+    return prefix
+
+
 state_line = render_from_state(state_path)
 if state_line is not None:
-    print(state_line)
+    print(merge_with_dispatch_prefix(state_line, dispatch_run_dir))
     sys.exit(0)
 
 transcript_line = render_from_transcript(transcript_path)
 if transcript_line is not None:
-    print(transcript_line)
+    print(merge_with_dispatch_prefix(transcript_line, dispatch_run_dir))
     sys.exit(0)
 
-print("MST idle")
-' "$state_file" "$transcript_path" 2>/dev/null || printf 'MST idle\n'
+print(merge_with_dispatch_prefix("MST idle", dispatch_run_dir))
+' "$state_file" "$transcript_path" "$dispatch_run_dir" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
 STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
+DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"

@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { AgentPerformance, type AgentPerformanceHandle } from '@/components/shared/AgentPerformance';
 import { StatusStackedBar } from '@/components/shared/StatusStackedBar';
+import { DispatchPanel } from '@/components/DispatchPanel';
 
 type CounterType = 'requests' | 'plans' | 'debug' | 'ideation' | 'discussion' | 'explore' | 'designs';
 type ActiveTab = 'all' | 'request' | 'plan';
@@ -388,6 +389,8 @@ export function OverviewView() {
             </Card>
           ))}
         </div>
+
+        <DispatchPanel projectId={projectId} />
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <Card className="bg-white dark:bg-card">

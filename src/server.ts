@@ -20,6 +20,7 @@ import { projectConfigApi } from "./routes/config.ts";
 import { projectDiscussionApi } from "./routes/discussion.ts";
 import { projectIdeationApi } from "./routes/ideation.ts";
 import { projectDebugApi } from "./routes/debug.ts";
+import { projectDispatchApi } from "./routes/dispatch.ts";
 import { projectExploreApi } from "./routes/explore.ts";
 import { projectDesignsApi } from "./routes/designs.ts";
 import { projectPlansApi } from "./routes/plans.ts";
@@ -76,6 +77,7 @@ projectApi.route("/", projectFactChecksApi);
 projectApi.route("/", projectReferencesApi);
 projectApi.route("/", projectIdeationApi);
 projectApi.route("/", projectDiscussionApi);
+projectApi.route("/", projectDispatchApi);
 projectApi.route("/", projectTreeApi);
 projectApi.route("/", projectWorktreesApi);
 
