@@ -38,3 +38,20 @@ def test_skills_preserve_frontmatter():
         assert content.startswith("---"), f"{skill}/SKILL.md must start with frontmatter"
         assert "name:" in content.split("---")[1]
         assert "description:" in content.split("---")[1]
+
+
+def test_skills_document_task_id_placeholder():
+    """AC-004: 3개 SKILL.md에 {task_id} placeholder 유도 규칙 명시"""
+    for skill in ("codex", "gemini", "claude"):
+        content = _skill_md(skill)
+        assert "{task_id}" in content, f"{skill}: {{task_id}} 언급 없음"
+        assert "Placeholder 유도 규칙" in content or "REQ-ID" in content, (
+            f"{skill}: placeholder 유도 규칙 문서화 누락"
+        )
+
+
+def test_codex_skill_model_resolve_simplified():
+    """AC-005: skills/codex/SKILL.md의 모델 resolve 방법 A/B 블록 제거"""
+    content = _skill_md("codex")
+    assert "방법 A" not in content, "방법 A 블록이 아직 남아있음"
+    assert "방법 B" not in content, "방법 B 블록이 아직 남아있음"

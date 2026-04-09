@@ -41,6 +41,22 @@ def _heartbeat_interval(args) -> int:
     return _coerce_positive_int(dispatch_cfg.get("heartbeat_interval_sec"), 30)
 
 
+def _wrapper_timeout_sec(args) -> int | None:
+    if getattr(args, "timeout", None) is not None:
+        value = int(args.timeout)
+        return value if value > 0 else None
+
+    dispatch_cfg = _load_dispatch_config()
+    raw = dispatch_cfg.get("wrapper_timeout_sec")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _register_state(args) -> str:
     now = _now_iso()
     payload = {
@@ -167,6 +183,7 @@ def cmd_run(args):
         return 2
 
     heartbeat_interval = _heartbeat_interval(args)
+    timeout_sec = _wrapper_timeout_sec(args)
     state_lock = threading.Lock()
     stop_event = threading.Event()
 
@@ -210,10 +227,35 @@ def cmd_run(args):
                 bufsize=0,
                 text=False,
             )
+            tee_error: list[BaseException] = []
 
-            _tee_output(proc, log_fd)
-            proc.wait()
-            exit_code = int(proc.returncode)
+            def _tee_worker() -> None:
+                try:
+                    _tee_output(proc, log_fd)
+                except BaseException as exc:  # pragma: no cover - defensive guard
+                    tee_error.append(exc)
+
+            tee_thread = threading.Thread(target=_tee_worker, daemon=True)
+            tee_thread.start()
+            try:
+                proc.wait(timeout=timeout_sec)
+                exit_code = int(proc.returncode)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=3)
+                exit_code = 143
+                print(
+                    f"[mst.py run] wrapper timeout after {timeout_sec}s, killed subprocess",
+                    file=sys.stderr,
+                )
+            finally:
+                tee_thread.join(timeout=5)
+                if tee_error:
+                    raise tee_error[0]
         finally:
             os.close(log_fd)
     except FileNotFoundError as exc:
@@ -261,4 +303,5 @@ def register(subparsers):
     run.add_argument("--log-dir", required=True)
     run.add_argument("--trace")
     run.add_argument("--heartbeat-interval")
+    run.add_argument("--timeout", type=int, help="Subprocess timeout in seconds")
     run.add_argument("cli_command", nargs=argparse.REMAINDER)

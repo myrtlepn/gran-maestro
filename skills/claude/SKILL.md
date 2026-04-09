@@ -16,6 +16,11 @@ PM Conductor 원칙 유지 목적으로 Claude CLI를 `mst.py run` wrapper 경�
 > ```bash
 > PROJECT_ROOT=$(pwd)
 > ```
+>
+> **Placeholder 유도 규칙 (MANDATORY)**:
+> - `{task_id}`: 워크플로우에서 `{REQ-ID}-T{TASK-NUM}` 형식으로 자동 치환 (예: `REQ-001-T01`). 독립 호출 시에는 호출자가 임의 고유 ID 지정.
+> - `{task_dir}`: `.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/` 절대경로
+> - `{working_dir}`: CLI 대상 작업 경로 (워크플로우에서는 worktree 경로). wrapper의 cwd와 다를 수 있음.
 
 1. `$ARGUMENTS` 파싱:
    - `--prompt-file {경로}`: 프롬프트 파일 경로 (우선)
