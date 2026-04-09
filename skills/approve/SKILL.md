@@ -638,10 +638,10 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 # codex-dev인 경우 (OMX_AUTOPILOT=true 시 \$autopilot 프리픽스 삽입)
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" 2>&1 | tee {task_dir}/running.log',   # OMX_AUTOPILOT=true
+  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log',   # OMX_AUTOPILOT=true
   # 또는:
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" 2>&1 | tee {task_dir}/running.log',              # OMX_AUTOPILOT=false
+  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log',              # OMX_AUTOPILOT=false
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -651,7 +651,7 @@ Bash(
 # gemini-dev인 경우
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null);
-  command: 'set -o pipefail && cd {worktree_path} && gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false 2>&1 | tee {task_dir}/running.log',
+  command: 'set -o pipefail && cd {worktree_path} && gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false < /dev/null 2>&1 | tee {task_dir}/running.log',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -1041,10 +1041,10 @@ else:
    ```bash
    # OMX_AUTOPILOT=true
    MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-   set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {escalation_prompt_path})" 2>&1 | tee {task_dir}/running-fallback.log
+   set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {escalation_prompt_path})" < /dev/null 2>&1 | tee {task_dir}/running-fallback.log
    # OMX_AUTOPILOT=false (현행 유지)
    MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-   set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {escalation_prompt_path})" 2>&1 | tee {task_dir}/running-fallback.log
+   set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {escalation_prompt_path})" < /dev/null 2>&1 | tee {task_dir}/running-fallback.log
    ```
 
 4. **결과 처리**:

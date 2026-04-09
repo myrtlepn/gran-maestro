@@ -962,7 +962,7 @@ Write → {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-
 ```bash
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex {tier} 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {PROJECT_ROOT} "$(cat {PROMPT_FILE})" 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
+  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {PROJECT_ROOT} "$(cat {PROMPT_FILE})" < /dev/null 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -972,7 +972,7 @@ Bash(
 ```bash
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini {tier} 2>/dev/null);
-  command: 'set -o pipefail && cd {PROJECT_ROOT} && gemini -p "$(cat {PROMPT_FILE})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
+  command: 'set -o pipefail && cd {PROJECT_ROOT} && gemini -p "$(cat {PROMPT_FILE})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false < /dev/null 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )

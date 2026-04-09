@@ -51,9 +51,9 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
    ```
 7. Codex CLI 실행:
    ```bash
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "{prompt}"                         # 인라인
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})"             # --prompt-file
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; set -o pipefail; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" 2>&1 | tee {task_dir}/running.log  # trace
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "{prompt}" < /dev/null                        # 인라인
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null            # --prompt-file
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; set -o pipefail; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log  # trace
    ```
 8. **결과 처리**: `--trace` → Trace 문서 자동 생성 후 exit code만 반환; `--output` → 파일 저장; 둘 다 없음 → 결과 표시
 
@@ -92,7 +92,7 @@ for item in values:
 PY
 )
 set -o pipefail
-codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" 2>&1 | tee "$task_dir/running.log" &
+codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null 2>&1 | tee "$task_dir/running.log" &
 EXEC_PID=$!
 SLEEP_SEC=$(( (MONITOR_INTERVAL_MS + 999) / 1000 ))
 monitor_loop() {

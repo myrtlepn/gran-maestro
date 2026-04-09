@@ -93,6 +93,11 @@ def requests_dir() -> Path:
 def plans_dir() -> Path:
     return BASE_DIR / "plans"
 
+def run_dir() -> Path:
+    path = BASE_DIR / "run"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 def iter_request_dirs(include_completed=False):
     """Yield (req_id, path, data) tuples."""
     for req_path in sorted(requests_dir().glob("REQ-*")):

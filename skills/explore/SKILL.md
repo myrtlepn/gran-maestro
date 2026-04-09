@@ -248,14 +248,14 @@ PM(Claude)이 탐색 목표를 분석하여 `explorers` 수만큼 역할을 배�
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex explore 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" > {absolute_path}/explore-{explorerKey}.md 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
+    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex explore 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" > {absolute_path}/explore-{explorerKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
   )
   ```
 - `provider: "gemini"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" --model {config.models.providers.gemini[explore.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/explore-{explorerKey}.md 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
+    command: "gemini -p \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" --model {config.models.providers.gemini[explore.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/explore-{explorerKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
   )
   ```
 

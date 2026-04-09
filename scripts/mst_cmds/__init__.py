@@ -38,6 +38,7 @@ from scripts.mst_cmds import preset
 from scripts.mst_cmds import hooks
 from scripts.mst_cmds import agile_detail
 from scripts.mst_cmds import agile_governance
+from scripts.mst_cmds import dispatch
 
 
 def set_base_dir(base_dir):
@@ -84,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     config.register(sub)
     preset.register(sub)
     hooks.register(sub)
+    dispatch.register(sub)
 
     return parser
 
@@ -196,4 +198,10 @@ DISPATCH = {
     ("preset", "diff"): preset.cmd_preset_diff,
     ("preset", "save"): preset.cmd_preset_save,
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
+    ("dispatch", "build"): dispatch.cmd_dispatch_build,
+    ("dispatch", "preflight"): dispatch.cmd_dispatch_preflight,
+    ("dispatch", "register"): dispatch.cmd_dispatch_register,
+    ("dispatch", "heartbeat"): dispatch.cmd_dispatch_heartbeat,
+    ("dispatch", "list"): dispatch.cmd_dispatch_list,
+    ("dispatch", "kill"): dispatch.cmd_dispatch_kill,
 }
