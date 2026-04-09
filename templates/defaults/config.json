@@ -258,7 +258,7 @@
   "models": {
     "providers": {
       "codex": {
-        "premium": "gpt-5.3-codex",
+        "premium": "gpt-5.4",
         "economy": "gpt-5.3-codex-spark",
         "default_tier": "premium"
       },
