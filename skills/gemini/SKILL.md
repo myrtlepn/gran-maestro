@@ -16,60 +16,66 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
 3. `--dir` 지정 시 디렉토리 존재 확인 (없으면 에러 중단); 상대경로는 cwd 기준
 4. `--files` 패턴으로 파일 목록 확인; 매칭 없으면 경고
 5. `--trace` 모드 판별 (아래 섹션 참조)
-6. **기본 모델**: `config.resolved.json`의 `models.providers.gemini[default_tier]`로 resolve; 없으면 `--model` 플래그 생략. tier resolve 순서: `providers.gemini[default_tier]`
+6. **기본 모델**: `config.resolved.json`의 `models.providers.gemini[default_tier]`로 resolve하고, 실패 시 `gemini-3.1-pro-preview`를 fallback으로 사용
 7. Gemini CLI 실행:
    ```bash
-   gemini -p "{prompt}" --model {model} --approval-mode yolo --sandbox=false                                  # 인라인
-   gemini -p "$(cat {prompt_file})" --model {model} --approval-mode yolo --sandbox=false                      # --prompt-file
-   set -o pipefail; gemini -p "$(cat {prompt_file})" --model {model} --approval-mode yolo --sandbox=false 2>&1 | tee {task_dir}/running.log  # trace
-   set -o pipefail && cd {dir} && gemini -p "$(cat {prompt_file})" --model {model} --approval-mode yolo --sandbox=false 2>&1 | tee {task_dir}/running.log  # trace + --dir
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null || echo "gemini-3.1-pro-preview")
+
+   # 인라인 프롬프트
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider gemini \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     -- gemini -p "{prompt}" --model "$MODEL" --approval-mode yolo --sandbox=false
+
+   # --prompt-file
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider gemini \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     -- gemini -p "$(cat {prompt_file})" --model "$MODEL" --approval-mode yolo --sandbox=false
+
+   # --trace 모드
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider gemini \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     --trace "{REQ-ID}/{TASK-NUM}/{label}" \
+     -- gemini -p "$(cat {prompt_file})" --model "$MODEL" --approval-mode yolo --sandbox=false
    ```
 8. **결과 처리**: `--trace` → Trace 문서 자동 생성 후 exit code만 반환; 없음 → 결과 표시
 
 ## Trace 모드 (워크플로우 내 자동 문서화)
 
-워크플로우 내 결과를 파일로 저장해 히스토리 추적; 실행 본문은 `running.log`에 위임하고 trace .md는 메타데이터만 기록.
+`--trace {REQ-ID}/{TASK-NUM}/{label}` 인자를 wrapper에 전달하면 실행 완료 시 `{task_dir}/traces/gemini-{label}-{ts}.md` 파일이 자동 생성됩니다.
 
-형식: `--trace {REQ-ID}/{TASK-NUM}/{label}`
+형식: `--trace {REQ-ID}/{TASK-NUM}/{label}` (예: `REQ-001/01/phase1-analysis`)
 
-실행 절차:
-1. 출력 디렉토리: `requests/{REQ-ID}/tasks/{TASK-NUM}/traces/` (없으면 생성)
-2. 파일명 패턴: `gemini-{label}-{YYYYMMDD-HHmmss}.md`
-3. **단일 Bash 블록**에서 실행 + trace 자동 생성:
+실행 예:
 
 ```bash
-task_dir="{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}"
-trace_dir="$task_dir/traces"
-mkdir -p "$trace_dir"
-TS=$(date +"%Y%m%d-%H%M%S")
-START=$(date +%s%3N)
-set -o pipefail
-cd {working_dir} && gemini -p "$(cat {prompt_file})" --model {model} --approval-mode yolo --sandbox=false 2>&1 | tee "$task_dir/running.log"
-EXIT=$?
-END=$(date +%s%3N)
-DUR=$((END-START))
-cat > "$trace_dir/gemini-{label}-${TS}.md" <<EOF
----
-agent: gemini
-request: {REQ-ID}
-task: {TASK-NUM}
-label: {label}
-timestamp: ${TS}
-duration_ms: ${DUR}
-exit_code: ${EXIT}
-log: requests/{REQ-ID}/tasks/{TASK-NUM}/running.log
----
-EOF
-exit $EXIT
+python3 {PLUGIN_ROOT}/scripts/mst.py run \
+  --task-id REQ-001-01 \
+  --provider gemini \
+  --model gemini-3.1-pro-preview \
+  --log-dir .gran-maestro/requests/REQ-001/tasks/01 \
+  --trace REQ-001/01/phase1-analysis \
+  -- gemini -p "$(cat {prompt_file})" --model gemini-3.1-pro-preview --approval-mode yolo --sandbox=false
 ```
 
-4. **부모 컨텍스트에는 exit code만 반환**한다.
-   반환 후 부모 스킬의 후속 단계를 계속 진행한다. 추가 설명, 요약 등 부가 텍스트 출력 절대 금지.
+wrapper는 자동으로 다음을 처리합니다.
+- `.gran-maestro/run/{task_id}.json`에 dispatch 상태 기록 (register + heartbeat)
+- stdout/stderr를 `{log_dir}/running.log`에 tee
+- 종료 시 exit_code 및 final phase 기록
+- `--trace` 전달 시 `traces/*.md` 자동 생성
 
 > **금지 마커 (MANDATORY)**: 이 스킬은 `NEXT_ACTION`, `step=returned`, `[MST skill=...]` 마커를 **절대 출력하지 않는다**.
 > 이 마커들은 부모 스킬(approve 등)의 책임이며, 서브스킬이 출력하면 부모가 "이미 처리됨"으로 혼동한다.
 
-> **Exit Code 캡처 (MANDATORY)**: Bash 도구의 exit code를 반드시 확인한다.
+> **Exit Code 캡처 (MANDATORY)**: `mst.py run`의 종료 코드를 반드시 확인한다.
 > 0이 아니어도 trace의 `exit_code` 필드에 해당 값을 반드시 기록한다.
 
 ## 옵션

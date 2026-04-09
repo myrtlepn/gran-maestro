@@ -51,99 +51,65 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
    ```
 7. Codex CLI 실행:
    ```bash
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "{prompt}" < /dev/null                        # 인라인
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null            # --prompt-file
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex"); SANDBOX_ARGS="--full-auto"; [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"; set -o pipefail; codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log  # trace
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex")
+   SANDBOX_ARGS="--full-auto"
+   [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"
+
+   # 인라인 프롬프트
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider codex \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "{prompt}"
+
+   # --prompt-file
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider codex \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})"
+
+   # --trace 모드
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{task_id}" \
+     --provider codex \
+     --model "$MODEL" \
+     --log-dir "{task_dir}" \
+     --trace "{REQ-ID}/{TASK-NUM}/{label}" \
+     -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})"
    ```
 8. **결과 처리**: `--trace` → Trace 문서 자동 생성 후 exit code만 반환; `--output` → 파일 저장; 둘 다 없음 → 결과 표시
 
 ## Trace 모드 (워크플로우 내 자동 문서화)
 
-워크플로우 내 결과를 파일로 저장해 히스토리 추적; 실행 본문은 `running.log`에 위임하고 trace .md는 메타데이터만 기록.
+`--trace {REQ-ID}/{TASK-NUM}/{label}` 인자를 wrapper에 전달하면 실행 완료 시 `{task_dir}/traces/codex-{label}-{ts}.md` 파일이 자동 생성됩니다.
 
 형식: `--trace {REQ-ID}/{TASK-NUM}/{label}` (예: `REQ-001/01/phase2-impl`)
 
-실행 절차:
-1. 출력 디렉토리: `requests/{REQ-ID}/tasks/{TASK-NUM}/traces/` (없으면 생성)
-2. 파일명 패턴: `codex-{label}-{YYYYMMDD-HHmmss}.md`
-3. **단일 Bash 블록**에서 실행 + trace 자동 생성 + 모니터링:
+실행 예:
 
 ```bash
-task_dir="{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}"
-trace_dir="$task_dir/traces"
-mkdir -p "$trace_dir"
-TS=$(date +"%Y%m%d-%H%M%S")
-START=$(date +%s%3N)
-MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex")
-SANDBOX_ARGS="--full-auto"
-[ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"
-MONITOR_INTERVAL_MS=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get delegation.monitor_interval_ms --default 180000 2>/dev/null || echo "180000")
-MONITOR_TAIL_LINES=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get delegation.monitor_tail_lines --default 50 2>/dev/null || echo "50")
-ANOMALY_JSON=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get delegation.monitor_anomaly_patterns --default '["ENOTFOUND","ECONNREFUSED","stdin","SIGTERM","OOM","killed"]' --json 2>/dev/null || echo '["ENOTFOUND","ECONNREFUSED","stdin","SIGTERM","OOM","killed"]')
-mapfile -t ANOMALY_PATTERNS < <(python3 - "$ANOMALY_JSON" <<'PY'
-import json, sys
-raw = sys.argv[1] if len(sys.argv) > 1 else "[]"
-try:
-    values = json.loads(raw)
-except Exception:
-    values = []
-for item in values:
-    print(str(item))
-PY
-)
-set -o pipefail
-codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})" < /dev/null 2>&1 | tee "$task_dir/running.log" &
-EXEC_PID=$!
-SLEEP_SEC=$(( (MONITOR_INTERVAL_MS + 999) / 1000 ))
-monitor_loop() {
-  while kill -0 "$EXEC_PID" 2>/dev/null; do
-    sleep "$SLEEP_SEC"
-    kill -0 "$EXEC_PID" 2>/dev/null || break
-    [ -f "$task_dir/running.log" ] || continue
-    TAIL_LOG=$(tail -n "$MONITOR_TAIL_LINES" "$task_dir/running.log")
-    LOG_LINE_COUNT=$(printf "%s\n" "$TAIL_LOG" | wc -l | tr -d ' ')
-    echo "[위임 모니터링] 최근 ${LOG_LINE_COUNT}줄 점검 (tail=${MONITOR_TAIL_LINES})"
-    MATCHED=()
-    for pattern in "${ANOMALY_PATTERNS[@]}"; do
-      if [ -n "$pattern" ] && printf "%s" "$TAIL_LOG" | grep -qi -- "$pattern"; then
-        MATCHED+=("$pattern")
-      fi
-    done
-    if [ "${#MATCHED[@]}" -gt 0 ]; then
-      echo "[위임 모니터링 경고] 이상 징후 감지: ${MATCHED[*]}"
-      echo "선택지: restart | abort | continue"
-    fi
-  done
-}
-monitor_loop &
-MONITOR_PID=$!
-wait "$EXEC_PID"
-EXIT=$?
-wait "$MONITOR_PID" 2>/dev/null || true
-END=$(date +%s%3N)
-DUR=$((END-START))
-cat > "$trace_dir/codex-{label}-${TS}.md" <<EOF
----
-agent: codex
-request: {REQ-ID}
-task: {TASK-NUM}
-label: {label}
-timestamp: ${TS}
-duration_ms: ${DUR}
-exit_code: ${EXIT}
-log: requests/{REQ-ID}/tasks/{TASK-NUM}/running.log
----
-EOF
-exit $EXIT
+python3 {PLUGIN_ROOT}/scripts/mst.py run \
+  --task-id REQ-001-01 \
+  --provider codex \
+  --model gpt-5.3-codex \
+  --log-dir .gran-maestro/requests/REQ-001/tasks/01 \
+  --trace REQ-001/01/phase2-impl \
+  -- codex exec --full-auto -m gpt-5.3-codex -C {worktree} "$(cat {prompt_file})"
 ```
 
-4. **부모 컨텍스트에는 exit code만 반환**한다.
-   반환 후 부모 스킬의 후속 단계를 계속 진행한다. 추가 설명, 요약 등 부가 텍스트 출력 절대 금지.
+wrapper는 자동으로 다음을 처리합니다.
+- `.gran-maestro/run/{task_id}.json`에 dispatch 상태 기록 (register + heartbeat)
+- stdout/stderr를 `{log_dir}/running.log`에 tee
+- 종료 시 exit_code 및 final phase 기록
+- `--trace` 전달 시 `traces/*.md` 자동 생성
 
 > **금지 마커 (MANDATORY)**: 이 스킬은 `NEXT_ACTION`, `step=returned`, `[MST skill=...]` 마커를 **절대 출력하지 않는다**.
 > 이 마커들은 부모 스킬(approve 등)의 책임이며, 서브스킬이 출력하면 부모가 "이미 처리됨"으로 혼동한다.
 
-> **Exit Code 캡처 (MANDATORY)**: Bash 도구의 exit code를 반드시 확인한다.
+> **Exit Code 캡처 (MANDATORY)**: `mst.py run`의 종료 코드를 반드시 확인한다.
 > 0이 아니어도 trace의 `exit_code` 필드에 해당 값을 반드시 기록한다.
 
 ## 옵션

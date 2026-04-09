@@ -39,6 +39,7 @@ from scripts.mst_cmds import hooks
 from scripts.mst_cmds import agile_detail
 from scripts.mst_cmds import agile_governance
 from scripts.mst_cmds import dispatch
+from scripts.mst_cmds import run as run_cmd
 
 
 def set_base_dir(base_dir):
@@ -86,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     preset.register(sub)
     hooks.register(sub)
     dispatch.register(sub)
+    run_cmd.register(sub)
 
     return parser
 
@@ -204,4 +206,5 @@ DISPATCH = {
     ("dispatch", "heartbeat"): dispatch.cmd_dispatch_heartbeat,
     ("dispatch", "list"): dispatch.cmd_dispatch_list,
     ("dispatch", "kill"): dispatch.cmd_dispatch_kill,
+    ("run", None): run_cmd.cmd_run,
 }
