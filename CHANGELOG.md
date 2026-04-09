@@ -4,6 +4,19 @@
 
 ---
 
+## [0.57.3] — 2026-04-09
+
+> **대시보드 Dispatch 패널 라이브 동작 복구 (PLN-444 / REQ-601)**
+
+REQ-598에서 도입된 Dashboard SSE Dispatch 패널이 production 환경에서 항상 빈 상태로만 표시되던 버그를 수정합니다.
+
+### 버그 수정
+
+- **DispatchPanel 라이브 데이터 복구**: `src/routes/dispatch.ts`의 `runDir` 경로가 `${baseDir}/.gran-maestro/run`으로 잘못 조합되어 있어, 실제 `.gran-maestro/run/*.json` 상태파일이 존재해도 `collectDispatchSnapshot`이 항상 빈 배열을 반환하던 문제를 수정했습니다. `resolveBaseDir`는 이미 `.gran-maestro` 접미 경로를 반환하므로 다른 라우트(`overview.ts` 등)와 동일하게 `${baseDir}/run`으로 교정했습니다. 이제 Overview 화면의 Dispatch Runs 패널이 `task_id`/`provider`/`phase`/`heartbeat_age_sec`을 실제 외부 CLI 실행 상태에 따라 1초 주기로 갱신하며 표시합니다.
+- **dispatch.test.ts production 규약 반영**: 동일한 잘못된 경로 규약을 따르고 있어 위 버그를 검출하지 못하던 단위 테스트를 production `resolveBaseDir` 규약(baseDir 자체가 `.gran-maestro` 디렉토리 역할)과 일치시켰습니다. TDD red→green 사이클로 회귀 방지를 검증했습니다.
+
+---
+
 ## [0.57.2] — 2026-04-08
 
 > **mst-loop 재진입 경로 복구 + 문서 정합성 정리 (PLN-440 / REQ-593)**
