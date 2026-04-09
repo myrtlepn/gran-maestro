@@ -25,7 +25,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
 Deno.test("GET /dispatch/stream emits snapshot events for active dispatch states", async () => {
   const baseDir = await Deno.makeTempDir({ prefix: "dispatch-route-test-" });
-  const runDir = `${baseDir}/.gran-maestro/run`;
+  const runDir = `${baseDir}/run`;
   await Deno.mkdir(runDir, { recursive: true });
   await writeJson(`${runDir}/task-running.json`, {
     task_id: "task-running",

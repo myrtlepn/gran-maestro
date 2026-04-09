@@ -65,7 +65,7 @@ export async function collectDispatchSnapshot(
   baseDir: string,
   staleThresholdSec: number,
 ): Promise<DispatchStreamItem[]> {
-  const runDir = `${baseDir}/.gran-maestro/run`;
+  const runDir = `${baseDir}/run`;
   if (!(await dirExists(runDir))) {
     return [];
   }
