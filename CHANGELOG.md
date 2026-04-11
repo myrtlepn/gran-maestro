@@ -4,6 +4,16 @@
 
 ---
 
+## [0.57.6] — 2026-04-11
+
+### 새 기능
+- **Agile Sprint dispatch 모드 (`--dispatch codex|claude|inline`)**: `/mst:agile` Sprint loop가 Step 2.2.3에서 sub-plan 전체 체인(plan→request→approve→accept)을 부모 세션 inline 컨텍스트에서 실행할지, 아니면 신규 worktree의 외부 CLI 격리 컨텍스트(`mst:codex` / `mst:claude`)에서 실행할지 선택할 수 있습니다. 기본값은 `inline`으로 기존 동작을 유지하며, 대형 agile 프로젝트에서 컨텍스트 압박이 누적될 때 `--dispatch codex` 플래그로 각 sub-plan을 깨끗한 격리 실행으로 전환할 수 있습니다. dispatch 결과는 `sprints/S{N:02d}/dispatch-result.json`에 기록되어 Step 2.2.0.7 통합 검증에 자동 연계됩니다.
+
+### 개선
+- **agile 기본 전략 명시**: `templates/defaults/config.json`에 `agile.dispatch.default_mode` 기본값 `"inline"`을 추가해 Sprint dispatch 모드 전역 기본값을 config에서 관리할 수 있게 했습니다. 기존 Sprint loop 동작은 완전히 호환됩니다.
+
+---
+
 ## [0.57.5] — 2026-04-11
 
 ### 새 기능

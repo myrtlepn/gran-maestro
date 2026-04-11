@@ -456,6 +456,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
    - `AUTO_MODE=false`: 다음 `retrospective.md`에 `integration_review_override` 섹션으로 사유 기록
    - Escape Hatch 사용 시 `verdict.force_wire_recommended`를 무시하고 기존 DoD 진행을 허용하되, 동일 세션에서 **연속 2회 이상 override 금지** (드리프트 누적 방지)
    - 사유 없이 무시하는 것은 금지 패턴(`### 금지 패턴` 참조)
+- **Dispatch 결과 수집**: `dispatch_mode in ["codex", "claude"]`인 sub-plan은 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json`을 Read하여 통합 검증 대상에 포함한다.
 
 ##### 2.2.0.8 기획-구현 정합성 점검 (MANDATORY)
 
@@ -572,6 +573,52 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 [누적층] 통합 컨텍스트 파일(MANDATORY Read): {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/integration-context.md — 직전 K Sprint 분류(modify/wire/new-island), entrypoint 상태, wire 파일별 통합 지점, user_observable_change 요약을 확인하고 이번 Sprint가 어디에 쌓을지 결정한다
 [제약층] 프로젝트 DoD: {PROJECT_DOD_LIST_LITERAL} | 성공 지표: {SUCCESS_METRICS_LITERAL}")
 ```
+
+##### 2.2.3.a Dispatch 모드 분기 (inline | codex | claude)
+
+Step 2.2.3은 `dispatch_mode`에 따라 위 plan 호출을 inline 또는 격리 컨텍스트 실행으로 분기한다.
+
+**dispatch_mode 결정 순서**:
+1. `/mst:agile --dispatch <mode>` CLI 플래그가 있으면 해당 값 사용 (허용: `inline`, `codex`, `claude`)
+2. 없으면 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `agile.dispatch.default_mode` 값 사용
+3. config 미설정 시 `templates/defaults/config.json`의 동일 키로 fallback
+4. 최종 기본값: `"inline"`
+
+**inline (기본 경로)**:
+- 위 `Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}...")` 호출을 그대로 실행 (부모 Sprint 세션 컨텍스트)
+
+**codex / claude (격리 실행 경로)**:
+
+1. 신규 worktree 생성 (Sprint별 sub-plan마다 새 경로):
+   ```text
+   {PROJECT_ROOT}/.gran-maestro/worktrees/AGI-{AGI_ID}/sprint-{CURRENT_SPRINT:02d}/sub-plan-{SUB_PLAN_NUM}/
+   ```
+2. 전체 체인을 외부 CLI에 위임:
+   ```text
+   Skill(skill: "mst:{dispatch_mode}", args: "exec --dir {worktree_path} '/mst:plan -a \"{SELECTED_WORK_ITEM} [고정층] ... [제약층] ...\" && /mst:request -a --plan PLN-NNN && /mst:approve -a && /mst:accept'")
+   ```
+   (내부 `mst:plan -a` 호출 인자는 inline 경로와 동일한 7층 컨텍스트를 그대로 전달한다.)
+3. 결과 회수: dispatch 완료 후 부모 Sprint 세션이 아래 파일에 결과를 기록한다.
+   ```text
+   {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json
+   ```
+   스키마:
+   ```json
+   {
+     "sub_plan_id": "SP-N",
+     "dispatch_mode": "codex | claude",
+     "worktree_path": "...",
+     "req_id": "REQ-NNN",
+     "commit_sha": "abcd1234",
+     "status": "success | failed",
+     "failure_reason": null
+   }
+   ```
+4. 실패 정책: dispatch 실행이 실패하면 Sprint 진행을 **중단하지 않고** 해당 sub-plan만 `status: failed`로 표시하고 사용자에게 에스컬레이션한다. inline 자동 fallback은 수행하지 않는다 (혼란 방지).
+
+**호환성**:
+- `dispatch_mode == "inline"` 경로는 기존 동작과 100% 동일하며 `dispatch-result.json`을 생성하지 않는다.
+- `codex` / `claude` 경로는 `mst:codex` / `mst:claude` 스킬의 기존 외부 CLI 호출 패턴을 그대로 사용한다 (신규 추상화 레이어 신설 금지).
 
 규칙:
 - `plan -a` 입력에 완료 시점/잔여 횟수 예측 문구를 포함하지 않는다.
