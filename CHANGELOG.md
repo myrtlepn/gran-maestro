@@ -4,6 +4,21 @@
 
 ---
 
+## [0.57.4] — 2026-04-11
+
+> **Accept 정리 로직 및 agile 플로우 개선 (PLN-445~447 / REQ-602~604)**
+
+### 개선
+
+- **스티어링 설정 Q&A 이동**: `/mst:agile` 실행 시 스티어링 체크포인트 관련 Q&A를 `agile-plan` 서브스킬에서 `agile` Step 1.5로 이동했습니다. 이제 objective.md 준비 단계와 실행 스텝이 더 명확하게 분리되어 있으며, 스티어링 설정이 필요한 시점에 정확히 문의됩니다.
+- **Frontend useDispatchStream 회귀 테스트**: `frontend/`의 `useDispatchStream` 훅에 대한 단위 테스트를 추가했습니다. Dashboard Dispatch 패널의 SSE 스트림 구독/해제 동작이 향후 회귀되지 않도록 검증합니다.
+
+### 버그 수정
+
+- **accept 종료 시 workflow 상태 정리**: `/mst:accept` 스킬 종료 시 `workflow_active=false` 상태 정리 호출을 추가했습니다. 기존에는 수락 완료 후에도 일부 경로에서 workflow_active 플래그가 남아있어 다음 요청 시작 시 상태가 혼동될 수 있던 문제를 해결합니다.
+
+---
+
 ## [0.57.3] — 2026-04-09
 
 > **대시보드 Dispatch 패널 라이브 동작 복구 (PLN-444 / REQ-601)**
