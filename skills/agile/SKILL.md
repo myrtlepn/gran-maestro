@@ -177,13 +177,87 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 신규 세션(`--resume` 없음)은 Step 1 전체를 아래 1줄 호출로 수행한다:
 
 ```text
-Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --steering-every {STEERING_EVERY} --return-to agile/1")
+Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1")
 ```
 
 규칙:
 - `--doc` 입력이 있으면 `DOC_FLAG_IF_ANY`에 `--doc {DOC_PATH}`를 포함하여 그대로 전달한다.
 - `--doc` 입력이 없으면 `{PROJECT_GOAL_OR_DOC}`에 사용자 목표 문장을 전달한다.
-- 서브스킬 종료 마커 `[MST skill=agile-plan step=returned return_to=agile/1]` 확인 후 stop-hook re-feed로 Step 2에 자동 진입한다.
+- 서브스킬 종료 마커 `[MST skill=agile-plan step=returned return_to=agile/1]` 확인 후 stop-hook re-feed로 Step 1.5에 자동 진입한다.
+
+---
+
+### Step 1.5: 스티어링 설정 확정
+
+`[MST skill=agile step=1.5/4 return_to=null]`
+
+> 목적: agile-plan이 objective 준비를 마치고 복귀한 직후, 스프린트 루프 진입 전에 스티어링 주기와 비상 스티어링 활성화 여부를 확정한다.
+
+**진입 가드**:
+- `--resume` 경로는 이 단계를 skip한다 (session.json의 기존 `steering_every` 값을 그대로 사용).
+- 신규 세션(Step 1에서 복귀)에서만 실행한다.
+
+**AUTO_MODE=true 분기**:
+1. `STEERING_EVERY`를 아래 우선순위로 결정한다:
+   1) CLI `--steering-every N` 값
+   2) `config.resolved.json`의 `agile.steering_every`
+   3) 기본값 `3`
+2. `STEERING_DISABLED = (STEERING_EVERY == 0)`
+3. `EMERGENCY_STEERING_ENABLED = true` (기본값 고정)
+4. `STEERING_EVERY`가 기본값 3과 다르고 세션이 기본값으로 생성되어 있으면 아래 명령으로 동기화:
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --steering-every {STEERING_EVERY} --json
+   ```
+5. `[자율] 스티어링 설정: {STEERING_EVERY} 스프린트마다, 비상 {활성/비활성}` 출력
+6. 사용자 질의 프롬프트는 호출하지 않는다.
+
+**AUTO_MODE=false 분기**:
+1. CLI `--steering-every N`이 사전 지정된 경우: Q&A를 skip하고 해당 값을 `STEERING_EVERY`로 적용한다. `STEERING_EVERY > 0`이고 기본값 3과 다르면 `mst.py agile update --steering-every {STEERING_EVERY}`를 호출한다.
+2. CLI 미지정 시 `AskUserQuestion` 1회 호출 (`questions` 배열 2개 탭 동시 제시):
+   - 탭 1 (`id: regular_steering`, `header: 정기 스티어링`)
+     - `question`: `정기 스티어링 체크포인트를 어떤 주기로 운영할까요?`
+     - `options`:
+       - `label`: `3 스프린트마다 (기본값)`
+         - `description`: |
+             - 기본 추천 주기입니다.
+             - Sprint 3/6/9 완료 직후 Step 3 체크포인트가 자동 실행됩니다.
+             - 탐색/구현 사이 균형을 유지하면서 drift 누적 전에 방향을 교정할 수 있습니다.
+       - `label`: `5 스프린트마다`
+         - `description`: |
+             - 보고 빈도를 낮추고 긴 실행 구간을 확보합니다.
+             - Sprint 5/10/15 완료 직후 Step 3 체크포인트가 실행됩니다.
+             - 대규모 구현 구간에서 컨텍스트 전환 비용을 줄이고 싶을 때 적합합니다.
+       - `label`: `비활성화 (정기 스티어링 없이 진행)`
+         - `description`: |
+             - 정기 체크포인트를 완전히 끄고 스프린트 루프를 연속 실행합니다.
+             - Step 3 정기 진입 조건은 skip되며, 필요한 경우 비상 스티어링만 사용합니다.
+             - 이 선택은 프롬프트 레벨에서 `STEERING_EVERY=0`으로 해석됩니다.
+   - 탭 2 (`id: emergency_steering`, `header: 비상 스티어링`)
+     - `question`: `이상 징후 발생 시 비상 스티어링 자동 개입을 사용할까요?`
+     - `options`:
+       - `label`: `활성화 (연속실패/drift/blocked 등 이상 시 자동 개입)`
+         - `description`: |
+             - 연속 실패, drift 누적, blocked 비율 급증 같은 위험 신호를 감지합니다.
+             - 위험 신호 발생 시 Step 3 비상 스티어링을 즉시 강제 실행합니다.
+             - 장기 루프 정체를 줄이고, 조기 개입으로 손실을 제한하는 기본 권장 설정입니다.
+       - `label`: `비활성화 (모든 스티어링 비활성화)`
+         - `description`: |
+             - 비상 트리거 기반 Step 3 강제 진입을 사용하지 않습니다.
+             - 정기 스티어링도 비활성화했다면 스티어링 자체가 완전히 꺼진 상태로 동작합니다.
+             - 사용자는 자동 개입 없이 연속 스프린트 실행만 원할 때 선택합니다.
+3. 응답 매핑:
+   - `3 스프린트마다 (기본값)` → `STEERING_EVERY=3`, `STEERING_DISABLED=false`
+   - `5 스프린트마다` → `STEERING_EVERY=5`, `STEERING_DISABLED=false`
+   - `비활성화 (정기 스티어링 없이 진행)` → `STEERING_EVERY=0`, `STEERING_DISABLED=true`
+   - 비상 활성화/비활성화 → `EMERGENCY_STEERING_ENABLED=true/false`
+4. `STEERING_EVERY > 0` 그리고 값이 3(기본값)과 다르면:
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --steering-every {STEERING_EVERY} --json
+   ```
+   `STEERING_EVERY == 0`인 경우 프롬프트 레벨 변수(`STEERING_DISABLED=true`)로만 해석하고 `agile update`는 호출하지 않는다.
+5. `[확정] 스티어링 설정: {STEERING_EVERY} 스프린트마다, 비상 {활성/비활성}` 출력
+
+Step 1.5 완료 후 Step 2(스프린트 루프)로 진행한다.
 
 ---
 
