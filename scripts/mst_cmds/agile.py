@@ -948,3 +948,17 @@ def register(subparsers):
     agile_alignment_package.add_argument("--sprint", type=int, required=True)
     agile_alignment_package.add_argument("--depth", type=int, default=3)
     agile_alignment_package.add_argument("--json", action="store_true")
+
+    agile_stop_audit = agile_sub.add_parser("stop-audit")
+    agile_stop_audit_sub = agile_stop_audit.add_subparsers(dest="stop_audit_subcommand")
+    agile_stop_audit_list = agile_stop_audit_sub.add_parser("list")
+    agile_stop_audit_list.add_argument("--agi", required=True)
+    agile_stop_audit_list.add_argument("--classification", choices=["blocked", "allowed", "pass_through"])
+    agile_stop_audit_list.add_argument("--json", action="store_true")
+    agile_stop_audit_aggregate = agile_stop_audit_sub.add_parser("aggregate")
+    agile_stop_audit_aggregate.add_argument("--agi", required=True)
+    agile_stop_audit_aggregate.add_argument(
+        "--group-by",
+        required=True,
+        choices=["declared_reason", "classification"],
+    )

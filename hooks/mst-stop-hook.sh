@@ -98,7 +98,107 @@ STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INFO" | cut -f1)"
 AGILE_AUTO_MODE_HINT="$(printf '%s' "$HOOK_INFO" | cut -f2)"
 LAST_ASSISTANT_MESSAGE="$(printf '%s' "$HOOK_INFO" | cut -f3-)"
 
+append_audit_entry() {
+  local classification="${1:-}"
+  local declared_reason="${2:-}"
+  local block_reason="${3:-}"
+
+  python3 - "$PROJECT_ROOT" "$classification" "$declared_reason" "$block_reason" "$STOP_HOOK_ACTIVE" "$LAST_ASSISTANT_MESSAGE" <<'PY'
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+classification = str(sys.argv[2] or "").strip()
+_ = str(sys.argv[3] or "").strip()
+block_reason = str(sys.argv[4] or "").strip() or None
+stop_hook_active_raw = str(sys.argv[5] or "").strip().lower()
+last_assistant_message = str(sys.argv[6] or "")
+
+try:
+    agile_root = project_root / ".gran-maestro" / "agile"
+    active_sessions = []
+    for session_path in sorted(agile_root.glob("AGI-*/session.json")):
+        try:
+            with open(session_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("status", "")).strip().lower() != "active":
+            continue
+        updated_at = payload.get("updated_at")
+        updated_at_key = str(updated_at).strip() if isinstance(updated_at, str) else ""
+        active_sessions.append((updated_at_key, session_path.parent.name))
+
+    if not active_sessions:
+        raise SystemExit(0)
+
+    active_sessions.sort(key=lambda item: item[0])
+    agi_id = active_sessions[-1][1]
+    audit_path = agile_root / agi_id / "stop-audit.ndjson"
+
+    line_count = 0
+    if audit_path.is_file():
+        try:
+            with open(audit_path, "r", encoding="utf-8") as f:
+                line_count = sum(1 for _ in f)
+        except Exception:
+            line_count = 0
+    event_id = f"SAT-{line_count + 1:06d}"
+
+    sentinel_match = re.search(r"(\[MST\s+stop_intent\s+reason=([^\]]+)\])", last_assistant_message)
+    sentinel_raw = None
+    declared_reason = None
+    if sentinel_match:
+        sentinel_raw = sentinel_match.group(1)
+        parsed_reason = sentinel_match.group(2).strip()
+        declared_reason = parsed_reason or None
+
+    stop_hook_active_at_entry = None
+    if stop_hook_active_raw == "true":
+        stop_hook_active_at_entry = True
+    elif stop_hook_active_raw == "false":
+        stop_hook_active_at_entry = False
+
+    classification_value = classification if classification in {"blocked", "allowed", "pass_through"} else "pass_through"
+    outcome_map = {
+        "blocked": "block",
+        "allowed": "allow",
+        "pass_through": "pass_through",
+    }
+    entry = {
+        "event_id": event_id,
+        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "agi_id": agi_id,
+        "sprint": None,
+        "hook_stage": "Stop",
+        "stop_hook_active_at_entry": stop_hook_active_at_entry,
+        "declared_reason": declared_reason,
+        "classification": classification_value,
+        "block_reason": block_reason,
+        "sentinel_raw": sentinel_raw,
+        "pm_last_turn_snippet": last_assistant_message[:200],
+        "retry_history_ref": None,
+        "outcome": outcome_map.get(classification_value, "pass_through"),
+    }
+
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(audit_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False))
+        f.write("\n")
+except SystemExit:
+    pass
+except Exception as exc:
+    print(f"[stop-audit] append failed: {exc}", file=sys.stderr)
+PY
+}
+
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
+  append_audit_entry "pass_through" "" "stop_hook_active_true"
   debug_log "allow" "reason=stop_hook_active_true"
   exit 0
 fi
@@ -118,7 +218,7 @@ contains_agile_allow_marker() {
 
 extract_return_to() {
   local text="$1"
-  printf '%s' "$text" | grep -oE 'return_to=[a-zA-Z0-9_:/-]+' | tail -1 | sed 's/return_to=//'
+  printf '%s' "$text" | grep -oE 'return_to=[a-zA-Z0-9_:/-]+' | tail -1 | sed 's/return_to=//' || true
 }
 
 contains_agile_text_question() {
@@ -344,6 +444,7 @@ LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
 STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
 
 if [ "$WORKFLOW_ACTIVE" != "true" ]; then
+  append_audit_entry "pass_through" "" "workflow_inactive"
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
   exit 0
 fi
@@ -395,12 +496,14 @@ if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ]
     REASON="[자동 중단] $REASON Escalate to user for steering."
   fi
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
+  append_audit_entry "blocked" "" "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
 
 if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
+  append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
   debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
   exit 0
 fi
@@ -429,6 +532,7 @@ if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; th
   fi
 
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
+  append_audit_entry "blocked" "" "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
@@ -436,6 +540,7 @@ fi
 
 if [ "$HAS_NEXT_ACTION" != "true" ]; then
   if [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
+    append_audit_entry "allowed" "" "explicit_allow_pattern_no_next_action"
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
     exit 0
   fi
@@ -453,6 +558,7 @@ if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+  append_audit_entry "blocked" "" "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=return_to_detected return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
@@ -464,6 +570,7 @@ if [ "$AGILE_GUARD_ACTIVE" = "true" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON Specifically: execute 'python3 ... agile objective-check {AGI_ID} --json' or the next pending step in the sprint backlog."
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+  append_audit_entry "blocked" "" "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_loop_no_next_action_continue current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
@@ -499,6 +606,7 @@ fi
 REASON="$REASON Do not stop; emit the next tool call now."
 
 PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+append_audit_entry "blocked" "" "$REASON"
 emit_block_json "$REASON"
 debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"
 exit 0

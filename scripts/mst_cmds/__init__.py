@@ -38,6 +38,7 @@ from scripts.mst_cmds import preset
 from scripts.mst_cmds import hooks
 from scripts.mst_cmds import agile_detail
 from scripts.mst_cmds import agile_governance
+from scripts.mst_cmds import agile_stop_audit
 from scripts.mst_cmds import dispatch
 from scripts.mst_cmds import run as run_cmd
 
@@ -164,6 +165,7 @@ DISPATCH = {
     ("agile", "link"): agile_detail.cmd_agile_link,
     ("agile", "integration-review"): agile_detail.cmd_agile_integration_review,
     ("agile", "alignment-package"): agile_detail.cmd_agile_alignment_package,
+    ("agile", "stop-audit"): agile_stop_audit.cmd_agile_stop_audit,
     ("counter", "next"): counter.cmd_counter_next,
     ("counter", "peek"): counter.cmd_counter_peek,
     ("version", "get"): version.cmd_version_get,
