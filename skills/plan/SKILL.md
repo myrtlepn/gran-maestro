@@ -63,6 +63,7 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 - "단순하니 plan 생략/축약"을 이유로 Step 0.1~4를 건너뛴다.
 - `plan.md` 저장 전에 `mst:request` 호출 또는 직접 구현(코드 수정)으로 전환한다.
 - `mcp__stitch__*`를 직접 호출해 스킬 경유 규칙을 우회한다.
+- "컨텍스트 압박"을 이유로 sub-plan chain(plan→request→approve→accept)을 우회하여 직접 `codex exec` + master 커밋으로 전환한다. 격리 실행이 필요하면 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 경로를 사용한다.
 
 ## Anti-Rationalization Checklist
 
@@ -70,6 +71,7 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 - 합리화 패턴: "질문 없이도 충분하니 Q&A를 건너뛰자." | 확인 증거: `AskUserQuestion` 실행 로그 또는 `auto-decisions.md`의 대응 결정 항목을 남긴다.
 - 합리화 패턴: "파일 저장 확인은 생략하고 다음 스킬로 넘어가자." | 확인 증거: `plan.md` 저장 경로와 실행 분기(`저장만/요청 실행`)를 명시한다.
 - 합리화 패턴: "WebSearch 결과를 표로 정리했으니 REF 저장은 생략해도 된다." | 확인 증거: WebSearch 실행 횟수와 동일한 횟수의 `Bash(mst.py reference add ...)` 호출 로그가 존재한다.
+- 합리화 패턴: "컨텍스트 한계에 도달했으니 체인을 건너뛰고 직접 codex로 끝내자." | 확인 증거: 체인 우회가 필요한 경우 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 사용 로그가 `auto-decisions.md` 또는 `retrospective.md`에 남아있어야 한다.
 
 ## 실행 프로토콜
 

@@ -50,12 +50,14 @@ Maestro 모드 비활성 시 자동 활성화:
 - spec 저장/승인 확인 전에 코드 수정, 파일 편집, 빌드, 커밋을 수행한다.
 - `workflow.default_agent` 확인 없이 Assigned Agent를 추정으로 기입한다.
 - plan 컨텍스트가 있는데도 탐색/근거 수집을 생략하고 AC를 형식적으로 작성한다.
+- "컨텍스트 압박"을 이유로 sub-plan chain(plan→request→approve→accept)을 우회하여 직접 `codex exec` + master 커밋으로 전환한다. 격리 실행이 필요하면 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 경로를 사용한다.
 
 ## Anti-Rationalization Checklist
 
 - 합리화 패턴: "plan에서 이미 분석했으니 코드베이스 탐색을 축약해도 된다." | 확인 증거: spec `§0 Context Manifest`에 실제 탐색 근거 파일 경로를 남긴다.
 - 합리화 패턴: "단순 요청이니 AC를 짧게 쓰고 Given/When/Then/Test를 생략한다." | 확인 증거: 각 AC를 Given/When/Then/Test 형식으로 작성하고 AC ID를 `request.json.tasks[].covers_ac`에 매핑한다.
 - 합리화 패턴: "속도를 위해 승인/사전검토 분기를 임의로 건너뛴다." | 확인 증거: 실행 로그에 `AUTO_APPROVE` 결정 근거(CLI/config)와 적용 경로를 출력한다.
+- 합리화 패턴: "컨텍스트 한계에 도달했으니 체인을 건너뛰고 직접 codex로 끝내자." | 확인 증거: 체인 우회가 필요한 경우 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 사용 로그가 `auto-decisions.md` 또는 `retrospective.md`에 남아있어야 한다.
 
 ## 실행 프로토콜
 

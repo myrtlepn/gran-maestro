@@ -115,3 +115,35 @@ running_log_path: {log_dir}/running.log
 /mst:claude "README의 설치 섹션을 업데이트해줘"
 /mst:claude --prompt-file .gran-maestro/requests/REQ-001/tasks/01/prompts/phase2-impl.md --dir .gran-maestro/worktrees/REQ-001-01 --trace REQ-001/01/phase2-impl
 ```
+
+## Agile Sub-plan Isolated Execution (수동 격리 실행)
+
+agile Sprint loop에서 컨텍스트 압박이 심해질 때, sub-plan 전체 체인(plan→request→approve→accept)을 깨끗한 claude -p 격리 컨텍스트에서 실행할 수 있습니다. 이는 옵션 A(수동 escape hatch)로 제공되며, Sprint loop 자체를 우회하지 않고 plan/request/approve/accept 게이트를 모두 유지합니다.
+
+### 사용 예시
+
+```bash
+# 부모 세션에서 sub-plan worktree를 만들고 claude -p로 전체 체인 실행
+/mst:claude -p --dir .gran-maestro/worktrees/AGI-001/sprint-3/sub-plan-2 \
+  "/mst:plan -a '사용자 프로필 편집 기능' && /mst:request -a --plan PLN-NNN && /mst:approve -a && /mst:accept"
+```
+
+### worktree 경로 규칙
+
+```
+{PROJECT_ROOT}/.gran-maestro/worktrees/AGI-NNN/sprint-N/sub-plan-M/
+```
+
+### 결과 확인
+
+격리 실행 완료 후 부모 Sprint 세션에서 다음을 확인:
+
+1. 생성된 REQ ID(`.gran-maestro/requests/REQ-NNN/request.json`)
+2. 최종 커밋 SHA(`git -C {worktree_path} log -1 --format=%H`)
+3. 실행 성공 여부(`sprints/sprint-N/result.json`)
+
+### 주의사항
+
+- 격리 실행은 Sprint의 **순차 실행이 기본**이며 이 escape hatch는 컨텍스트 압박 예외 상황에서만 사용합니다.
+- 실행 후 반드시 `auto-decisions.md` 또는 `retrospective.md`에 격리 실행 사유와 결과를 기록해야 합니다 (Anti-Rationalization Checklist 준수).
+- Sprint 2.2.3의 자동 dispatch 모드(`/mst:agile --dispatch codex`)는 별도 기능이며 REQ-608에서 도입됩니다.

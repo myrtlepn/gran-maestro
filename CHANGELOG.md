@@ -4,6 +4,16 @@
 
 ---
 
+## [0.57.5] — 2026-04-11
+
+### 새 기능
+- **Agile Sub-plan 격리 실행 가이드**: `mst:codex`와 `mst:claude` 스킬에 agile Sprint loop에서 sub-plan 전체 체인(plan→request→approve→accept)을 깨끗한 격리 컨텍스트로 수동 실행하는 사용 예시 섹션을 추가했습니다. 컨텍스트 압박이 심한 대형 agile 프로젝트에서 안전 장치로 활용할 수 있습니다.
+
+### 개선
+- **우회 금지 규칙 전역화**: `mst:agile`, `mst:plan`, `mst:request` 3개 스킬에 "컨텍스트 압박을 이유로 sub-plan chain을 우회하여 직접 codex dispatch + master 커밋으로 전환하는 관행"을 금지하는 규칙과 Anti-Rationalization 항목을 동일 문구로 추가했습니다. 이 플러그인이 다른 프로젝트에 재사용될 때도 동일 원칙이 유지됩니다.
+
+---
+
 ## [0.57.4] — 2026-04-11
 
 > **Accept 정리 로직 및 agile 플로우 개선 (PLN-445~447 / REQ-602~604)**
