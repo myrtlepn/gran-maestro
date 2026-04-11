@@ -225,9 +225,11 @@ JTBD 직후 아래 항목을 점검한다. `WHO/WHAT/WHY`는 JTBD에서 이미 �
 
 4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**
    - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
-   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - 표/텍스트 결론 요약만으로는 저장이 완료되지 않는다 — `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
    - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
-   - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
+   - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{raw 발췌 본문}"`
+   - 작성 원칙 요약: 인용/표/코드 스니펫 + 출처 URL/날짜를 함께 기록한다 (`summary`는 한 줄 인덱스 유지).
+   - 상세 예시/품질 체크리스트/lazy-Read 트리거는 `skills/plan/SKILL.md`의 Reference Lookup Protocol 4번 항목을 동일 기준으로 따른다.
 
 5. **컨텍스트 주입 블록 생성**
    - 이후 판단 프롬프트에 아래 블록 주입:

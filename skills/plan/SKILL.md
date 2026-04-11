@@ -121,9 +121,37 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
    - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
 4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
    - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
-   - 표/텍스트 요약만으로는 저장이 완료되지 않는다 — `Bash` 도구 호출이 확인 증거다.
+   - 결론 한 문단 요약만 저장하지 않는다. `summary`는 한 줄 인덱스, `content.md`는 원문 근거(raw 발췌) 저장 용도다.
    - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
-   - 예시: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{핵심 요약}"`
+   - 저장 명령 예시: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{raw 발췌 본문}"`
+   - `--content` 작성 원칙:
+     - 인용/표/코드 스니펫 중 최소 1종 이상을 포함하고, 가능하면 2종 이상을 함께 저장한다.
+     - 각 발췌 블록 옆에 `출처 URL`과 `날짜`(또는 버전)를 반드시 함께 남긴다.
+     - content.md 길이 상한은 강제 규칙이 아니라 가이드라인으로만 다룬다.
+   - 예시 A (인용):
+     - `> 인용: "..."` 형태로 핵심 문장을 원문 그대로 발췌
+     - 메타데이터: `출처: https://example.com/doc`, `날짜: 2026-04-12`
+   - 예시 B (표):
+     - 아래처럼 원문 표를 구조 보존해 복사
+       `| 열 | 값 |`
+     - 메타데이터: `출처 URL: https://example.com/pricing`, `날짜: 2026-04-12`
+   - 예시 C (코드 스니펫):
+     - API 시그니처/설정 예시는 코드 펜스로 보존
+       ```text
+       curl https://api.example.com/v1/foo
+       ```
+     - 메타데이터: `출처 URL: https://example.com/api`, `날짜: 2026-04-12`
+   - 신규 REF 품질 체크리스트 (저장 전 점검):
+     - Findings: 이번 검색에서 확정적으로 얻은 사실이 명시되어 있는가
+     - Quotes: 원문 문장/표현 인용이 포함되어 있는가
+     - Data: 수치/표/시그니처 등 재사용 가능한 구조 데이터가 있는가
+     - Context: 출처 URL과 날짜(또는 버전), 적용 맥락이 함께 기록되어 있는가
+   - PM lazy-Read 트리거 (`content.md Read` 필수):
+     - 버전 선택/업그레이드 결정을 할 때
+     - 가격/요금 근거를 확정할 때
+     - API 시그니처/파라미터를 확정할 때
+     - deprecation 여부를 판단할 때
+     - 구성 옵션(default/flags/env)을 결정할 때
 5. **프롬프트 주입 블록 생성**:
    - 이후 의사결정 프롬프트(질문 생성, ideation/discussion 호출 인자)에 아래 형식의 `[REFERENCE_CONTEXT]`를 반드시 주입한다.
    - `model_cutoff`는 현재 모델 cutoff 문자열(미확인 시 `unknown`)을 사용한다.

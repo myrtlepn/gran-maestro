@@ -439,7 +439,13 @@ def register(subparsers):
     reference_add.add_argument("--topic", required=True)
     reference_add.add_argument("--url", required=True)
     reference_add.add_argument("--summary", required=True)
-    reference_add.add_argument("--content")
+    reference_add.add_argument(
+        "--content",
+        help=(
+            "content.md용 raw 발췌를 저장한다. 결론 요약만 입력하지 말고 원문 근거를 남긴다 "
+            "(예: 인용, 표, 코드 스니펫 + 출처 URL/날짜)."
+        ),
+    )
     reference_add.add_argument("--json", action="store_true")
 
     reference_get = reference_sub.add_parser("get")
@@ -459,5 +465,11 @@ def register(subparsers):
     reference_update.add_argument("--url")
     reference_update.add_argument("--summary")
     reference_update.add_argument("--searched-at")
-    reference_update.add_argument("--content")
+    reference_update.add_argument(
+        "--content",
+        help=(
+            "content.md를 raw 발췌 중심으로 갱신한다. 결론 요약만 입력하지 말고 원문 근거를 보강한다 "
+            "(예: 인용, 표, 코드 스니펫 + 출처 URL/날짜)."
+        ),
+    )
     reference_update.add_argument("--json", action="store_true")
