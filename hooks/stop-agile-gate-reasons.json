@@ -1,0 +1,8 @@
+{
+  "allowed_enum": ["fatal_user_judgment_required", "unrecoverable_external_failure"],
+  "classification_rules": {
+    "arbitrary_stop": "reason NOT IN allowed_enum",
+    "ambiguous_user_question": "fatal_user_judgment_required without '?' in pm_last_turn",
+    "insufficient_recovery_attempt": "unrecoverable_external_failure without retry keyword in pm_last_turn"
+  }
+}

@@ -112,7 +112,7 @@ from pathlib import Path
 
 project_root = Path(sys.argv[1])
 classification = str(sys.argv[2] or "").strip()
-_ = str(sys.argv[3] or "").strip()
+declared_reason_input = str(sys.argv[3] or "").strip()
 block_reason = str(sys.argv[4] or "").strip() or None
 stop_hook_active_raw = str(sys.argv[5] or "").strip().lower()
 last_assistant_message = str(sys.argv[6] or "")
@@ -150,13 +150,15 @@ try:
             line_count = 0
     event_id = f"SAT-{line_count + 1:06d}"
 
-    sentinel_match = re.search(r"(\[MST\s+stop_intent\s+reason=([^\]]+)\])", last_assistant_message)
+    sentinel_match = re.search(r"\[MST\s+stop_intent\s+reason=([^\s\]]+)(?:\s+detail=\"([^\"]*)\")?\]", last_assistant_message)
     sentinel_raw = None
     declared_reason = None
     if sentinel_match:
-        sentinel_raw = sentinel_match.group(1)
-        parsed_reason = sentinel_match.group(2).strip()
+        sentinel_raw = sentinel_match.group(0)
+        parsed_reason = sentinel_match.group(1).strip()
         declared_reason = parsed_reason or None
+    if declared_reason_input:
+        declared_reason = declared_reason_input
 
     stop_hook_active_at_entry = None
     if stop_hook_active_raw == "true":
@@ -195,6 +197,73 @@ except SystemExit:
 except Exception as exc:
     print(f"[stop-audit] append failed: {exc}", file=sys.stderr)
 PY
+}
+
+classify_stop_intent() {
+  python3 - "$PROJECT_ROOT" "$LAST_ASSISTANT_MESSAGE" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+pm_last_turn = str(sys.argv[2] or "")
+
+sentinel_match = re.search(
+    r"\[MST\s+stop_intent\s+reason=([^\s\]]+)(?:\s+detail=\"([^\"]*)\")?\]",
+    pm_last_turn,
+)
+if not sentinel_match:
+    print("none\t\t")
+    raise SystemExit(0)
+
+declared_reason = sentinel_match.group(1).strip()
+if not declared_reason:
+    print("none\t\t")
+    raise SystemExit(0)
+
+policy_path = project_root / "hooks" / "stop-agile-gate-reasons.json"
+try:
+    with open(policy_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    allowed_enum = payload.get("allowed_enum")
+    if not isinstance(allowed_enum, list):
+        raise ValueError("allowed_enum must be a list")
+    allowed = {str(item).strip() for item in allowed_enum if str(item).strip()}
+except Exception:
+    print("none\t\t")
+    raise SystemExit(0)
+
+if declared_reason not in allowed:
+    print(f"blocked\t{declared_reason}\tarbitrary_stop")
+    raise SystemExit(0)
+
+if declared_reason == "unrecoverable_external_failure":
+    if not re.search(r"retry|재시도|다시\s*시도|retried|attempt", pm_last_turn, re.IGNORECASE):
+        print(f"blocked\t{declared_reason}\tinsufficient_recovery_attempt")
+        raise SystemExit(0)
+    print(f"allowed\t{declared_reason}\t")
+    raise SystemExit(0)
+
+if declared_reason == "fatal_user_judgment_required":
+    if "?" not in pm_last_turn:
+        print(f"blocked\t{declared_reason}\tambiguous_user_question")
+        raise SystemExit(0)
+    print(f"allowed\t{declared_reason}\t")
+    raise SystemExit(0)
+
+print(f"allowed\t{declared_reason}\t")
+PY
+}
+
+append_block_audit_entry() {
+  local fallback_reason="${1:-}"
+  local effective_block_reason="$fallback_reason"
+  if [ -n "${STOP_INTENT_BLOCK_REASON:-}" ]; then
+    effective_block_reason="$STOP_INTENT_BLOCK_REASON"
+  fi
+
+  append_audit_entry "blocked" "${STOP_INTENT_DECLARED_REASON:-}" "$effective_block_reason"
 }
 
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
@@ -449,6 +518,23 @@ if [ "$WORKFLOW_ACTIVE" != "true" ]; then
   exit 0
 fi
 
+CLASSIFY_INFO="$(classify_stop_intent)"
+STOP_INTENT_CLASSIFICATION="$(printf '%s' "$CLASSIFY_INFO" | cut -f1)"
+STOP_INTENT_DECLARED_REASON="$(printf '%s' "$CLASSIFY_INFO" | cut -f2)"
+STOP_INTENT_BLOCK_REASON="$(printf '%s' "$CLASSIFY_INFO" | cut -f3)"
+STOP_INTENT_FORCE_BLOCK="false"
+
+if [ "$STOP_INTENT_CLASSIFICATION" = "allowed" ]; then
+  append_audit_entry "allowed" "$STOP_INTENT_DECLARED_REASON" ""
+  debug_log "allow" "reason=sentinel_allowed declared=$STOP_INTENT_DECLARED_REASON"
+  exit 0
+fi
+
+if [ "$STOP_INTENT_CLASSIFICATION" = "blocked" ]; then
+  STOP_INTENT_FORCE_BLOCK="true"
+  debug_log "info" "sentinel_blocked declared=$STOP_INTENT_DECLARED_REASON block_reason=$STOP_INTENT_BLOCK_REASON"
+fi
+
 if ! printf '%s' "$BLOCK_COUNT" | grep -Eq '^[0-9]+$'; then
   BLOCK_COUNT="0"
 fi
@@ -496,19 +582,19 @@ if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ]
     REASON="[자동 중단] $REASON Escalate to user for steering."
   fi
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
-  append_audit_entry "blocked" "" "$REASON"
+  append_block_audit_entry "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
 
-if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
+if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
   append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
   debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
   exit 0
 fi
 
-if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; then
+if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; then
   NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
   REMAINING_DODS="continue current sprint backlog"
   if [ -n "$NEXT_SOURCE" ]; then
@@ -532,14 +618,14 @@ if [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; th
   fi
 
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
-  append_audit_entry "blocked" "" "$REASON"
+  append_block_audit_entry "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
 
 if [ "$HAS_NEXT_ACTION" != "true" ]; then
-  if [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
+  if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
     append_audit_entry "allowed" "" "explicit_allow_pattern_no_next_action"
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
     exit 0
@@ -558,7 +644,7 @@ if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-  append_audit_entry "blocked" "" "$REASON"
+  append_block_audit_entry "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=return_to_detected return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
@@ -570,7 +656,7 @@ if [ "$AGILE_GUARD_ACTIVE" = "true" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON Specifically: execute 'python3 ... agile objective-check {AGI_ID} --json' or the next pending step in the sprint backlog."
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-  append_audit_entry "blocked" "" "$REASON"
+  append_block_audit_entry "$REASON"
   emit_block_json "$REASON"
   debug_log "block" "reason=agile_loop_no_next_action_continue current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
@@ -606,7 +692,7 @@ fi
 REASON="$REASON Do not stop; emit the next tool call now."
 
 PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-append_audit_entry "blocked" "" "$REASON"
+append_block_audit_entry "$REASON"
 emit_block_json "$REASON"
 debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"
 exit 0

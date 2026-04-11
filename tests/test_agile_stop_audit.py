@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 STOP_HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
+STOP_GATE_REASONS = REPO_ROOT / "hooks" / "stop-agile-gate-reasons.json"
 
 
 def _make_workspace(tmp_path: Path) -> Path:
@@ -75,6 +76,13 @@ def _write_stop_audit_entries(workspace: Path, agi_id: str, entries: list[dict])
             f.write(json.dumps(entry, ensure_ascii=False))
             f.write("\n")
     return audit_path
+
+
+def _write_stop_gate_reasons(workspace: Path) -> Path:
+    target = workspace / "hooks" / "stop-agile-gate-reasons.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(STOP_GATE_REASONS.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
 
 
 def _sample_entries() -> list[dict]:
@@ -236,3 +244,137 @@ def test_stop_audit_write_failure_does_not_break_hook(tmp_path):
     state_payload = json.loads(_state_path(workspace).read_text(encoding="utf-8"))
     assert state_payload["block_count"] == 1
     assert state_payload["last_block_reason"]
+
+
+def test_sentinel_allowed_enum_passes(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    _write_stop_gate_reasons(workspace)
+    _write_active_session(workspace, "AGI-012")
+    _write_workflow_state(
+        workspace,
+        {
+            "workflow_active": True,
+            "current_skill": "mst:agile",
+            "active_req": "REQ-609",
+            "iteration": 1,
+            "updated_at": "2026-04-12T00:00:00Z",
+        },
+    )
+
+    proc = _run_stop_hook(
+        workspace,
+        {
+            "stop_hook_active": False,
+            "last_assistant_message": "Should I overwrite production DB? [MST stop_intent reason=fatal_user_judgment_required detail=\"prod DB\"]",
+        },
+    )
+
+    assert proc.returncode == 0
+    assert '"decision": "block"' not in proc.stdout
+
+    audit_path = workspace / ".gran-maestro" / "agile" / "AGI-012" / "stop-audit.ndjson"
+    rows = [line for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    entry = json.loads(rows[0])
+    assert entry["classification"] == "allowed"
+    assert entry["declared_reason"] == "fatal_user_judgment_required"
+    assert entry["block_reason"] is None
+
+
+def test_sentinel_arbitrary_reason_blocks(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    _write_stop_gate_reasons(workspace)
+    _write_active_session(workspace, "AGI-012")
+    _write_workflow_state(
+        workspace,
+        {
+            "workflow_active": True,
+            "current_skill": "mst:agile",
+            "active_req": "REQ-609",
+            "iteration": 1,
+            "updated_at": "2026-04-12T00:00:00Z",
+        },
+    )
+
+    proc = _run_stop_hook(
+        workspace,
+        {
+            "stop_hook_active": False,
+            "last_assistant_message": "[MST stop_intent reason=context_too_large detail=\"ctx\"]",
+        },
+    )
+
+    assert proc.returncode == 0
+    assert '"decision": "block"' in proc.stdout
+
+    audit_path = workspace / ".gran-maestro" / "agile" / "AGI-012" / "stop-audit.ndjson"
+    entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["classification"] == "blocked"
+    assert entry["declared_reason"] == "context_too_large"
+    assert entry["block_reason"] == "arbitrary_stop"
+
+
+def test_sentinel_fatal_without_question_blocks(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    _write_stop_gate_reasons(workspace)
+    _write_active_session(workspace, "AGI-012")
+    _write_workflow_state(
+        workspace,
+        {
+            "workflow_active": True,
+            "current_skill": "mst:agile",
+            "active_req": "REQ-609",
+            "iteration": 1,
+            "updated_at": "2026-04-12T00:00:00Z",
+        },
+    )
+
+    proc = _run_stop_hook(
+        workspace,
+        {
+            "stop_hook_active": False,
+            "last_assistant_message": "[MST stop_intent reason=fatal_user_judgment_required detail=\"need\"]",
+        },
+    )
+
+    assert proc.returncode == 0
+    assert '"decision": "block"' in proc.stdout
+
+    audit_path = workspace / ".gran-maestro" / "agile" / "AGI-012" / "stop-audit.ndjson"
+    entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["classification"] == "blocked"
+    assert entry["declared_reason"] == "fatal_user_judgment_required"
+    assert entry["block_reason"] == "ambiguous_user_question"
+
+
+def test_sentinel_unrecoverable_without_retry_blocks(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    _write_stop_gate_reasons(workspace)
+    _write_active_session(workspace, "AGI-012")
+    _write_workflow_state(
+        workspace,
+        {
+            "workflow_active": True,
+            "current_skill": "mst:agile",
+            "active_req": "REQ-609",
+            "iteration": 1,
+            "updated_at": "2026-04-12T00:00:00Z",
+        },
+    )
+
+    proc = _run_stop_hook(
+        workspace,
+        {
+            "stop_hook_active": False,
+            "last_assistant_message": "[MST stop_intent reason=unrecoverable_external_failure detail=\"api 403\"]",
+        },
+    )
+
+    assert proc.returncode == 0
+    assert '"decision": "block"' in proc.stdout
+
+    audit_path = workspace / ".gran-maestro" / "agile" / "AGI-012" / "stop-audit.ndjson"
+    entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["classification"] == "blocked"
+    assert entry["declared_reason"] == "unrecoverable_external_failure"
+    assert entry["block_reason"] == "insufficient_recovery_attempt"
