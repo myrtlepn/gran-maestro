@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import fcntl
 import glob
 import hashlib
 import json
@@ -20,6 +19,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 BASE_DIR: Path = None
 
@@ -282,17 +286,40 @@ def _queue_build_entry(data: dict) -> dict:
         "result": None,
     }
 
+_WINDOWS_LOCK_BYTES = 0x7FFFFFFF
+
+def _lock_shared(file_obj):
+    if os.name == "nt":
+        file_obj.seek(0)
+        msvcrt.locking(file_obj.fileno(), msvcrt.LK_RLCK, _WINDOWS_LOCK_BYTES)
+        return
+    fcntl.flock(file_obj.fileno(), fcntl.LOCK_SH)
+
+def _lock_exclusive(file_obj):
+    if os.name == "nt":
+        file_obj.seek(0)
+        msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, _WINDOWS_LOCK_BYTES)
+        return
+    fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+
+def _unlock(file_obj):
+    if os.name == "nt":
+        file_obj.seek(0)
+        msvcrt.locking(file_obj.fileno(), msvcrt.LK_UNLCK, _WINDOWS_LOCK_BYTES)
+        return
+    fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
+
 def _queue_read_entries() -> list[dict]:
     path = _queue_path()
     if not path.exists():
         return []
 
     with open(path, "r", encoding="utf-8") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+        _lock_shared(f)
         try:
             return _queue_parse_entries(f.read().splitlines())
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            _unlock(f)
 
 def _queue_compact(mutator):
     path = _queue_path()
@@ -300,7 +327,7 @@ def _queue_compact(mutator):
         return mutator([])[1]
 
     with open(path, "r+", encoding="utf-8") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        _lock_exclusive(f)
         try:
             entries = _queue_parse_entries(f.read().splitlines())
             new_entries, result = mutator(entries)
@@ -331,7 +358,7 @@ def _queue_compact(mutator):
                 raise
             return result
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            _unlock(f)
 
 def queue_enqueue(data: dict) -> dict:
     entry = _queue_build_entry(data)
@@ -339,13 +366,13 @@ def queue_enqueue(data: dict) -> dict:
     line = _compact_json(entry) + "\n"
 
     with open(path, "a", encoding="utf-8") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        _lock_exclusive(f)
         try:
             f.write(line)
             f.flush()
             os.fsync(f.fileno())
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            _unlock(f)
 
     return entry
 
