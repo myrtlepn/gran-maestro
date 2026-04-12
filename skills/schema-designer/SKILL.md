@@ -1,3 +1,9 @@
+---
+name: schema-designer
+description: "DB 스키마, 데이터 모델, ERD, 마이그레이션 계획을 설계하는 Design Wing 템플릿 스킬. PM Conductor가 변수를 치환하여 /mst:codex로 실행."
+user-invocable: false
+---
+
 # mst:schema-designer
 
 DB 스키마, 데이터 모델, ERD, 마이그레이션 계획을 설계하는 Design Wing 템플릿 스킬입니다.

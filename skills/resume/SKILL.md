@@ -1,7 +1,7 @@
 ---
 name: resume
 description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 즉시 종료."
-user-invocable: true
+user-invocable: false
 argument-hint: ""
 ---
 

@@ -1,3 +1,9 @@
+---
+name: feedback-composer
+description: "리뷰 결과를 분석해 외주 에이전트가 한 번에 수정할 수 있는 정밀하고 실행 가능한 피드백 문서를 작성하는 템플릿 스킬. PM Conductor가 변수를 치환하여 /mst:codex로 실행."
+user-invocable: false
+---
+
 # mst:feedback-composer
 
 리뷰 결과를 분석해 외주 에이전트가 한 번에 수정할 수 있는 정밀하고 실행 가능한 피드백 문서를 작성하는 템플릿 스킬입니다.

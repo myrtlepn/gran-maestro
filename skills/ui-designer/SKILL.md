@@ -1,3 +1,9 @@
+---
+name: ui-designer
+description: "화면 설계, 컴포넌트 구조, 인터랙션 흐름, 디자인 시스템을 설계하는 Design Wing 템플릿 스킬. PM Conductor가 변수를 치환하여 /mst:codex로 실행."
+user-invocable: false
+---
+
 # mst:ui-designer
 
 화면 설계, 컴포넌트 구조, 인터랙션 흐름, 디자인 시스템을 설계하는 Design Wing 템플릿 스킬입니다.
