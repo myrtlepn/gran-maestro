@@ -1425,6 +1425,344 @@ def _classify_changed_files(repo_root, since_ref, until_ref, reference_pattern=N
         "entrypoint_touched_count": sum(1 for path in changed if path.startswith(entrypoint_prefix)),
     }
 
+def _reference_regex_for(path: str, reference_pattern: Optional[str] = None):
+    path_obj = Path(path)
+    stem_raw = path_obj.stem
+    stem = re.escape(stem_raw)
+    parent_stem = re.escape(path_obj.parent.name) if stem_raw == "__init__" and path_obj.parent.name else None
+    parent_dotted = (
+        re.escape(str(path_obj.parent).replace("/", "."))
+        if stem_raw == "__init__" and str(path_obj.parent) not in {"", "."}
+        else None
+    )
+    dotted = re.escape(str(Path(path).with_suffix("")).replace("/", "."))
+    escaped_path = re.escape(path)
+    if reference_pattern:
+        try:
+            return re.compile(
+                str(reference_pattern).format(module=stem, module_path=dotted, path=escaped_path),
+                flags=re.IGNORECASE,
+            )
+        except Exception:
+            return re.compile(str(reference_pattern), flags=re.IGNORECASE)
+    patterns = [
+        rf"\bfrom\s+{stem}\b",
+        rf"\bimport\s+{stem}\b",
+        rf"\bfrom\s+{dotted}\b",
+        rf"\bimport\s+{dotted}\b",
+        rf"\b{stem}\s*\.\s*(?:register|setup|init|initialize)\s*\(",
+        rf"require\([^)]*{stem}[^)]*\)",
+        rf"\b{escaped_path}\b",
+        rf"\]\({escaped_path}\)",
+    ]
+    if parent_stem:
+        patterns.extend(
+            [
+                rf"\bfrom\s+{parent_stem}\b",
+                rf"\bimport\s+{parent_stem}\b",
+                rf"\b{parent_stem}\s*\.\s*(?:register|setup|init|initialize)\s*\(",
+            ]
+        )
+    if parent_dotted:
+        patterns.extend(
+            [
+                rf"\bfrom\s+{parent_dotted}\b",
+                rf"\bimport\s+{parent_dotted}\b",
+            ]
+        )
+    return re.compile("|".join(patterns), flags=re.IGNORECASE)
+
+def _status_is_pass(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"pass", "passed", "ok", "success", "true"}
+
+def _test_file_from_identifier(value: str) -> Optional[str]:
+    token = str(value or "").strip().replace("\\", "/")
+    if not token:
+        return None
+    candidate = token.split("::", 1)[0].strip()
+    if candidate.startswith("./"):
+        candidate = candidate[2:]
+    return candidate if candidate.startswith("tests/") else None
+
+def _record_passed_test(passed_map: dict[str, List[str]], test_file: str, test_id: str):
+    normalized_file = str(test_file or "").strip().replace("\\", "/")
+    if not normalized_file.startswith("tests/"):
+        return
+    normalized_id = str(test_id or normalized_file).strip()
+    passed_map.setdefault(normalized_file, []).append(normalized_id)
+
+def _ingest_test_result_item(passed_map: dict[str, List[str]], key: str, value):
+    key_token = str(key or "").strip()
+    if isinstance(value, dict):
+        status = value.get("status")
+        if status is None:
+            status = value.get("result")
+        if status is None and "passed" in value:
+            status = value.get("passed")
+        test_id = str(value.get("test_id") or value.get("id") or key_token).strip()
+        test_file = str(value.get("test_file") or "").strip().replace("\\", "/")
+        if not test_file:
+            test_file = _test_file_from_identifier(test_id) or _test_file_from_identifier(key_token) or ""
+        if _status_is_pass(status):
+            _record_passed_test(passed_map, test_file, test_id or key_token)
+        nested_tests = value.get("tests")
+        if isinstance(nested_tests, dict):
+            for nested_key, nested_value in nested_tests.items():
+                _ingest_test_result_item(passed_map, str(nested_key), nested_value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _ingest_test_result_item(passed_map, key_token, item)
+        return
+    if _status_is_pass(value):
+        test_id = key_token
+        test_file = _test_file_from_identifier(key_token) or (key_token if key_token.startswith("tests/") else "")
+        _record_passed_test(passed_map, test_file, test_id)
+
+def _collect_passed_test_ids(result_payload: dict) -> dict[str, List[str]]:
+    if not isinstance(result_payload, dict):
+        return {}
+    passed_map: dict[str, List[str]] = {}
+    candidates = []
+    root_test_results = result_payload.get("test_results")
+    if isinstance(root_test_results, dict):
+        candidates.append(root_test_results)
+    sprint_goals = result_payload.get("sprint_goals")
+    if isinstance(sprint_goals, list):
+        for goal in sprint_goals:
+            if not isinstance(goal, dict):
+                continue
+            evidence = goal.get("evidence")
+            if not isinstance(evidence, dict):
+                continue
+            test_results = evidence.get("test_results")
+            if isinstance(test_results, dict):
+                candidates.append(test_results)
+    for test_results in candidates:
+        for key, value in test_results.items():
+            _ingest_test_result_item(passed_map, str(key), value)
+    return {test_file: sorted(set(test_ids)) for test_file, test_ids in passed_map.items()}
+
+def _collect_test_reference_map(repo_root: Path, targets: List[str]) -> dict[str, List[str]]:
+    tests_root = repo_root / "tests"
+    if not tests_root.exists() or not tests_root.is_dir():
+        return {path: [] for path in targets}
+
+    test_contents: dict[str, str] = {}
+    for candidate in sorted(tests_root.rglob("*")):
+        if not candidate.is_file():
+            continue
+        rel_path = candidate.relative_to(repo_root).as_posix()
+        test_contents[rel_path] = candidate.read_text(encoding="utf-8", errors="ignore")
+
+    refs: dict[str, List[str]] = {}
+    for path in targets:
+        regex = _reference_regex_for(path)
+        path_refs: List[str] = []
+        for candidate, content in test_contents.items():
+            if candidate == path:
+                continue
+            match = regex.search(content)
+            if not match:
+                continue
+            line_no = content.count(chr(10), 0, match.start()) + 1
+            path_refs.append(f"{candidate}:{line_no}")
+        refs[path] = sorted(path_refs)
+    return refs
+
+def _detect_test_runner(repo_root: Path) -> Optional[str]:
+    pyproject = repo_root / "pyproject.toml"
+    if pyproject.exists():
+        return "pytest"
+    if (repo_root / "pytest.ini").exists():
+        return "pytest"
+    if (repo_root / "deno.json").exists():
+        return "deno"
+    if (repo_root / "go.mod").exists():
+        return "go"
+    return None
+
+def _run_selected_test_file(repo_root: Path, runner: str, test_file: str) -> bool:
+    if runner == "pytest":
+        cmd = [sys.executable, "-m", "pytest", test_file, "-v"]
+    elif runner == "deno":
+        cmd = ["deno", "test", test_file]
+    elif runner == "go":
+        package_dir = Path(test_file).parent.as_posix().strip(".")
+        target = "./..." if not package_dir else f"./{package_dir}"
+        cmd = ["go", "test", target]
+    else:
+        return False
+
+    try:
+        proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True)
+    except OSError:
+        return False
+    return proc.returncode == 0
+
+def _freshness_for_test_evidence(
+    repo_root: Path,
+    target_file: str,
+    test_files: List[str],
+    result_payload: dict,
+    current_git_tree: str,
+) -> str:
+    if not isinstance(result_payload, dict):
+        return "stale"
+    result_tree = str(
+        result_payload.get("git_tree")
+        or result_payload.get("result_git_tree")
+        or result_payload.get("repo_tree")
+        or ""
+    ).strip()
+    if result_tree and current_git_tree and result_tree == current_git_tree:
+        return "fresh"
+
+    result_commit = str(
+        result_payload.get("result_commit")
+        or result_payload.get("git_commit")
+        or result_payload.get("commit")
+        or result_payload.get("head_commit")
+        or ""
+    ).strip()
+    if not result_commit:
+        return "stale"
+
+    compare_targets = [target_file, *test_files]
+    try:
+        changed = [
+            line.strip()
+            for line in _git_output(repo_root, "diff", "--name-only", f"{result_commit}..HEAD", "--", *compare_targets).splitlines()
+            if line.strip()
+        ]
+    except RuntimeError:
+        return "stale"
+    return "acceptable" if not changed else "stale"
+
+def _promote_with_test_evidence(classification, repo_root, session_dir, sprint, depth):
+    del depth  # 현재는 직전 sprint 증거만 사용
+    updated = copy.deepcopy(classification if isinstance(classification, dict) else {})
+    updated["wire_promotions"] = []
+    new_island_files = updated.get("new_island_files")
+    if not isinstance(new_island_files, list) or not new_island_files:
+        return updated
+
+    previous_result = {}
+    if int(sprint) > 0:
+        previous_path = session_dir / "sprints" / f"S{int(sprint) - 1:02d}" / "result.json"
+        loaded = load_json(previous_path)
+        if isinstance(loaded, dict):
+            previous_result = loaded
+    has_cached_result = bool(previous_result)
+    cached_passed = _collect_passed_test_ids(previous_result) if has_cached_result else {}
+    refs_by_file = _collect_test_reference_map(repo_root, sorted({str(path) for path in new_island_files if str(path).strip()}))
+    if not any(refs_by_file.values()):
+        return updated
+
+    try:
+        current_tree = _git_output(repo_root, "rev-parse", "HEAD^{tree}").strip()
+    except RuntimeError:
+        current_tree = ""
+
+    fallback_runner: Optional[str] = None
+    fallback_cache: dict[str, bool] = {}
+    promotions = []
+    previous_sprint_id = f"S{int(sprint) - 1:02d}" if int(sprint) > 0 else None
+
+    for target_file in sorted(new_island_files):
+        refs = refs_by_file.get(str(target_file), [])
+        if not refs:
+            continue
+        test_files = sorted({item.split(":", 1)[0] for item in refs if item.startswith("tests/")})
+        if not test_files:
+            continue
+
+        freshness = _freshness_for_test_evidence(repo_root, str(target_file), test_files, previous_result, current_tree) if has_cached_result else "stale"
+        cached_test_ids: List[str] = []
+        for test_file in test_files:
+            cached_test_ids.extend(cached_passed.get(test_file, []))
+        cached_test_ids = sorted(set(cached_test_ids))
+
+        if has_cached_result and freshness in {"fresh", "acceptable"} and cached_test_ids:
+            promotions.append(
+                {
+                    "file": str(target_file),
+                    "promoted_by_test": True,
+                    "evidence_source": "cached",
+                    "evidence_sprint": previous_sprint_id,
+                    "freshness": freshness,
+                    "test_ids": cached_test_ids,
+                }
+            )
+            continue
+
+        if fallback_runner is None:
+            fallback_runner = _detect_test_runner(repo_root)
+        if not fallback_runner:
+            continue
+
+        executed = False
+        all_passed = True
+        fallback_test_ids: List[str] = []
+        for test_file in test_files:
+            if test_file in fallback_cache:
+                passed = fallback_cache[test_file]
+            else:
+                passed = _run_selected_test_file(repo_root, fallback_runner, test_file)
+                fallback_cache[test_file] = passed
+            executed = True
+            if not passed:
+                all_passed = False
+            else:
+                fallback_test_ids.append(test_file)
+
+        if not executed or not all_passed or not fallback_test_ids:
+            continue
+
+        promotions.append(
+            {
+                "file": str(target_file),
+                "promoted_by_test": True,
+                "evidence_source": "fallback",
+                "evidence_sprint": previous_sprint_id,
+                "freshness": freshness,
+                "test_ids": sorted(set(fallback_test_ids)),
+            }
+        )
+
+    if not promotions:
+        return updated
+
+    new_island_set = {str(path) for path in new_island_files}
+    wire_files = {str(path) for path in updated.get("wire_files", [])}
+    wire_refs = updated.get("wire_references")
+    if not isinstance(wire_refs, dict):
+        wire_refs = {}
+
+    applied_promotions = []
+    for promotion in promotions:
+        target_file = str(promotion.get("file", "")).strip()
+        if not target_file or target_file not in new_island_set:
+            continue
+        new_island_set.remove(target_file)
+        wire_files.add(target_file)
+        wire_refs[target_file] = refs_by_file.get(target_file, [])
+        applied_promotions.append(promotion)
+
+    updated["new_island_files"] = sorted(new_island_set)
+    updated["wire_files"] = sorted(wire_files)
+    updated["wire_references"] = wire_refs
+    updated["wire"] = len(updated["wire_files"])
+    updated["new_island"] = len(updated["new_island_files"])
+    updated["wire_promotions"] = applied_promotions
+    return updated
+
 def _compute_integration_verdict(classification, threshold):
     total = int(classification.get("total", 0))
     ratio = (float(classification.get("new_island", 0)) / total) if total > 0 else 0.0
@@ -1515,9 +1853,12 @@ def cmd_agile_integration_review(args):
         print("Error: --depth must be >= 1", file=sys.stderr)
         return 1
 
+    repo_root = Path.cwd().resolve()
+    session_dir = _agi_session_dir(agi_id)
     try:
-        since_ref, until_ref = _resolve_git_window_refs(Path.cwd().resolve(), depth)
-        classification = _classify_changed_files(Path.cwd().resolve(), since_ref, until_ref, args.reference_pattern)
+        since_ref, until_ref = _resolve_git_window_refs(repo_root, depth)
+        classification = _classify_changed_files(repo_root, since_ref, until_ref, args.reference_pattern)
+        classification = _promote_with_test_evidence(classification, repo_root, session_dir, args.sprint, depth)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -1534,7 +1875,6 @@ def cmd_agile_integration_review(args):
     }
     sprint_id = f"S{args.sprint:02d}"
     window_sprints = _window_sprint_ids(args.sprint, depth)
-    session_dir = _agi_session_dir(agi_id)
     sprint_dir = session_dir / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1555,6 +1895,7 @@ def cmd_agile_integration_review(args):
         "depth": depth,
         "window_sprints": window_sprints,
         "files": {k: classification.get(k, 0) for k in ("total", "modify", "wire", "new_island")} | {"new_island_files": classification.get("new_island_files", [])},
+        "wire_promotions": classification.get("wire_promotions", []),
         "ratios": ratios,
         "verdict": verdict,
         "wire_streak": {"current": streak, "max": streak_max, "exceeded": streak >= streak_max},

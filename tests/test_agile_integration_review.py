@@ -61,6 +61,18 @@ def _git(workspace: Path, *args: str):
     assert proc.returncode == 0, proc.stderr or proc.stdout
 
 
+def _git_stdout(workspace: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    return proc.stdout.strip()
+
+
 def _git_commit_all(workspace: Path, message: str):
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-m", message)
@@ -76,6 +88,19 @@ def _init_agi(workspace: Path) -> str:
 def _write(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _write_previous_result(workspace: Path, agi_id: str, sprint: int, payload: dict):
+    _write(
+        workspace
+        / ".gran-maestro"
+        / "agile"
+        / agi_id
+        / "sprints"
+        / f"S{sprint:02d}"
+        / "result.json",
+        json.dumps(payload, ensure_ascii=False),
+    )
 
 
 def _prepare_base_commit(workspace: Path):
@@ -266,6 +291,166 @@ def test_register_callsite_wire(tmp_path):
     assert payload["files"]["wire"] == 1
     assert payload["files"]["new_island"] == 0
     assert "src/auth.py" not in payload["files"]["new_island_files"]
+
+
+def test_promote_with_test_evidence_pass(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "src" / "providers" / "__init__.py",
+        "def register():\n    return 'ok'\n",
+    )
+    _write(
+        workspace / "tests" / "test_providers.py",
+        "from src.providers import register\n\n\ndef test_provider_register():\n    assert register() == 'ok'\n",
+    )
+    _git_commit_all(workspace, "add providers and tests")
+
+    head_commit = _git_stdout(workspace, "rev-parse", "HEAD")
+    head_tree = _git_stdout(workspace, "rev-parse", "HEAD^{tree}")
+    _write_previous_result(
+        workspace,
+        agi_id,
+        4,
+        {
+            "sprint_id": "S04",
+            "result_commit": head_commit,
+            "git_tree": head_tree,
+            "sprint_goals": [
+                {
+                    "goal": "providers coverage",
+                    "status": "done",
+                    "change_summary": "provider import covered",
+                    "evidence": {
+                        "test_results": {
+                            "tests/test_providers.py::test_provider_register": "PASS",
+                        }
+                    },
+                }
+            ],
+        },
+    )
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["new_island"] == 0
+    assert "src/providers/__init__.py" not in payload["files"]["new_island_files"]
+    assert len(payload["wire_promotions"]) == 1
+    promotion = payload["wire_promotions"][0]
+    assert promotion["file"] == "src/providers/__init__.py"
+    assert promotion["promoted_by_test"] is True
+    assert promotion["evidence_source"] == "cached"
+    assert promotion["freshness"] == "fresh"
+
+
+def test_stale_result_triggers_fallback(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(workspace / "pytest.ini", "[pytest]\n")
+    _git_commit_all(workspace, "add pytest runner config")
+
+    _write(
+        workspace / "src" / "providers" / "__init__.py",
+        "def register():\n    return 'ok'\n",
+    )
+    _write(
+        workspace / "tests" / "test_providers.py",
+        "from src.providers import register\n\n\ndef test_provider_register():\n    assert register() == 'ok'\n",
+    )
+    _git_commit_all(workspace, "add provider tests for fallback")
+
+    stale_commit = _git_stdout(workspace, "rev-parse", "HEAD~1")
+    stale_tree = _git_stdout(workspace, "rev-parse", "HEAD~1^{tree}")
+    _write_previous_result(
+        workspace,
+        agi_id,
+        4,
+        {
+            "sprint_id": "S04",
+            "result_commit": stale_commit,
+            "git_tree": stale_tree,
+            "sprint_goals": [],
+        },
+    )
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["new_island"] == 0
+    assert len(payload["wire_promotions"]) == 1
+    promotion = payload["wire_promotions"][0]
+    assert promotion["file"] == "src/providers/__init__.py"
+    assert promotion["evidence_source"] == "fallback"
+    assert promotion["freshness"] == "stale"
+
+
+def test_no_test_infra_graceful_skip(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "src" / "isolated_feature.py",
+        "def isolated_feature():\n    return 'isolated'\n",
+    )
+    _git_commit_all(workspace, "add isolated feature")
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["new_island"] == 1
+    assert "src/isolated_feature.py" in payload["files"]["new_island_files"]
+    assert payload["wire_promotions"] == []
+
+
+def test_wire_promotions_in_payload(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "src" / "providers" / "__init__.py",
+        "def register():\n    return 'ok'\n",
+    )
+    _write(
+        workspace / "tests" / "test_providers.py",
+        "from src.providers import register\n\n\ndef test_provider_register():\n    assert register() == 'ok'\n",
+    )
+    _git_commit_all(workspace, "add providers for payload check")
+
+    head_commit = _git_stdout(workspace, "rev-parse", "HEAD")
+    head_tree = _git_stdout(workspace, "rev-parse", "HEAD^{tree}")
+    _write_previous_result(
+        workspace,
+        agi_id,
+        4,
+        {
+            "sprint_id": "S04",
+            "result_commit": head_commit,
+            "git_tree": head_tree,
+            "sprint_goals": [
+                {
+                    "goal": "provider smoke",
+                    "status": "done",
+                    "change_summary": "cache-ready",
+                    "evidence": {
+                        "test_results": {
+                            "tests/test_providers.py::test_provider_register": {"status": "pass"},
+                        }
+                    },
+                }
+            ],
+        },
+    )
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert "wire_promotions" in payload
+    assert payload["wire_promotions"], "wire_promotions must record promoted files"
+    promotion = payload["wire_promotions"][0]
+    assert {"file", "promoted_by_test", "evidence_source", "freshness"}.issubset(set(promotion.keys()))
 
 
 def test_wire_streak_counted_from_previous_reviews(tmp_path):
