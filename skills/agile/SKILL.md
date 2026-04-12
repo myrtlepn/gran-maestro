@@ -451,6 +451,16 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
      - 2.2.2 DoD 선택은 이 Sprint에서 skip하고, `selection_reason`에 `integration-review forced wire`를 기록한다.
      - `wire_streak.exceeded=true`(연속 `agile.integration_wire_streak_max`=3회 wire)이면 비상 스티어링(Step 3)으로 즉시 강제 진입한다 — 근본적으로 DoD 설계가 잘못됐을 가능성.
 
+##### LLM 스티어링 게이트 (wire_streak.exceeded=true 시)
+
+`config.agile.llm_steering_gate_enabled == true`이면 비상 스티어링 진입 전 LLM 분석을 수행한다:
+
+1. `new_island`로 남은 파일 목록 + 관련 테스트 PASS/FAIL 상태 + `integration-context.md`를 분석
+2. 판정:
+   - `false_positive`: heuristic false positive로 판단 → `wire_streak.exceeded`를 false로 override, 근거를 `integration-review.json`의 `llm_gate`에 기록, 정상 Sprint 진행
+   - `true_positive`: 진짜 통합 부채로 판단 → 기존대로 비상 스티어링 진입
+3. `llm_steering_gate_enabled == false`이면 기존 동작 유지 (게이트 skip)
+
 5. **PM Escape Hatch**: PM이 구조적 판단으로 verdict를 무시해야 하는 경우(예: 프로젝트 특성상 grep 휴리스틱이 false positive를 낸 경우, 동적 import/매크로 기반 언어 등) 아래 조건을 모두 만족할 때만 허용:
    - `AUTO_MODE=true`: `auto-decisions.md`에 `[integration-review override] reason: {...}` 행을 반드시 기록
    - `AUTO_MODE=false`: 다음 `retrospective.md`에 `integration_review_override` 섹션으로 사유 기록

@@ -484,6 +484,28 @@ def test_wire_streak_counted_from_previous_reviews(tmp_path):
     }
 
 
+def test_llm_gate_field_in_payload(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+    _apply_change_set(workspace, wire_count=1, island_count=2)
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1)
+
+    assert "llm_gate" in payload
+    llm_gate = payload["llm_gate"]
+    assert {"triggered", "verdict", "reason"}.issubset(set(llm_gate.keys()))
+    assert llm_gate["triggered"] is False
+    assert llm_gate["verdict"] is None
+    assert llm_gate["reason"] is None
+
+
+def test_llm_gate_config_default():
+    config = json.loads((REPO_ROOT / "templates" / "defaults" / "config.json").read_text(encoding="utf-8"))
+
+    assert config["agile"]["llm_steering_gate_enabled"] is True
+
+
 def test_escape_hatch_reason_recorded(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agi(workspace)

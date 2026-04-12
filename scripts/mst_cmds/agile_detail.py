@@ -1900,6 +1900,11 @@ def cmd_agile_integration_review(args):
         "verdict": verdict,
         "wire_streak": {"current": streak, "max": streak_max, "exceeded": streak >= streak_max},
     }
+    payload["llm_gate"] = {
+        "triggered": False,
+        "verdict": None,
+        "reason": None,
+    }
     save_json(sprint_dir / "integration-review.json", payload)
 
     changes = []

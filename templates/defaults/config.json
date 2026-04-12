@@ -87,6 +87,7 @@
       "default_mode": "inline"
     },
     "integration_wire_streak_max": 3,
+    "llm_steering_gate_enabled": true,
     "retrospective": {
       "enabled": true,
       "max_fix_sprint_depth": 2,
