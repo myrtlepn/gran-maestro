@@ -220,6 +220,54 @@ def test_tests_directory_new_file_is_wire(tmp_path):
     assert payload["files"]["new_island"] == 0
 
 
+def test_init_package_wire(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "providers" / "__init__.py",
+        "def register():\n    return 'ok'\n",
+    )
+    _write(
+        workspace / "src" / "app.py",
+        "from providers import register\n\n\ndef app_entrypoint():\n    return register()\n",
+    )
+    _git_commit_all(workspace, "add providers package")
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["total"] == 2
+    assert payload["files"]["modify"] == 1
+    assert payload["files"]["wire"] == 1
+    assert payload["files"]["new_island"] == 0
+    assert "providers/__init__.py" not in payload["files"]["new_island_files"]
+
+
+def test_register_callsite_wire(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agi(workspace)
+    _prepare_base_commit(workspace)
+
+    _write(
+        workspace / "src" / "auth.py",
+        "def register():\n    return True\n",
+    )
+    _write(
+        workspace / "src" / "app.py",
+        "import auth\n\n\ndef app_entrypoint():\n    return auth.register()\n",
+    )
+    _git_commit_all(workspace, "add auth register")
+
+    payload = _integration_review(workspace, agi_id, sprint=5, depth=1, threshold=0.20)
+
+    assert payload["files"]["total"] == 2
+    assert payload["files"]["modify"] == 1
+    assert payload["files"]["wire"] == 1
+    assert payload["files"]["new_island"] == 0
+    assert "src/auth.py" not in payload["files"]["new_island_files"]
+
+
 def test_wire_streak_counted_from_previous_reviews(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agi(workspace)

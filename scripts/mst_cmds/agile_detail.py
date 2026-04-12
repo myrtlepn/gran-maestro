@@ -1346,7 +1346,10 @@ def _classify_changed_files(repo_root, since_ref, until_ref, reference_pattern=N
     content_cache: dict[str, str] = {}
 
     def _regex_for(path: str):
-        stem = re.escape(Path(path).stem)
+        path_obj = Path(path)
+        stem_raw = path_obj.stem
+        stem = re.escape(stem_raw)
+        parent_stem = re.escape(path_obj.parent.name) if stem_raw == "__init__" and path_obj.parent.name else None
         dotted = re.escape(str(Path(path).with_suffix("")).replace("/", "."))
         escaped_path = re.escape(path)
         if reference_pattern:
@@ -1354,17 +1357,25 @@ def _classify_changed_files(repo_root, since_ref, until_ref, reference_pattern=N
                 return re.compile(str(reference_pattern).format(module=stem, module_path=dotted, path=escaped_path), flags=re.IGNORECASE)
             except Exception:
                 return re.compile(str(reference_pattern), flags=re.IGNORECASE)
-        pattern = "|".join(
-            [
-                rf"\bfrom\s+{stem}\b",
-                rf"\bimport\s+{stem}\b",
-                rf"\bfrom\s+{dotted}\b",
-                rf"\bimport\s+{dotted}\b",
-                rf"require\([^)]*{stem}[^)]*\)",
-                rf"\b{escaped_path}\b",
-                rf"\]\({escaped_path}\)",
-            ]
-        )
+        patterns = [
+            rf"\bfrom\s+{stem}\b",
+            rf"\bimport\s+{stem}\b",
+            rf"\bfrom\s+{dotted}\b",
+            rf"\bimport\s+{dotted}\b",
+            rf"\b{stem}\s*\.\s*(?:register|setup|init|initialize)\s*\(",
+            rf"require\([^)]*{stem}[^)]*\)",
+            rf"\b{escaped_path}\b",
+            rf"\]\({escaped_path}\)",
+        ]
+        if parent_stem:
+            patterns.extend(
+                [
+                    rf"\bfrom\s+{parent_stem}\b",
+                    rf"\bimport\s+{parent_stem}\b",
+                    rf"\b{parent_stem}\s*\.\s*(?:register|setup|init|initialize)\s*\(",
+                ]
+            )
+        pattern = "|".join(patterns)
         return re.compile(pattern, flags=re.IGNORECASE)
 
     def _refs_for(path: str) -> List[str]:
