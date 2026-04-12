@@ -110,6 +110,10 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      EOF
      ```
    - 완료 메시지: `"✓ base_branch: {BASE_BRANCH_VALUE}"`
+3.6. **MANDATORY (config 변경 후처리)**: Step 3/3.5에서 `config.json`이 생성/수정된 직후 아래 명령을 실행한다.
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py config resolve || echo "[warning] config.resolved.json 갱신 실패. 수동으로 'python3 scripts/mst.py config resolve'를 실행하세요." >&2
+   ```
 4. `{PROJECT_ROOT}/.gran-maestro/mode.json` 작성 (always overwrite):
 
    > ⏱️ **타임스탬프 취득 (MANDATORY)**:

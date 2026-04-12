@@ -38,6 +38,10 @@ argument-hint: "[{key} [{value}] | preset {list|apply|diff|save|wizard} [id]]"
 1. 인자 없이 호출 시: 전체 설정 표시
 2. key만 지정 시: 해당 설정값 표시
 3. key와 value 모두 지정 시: 설정 변경
+4. **MANDATORY (config 변경 후처리)**: `config.json`을 수정한 직후(예: key/value 변경, preset apply) 아래 명령을 실행한다.
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py config resolve || echo "[warning] config.resolved.json 갱신 실패. 수동으로 'python3 scripts/mst.py config resolve'를 실행하세요." >&2
+   ```
 
 ## 설정 항목
 
@@ -127,7 +131,8 @@ python3 scripts/mst.py config migrate --apply   # 실제 적용
 1. `python3 {PLUGIN_ROOT}/scripts/mst.py preset diff <preset_id>` 실행하여 변경 미리보기
 2. AskUserQuestion으로 적용 확인
 3. 확인 시 `python3 {PLUGIN_ROOT}/scripts/mst.py preset apply <preset_id>` 실행
-4. 결과 표시
+4. 직후 `python3 {PLUGIN_ROOT}/scripts/mst.py config resolve || echo "[warning] config.resolved.json 갱신 실패. 수동으로 'python3 scripts/mst.py config resolve'를 실행하세요." >&2` 실행
+5. 결과 표시
 
 #### preset diff <preset_id>
 
