@@ -4,6 +4,23 @@
 
 ---
 
+## [0.58.0] — 2026-04-12
+
+### 새 기능
+- **LLM 스티어링 게이트**: `mst:agile` 실행 중 LLM이 규칙을 우회하려는 자기합리화를 감지하면 즉시 정지시키는 런타임 게이트를 추가했습니다 (DOD-004/006).
+- **Synthetic marker 테스트 인프라**: `tests/test_synthetic_markers.py`로 마커 기반 agile 실행 검증을 자동화했습니다.
+
+### 개선
+- **Wire 승격 + 하이브리드 fallback**: 테스트 PASS 기반으로 wire를 승격하고, 실패 시 하위호환 fallback 경로를 제공합니다 (DOD-002/003/005).
+- **grep 패턴 확장**: `_regex_for()`에 `__init__.py` 패키지 매칭 및 `register()` call-site 패턴을 추가해 탐색 정확도를 높였습니다.
+- **Reference 스킬 재설계**: 원문 중심으로 content.md 및 가이드를 전면 재작성했습니다.
+- **Stop-audit 감사 로그**: sentinel 프로토콜 + 허용 정지 사유 enum 매칭 로직으로 감사 인프라를 구축했습니다.
+
+### 버그 수정
+- `/mst:settings` 실행 후 `/mst:on`이 `config.resolved.json`을 갱신하지 않던 문제를 수정했습니다.
+
+---
+
 ## [0.57.6] — 2026-04-11
 
 ### 새 기능
