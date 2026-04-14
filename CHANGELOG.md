@@ -4,6 +4,17 @@
 
 ---
 
+## [0.58.3] — 2026-04-15
+
+### 버그 수정
+- **agile→accept 복귀 시 Sprint 자동 재개 복원**: accept 단계에서 stop-hook이 조기 종료되며 다음 Sprint가 이어지지 않던 문제를 수정했습니다.
+- **AUTO_MODE 스프린트 간 자발 정지 방지**: agile AUTO_MODE에서 스프린트 사이에 LLM이 자발적으로 멈추던 현상을 stop-hook 패턴 확장과 진입 시 hook 검증으로 차단했습니다.
+
+### 개선
+- **plan/agile-plan/request/agile 진입 시 hooks 자동 동기화**: 해당 스킬 진입 시 `hooks/` 원본이 프로젝트로 자동 복사되어 수동 동기화 없이 최신 hook이 적용됩니다.
+
+---
+
 ## [0.58.2] — 2026-04-12
 
 ### 버그 수정
