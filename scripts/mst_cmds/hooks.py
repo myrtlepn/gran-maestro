@@ -69,6 +69,93 @@ def cmd_hooks_post_skill(args):
         return 0
     return 0
 
+
+def _atomic_copy_file(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{dest.name}.tmp.", dir=str(dest.parent))
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        shutil.copyfile(src, tmp_path)
+        os.replace(tmp_path, dest)
+        try:
+            shutil.copymode(src, dest)
+        except OSError:
+            os.chmod(dest, src.stat().st_mode)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".mst-hook-version.tmp.", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def cmd_hooks_sync(args):
+    silent = bool(getattr(args, "silent", False))
+    try:
+        mst_script = _common._mst_script_path().resolve()
+        plugin_root = mst_script.parent.parent
+        plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+        plugin_json = load_json(plugin_json_path)
+        plugin_version = ""
+        if isinstance(plugin_json, dict):
+            version_value = plugin_json.get("version")
+            if isinstance(version_value, str):
+                plugin_version = version_value.strip()
+        if not plugin_version:
+            raise RuntimeError(f"invalid plugin version: {plugin_json_path}")
+
+        project_root = Path(os.getcwd()).resolve()
+        project_hooks_dir = project_root / ".claude" / "hooks"
+        version_stamp_path = project_hooks_dir / ".mst-hook-version"
+        current_version = ""
+        try:
+            current_version = version_stamp_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            current_version = ""
+
+        if current_version == plugin_version:
+            if not silent:
+                print(f"[hooks] up-to-date (v{plugin_version})")
+            return 0
+
+        source_hooks_dir = plugin_root / "hooks"
+        if not source_hooks_dir.is_dir():
+            raise RuntimeError(f"hooks source not found: {source_hooks_dir}")
+        source_files = sorted(path for path in source_hooks_dir.iterdir() if path.is_file())
+        if not source_files:
+            raise RuntimeError(f"hooks source empty: {source_hooks_dir}")
+
+        synced_files = 0
+        for src_file in source_files:
+            dest_file = project_hooks_dir / src_file.name
+            _atomic_copy_file(src_file, dest_file)
+            synced_files += 1
+
+        _atomic_write_text(version_stamp_path, f"{plugin_version}\n")
+        if not silent:
+            old_version = current_version or "none"
+            print(f"[hooks] synced {synced_files} files (v{old_version}→v{plugin_version})")
+    except Exception as exc:
+        reason = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
+        print(f"[hooks] warning: sync skipped ({reason})", file=sys.stderr)
+    return 0
+
+
 def _hooks_post_skill_continuation(completed_skill: str) -> None:
     """If the snapshot has returnTo, emit a mandatory continuation message."""
     try:
@@ -112,3 +199,6 @@ def register(subparsers):
     hooks_sub = hooks.add_subparsers(dest="subcommand")
     hooks_post_skill = hooks_sub.add_parser("post-skill")
     hooks_post_skill.set_defaults(func=cmd_hooks_post_skill)
+    hooks_sync = hooks_sub.add_parser("sync")
+    hooks_sync.add_argument("--silent", action="store_true")
+    hooks_sync.set_defaults(func=cmd_hooks_sync)

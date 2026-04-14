@@ -61,15 +61,22 @@ def cmd_workflow_run(args):
     return _cmd_workflow_run(args)
 
 
+BASE_DIR_OPTIONAL_COMMANDS = {("hooks", "sync")}
+
+
 def main():
     global BASE_DIR
-    BASE_DIR = find_base_dir()
-    set_base_dir(BASE_DIR)
 
     parser = build_parser()
     args = parser.parse_args()
 
     key = (args.command, getattr(args, "subcommand", None))
+    if key in BASE_DIR_OPTIONAL_COMMANDS:
+        BASE_DIR = None
+    else:
+        BASE_DIR = find_base_dir()
+        set_base_dir(BASE_DIR)
+
     fn = DISPATCH.get(key)
     if fn is None:
         parser.print_help()

@@ -109,6 +109,14 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 > ```
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 절대경로입니다.
 
+### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
+```
+
+플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
+
 ---
 
 ### Step 0: 세션 초기화

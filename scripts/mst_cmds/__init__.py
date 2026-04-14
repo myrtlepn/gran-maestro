@@ -202,6 +202,7 @@ DISPATCH = {
     ("preset", "diff"): preset.cmd_preset_diff,
     ("preset", "save"): preset.cmd_preset_save,
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
+    ("hooks", "sync"): hooks.cmd_hooks_sync,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
     ("dispatch", "preflight"): dispatch.cmd_dispatch_preflight,
     ("dispatch", "register"): dispatch.cmd_dispatch_register,
