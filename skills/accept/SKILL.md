@@ -168,7 +168,19 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
 5. **Phase 5 완료 처리**: `stitch_screens`의 `active` 항목 → `archived`로 변경; **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 5 done`; 실패 시 fallback으로 `current_phase`=5, `status`=`done` 직접 업데이트; 완료 알림
 > ⚠️ **CONTINUATION GUARD**: 서브스킬 반환 후 즉시 다음 Step 진행 (hook이 자동 강제).
 
-5.1. **워크플로우 상태 정리 (MANDATORY)**: Phase 5 완료 처리 직후, 워크플로우 상태를 비활성으로 전환한다. 이 호출이 누락되면 stop hook이 "Workflow active" 에러를 발생시킨다.
+5.1. **워크플로우 상태 정리 (MANDATORY)**: Phase 5 완료 처리 직후, `python3 {PLUGIN_ROOT}/scripts/mst.py state get --json` 결과의 `agile_loop_active`를 먼저 확인한 뒤 아래 분기로 실행한다.
+
+- `agile_loop_active=true`이면, 워크플로우를 끄지 말고 agile 복귀 상태로 복원:
+
+```bash
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+  --active true \
+  --skill mst:agile \
+  --req "{ACTIVE_REQ}" \
+|| echo "[mst:accept] warning: failed to restore agile workflow state" >&2
+```
+
+- `agile_loop_active!=true`이면, 기존처럼 워크플로우 비활성:
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
@@ -176,7 +188,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 || echo "[mst:accept] warning: failed to clear workflow state" >&2
 ```
 
-- 이 호출은 비차단(non-blocking)으로 처리한다: 실패 시 경고만 출력하고 워크플로우를 계속 진행한다.
+- 두 호출 모두 비차단(non-blocking)으로 처리한다: 실패 시 경고만 출력하고 워크플로우를 계속 진행한다.
 - `approve`의 `state set-workflow --active true` 호출과 대칭을 이룬다.
 
 5.5. **후속 REQ 활성화 (Dependency Unblock)**:

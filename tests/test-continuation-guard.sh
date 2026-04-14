@@ -233,6 +233,28 @@ assert_contains "workflow_active=true + next_auto=false includes continue guidan
 assert_not_contains "workflow_active=true + next_auto=false does not suggest next skill" 'Suggested next skill' "$output"
 
 cleanup
+write_state '{"workflow_active":false,"agile_loop_active":false,"current_skill":"","active_req":"REQ-627","iteration":1,"updated_at":"2026-04-14T00:00:00Z"}'
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "workflow_inactive_agile_loop_false exits 0" "0" "$STOP_EXIT"
+assert_empty "workflow_inactive_agile_loop_false -> allow pass_through" "$output"
+
+cleanup
+write_state '{"workflow_active":false,"current_skill":"mst:agile","agile_loop_active":true,"active_req":"REQ-xxx","iteration":5,"updated_at":"2026-04-14T00:00:00Z"}'
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "agile_resume_after_accept exits 0" "0" "$STOP_EXIT"
+assert_contains "agile_resume_after_accept -> AGILE-CONTINUE" "AGILE-CONTINUE" "$output"
+assert_contains "agile_resume_after_accept -> objective-check" "objective-check" "$output"
+
+cleanup
+write_state '{"workflow_active":false,"agile_loop_active":false,"current_skill":"","active_req":"REQ-627","iteration":2,"updated_at":"2026-04-14T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "standalone_accept_simulation exits 0" "0" "$STOP_EXIT"
+assert_empty "standalone_accept_simulation -> allow" "$output"
+
+cleanup
 write_state '{"workflow_active":false,"current_skill":"","active_req":"","iteration":0,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"

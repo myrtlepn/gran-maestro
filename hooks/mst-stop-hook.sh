@@ -512,7 +512,7 @@ BLOCK_COUNT="$(printf '%s' "$STATE_INFO" | cut -f13)"
 LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
 STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
 
-if [ "$WORKFLOW_ACTIVE" != "true" ]; then
+if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
   append_audit_entry "pass_through" "" "workflow_inactive"
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
   exit 0

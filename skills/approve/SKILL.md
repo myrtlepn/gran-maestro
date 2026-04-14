@@ -217,6 +217,7 @@ approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 
 `AUTO_MODE=true`이면 단건 프로토콜 진입 직후 workflow state를 기록한다 (non-blocking):
 
 ```bash
+# TODO(PLN-469 SHOULD): agile_loop_active 보존 검토
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:approve \
