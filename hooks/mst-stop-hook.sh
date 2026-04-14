@@ -292,7 +292,7 @@ extract_return_to() {
 
 contains_agile_text_question() {
   local text="$1"
-  printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요|요약하고[[:space:]]*계속|정리하고[[:space:]]*계속|컨텍스트.*길'
+  printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요|요약하고[[:space:]]*계속|정리하고[[:space:]]*계속|컨텍스트.*길|자연스러운[[:space:]]*단락|여기서[[:space:]]*(단락|끊|마무리|정지)|수동[[:space:]]*재호출|다시[[:space:]]*호출|세션[[:space:]]*교체|자연스럽게[[:space:]]*(멈|쉬|끊)'
 }
 
 emit_block_json() {

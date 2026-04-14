@@ -115,6 +115,10 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 ```
 
+직후에 `.claude/hooks/mst-stop-hook.sh` 파일 존재를 `Bash("test -f ...")`로 반드시 검증한다.
+- 파일이 존재하면 다음 단계로 계속 진행한다.
+- 파일이 여전히 없으면 `"[warn] stop hook 미설치 — 자발 정지 가드가 동작하지 않을 수 있음"` 경고를 출력하되 agile 진입은 계속 허용한다 (graceful fallback, 에러 아님).
+
 플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
 
 ---
@@ -1207,3 +1211,4 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "이번 스프린트는 바쁘니 스티어링 해당이어도 Step 3을 건너뛰자." | 확인 증거: 스티어링 해당 시점마다 `[MANDATORY][STEERING-DUE]` 로그와 Step 3 실행 기록이 존재.
 - 합리화 패턴: "스티어링 미해당이지만 한 번 더 계속 여부를 묻자." | 확인 증거: 미해당 스프린트 로그에서 `"계속할까요?"`, `"멈출까요?"` 질문이 0건이고 Step 2.2.1로 즉시 진행한다.
 - 합리화 패턴: "컨텍스트 한계에 도달했으니 체인을 건너뛰고 직접 codex로 끝내자." | 확인 증거: 체인 우회가 필요한 경우 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 사용 로그가 `auto-decisions.md` 또는 `retrospective.md`에 남아있어야 한다.
+- 합리화 패턴: "컨텍스트가 길어졌으니/자연스러운 단락이니 여기서 끊자." | 확인 증거: `mst-stop-hook.sh`가 해당 턴을 block으로 판정해야 하며, LLM은 block 수신 시 즉시 다음 tool call을 emit한다(정지·요약·확인 질문 금지).
