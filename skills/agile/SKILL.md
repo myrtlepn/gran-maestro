@@ -1212,3 +1212,5 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "스티어링 미해당이지만 한 번 더 계속 여부를 묻자." | 확인 증거: 미해당 스프린트 로그에서 `"계속할까요?"`, `"멈출까요?"` 질문이 0건이고 Step 2.2.1로 즉시 진행한다.
 - 합리화 패턴: "컨텍스트 한계에 도달했으니 체인을 건너뛰고 직접 codex로 끝내자." | 확인 증거: 체인 우회가 필요한 경우 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 사용 로그가 `auto-decisions.md` 또는 `retrospective.md`에 남아있어야 한다.
 - 합리화 패턴: "컨텍스트가 길어졌으니/자연스러운 단락이니 여기서 끊자." | 확인 증거: `mst-stop-hook.sh`가 해당 턴을 block으로 판정해야 하며, LLM은 block 수신 시 즉시 다음 tool call을 emit한다(정지·요약·확인 질문 금지).
+- 합리화 패턴: "Sprint 경계에서 WIP/stash/squash 부담을 이유로 agile update --status paused를 호출해 루프를 종료한다." | 확인 증거: `MST_AGILE_PAUSE_AUTHORIZED=1` 또는 `--user-requested` 플래그 없이 active→paused 전이를 시도하면 mst.py가 exit≠0으로 차단한다. 해당 호출 0건 또는 차단 로그 존재.
+- 합리화 패턴: "Sprint 간 '자연스러운 단락'이라며 paused 상태 전이 명령으로 정지를 달성한다." | 확인 증거: stop-hook이 `[CRITICAL][SELF-PAUSE-DETECTED]` 마커로 block을 재-emit하고, LLM은 block 수신 즉시 다음 tool call을 emit한다 (상태 전이 명령 재호출 금지).

@@ -304,8 +304,25 @@ def cmd_agile_update(args):
 
     changed_fields = {}
     if args.status is not None:
-        session["status"] = str(args.status)
-        changed_fields["status"] = str(args.status)
+        new_status = str(args.status)
+        current_status = session.get("status")
+        auto_mode = bool(session.get("auto_mode", False))
+        if current_status == "active" and new_status == "paused" and auto_mode:
+            authorized = (
+                os.environ.get("MST_AGILE_PAUSE_AUTHORIZED") == "1"
+                or getattr(args, "user_requested", False)
+            )
+            if not authorized:
+                print(
+                    "Error: 자발 정지 시도 차단 — AUTO_MODE sprint loop가 active인 상태에서 "
+                    "권한 플래그 없이 paused로 전환할 수 없습니다. "
+                    "사용자 직접 요청인 경우 --user-requested 또는 "
+                    "MST_AGILE_PAUSE_AUTHORIZED=1 환경변수를 설정하세요.",
+                    file=sys.stderr,
+                )
+                return 1
+        session["status"] = new_status
+        changed_fields["status"] = new_status
     if args.current_sprint is not None:
         if args.current_sprint < 0:
             print("Error: current_sprint must be >= 0", file=sys.stderr)
@@ -771,6 +788,8 @@ def register(subparsers):
     agile_update.add_argument("--current-sprint", type=int)
     agile_update.add_argument("--steering-every", type=int)
     agile_update.add_argument("--objective-version", type=int)
+    agile_update.add_argument("--user-requested", action="store_true",
+        help="사용자가 직접 요청한 pause 전환임을 표시 (LLM 자발 정지 방지 게이트 우회)")
     agile_update.add_argument("--json", action="store_true")
 
     agile_result = agile_sub.add_parser("result")

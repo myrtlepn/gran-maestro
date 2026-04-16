@@ -295,6 +295,14 @@ contains_agile_text_question() {
   printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요|요약하고[[:space:]]*계속|정리하고[[:space:]]*계속|컨텍스트.*길|자연스러운[[:space:]]*단락|여기서[[:space:]]*(단락|끊|마무리|정지)|수동[[:space:]]*재호출|다시[[:space:]]*호출|세션[[:space:]]*교체|자연스럽게[[:space:]]*(멈|쉬|끊)'
 }
 
+contains_self_pause_rationalization() {
+  local text="$1"
+  if printf '%s' "$text" | grep -E -i -q 'stash[^[:cntrl:]]{0,20}squash[^[:cntrl:]]{0,20}부담|반복[[:space:]]*stash|paused로[[:space:]]*전환|명시적으로[[:space:]]*paused|Sprint[^[:cntrl:]]{0,40}paused[^[:cntrl:]]{0,20}boundary|sprint[[:space:]]*[0-9]+[[:space:]]*boundary'; then
+    return 0
+  fi
+  return 1
+}
+
 emit_block_json() {
   local reason="$1"
   python3 - "$reason" <<'PY'
@@ -572,6 +580,26 @@ fi
 
 AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
 ${STDIN_RAW}"
+
+if [ "$AGILE_LOOP_ACTIVE" = "true" ] && [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ]; then
+  SELF_PAUSE_CONTEXT="${LAST_ASSISTANT_MESSAGE}
+${STDIN_RAW}"
+  if contains_self_pause_rationalization "$SELF_PAUSE_CONTEXT"; then
+    NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
+    REASON="[CRITICAL][SELF-PAUSE-DETECTED] 자발 정지 시도 감지: 합리화 텍스트(stash/squash 부담, paused 전환, Sprint boundary 등)가 발견됨."
+    REASON="$REASON Sprint loop가 active인 상태에서 자발적 상태 전이 명령(예: 'mst.py agile update --status paused')을 호출해 루프를 종료하려는 행위는 금지된다."
+    REASON="$REASON 상태 전이 명령을 호출하지 말고 즉시 다음 sprint step의 tool call을 emit하라."
+    REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
+    if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
+      REASON="[자동 중단] $REASON Escalate to user for steering."
+    fi
+    PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
+    append_block_audit_entry "$REASON"
+    emit_block_json "$REASON"
+    debug_log "block" "reason=self_pause_rationalization_detected current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
+    exit 0
+  fi
+fi
 
 if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ] || [ "$STEERING_DISABLED" = "true" ]; } && contains_agile_text_question "$AGILE_ALLOW_CONTEXT"; then
   NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
