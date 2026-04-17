@@ -195,14 +195,22 @@ total_cost_extra = 0.90 × base_input × 3.0 MTok × 10회
 
 ### 옵션 A: 1시간 TTL 명시 캐시 사용
 
-**설명**: Anthropic API의 `cache_control.ttl=3600` 파라미터를 사용하여 캐시 TTL을 1시간으로 명시 설정한다. 출처: [platform.claude.com/docs prompt-caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+**설명**: Claude Code 환경 변수(`ENABLE_PROMPT_CACHING_1H=true`) 또는 Anthropic API의 `cache_control.ttl=1h` 파라미터를 사용하여 캐시 TTL을 1시간으로 설정한다. 출처: [platform.claude.com/docs prompt-caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+
+**REQ-634 조사 결과 (2026-04-17)**: Claude Code가 `cache_control.ttl=1h`를 **사용자 레벨에서 환경 변수 경로로 노출함**이 확인됨 (상세: `docs/analysis/2026-04-cache-control-investigation.md`).
+
+```bash
+# Pro plan / API Key 사용자: ~/.zshrc 또는 ~/.bashrc 에 추가
+export ENABLE_PROMPT_CACHING_1H=true
+# Max plan 구독자는 기본 1h TTL 활성화 상태 — 별도 설정 불필요
+```
 
 | 항목 | 내용 |
 |------|------|
-| **장점** | TTL 만료 빈도 12배 감소 (300초→3600초). cli_large_task_ms (30분) 케이스 완전 해소. 추가 구현 없이 API 파라미터만 변경으로 즉시 효과. |
-| **단점** | Claude Code CLI는 내부적으로 자동 캐시를 사용하며 현재 TTL 직접 제어 불가. API 직접 호출 패턴이 필요하거나 Claude Code SDK의 캐시 설정 인터페이스가 노출되어야 한다. |
-| **예상 절감률** | 시나리오 1~3: **90% 이상** (5분 TTL로 발생했던 cache miss의 대부분 제거). 시나리오 4 (agile 30분 루프): **약 95%** |
-| **구현 복잡도** | **중간** — Claude Code에서 캐시 TTL을 제어하는 공식 경로가 있다면 설정 추가만으로 가능. 없다면 `mst.py` 또는 스킬에서 Anthropic SDK 직접 호출 패턴 도입 필요. |
+| **장점** | TTL 만료 빈도 12배 감소 (300초→3600초). cli_large_task_ms (30분) 케이스 완전 해소. 환경 변수 1줄 추가만으로 즉시 적용 가능 (REF-009 sliding TTL 정책 근거). |
+| **단점** | 1h TTL 캐시 쓰기 단가 프리미엄 발생 (5m 대비 약 2×, 정확한 배율은 [anthropic.com/pricing](https://www.anthropic.com/pricing) 교차 확인 필요). plugin hook/settings.json 경로로는 직접 제어 불가 — 사용자가 환경 변수를 직접 설정해야 함. |
+| **예상 절감률** | 시나리오 1~3: **90% 이상** (5분 TTL로 발생했던 cache miss의 대부분 제거). 시나리오 4 (agile 30분 루프): write 프리미엄 감안 후 **약 80% 이상** 순절감. |
+| **구현 복잡도** | **낮음** — 환경 변수 설정만으로 즉시 적용 가능 (코드 변경 불필요). Anthropic SDK 직접 호출 경로는 별도 구현 필요. |
 
 ---
 
@@ -229,6 +237,12 @@ total_cost_extra = 0.90 × base_input × 3.0 MTok × 10회
 | **단점** | Cache miss 횟수는 동일하므로 절감에 한계. 컨텍스트 축소가 품질(분석 정확도, 코드 이해도)에 영향을 줄 수 있음. 지속적인 프롬프트 관리 오버헤드. |
 | **예상 절감률** | prefix 크기 50% 감소 시 cache miss 비용 **50% 절감**. (예: 시나리오 4 Opus $405 → $202.50). 절감률은 prefix 크기 감소율에 정비례. |
 | **구현 복잡도** | **낮음** — `CLAUDE.md`, 스킬 SKILL.md 내 시스템 프롬프트, `skills/*/SKILL.md` 컨텍스트 전달 부분 수정. 코드 변경 없음. |
+
+---
+
+### ~~옵션 D~~: keep-alive polling — 불가 판정
+
+> **⚠️ 옵션 D(keep-alive polling) 불가 사유**: 원래 제안은 "메인 세션이 idle 상태일 때 270초 주기로 dummy API 호출을 전송하여 cache TTL을 sliding window로 유지"하는 방식이었다. 그러나 Claude Code hook 구조가 **이벤트 기반**이며 시간 기반 polling trigger를 지원하지 않아 표준 경로로 구현 불가함이 확인되었다. 지원되는 hook 이벤트는 SessionStart / Stop / UserPromptSubmit / PreToolUse / PostToolUse / PreCompact 등으로 한정되며, 주기적 타이머 hook은 없다. 근거: REF-009 (sliding TTL 정책 확인), PLN-476 (keep-alive 가설 검증 후 옵션 A 경로로 단순화). 대신 옵션 A(환경 변수 1h TTL)를 단기 완화 조치로 우선 적용한다.
 
 ---
 
@@ -269,3 +283,18 @@ total_cost_extra = 0.90 × base_input × 3.0 MTok × 10회
 ### 정책 변경 가능성
 
 모든 수치는 **2026-04-17 기준**으로 고정된다. REF-002(github.com/anthropics/claude-code/issues/46829)가 보여주듯 Anthropic은 TTL 정책을 예고 없이 변경한 선례가 있다. 본 분석 이후 캐시 정책 재변경 시 시나리오 비용 및 완화 옵션 효과를 재검토해야 한다.
+
+---
+
+## 지금 시점 권장 조치
+
+> **[2026-04-17 기준]** Pro plan / API Key 사용자는 쉘 프로파일에 `export ENABLE_PROMPT_CACHING_1H=true`를 즉시 추가하여 1h TTL을 활성화하라 — Max plan 구독자는 기본 활성화 상태이며, Gran Maestro plugin hook 경로로는 TTL 제어가 불가하므로 환경 변수 설정이 현재 무코드 적용의 유일한 경로다 (상세 fallback 분석: `docs/analysis/2026-04-cache-control-investigation.md`).
+
+---
+
+## 참고 자료 (REF)
+
+| REF ID | 내용 | URL |
+|--------|------|-----|
+| REF-009 | Anthropic prompt cache sliding TTL — refresh on each access (5m 기본, 1h 선택) | https://platform.claude.com/docs/en/build-with-claude/prompt-caching |
+| REF-002 | Claude Code cache TTL regression 2026-03 (1h→5m silent downgrade) | https://github.com/anthropics/claude-code/issues/46829 |
