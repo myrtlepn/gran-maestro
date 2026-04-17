@@ -973,6 +973,7 @@ Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
   - `d3.cynefin_skip=["simple","chaotic"]`
   - `d3.light_mode=true`
   - `d3.ambiguity_threshold=0.2`
+  - `d3.sprint_plan_threshold=0.15` (agile 컨텍스트에서 sprint-plan D3 게이트에 사용, AD-RV-001)
   - `d3.max_escalation_retries=3`
   - `pac_trace.enabled=true`
 - `d3.enabled != true`면 이 단계 전체를 skip하고 Step 4로 진행한다.
@@ -1012,15 +1013,33 @@ Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
 - 판정 지표:
   - `ambiguous_count` = `is_ambiguous=true`인 AC 개수
   - `ambiguity_ratio = ambiguous_count / total_ac`
-  - 임계치: `d3.ambiguity_threshold`
+  - 임계치:
+    - `agile_context_active=true`이면 `d3.sprint_plan_threshold` 우선 사용 (기본 0.15, AD-RV-001 — sprint-plan은 objective detail보다 관대하게 허용)
+    - 그 외에는 기존 `d3.ambiguity_threshold` 사용 (기본 0.2)
 - `ambiguity_ratio > threshold`이면 request 진입을 차단하고 아래를 수행한다:
   1. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/d3-findings.md` 생성
   2. 모호 AC 목록 + 유형 + 분기점 + 보완 제안 기록
   3. AC 수정 후 Step 3.9를 재실행 (회귀)
-- 사용자 override는 허용하되 **사유 기록이 필수**다.
-  - `AUTO_MODE=false`: `AskUserQuestion`으로 stop+confirm
-  - `AUTO_MODE=true`: override 사유를 `auto-decisions.md`에 기록한 경우에만 진행
 - 임계치 이하이면 D3 통과로 간주하고 Step 4로 진행한다.
+
+#### 3.9.4: 자동 재지시 루프 (AD-RV-003)
+
+임계치 초과 판정 시 사용자 에스컬레이션 대신 자동 재지시 루프를 수행한다. 이 루프는 `agile_context_active=true`일 때만 강제 적용되며, 일반 plan에서도 동일 로직을 재사용할 수 있다.
+
+1. `d3-findings.md` 기록 후 plan 초안 보완을 위한 재지시 메시지 생성:
+   - "모호 AC 목록과 보완 제안을 반영해 plan 초안을 수정한 뒤 Step 3.9를 재실행하세요."
+2. 재지시 루프 카운터 `d3_redirect_retries`를 증가시키고 3.9.2를 재실행한다.
+3. `d3_redirect_retries > d3.max_escalation_retries` (기본 3)가 되면 루프 종료:
+   - warning 로그 출력: `"[D3 재지시 소진] {max} 회 재시도 후에도 임계치 초과. 현재 plan으로 진행합니다."`
+   - `mst.py agile known-issues add` 호출로 known issue 등록 (agile_context_active=true일 때만):
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+       --title "D3 sprint-plan 재지시 소진" \
+       --detail "PLN-{NNN} — {max} 회 재시도 후 모호도 임계치 초과. 수동 검토 필요." \
+       --severity medium
+     ```
+   - `d3_redirect_exhausted=true` 플래그를 plan.json에 기록
+4. 사용자 에스컬레이션 금지 — 자동 복구 루프만 수행한다 (AD-RV-003, AD-INT-002와 일관).
 
 ### Step 4: plan.md 초안 제시, 저장, 요청 연계
 

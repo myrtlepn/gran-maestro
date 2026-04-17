@@ -617,6 +617,7 @@
     ],
     "light_mode": true,
     "ambiguity_threshold": 0.2,
+    "sprint_plan_threshold": 0.15,
     "objective_detail_threshold": 0.1,
     "max_escalation_retries": 3
   },
