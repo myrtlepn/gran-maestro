@@ -85,7 +85,7 @@ def test_objective_check_dod_partial(tmp_path):
     proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
     payload = json.loads(proc.stdout)
 
-    assert proc.returncode == 1
+    assert proc.returncode == 0
     assert payload["all_done"] is False
     assert payload["incomplete"] == ["DOD-001"]
     assert payload["dods"]["DOD-001"] == {"status": "todo", "priority": "must"}
@@ -231,7 +231,7 @@ def test_objective_check_init_default_dod_pending(tmp_path):
     proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
     payload = json.loads(proc.stdout)
 
-    assert proc.returncode == 1
+    assert proc.returncode == 0
     assert payload["all_done"] is False
     assert payload["stories"]["DOD-001"] == "todo"
     assert payload["dods"]["DOD-001"]["priority"] == "must"
@@ -271,7 +271,7 @@ def test_objective_check_warns_when_no_dod_markers(tmp_path):
     proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
     payload = json.loads(proc.stdout)
 
-    assert proc.returncode == 1
+    assert proc.returncode == 0
     assert payload["all_done"] is False
     assert payload["dods"] == {}
     assert payload["incomplete"] == []

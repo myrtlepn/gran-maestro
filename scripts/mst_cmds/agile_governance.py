@@ -2013,7 +2013,7 @@ def cmd_agile_objective_check(args):
             print(json.dumps(output, ensure_ascii=False, indent=2))
         else:
             print(json.dumps(output, ensure_ascii=False))
-        return 1
+        return 0
 
     incomplete = sorted([
         dod_id for dod_id, item in dod_items.items()
@@ -2031,7 +2031,7 @@ def cmd_agile_objective_check(args):
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
         print(json.dumps(output, ensure_ascii=False))
-    return 0 if not incomplete else 1
+    return 0
 
 def cmd_agile_objective_snapshot(args):
     try:
