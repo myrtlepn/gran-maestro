@@ -619,6 +619,8 @@
     "ambiguity_threshold": 0.2,
     "sprint_plan_threshold": 0.15,
     "objective_detail_threshold": 0.1,
+    "drift_matching_threshold_aligned": 0.8,
+    "drift_matching_threshold_warning": 0.5,
     "max_escalation_retries": 3
   },
   "pac_trace": {

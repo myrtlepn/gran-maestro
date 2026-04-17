@@ -482,6 +482,16 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
 
 ##### 2.2.0.8 기획-구현 정합성 점검 (MANDATORY)
 
+##### 2.2.0.8-pre: drift-report.json 신뢰 소스 우선 참조 (AD-RV-004)
+
+본 단계의 3축 판정을 수행하기 전, `.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT-1:02d}/drift-report.json`이 존재하면 해당 파일의 `classification` 필드를 우선 사용한다.
+
+- `classification == "aligned"`: alignment 판정을 **aligned**로 확정, 3축 판정 skip.
+- `classification == "drift_warning"`: **drift_warning**으로 확정, 기존 drift 카운터 경로로 진입.
+- `classification == "objective_stale"`: **objective_stale**로 확정, 비상 스티어링 강제 진입.
+- `classification == "pending"`: MVP skeleton 상태 -> 기존 3축 판정으로 fallback.
+- 파일 미존재 또는 파싱 실패: 기존 3축 판정으로 fallback (graceful).
+
 **목적**: 2.2.0.7가 "코드 통합 부채"를 잡는다면, 본 단계는 "**기획(objective.md) ↔ 구현(누적 변경)**의 정합성"을 점검한다. slide-craft 재발의 또 다른 축인 "DoD가 코드의 현실과 어긋나는 기획 노후화"를 감지한다.
 
 `CURRENT_SPRINT <= 1`이면 직전 데이터가 없으므로 본 단계를 skip하고 2.2.1로 진행한다.

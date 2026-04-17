@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds.agile_governance import _generate_drift_report_skeleton
 from scripts.mst_cmds._common import (
     TYPE_DIRS,
     _agi_events_path,
@@ -502,6 +503,19 @@ def cmd_agile_result(args):
                 links["req"].append(req_id)
         links["updated_at"] = _now_iso()
         save_json(links_path, links)
+
+    # drift report skeleton 생성 (status in [done, failed]일 때만)
+    if args.status in ("done", "failed"):
+        try:
+            _generate_drift_report_skeleton(
+                agi_id=agi_id,
+                sprint_num=args.sprint,
+                source_plan=getattr(args, "pln", None),
+                dod_ref=getattr(args, "dod_ref", None),
+                original_dod_text=None,  # MVP에서는 None, 향후 확장
+            )
+        except Exception as exc:
+            print(f"[warn] drift-report hook 실패: {exc}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

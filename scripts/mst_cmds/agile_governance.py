@@ -60,6 +60,81 @@ def _normalize_dod_id(value: str) -> str:
         raise ValueError(f"Invalid DoD id: {value}")
     return dod_id.upper()
 
+def _generate_drift_report_skeleton(
+    agi_id: str,
+    sprint_num: int,
+    source_plan: Optional[str] = None,
+    dod_ref: Optional[str] = None,
+    original_dod_text: Optional[str] = None,
+) -> Optional[Path]:
+    """Sprint 완료 시 drift-report.json skeleton 생성.
+
+    LLM 실제 역추정은 MVP에서 연결하지 않고, pending 플레이스홀더로 남김.
+    git 커맨드 실패 시 commits/changed_files는 빈 배열로 graceful degrade.
+    return Path on success, None on graceful fail.
+    """
+    try:
+        import subprocess
+
+        sprints_dir_resolver = globals().get("_agi_sprints_dir")
+        sprints_dir = (
+            sprints_dir_resolver(agi_id)
+            if callable(sprints_dir_resolver)
+            else _agi_session_dir(agi_id) / "sprints"
+        )
+        sprint_dir = sprints_dir / f"S{sprint_num:02d}"
+        sprint_dir.mkdir(parents=True, exist_ok=True)
+        report_path = sprint_dir / "drift-report.json"
+
+        # git commit 수집 (최근 10개 fallback)
+        commits = []
+        changed_files = []
+        try:
+            result = subprocess.run(
+                ["git", "log", "--pretty=%H", "-10"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                commits = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "HEAD~1..HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                changed_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except Exception:
+            pass
+
+        payload = {
+            "sprint": f"S{sprint_num:02d}",
+            "dod_ref": dod_ref,
+            "classification": "pending",
+            "matching_score": None,
+            "inferred_intent": None,
+            "original_dod_text": original_dod_text,
+            "source_plan": source_plan,
+            "evidence": {
+                "commits": commits,
+                "changed_files": changed_files,
+            },
+            "generated_at": _now_iso(),
+            "todo": "LLM intent inference not yet wired",
+        }
+        report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return report_path
+    except Exception as exc:
+        print(f"[warn] drift-report skeleton 생성 실패: {exc}", file=sys.stderr)
+        return None
+
 _RECALL_DEFAULT_COOLDOWN_RATIO = 0.10
 
 _RECALL_DEFAULT_CAP_RATIO = 0.10
