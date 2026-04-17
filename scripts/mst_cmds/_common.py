@@ -239,6 +239,26 @@ def _workflow_state_load(path: Path):
         return payload
     return None
 
+def is_pid_alive(pid) -> bool:
+    """Return True iff the given PID is currently alive.
+
+    Returns False on:
+      - TypeError / ValueError (pid cannot be cast to int)
+      - OSError (pid is not accessible or dead)
+    Never raises.
+    """
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid_int <= 0:
+        return False
+    try:
+        os.kill(pid_int, 0)
+        return True
+    except (OSError, PermissionError):
+        return False
+
 def read_workflow_state_auto_mode(
     skill_name: str,
     expected_source_id: Optional[str] = None,
@@ -255,7 +275,7 @@ def read_workflow_state_auto_mode(
       3) when expected_source_id is provided:
          payload.next_action.source_id == expected_source_id
       4) payload.updated_at within ttl_minutes of now (UTC)
-      5) PPID liveness: os.kill(pid, 0) does not raise
+      5) PPID liveness: is_pid_alive(pid) == True
 
     On ANY failure (missing file, JSON parse error, key missing, gate fail,
     liveness fail) -> return None (never raise).
@@ -302,11 +322,8 @@ def read_workflow_state_auto_mode(
             return None
 
         state_pid = int(state_path.stem.rsplit("-", 1)[1])
-        if state_pid not in (0, os.getpid()):
-            try:
-                os.kill(state_pid, 0)
-            except (OSError, ValueError):
-                return None
+        if state_pid not in (0, os.getpid()) and not is_pid_alive(state_pid):
+            return None
 
         if "auto_mode" not in next_action:
             return None
@@ -363,6 +380,24 @@ def _queue_build_entry(data: dict) -> dict:
         "error": None,
         "result": None,
     }
+
+def _validate_enqueue_entry(entry: dict) -> None:
+    """auto=true인 entry가 args에 -a/--auto 토큰을 포함하는지 검증."""
+    if not isinstance(entry, dict):
+        return
+    auto = bool(entry.get("auto", False))
+    if not auto:
+        return
+    args = entry.get("args", "") or ""
+    if not isinstance(args, str):
+        args = str(args)
+    tokens = args.split()
+    if "-a" in tokens or "--auto" in tokens:
+        return
+    raise ValueError(
+        "queue_enqueue: auto=true entry는 args에 '-a' 또는 '--auto' 토큰을 포함해야 합니다 "
+        f"(skill={entry.get('skill')!r}, args={args!r})"
+    )
 
 _WINDOWS_LOCK_BYTES = 0x7FFFFFFF
 
@@ -439,6 +474,7 @@ def _queue_compact(mutator):
             _unlock(f)
 
 def queue_enqueue(data: dict) -> dict:
+    _validate_enqueue_entry(data)
     entry = _queue_build_entry(data)
     path = _queue_path()
     line = _compact_json(entry) + "\n"

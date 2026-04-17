@@ -16,6 +16,10 @@ argument-hint: ""
 - `.gran-maestro/pending.ndjson` queue에서 정확히 **한 개**의 action만 pop하여 실행한다.
 - AUTO_MODE 판정은 queue entry의 `auto` 필드와 `args` 내 `-a` 플래그를 그대로 사용한다. 재판단 금지.
 
+### 경로 우선순위 (MANDATORY)
+
+resume 경로는 **queue entry를 SSoT**로 사용합니다. plan.json 또는 tmp/mst-state-{PPID}.json의 `next_action.auto_mode` 등을 fallback으로 읽어 args를 재조합하지 **않습니다**. 자율 모드 의도는 enqueue 시점에 queue entry의 `auto` 필드와 `args` 내 `-a` 토큰으로 함께 표현되어야 하며, 이 불변 계약은 `scripts/mst_cmds/_common.py::queue_enqueue`가 강제합니다 (REQ-639 T01 참조).
+
 ### Exit
 
 - 한 action의 Skill 호출이 완료되면 `complete` 또는 `fail`로 queue 상태를 확정한 뒤 **정상 종료**한다.

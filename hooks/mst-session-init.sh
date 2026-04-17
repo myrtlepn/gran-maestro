@@ -166,25 +166,63 @@ check_hook_version_mismatch() {
 }
 
 cleanup_stale_markers() {
+  local tmp_dir my_ppid state_file pid_str
+  tmp_dir="${MST_TMP}"
+
   rm -f \
-    "${MST_TMP}/mst-call-stack-"*.json \
-    "${MST_TMP}/mst-call-stack-"*.json.tmp \
-    "${MST_TMP}/mst-pending-continuation-"* \
-    "${MST_TMP}/mst-pending-continuation-"*.tmp \
-    "${MST_TMP}/mst-next-action-"*.json \
-    "${MST_TMP}/mst-next-action-"*.json.tmp \
-    "${MST_TMP}/mst-next-action-count-"* \
-    "${MST_TMP}/mst-next-action-count-"*.tmp \
-    "${MST_TMP}/mst-next-action-state-"* \
-    "${MST_TMP}/mst-next-action-state-"*.tmp \
-    "${MST_TMP}/mst-stop-hook-count-"* \
-    "${MST_TMP}/mst-stop-hook-count-"*.tmp \
-    "${MST_TMP}/mst-hook-debug-"*.log \
-    "${MST_TMP}/mst-hook-check-done-"* \
-    "${MST_TMP}/mst-transcript-"*.path \
-    "${MST_TMP}/mst-state-"*.json \
-    "${MST_TMP}/mst-state-"*.json.tmp \
+    "${tmp_dir}/mst-call-stack-"*.json \
+    "${tmp_dir}/mst-call-stack-"*.json.tmp \
+    "${tmp_dir}/mst-pending-continuation-"* \
+    "${tmp_dir}/mst-pending-continuation-"*.tmp \
+    "${tmp_dir}/mst-next-action-"*.json \
+    "${tmp_dir}/mst-next-action-"*.json.tmp \
+    "${tmp_dir}/mst-next-action-count-"* \
+    "${tmp_dir}/mst-next-action-count-"*.tmp \
+    "${tmp_dir}/mst-next-action-state-"* \
+    "${tmp_dir}/mst-next-action-state-"*.tmp \
+    "${tmp_dir}/mst-stop-hook-count-"* \
+    "${tmp_dir}/mst-stop-hook-count-"*.tmp \
+    "${tmp_dir}/mst-hook-debug-"*.log \
+    "${tmp_dir}/mst-hook-check-done-"* \
+    "${tmp_dir}/mst-transcript-"*.path \
     2>/dev/null || true
+
+  # PLN-479 T02: multi-terminal 시 타 세션 state 파괴 방지
+  # 자기 PPID 및 liveness 없는 PPID의 state만 삭제, 살아있는 타 PPID는 보존
+  my_ppid="${PPID}"
+  for state_file in "${tmp_dir}/mst-state-"*.json; do
+    [ -e "$state_file" ] || continue
+
+    # 파일명에서 PID 추출: mst-state-12345.json -> 12345
+    pid_str="${state_file##*mst-state-}"
+    pid_str="${pid_str%.json}"
+
+    # 숫자 검증
+    case "$pid_str" in
+      ''|*[!0-9]*)
+        # 비정상 파일명은 안전하게 삭제
+        rm -f "$state_file" 2>/dev/null || true
+        continue
+        ;;
+    esac
+
+    # 자기 PPID면 삭제 (새 세션 시작이므로 이전 마커 정리)
+    if [ "$pid_str" = "$my_ppid" ]; then
+      rm -f "$state_file" 2>/dev/null || true
+      continue
+    fi
+
+    # liveness 체크: kill -0 성공이면 살아있음
+    if kill -0 "$pid_str" 2>/dev/null; then
+      # 살아있는 타 PPID - 보존
+      continue
+    fi
+
+    # 좀비 PPID - 삭제
+    rm -f "$state_file" 2>/dev/null || true
+  done
+
+  # TODO([PLUGIN-CACHE-SYNC]): accept 단계에서 ~/.claude/plugins/cache/.../hooks/mst-session-init.sh도 동기화
 
   debug_log "session_init_tmp_cleanup" "tmp_dir=$MST_TMP"
 }

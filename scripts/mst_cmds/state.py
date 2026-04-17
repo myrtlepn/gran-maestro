@@ -116,15 +116,22 @@ def cmd_state_set_workflow(args):
         if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
             na = payload.get("next_action", {})
             if isinstance(na, dict) and na.get("expected_skill"):
+                auto_flag = bool(na.get("auto_mode", na.get("auto", False)))
+                args_base = str(na.get("args", "") or "").strip()
+                queue_args = args_base
+                if auto_flag:
+                    args_tokens = args_base.split()
+                    if "-a" not in args_tokens and "--auto" not in args_tokens:
+                        queue_args = f"{args_base} -a".strip()
                 try:
                     queue_enqueue(
                         {
                             "skill": str(na.get("expected_skill", "")),
-                            "args": "",
+                            "args": queue_args,
                             "source_skill": str(na.get("source_skill", "")),
                             "source_id": str(na.get("source_id", "")),
                             "resource_id": str(na.get("source_id", "")),
-                            "auto": bool(na.get("auto_mode", na.get("auto", False))),
+                            "auto": auto_flag,
                         }
                     )
                 except Exception as queue_exc:

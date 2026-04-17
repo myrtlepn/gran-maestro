@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
@@ -253,3 +255,73 @@ def test_parse_and_list_status(tmp_path, monkeypatch):
     assert [item["id"] for item in done_items] == [first["id"]]
     assert [item["id"] for item in running_items] == [second["id"]]
     assert len(all_items) == 2
+
+
+def test_enqueue_rejects_auto_without_dash_a(tmp_path, monkeypatch):
+    workspace = _make_workspace(tmp_path)
+    monkeypatch.chdir(workspace)
+    mst = _load_mst_module()
+    state_base_dir = workspace / ".gran-maestro"
+    monkeypatch.setattr(mst._common, "_skill_state_base_dir", lambda: state_base_dir)
+
+    with pytest.raises(ValueError, match="queue_enqueue: auto=true entry"):
+        mst.queue_enqueue(
+            {
+                "skill": "mst:request",
+                "args": "REQ-001",
+                "auto": True,
+            }
+        )
+
+    pending_path = state_base_dir / "pending.ndjson"
+    assert not pending_path.exists() or pending_path.read_text(encoding="utf-8").strip() == ""
+
+
+def test_enqueue_accepts_dash_a(tmp_path, monkeypatch):
+    workspace = _make_workspace(tmp_path)
+    monkeypatch.chdir(workspace)
+    mst = _load_mst_module()
+    state_base_dir = workspace / ".gran-maestro"
+    monkeypatch.setattr(mst._common, "_skill_state_base_dir", lambda: state_base_dir)
+
+    entry = mst.queue_enqueue(
+        {
+            "skill": "mst:request",
+            "args": "-a REQ-001",
+            "auto": True,
+        }
+    )
+
+    pending_path = state_base_dir / "pending.ndjson"
+    lines = pending_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+
+    persisted = json.loads(lines[0])
+    assert persisted["id"] == entry["id"]
+    assert persisted["auto"] is True
+    assert persisted["args"] == "-a REQ-001"
+
+
+def test_enqueue_non_auto_allowed(tmp_path, monkeypatch):
+    workspace = _make_workspace(tmp_path)
+    monkeypatch.chdir(workspace)
+    mst = _load_mst_module()
+    state_base_dir = workspace / ".gran-maestro"
+    monkeypatch.setattr(mst._common, "_skill_state_base_dir", lambda: state_base_dir)
+
+    entry = mst.queue_enqueue(
+        {
+            "skill": "mst:request",
+            "args": "REQ-001",
+            "auto": False,
+        }
+    )
+
+    pending_path = state_base_dir / "pending.ndjson"
+    lines = pending_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+
+    persisted = json.loads(lines[0])
+    assert persisted["id"] == entry["id"]
+    assert persisted["auto"] is False
+    assert persisted["args"] == "REQ-001"

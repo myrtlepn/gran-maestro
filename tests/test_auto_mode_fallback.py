@@ -150,3 +150,15 @@ def test_source_id_none_allowed(tmp_path, monkeypatch):
     result = _common.read_workflow_state_auto_mode("mst:accept")
 
     assert result is True
+
+
+def test_is_pid_alive_helper():
+    from scripts.mst_cmds._common import is_pid_alive
+    import os
+
+    assert is_pid_alive(os.getpid()) is True, "자기 PID는 alive"
+    assert is_pid_alive(999999999) is False, "매우 큰 PID는 not alive"
+    assert is_pid_alive(0) is False, "PID 0 거부"
+    assert is_pid_alive(-1) is False, "음수 PID 거부"
+    assert is_pid_alive("not-a-number") is False, "non-int input graceful False"
+    assert is_pid_alive(None) is False, "None graceful False"
