@@ -303,6 +303,88 @@ contains_self_pause_rationalization() {
   return 1
 }
 
+read_status_field() {
+  local status_file="$1"
+  python3 - "$status_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+except Exception:
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+status = payload.get("status", "")
+if status is None:
+    status = ""
+elif not isinstance(status, str):
+    status = str(status)
+
+print(status.strip().lower())
+PY
+}
+
+is_request_terminal_status() {
+  local status="$1"
+  case "$status" in
+    done|completed|accepted|cancelled)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+is_plan_terminal_status() {
+  local status="$1"
+  case "$status" in
+    done|completed|cancelled)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+has_active_workflow_session() {
+  local requests_root plans_root status_file status
+  requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
+  plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
+
+  if [ -d "$requests_root" ]; then
+    for status_file in $(find "$requests_root" -maxdepth 2 -type f -name request.json 2>/dev/null); do
+      if ! status="$(read_status_field "$status_file")"; then
+        printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=request_status_parse_failed file=$status_file"
+        continue
+      fi
+      if ! is_request_terminal_status "$status"; then
+        debug_log "info" "active_request_session_detected status=$status file=$status_file"
+        return 0
+      fi
+    done
+  fi
+
+  if [ -d "$plans_root" ]; then
+    for status_file in $(find "$plans_root" -maxdepth 2 -type f -name plan.json 2>/dev/null); do
+      if ! status="$(read_status_field "$status_file")"; then
+        printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=plan_status_parse_failed file=$status_file"
+        continue
+      fi
+      if ! is_plan_terminal_status "$status"; then
+        debug_log "info" "active_plan_session_detected status=$status file=$status_file"
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
 emit_block_json() {
   local reason="$1"
   python3 - "$reason" <<'PY'
@@ -521,6 +603,13 @@ LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
 STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
 
 if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
+  if has_active_workflow_session; then
+    REASON="active workflow session detected but PPID state missing; continue workflow"
+    append_block_audit_entry "$REASON"
+    emit_block_json "$REASON"
+    debug_log "block" "reason=state_missing_active_session_detected"
+    exit 0
+  fi
   append_audit_entry "pass_through" "" "workflow_inactive"
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
   exit 0

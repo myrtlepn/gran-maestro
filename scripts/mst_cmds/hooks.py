@@ -104,6 +104,14 @@ def _atomic_write_text(path: Path, text: str) -> None:
             pass
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def cmd_hooks_sync(args):
     silent = bool(getattr(args, "silent", False))
     try:
@@ -122,6 +130,13 @@ def cmd_hooks_sync(args):
         project_root = Path(os.getcwd()).resolve()
         project_hooks_dir = project_root / ".claude" / "hooks"
         version_stamp_path = project_hooks_dir / ".mst-hook-version"
+        source_hooks_dir = plugin_root / "hooks"
+        if not source_hooks_dir.is_dir():
+            raise RuntimeError(f"hooks source not found: {source_hooks_dir}")
+        source_files = sorted(path for path in source_hooks_dir.iterdir() if path.is_file())
+        if not source_files:
+            raise RuntimeError(f"hooks source empty: {source_hooks_dir}")
+
         current_version = ""
         try:
             current_version = version_stamp_path.read_text(encoding="utf-8").strip()
@@ -129,16 +144,21 @@ def cmd_hooks_sync(args):
             current_version = ""
 
         if current_version == plugin_version:
-            if not silent:
-                print(f"[hooks] up-to-date (v{plugin_version})")
-            return 0
+            resynced_files = 0
+            for src_file in source_files:
+                dest_file = project_hooks_dir / src_file.name
+                hashes_match = dest_file.is_file() and _sha256_file(src_file) == _sha256_file(dest_file)
+                if hashes_match:
+                    continue
+                _atomic_copy_file(src_file, dest_file)
+                resynced_files += 1
 
-        source_hooks_dir = plugin_root / "hooks"
-        if not source_hooks_dir.is_dir():
-            raise RuntimeError(f"hooks source not found: {source_hooks_dir}")
-        source_files = sorted(path for path in source_hooks_dir.iterdir() if path.is_file())
-        if not source_files:
-            raise RuntimeError(f"hooks source empty: {source_hooks_dir}")
+            if not silent:
+                if resynced_files > 0:
+                    print(f"[hooks] resynced {resynced_files} files by hash (v{plugin_version})")
+                else:
+                    print(f"[hooks] up-to-date (v{plugin_version})")
+            return 0
 
         synced_files = 0
         for src_file in source_files:

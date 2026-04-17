@@ -160,8 +160,44 @@ hooks_sync_creates_missing_dirs() {
   pass "$case_name"
 }
 
+hooks_sync_rewrites_when_hash_differs_on_same_version() {
+  local case_name="hooks_sync_rewrites_when_hash_differs_on_same_version"
+  local project_dir=""
+  local synced_file=""
+  local command_output=""
+  project_dir="$(new_tmpdir)"
+
+  sync_hooks "$project_dir"
+
+  synced_file="$project_dir/.claude/hooks/mst-stop-hook.sh"
+  assert_file_exists "$case_name" "$synced_file"
+
+  printf '#!/usr/bin/env bash\necho "stale-copy"\n' > "$synced_file"
+  chmod +x "$synced_file"
+
+  if cmp -s "$HOOKS_SOURCE_DIR/mst-stop-hook.sh" "$synced_file"; then
+    fail "$case_name"
+  fi
+
+  command_output="$(
+    cd "$project_dir" &&
+      python3 "$MST_SCRIPT" hooks sync
+  )"
+
+  if ! cmp -s "$HOOKS_SOURCE_DIR/mst-stop-hook.sh" "$synced_file"; then
+    fail "$case_name"
+  fi
+
+  if ! printf '%s\n' "$command_output" | grep -Fq "[hooks] resynced 1 files by hash (v$PLUGIN_VERSION)"; then
+    fail "$case_name"
+  fi
+
+  pass "$case_name"
+}
+
 hooks_sync_copies_when_version_differs
 hooks_sync_is_noop_on_match
 hooks_sync_creates_missing_dirs
+hooks_sync_rewrites_when_hash_differs_on_same_version
 
 echo "PASS: total=$PASS_COUNT"

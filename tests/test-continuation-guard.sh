@@ -18,6 +18,10 @@ INFILE="/tmp/mst-stop-hook-in-$$.txt"
 MY_PID="$$"
 MST_TMP="${SCRIPT_DIR}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${MY_PID}.json"
+REQUEST_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/requests/REQ-TEST-CONTINUATION-GUARD"
+REQUEST_FIXTURE_FILE="${REQUEST_FIXTURE_DIR}/request.json"
+PLAN_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/plans/PLN-TEST-CONTINUATION-GUARD"
+PLAN_FIXTURE_FILE="${PLAN_FIXTURE_DIR}/plan.json"
 mkdir -p "$MST_TMP"
 
 cleanup() {
@@ -33,6 +37,8 @@ cleanup() {
     "${MST_TMP}/mst-hook-check-done-${MY_PID}" \
     "${MST_TMP}/mst-transcript-${MY_PID}.path" \
     2>/dev/null || true
+  rm -f "$REQUEST_FIXTURE_FILE" "$PLAN_FIXTURE_FILE" 2>/dev/null || true
+  rmdir "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR" 2>/dev/null || true
   rm -f "$SCRIPT_DIR/.claude/hooks/.mst-hook-version" 2>/dev/null || true
 }
 
@@ -238,6 +244,24 @@ run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "workflow_inactive_agile_loop_false exits 0" "0" "$STOP_EXIT"
 assert_empty "workflow_inactive_agile_loop_false -> allow pass_through" "$output"
+
+cleanup
+mkdir -p "$REQUEST_FIXTURE_DIR"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis"}' > "$REQUEST_FIXTURE_FILE"
+run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "stop_hook_blocks_when_state_missing_and_active_request_exists exits 0" "0" "$STOP_EXIT"
+assert_contains "stop_hook_blocks_when_state_missing_and_active_request_exists -> block" '"decision": "block"' "$output"
+assert_contains "stop_hook_blocks_when_state_missing_and_active_request_exists reason" 'active workflow session detected' "$output"
+
+cleanup
+mkdir -p "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"done"}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"PLN-TEST-CONTINUATION-GUARD","status":"completed"}' > "$PLAN_FIXTURE_FILE"
+run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "stop_hook_allows_when_only_terminal_requests_exist exits 0" "0" "$STOP_EXIT"
+assert_empty "stop_hook_allows_when_only_terminal_requests_exist -> allow pass_through" "$output"
 
 cleanup
 write_state '{"workflow_active":false,"current_skill":"mst:agile","agile_loop_active":true,"active_req":"REQ-xxx","iteration":5,"updated_at":"2026-04-14T00:00:00Z"}'
