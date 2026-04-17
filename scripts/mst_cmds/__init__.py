@@ -181,6 +181,8 @@ DISPATCH = {
     ("archive", "list"): archive.cmd_archive_list,
     ("archive", "restore"): archive.cmd_archive_restore,
     ("gardening", "scan"): gardening.cmd_gardening_scan,
+    ("gardening", "auto-archive"): gardening.cmd_gardening_auto_archive,
+    ("gardening", "restore"): gardening.cmd_gardening_restore,
     ("cleanup", None): cleanup.cmd_cleanup,
     ("session", "list"): session.cmd_session_list,
     ("session", "inspect"): session.cmd_session_inspect,

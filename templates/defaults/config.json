@@ -157,6 +157,27 @@
     "auto_archive_on_complete": true,
     "archive_directory": ".gran-maestro/archive"
   },
+  "gardening": {
+    "auto_archive": {
+      "enabled": false,
+      "trigger": "session_init",
+      "thresholds": {
+        "req_stale_days": 14,
+        "plan_stale_days": 30,
+        "plan_active_stale_days": 14
+      },
+      "target_status_map": {
+        "req_phase1_analysis": "cancelled",
+        "req_spec_ready": "cancelled",
+        "req_pending_dependency": "cancelled",
+        "plan_active": "cancelled",
+        "plan_in_progress": "cancelled"
+      },
+      "dry_run": true,
+      "log_file": ".gran-maestro/gardening/auto-archive.ndjson",
+      "session_init_guard_seconds": 86400
+    }
+  },
   "notifications": {
     "terminal": true,
     "dashboard": true

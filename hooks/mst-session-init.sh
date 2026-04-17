@@ -230,4 +230,64 @@ clear_next_action_from_plan_json
 check_hook_version_mismatch
 write_initial_state
 
+# === Auto-gardening trigger (PLN-475 / REQ-633-T03) ===
+# config.gardening.auto_archive.enabled=true일 때만 백그라운드로 실행
+# 24h 가드 (session_init_guard_seconds)로 중복 실행 방지
+_gardening_trigger_auto_archive() {
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local config_file="${PROJECT_ROOT:-$PWD}/.gran-maestro/config.resolved.json"
+  [ -f "$config_file" ] || return 0
+
+  local enabled
+  enabled="$(CONFIG_FILE="$config_file" python3 -c "
+import json
+import os
+try:
+    d = json.load(open(os.environ['CONFIG_FILE']))
+    v = d.get('gardening', {}).get('auto_archive', {}).get('enabled', False)
+    print('true' if v else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null || printf 'false')"
+  [ "$enabled" = "true" ] || return 0
+
+  local guard_seconds
+  guard_seconds="$(CONFIG_FILE="$config_file" python3 -c "
+import json
+import os
+try:
+    d = json.load(open(os.environ['CONFIG_FILE']))
+    print(d.get('gardening', {}).get('auto_archive', {}).get('session_init_guard_seconds', 86400))
+except Exception:
+    print(86400)
+" 2>/dev/null || printf '86400')"
+  case "$guard_seconds" in
+    ''|*[!0-9]*) guard_seconds=86400 ;;
+  esac
+
+  local stamp_file="${PROJECT_ROOT:-$PWD}/.gran-maestro/tmp/gardening-last-run"
+  local now last_run
+  now="$(date +%s 2>/dev/null || printf '0')"
+  last_run="$(cat "$stamp_file" 2>/dev/null || printf '0')"
+  case "$last_run" in
+    ''|*[!0-9]*) last_run=0 ;;
+  esac
+  case "$now" in
+    ''|*[!0-9]*) now=0 ;;
+  esac
+
+  if [ "$((now - last_run))" -lt "$guard_seconds" ]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$stamp_file")" 2>/dev/null || return 0
+  printf '%s\n' "$now" > "$stamp_file" 2>/dev/null || return 0
+
+  local plugin_root="${PLUGIN_ROOT:-$HOME/.claude/plugins/cache/gran-maestro/mst/0.58.3}"
+  (python3 "$plugin_root/scripts/mst.py" gardening auto-archive --silent >/dev/null 2>&1 &)
+  return 0
+}
+_gardening_trigger_auto_archive || true
+
 exit 0
