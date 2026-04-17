@@ -123,6 +123,7 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
     'drift',
     'recall',
     'unlock',
+    'dispatch',
   ],
   reference: ['cache_ttl_days', 'cutoff_threshold_months', 'auto_search', 'max_searches_per_step'],
   test_enforcement: ['enabled', 'backend_tdd', 'web_execution_test', 'exempt_patterns', 'require_exemption_reason'],
