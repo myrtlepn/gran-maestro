@@ -546,6 +546,55 @@ def cmd_agile_result(args):
         print(str(sprint_dir / "result.json"))
     return 0
 
+def cmd_agile_dispatch_result(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+        pln_id = _normalize_link_id(args.pln, "PLN") if args.pln else None
+        req_id = _normalize_link_id(args.req, "REQ") if args.req else None
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+
+    sprint_id = f"S{args.sprint:02d}"
+    payload = {
+        "agi_id": agi_id,
+        "sprint": int(args.sprint),
+        "status": str(args.status),
+        "pln_id": pln_id,
+        "req_id": req_id,
+        "commit_sha": str(args.commit_sha) if args.commit_sha is not None else None,
+        "sprint_kind": str(args.sprint_kind) if args.sprint_kind is not None else None,
+        "exit_code": int(args.exit_code),
+        "failure_reason": str(args.failure_reason) if args.failure_reason is not None else None,
+        "result_recorded": bool(args.result_recorded),
+        "retrospective_recorded": bool(args.retrospective_recorded),
+    }
+
+    sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
+    sprint_dir.mkdir(parents=True, exist_ok=True)
+    dispatch_result_path = sprint_dir / "dispatch-result.json"
+    save_json(dispatch_result_path, payload)
+    _append_agile_event(
+        agi_id,
+        "agile.dispatch-result",
+        {
+            "sprint_id": sprint_id,
+            "status": payload["status"],
+            "exit_code": payload["exit_code"],
+        },
+    )
+
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(str(dispatch_result_path))
+    return 0
+
 def cmd_agile_retrospective(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
@@ -860,6 +909,32 @@ def register(subparsers):
     agile_result.add_argument("--user-observable-change", dest="user_observable_change")
     agile_result.add_argument("--foundational-reason", dest="foundational_reason")
     agile_result.add_argument("--json", action="store_true")
+
+    agile_dispatch_result = agile_sub.add_parser("dispatch-result")
+    agile_dispatch_result.add_argument("agi_id")
+    agile_dispatch_result.add_argument("--sprint", type=int, required=True)
+    agile_dispatch_result.add_argument("--status", required=True, choices=["success", "failed"])
+    agile_dispatch_result.add_argument("--exit-code", type=int, required=True, dest="exit_code")
+    agile_dispatch_result.add_argument("--pln")
+    agile_dispatch_result.add_argument("--req")
+    agile_dispatch_result.add_argument("--commit-sha", dest="commit_sha")
+    agile_dispatch_result.add_argument("--sprint-kind", dest="sprint_kind")
+    agile_dispatch_result.add_argument("--failure-reason", dest="failure_reason")
+    agile_dispatch_result.add_argument(
+        "--result-recorded",
+        type=_common._parse_bool_arg,
+        default=True,
+        metavar="{true,false}",
+        dest="result_recorded",
+    )
+    agile_dispatch_result.add_argument(
+        "--retrospective-recorded",
+        type=_common._parse_bool_arg,
+        default=True,
+        metavar="{true,false}",
+        dest="retrospective_recorded",
+    )
+    agile_dispatch_result.add_argument("--json", action="store_true")
 
     agile_retrospective = agile_sub.add_parser("retrospective")
     agile_retrospective.add_argument("agi_id")

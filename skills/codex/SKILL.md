@@ -159,4 +159,4 @@ agile Sprint loop에서 컨텍스트 압박이 심해질 때, sub-plan 전체 �
 
 - 격리 실행은 Sprint의 **순차 실행이 기본**이며 이 escape hatch는 컨텍스트 압박 예외 상황에서만 사용합니다.
 - 실행 후 반드시 `auto-decisions.md` 또는 `retrospective.md`에 격리 실행 사유와 결과를 기록해야 합니다 (Anti-Rationalization Checklist 준수).
-- Sprint 2.2.3의 자동 dispatch 모드(`/mst:agile --dispatch codex`)는 별도 기능이며 REQ-608에서 도입됩니다.
+- Sprint 2.2.3 자동 dispatch는 AGI-015에서 `config.agile.dispatch.enabled` 기반의 claude 단일 provider 경로로 재정의되었으며, codex/gemini 자동 dispatch 분기는 지원하지 않습니다.

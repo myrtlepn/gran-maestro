@@ -85,6 +85,7 @@
     "new_island_threshold": 0.20,
     "foundational_streak_max": 2,
     "dispatch": {
+      "enabled": false,
       "default_mode": "inline"
     },
     "integration_wire_streak_max": 3,
