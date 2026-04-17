@@ -623,6 +623,17 @@
     "drift_matching_threshold_warning": 0.5,
     "max_escalation_retries": 3
   },
+  "recall": {
+    "auto_manifest_enabled": true,
+    "level2_operations": [
+      "dod_add",
+      "dod_remove",
+      "dod_reorder",
+      "dod_merge",
+      "dod_refine"
+    ],
+    "level3_requires_approval": true
+  },
   "pac_trace": {
     "enabled": true,
     "blocking": true,

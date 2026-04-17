@@ -492,6 +492,15 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
 - `classification == "pending"`: MVP skeleton 상태 -> 기존 3축 판정으로 fallback.
 - 파일 미존재 또는 파싱 실패: 기존 3축 판정으로 fallback (graceful).
 
+##### 2.2.0.8-recall: Recall Patch Manifest 자동 생성 (AD-SU)
+
+drift-report classification이 `drift_warning` 또는 `objective_stale`이면 `.gran-maestro/agile/{AGI_ID}/sprints/S{N}/recall-patch-manifest.json` 초안을 자동 생성한다.
+
+- `drift_warning` → Level 2 manifest (DoD 추가/삭제/순서/병합/문구 정밀화만 허용, `requires_user_approval: false`)
+- `objective_stale` → Level 3 manifest (의미 변경, `requires_user_approval: true`로 사용자 승인 필요)
+
+manifest는 MVP에서 placeholder + TODO 마커로 기록되며, 실제 patch operation apply는 `mst.py agile recall --apply` 후속 커맨드에서 처리한다. 자동 block 없음 (dashboard 표시만).
+
 **목적**: 2.2.0.7가 "코드 통합 부채"를 잡는다면, 본 단계는 "**기획(objective.md) ↔ 구현(누적 변경)**의 정합성"을 점검한다. slide-craft 재발의 또 다른 축인 "DoD가 코드의 현실과 어긋나는 기획 노후화"를 감지한다.
 
 `CURRENT_SPRINT <= 1`이면 직전 데이터가 없으므로 본 단계를 skip하고 2.2.1로 진행한다.

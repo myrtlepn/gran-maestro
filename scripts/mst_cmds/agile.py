@@ -20,7 +20,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
-from scripts.mst_cmds.agile_governance import _generate_drift_report_skeleton
+from scripts.mst_cmds.agile_governance import (
+    _generate_drift_report_skeleton,
+    _generate_recall_patch_manifest_skeleton,
+)
 from scripts.mst_cmds._common import (
     TYPE_DIRS,
     _agi_events_path,
@@ -505,9 +508,10 @@ def cmd_agile_result(args):
         save_json(links_path, links)
 
     # drift report skeleton 생성 (status in [done, failed]일 때만)
+    drift_report_path = None
     if args.status in ("done", "failed"):
         try:
-            _generate_drift_report_skeleton(
+            drift_report_path = _generate_drift_report_skeleton(
                 agi_id=agi_id,
                 sprint_num=args.sprint,
                 source_plan=getattr(args, "pln", None),
@@ -516,6 +520,25 @@ def cmd_agile_result(args):
             )
         except Exception as exc:
             print(f"[warn] drift-report hook 실패: {exc}", file=sys.stderr)
+
+        # recall patch manifest skeleton 생성 (drift-report classification 기반)
+        try:
+            classification = None
+            if drift_report_path is not None:
+                try:
+                    report_data = json.loads(Path(drift_report_path).read_text(encoding="utf-8"))
+                    classification = report_data.get("classification")
+                except Exception:
+                    classification = None
+            if classification in ("drift_warning", "objective_stale"):
+                _generate_recall_patch_manifest_skeleton(
+                    agi_id=agi_id,
+                    sprint_num=args.sprint,
+                    classification=classification,
+                    drift_report_path=drift_report_path,
+                )
+        except Exception as exc:
+            print(f"[warn] recall manifest hook 실패: {exc}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

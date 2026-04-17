@@ -135,6 +135,70 @@ def _generate_drift_report_skeleton(
         print(f"[warn] drift-report skeleton 생성 실패: {exc}", file=sys.stderr)
         return None
 
+def _generate_recall_patch_manifest_skeleton(
+    agi_id: str,
+    sprint_num: int,
+    classification: str,
+    drift_report_path: Optional[Path] = None,
+) -> Optional[Path]:
+    """drift-report classification에 따라 Level 2/3 recall patch manifest skeleton 생성.
+
+    - drift_warning -> Level 2, requires_user_approval=False, operations=[placeholder+TODO]
+    - objective_stale -> Level 3, requires_user_approval=True, operations=[] + TODO 마커
+
+    실제 patch operation apply는 후속 PLN에서 확장.
+    return Path on success, None on graceful fail.
+    """
+    try:
+        if classification not in ("drift_warning", "objective_stale"):
+            return None
+
+        sprints_dir_resolver = globals().get("_agi_sprints_dir")
+        sprints_dir = (
+            sprints_dir_resolver(agi_id)
+            if callable(sprints_dir_resolver)
+            else _agi_session_dir(agi_id) / "sprints"
+        )
+        sprint_dir = sprints_dir / f"S{sprint_num:02d}"
+        sprint_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = sprint_dir / "recall-patch-manifest.json"
+
+        if classification == "drift_warning":
+            level = 2
+            requires_user_approval = False
+            operations = [
+                {
+                    "type": "dod_refine",
+                    "target_dod": None,
+                    "detail": "placeholder — 후속 분류 로직 필요",
+                }
+            ]
+            todo = "Level 2 operation 분류 로직은 후속 PLN에서 구체화"
+        else:
+            level = 3
+            requires_user_approval = True
+            operations = []
+            todo = "Level 3 objective revision — 사용자 승인 필요, 후속 승인 경로 연결 예정"
+
+        payload = {
+            "agi_id": agi_id,
+            "sprint": f"S{sprint_num:02d}",
+            "classification": classification,
+            "level": level,
+            "requires_user_approval": requires_user_approval,
+            "operations": operations,
+            "drift_report_path": str(drift_report_path) if drift_report_path else None,
+            "generated_at": _now_iso(),
+            "todo": todo,
+        }
+        manifest_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return manifest_path
+    except Exception as exc:
+        print(f"[warn] recall manifest skeleton 생성 실패: {exc}", file=sys.stderr)
+        return None
+
 _RECALL_DEFAULT_COOLDOWN_RATIO = 0.10
 
 _RECALL_DEFAULT_CAP_RATIO = 0.10
