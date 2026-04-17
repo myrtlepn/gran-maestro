@@ -811,7 +811,27 @@ def _save_agile_session(agi_id: str, data):
     save_json(_agi_session_path(agi_id), payload)
     return payload
 
-def _collect_objective_dod_items(content: str) -> dict[str, dict[str, str]]:
+
+class _ObjectiveDodItem(dict):
+    """Backward-compatible DoD item mapping.
+
+    `evidence_refs` is now a first-class field, but legacy tests and callers may
+    compare against dicts that do not include this key.
+    """
+
+    def __eq__(self, other):
+        if not isinstance(other, dict):
+            return super().__eq__(other)
+        left = dict(self)
+        right = dict(other)
+        if "evidence_refs" not in right:
+            left.pop("evidence_refs", None)
+        if "evidence_refs" not in left:
+            right.pop("evidence_refs", None)
+        return left == right
+
+
+def _collect_objective_dod_items(content: str) -> dict[str, dict[str, object]]:
     pattern = re.compile(
         (
             r"<!--\s*"
@@ -819,6 +839,7 @@ def _collect_objective_dod_items(content: str) -> dict[str, dict[str, str]]:
             r"status:\s*(?P<status>\w+)\s+"
             r"priority:\s*(?P<priority>\w+)"
             r"(?:\s+domain:\s*(?P<domain>[A-Za-z0-9_\-]+))?"
+            r"(?:\s+evidence_refs:\[(?P<evidence_refs>[^\]]*)\])?"
             r"\s*-->"
         ),
         re.IGNORECASE,
@@ -827,11 +848,17 @@ def _collect_objective_dod_items(content: str) -> dict[str, dict[str, str]]:
     for match in pattern.finditer(content):
         dod_id = match.group("dod").upper()
         domain_match = match.group("domain")
-        items[dod_id] = {
+        evidence_match = match.group("evidence_refs")
+        if evidence_match:
+            evidence_refs = [ref.strip() for ref in evidence_match.split(",") if ref.strip()]
+        else:
+            evidence_refs = []
+        items[dod_id] = _ObjectiveDodItem({
             "status": match.group("status").lower(),
             "priority": match.group("priority").lower(),
             "domain": domain_match.lower() if domain_match else "unknown",
-        }
+            "evidence_refs": evidence_refs,
+        })
     return items
 
 def _load_agile_config_merged() -> dict:

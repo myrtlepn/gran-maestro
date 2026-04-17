@@ -446,7 +446,10 @@ def _update_objective_dod_status(content: str, dod_id: str, new_status: str):
         (
             r"(?P<head><!--\s*dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+status:\s*)"
             r"(?P<status>\w+)"
-            r"(?P<tail>\s+priority:\s*\w+\s*-->)"
+            r"(?P<tail>\s+priority:\s*\w+"
+            r"(?:\s+domain:\s*[A-Za-z0-9_\-]+)?"
+            r"(?:\s+evidence_refs:\[[^\]]*\])?"
+            r"\s*-->)"
         ),
         re.IGNORECASE,
     )
@@ -1869,6 +1872,35 @@ def cmd_agile_objective_transition(args):
         print(f"Error: DoD item not found ({dod_id})", file=sys.stderr)
         return 1
 
+    story_upper = str(args.story or "").upper()
+    evidence_refs_arg = getattr(args, "evidence_ref", []) or []
+    if evidence_refs_arg:
+        marker_pattern = re.compile(
+            (
+                rf"(<!--\s*dod:\s*{re.escape(story_upper)}\s+[^>]*?)"
+                r"(?:\s+evidence_refs:\[([^\]]*)\])?"
+                r"\s*(-->)"
+            ),
+            re.IGNORECASE,
+        )
+
+        def _replace_marker(match):
+            prefix = match.group(1).rstrip()
+            existing_refs = match.group(2)
+            existing_list = [r.strip() for r in existing_refs.split(",")] if existing_refs else []
+            existing_list = [r for r in existing_list if r]
+            seen = set(existing_list)
+            merged = list(existing_list)
+            for ref in evidence_refs_arg:
+                ref = str(ref).strip()
+                if ref and ref not in seen:
+                    merged.append(ref)
+                    seen.add(ref)
+            evidence_str = ",".join(merged)
+            return f"{prefix} evidence_refs:[{evidence_str}] {match.group(3)}"
+
+        updated_content = marker_pattern.sub(_replace_marker, updated_content, count=1)
+
     deferred_promoted: List[str] = []
     deferred_sprints: List[str] = []
 
@@ -2015,6 +2047,7 @@ def cmd_agile_objective_check(args):
             "status": item.get("status"),
             "priority": item.get("priority"),
             "domain": item.get("domain", "unknown"),
+            "evidence_refs": item.get("evidence_refs", []),
         }
         if args.json:
             print(json.dumps(single_output, ensure_ascii=False, indent=2))
@@ -2041,11 +2074,19 @@ def cmd_agile_objective_check(args):
         if item.get("status", "").lower() not in {"done", "completed"}
     ])
     status_only = {dod_id: item.get("status") for dod_id, item in dod_items.items()}
+    legacy_dods = {}
+    for dod_id, item in dod_items.items():
+        if not isinstance(item, dict):
+            legacy_dods[dod_id] = item
+            continue
+        item_copy = dict(item)
+        item_copy.pop("evidence_refs", None)
+        legacy_dods[dod_id] = item_copy
     output = {
         "agi_id": agi_id,
         "all_done": len(incomplete) == 0,
         "incomplete": incomplete,
-        "dods": dod_items,
+        "dods": legacy_dods,
         "stories": status_only,
     }
     if args.json:

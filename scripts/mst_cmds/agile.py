@@ -413,6 +413,10 @@ def cmd_agile_result(args):
         payload["target_dod"] = str(args.target_dod)
     if args.target_dod_text is not None:
         payload["target_dod_text"] = str(args.target_dod_text)
+    if getattr(args, "dod_ref", None) is not None:
+        payload["dod_ref"] = str(args.dod_ref)
+    if getattr(args, "domain", None) is not None:
+        payload["domain_ref"] = str(args.domain)
     if args.previous_direction is not None:
         payload["previous_direction"] = str(args.previous_direction)
     if args.previous_lessons is not None:
@@ -807,6 +811,8 @@ def register(subparsers):
     agile_result.add_argument("--selection-reason")
     agile_result.add_argument("--target-dod")
     agile_result.add_argument("--target-dod-text")
+    agile_result.add_argument("--dod-ref", default=None)
+    agile_result.add_argument("--domain", default=None)
     agile_result.add_argument("--previous-direction")
     agile_result.add_argument("--previous-lessons")
     agile_result.add_argument(
@@ -935,6 +941,7 @@ def register(subparsers):
     agile_objective_transition.add_argument("--status", required=True)
     agile_objective_transition.add_argument("--deferred-promote", action="store_true")
     agile_objective_transition.add_argument("--sprint", type=int)
+    agile_objective_transition.add_argument("--evidence-ref", action="append", default=[])
     agile_objective_transition.add_argument("--json", action="store_true")
 
     agile_objective_check = agile_sub.add_parser("objective-check")
