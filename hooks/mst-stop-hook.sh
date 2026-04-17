@@ -329,6 +329,61 @@ print(status.strip().lower())
 PY
 }
 
+# Exit 0 + print value: owner_ppid present
+# Exit 2: owner_ppid field absent (legacy file)
+# Exit 1: parse error
+read_owner_ppid_field() {
+  local status_file="$1"
+  python3 - "$status_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+except Exception:
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+owner_ppid = payload.get("owner_ppid")
+if owner_ppid is None:
+    raise SystemExit(2)
+
+if isinstance(owner_ppid, bool):
+    raise SystemExit(1)
+try:
+    print(int(owner_ppid))
+except (TypeError, ValueError):
+    raise SystemExit(1)
+PY
+}
+
+# Exit 0: file mtime is within window; Exit 1: outside window or error
+_file_age_within_window() {
+  local status_file="$1" window_sec="$2"
+  python3 - "$status_file" "$window_sec" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+try:
+    window = int(sys.argv[2])
+except (ValueError, IndexError):
+    window = 900
+try:
+    age = time.time() - os.path.getmtime(path)
+    sys.exit(0 if age <= window else 1)
+except OSError:
+    sys.exit(1)
+PY
+}
+
+MST_STOP_STATE_GUARD_WINDOW_SEC="${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}"
+
 is_request_terminal_status() {
   local status="$1"
   case "$status" in
@@ -350,7 +405,7 @@ is_plan_terminal_status() {
 }
 
 has_active_workflow_session() {
-  local requests_root plans_root status_file status
+  local requests_root plans_root status_file status owner_ppid_value owner_ppid_exit
   requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
   plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
 
@@ -361,9 +416,35 @@ has_active_workflow_session() {
         debug_log "warn" "reason=request_status_parse_failed file=$status_file"
         continue
       fi
-      if ! is_request_terminal_status "$status"; then
-        debug_log "info" "active_request_session_detected status=$status file=$status_file"
-        return 0
+      if is_request_terminal_status "$status"; then
+        continue
+      fi
+      # Non-terminal: check owner_ppid for session isolation
+      owner_ppid_exit=0
+      owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
+      if [ "$owner_ppid_exit" -eq 0 ]; then
+        # owner_ppid present — check if it matches current session
+        if [ "$owner_ppid_value" = "$PPID" ]; then
+          debug_log "info" "active_request_session_detected status=$status file=$status_file"
+          return 0
+        else
+          debug_log "info" "skipping_foreign_session_request status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          continue
+        fi
+      elif [ "$owner_ppid_exit" -eq 2 ]; then
+        # Legacy file: no owner_ppid — fall back to mtime window
+        if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
+          debug_log "info" "active_request_session_detected(legacy_mtime) status=$status file=$status_file"
+          return 0
+        else
+          debug_log "info" "skipping_stale_legacy_request status=$status file=$status_file"
+          continue
+        fi
+      else
+        # JSON parse error — skip gracefully, do not block
+        printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"
+        continue
       fi
     done
   fi
@@ -375,9 +456,32 @@ has_active_workflow_session() {
         debug_log "warn" "reason=plan_status_parse_failed file=$status_file"
         continue
       fi
-      if ! is_plan_terminal_status "$status"; then
-        debug_log "info" "active_plan_session_detected status=$status file=$status_file"
-        return 0
+      if is_plan_terminal_status "$status"; then
+        continue
+      fi
+      # Non-terminal: check owner_ppid for session isolation
+      owner_ppid_exit=0
+      owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
+      if [ "$owner_ppid_exit" -eq 0 ]; then
+        if [ "$owner_ppid_value" = "$PPID" ]; then
+          debug_log "info" "active_plan_session_detected status=$status file=$status_file"
+          return 0
+        else
+          debug_log "info" "skipping_foreign_session_plan status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          continue
+        fi
+      elif [ "$owner_ppid_exit" -eq 2 ]; then
+        if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
+          debug_log "info" "active_plan_session_detected(legacy_mtime) status=$status file=$status_file"
+          return 0
+        else
+          debug_log "info" "skipping_stale_legacy_plan status=$status file=$status_file"
+          continue
+        fi
+      else
+        printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"
+        continue
       fi
     done
   fi

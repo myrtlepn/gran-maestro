@@ -32,6 +32,51 @@ from scripts.mst_cmds._common import (
     queue_enqueue,
 )
 
+def _resolve_owner_ppid() -> int:
+    ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
+    if ppid_env.isdigit():
+        return int(ppid_env)
+    return os.getppid()
+
+
+def _inject_owner_ppid_to_json(json_path: Path, ppid: int) -> None:
+    """Write owner_ppid into json_path only if the field is absent (idempotent)."""
+    data = _common.load_json(json_path)
+    if not isinstance(data, dict):
+        return
+    if "owner_ppid" in data:
+        return
+    data["owner_ppid"] = ppid
+    tmp_path = json_path.with_name(f"{json_path.name}.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, json_path)
+
+
+def _inject_owner_ppid_if_missing(args) -> None:
+    ppid = _resolve_owner_ppid()
+
+    req_id = (getattr(args, "req", "") or "").strip()
+    if req_id.startswith("REQ-") and _common.BASE_DIR:
+        req_json = _common.BASE_DIR / "requests" / req_id / "request.json"
+        if req_json.exists():
+            try:
+                _inject_owner_ppid_to_json(req_json, ppid)
+            except Exception as exc:
+                print(f"[mst] warning: failed to inject owner_ppid into {req_json}: {exc}", file=sys.stderr)
+
+    next_source = (getattr(args, "next_source", "") or "").strip()
+    source_skill = (getattr(args, "source_skill", "") or "").strip()
+    if next_source.startswith("PLN-") and source_skill == "mst:plan" and _common.BASE_DIR:
+        plan_json = _common.BASE_DIR / "plans" / next_source / "plan.json"
+        if plan_json.exists():
+            try:
+                _inject_owner_ppid_to_json(plan_json, ppid)
+            except Exception as exc:
+                print(f"[mst] warning: failed to inject owner_ppid into {plan_json}: {exc}", file=sys.stderr)
+
+
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     state_path = _workflow_state_file(state_base_dir)
@@ -112,6 +157,9 @@ def cmd_state_set_workflow(args):
 
         payload["next_action"] = next_action
         _workflow_state_atomic_write(state_path, payload)
+
+        if args.active:
+            _inject_owner_ppid_if_missing(args)
 
         if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
             na = payload.get("next_action", {})
