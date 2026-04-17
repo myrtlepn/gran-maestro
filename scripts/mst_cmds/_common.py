@@ -817,17 +817,20 @@ def _collect_objective_dod_items(content: str) -> dict[str, dict[str, str]]:
             r"<!--\s*"
             r"dod:\s*(?P<dod>[A-Za-z0-9_-]+)\s+"
             r"status:\s*(?P<status>\w+)\s+"
-            r"priority:\s*(?P<priority>\w+)\s*"
-            r"-->"
+            r"priority:\s*(?P<priority>\w+)"
+            r"(?:\s+domain:\s*(?P<domain>[A-Za-z0-9_\-]+))?"
+            r"\s*-->"
         ),
         re.IGNORECASE,
     )
     items = {}
     for match in pattern.finditer(content):
         dod_id = match.group("dod").upper()
+        domain_match = match.group("domain")
         items[dod_id] = {
             "status": match.group("status").lower(),
             "priority": match.group("priority").lower(),
+            "domain": domain_match.lower() if domain_match else "unknown",
         }
     return items
 

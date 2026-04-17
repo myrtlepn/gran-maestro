@@ -88,7 +88,11 @@ def test_objective_check_dod_partial(tmp_path):
     assert proc.returncode == 0
     assert payload["all_done"] is False
     assert payload["incomplete"] == ["DOD-001"]
-    assert payload["dods"]["DOD-001"] == {"status": "todo", "priority": "must"}
+    assert payload["dods"]["DOD-001"] == {
+        "status": "todo",
+        "priority": "must",
+        "domain": "unknown",
+    }
     assert payload["stories"]["DOD-002"] == "done"
 
 
@@ -116,8 +120,8 @@ def test_collect_objective_dod_items_structured_multiline_format():
 
     items = MST_MODULE._collect_objective_dod_items(content)
     assert items == {
-        "DOD-001": {"status": "todo", "priority": "must"},
-        "DOD-002": {"status": "done", "priority": "should"},
+        "DOD-001": {"status": "todo", "priority": "must", "domain": "unknown"},
+        "DOD-002": {"status": "done", "priority": "should", "domain": "unknown"},
     }
 
 
@@ -132,8 +136,8 @@ def test_collect_objective_dod_items_supports_spaced_marker_tokens():
 
     items = MST_MODULE._collect_objective_dod_items(content)
     assert items == {
-        "DOD-010": {"status": "todo", "priority": "must"},
-        "DOD-011": {"status": "done", "priority": "should"},
+        "DOD-010": {"status": "todo", "priority": "must", "domain": "unknown"},
+        "DOD-011": {"status": "done", "priority": "should", "domain": "unknown"},
     }
 
 

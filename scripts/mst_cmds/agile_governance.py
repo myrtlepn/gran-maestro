@@ -2001,6 +2001,27 @@ def cmd_agile_objective_check(args):
 
     content = objective_path.read_text(encoding="utf-8")
     dod_items = _collect_objective_dod_items(content)
+
+    requested_dod_id = getattr(args, "dod_id", None)
+    if requested_dod_id:
+        dod_key = requested_dod_id.upper()
+        if dod_key not in dod_items:
+            print(f"Error: DoD '{requested_dod_id}' not found", file=sys.stderr)
+            return 1
+        item = dod_items[dod_key]
+        single_output = {
+            "agi_id": agi_id,
+            "dod_id": dod_key,
+            "status": item.get("status"),
+            "priority": item.get("priority"),
+            "domain": item.get("domain", "unknown"),
+        }
+        if args.json:
+            print(json.dumps(single_output, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(single_output, ensure_ascii=False))
+        return 0
+
     if not dod_items:
         output = {
             "agi_id": agi_id,

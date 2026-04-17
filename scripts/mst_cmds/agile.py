@@ -939,6 +939,7 @@ def register(subparsers):
 
     agile_objective_check = agile_sub.add_parser("objective-check")
     agile_objective_check.add_argument("agi_id")
+    agile_objective_check.add_argument("--dod-id", default=None)
     agile_objective_check.add_argument("--json", action="store_true")
 
     agile_objective_snapshot = agile_sub.add_parser("objective-snapshot")

@@ -549,7 +549,8 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
   - 사용자가 제시한 원본(텍스트/문서)이 있으면 그대로 복사하는 것이 아니라, **Q&A를 거쳐 정제·보강·구조화된 버전**을 기록한다.
 - DoD는 다중행 구조(`Direction/Measure/Object/Context/Target`)를 사용한다.
 - 모든 DoD 항목에 아래 마커를 포함한다.
-  - `<!-- dod:DOD-NNN status:todo priority:must -->`
+  - `<!-- dod:DOD-NNN status:todo priority:must domain:{slug} -->`
+  - `{slug}`는 해당 DoD가 속한 도메인의 상세 문서 파일명 (예: `details/intent-context-propagation.md` → `domain:intent-context-propagation`)
 - `priority` 값은 MoSCoW 결과를 반영해 `must|should|could|wont` 중 하나를 사용한다.
 - 전략 검토/Confidence Matrix 결과를 objective.md 섹션으로 남기지 않는다.
 

@@ -43,6 +43,7 @@
     "drift_threshold": 80,
     "drift_count_trigger": 2,
     "no_diff_count_trigger": 2,
+    "intent_redirect_max_retries": 3,
     "convergence_threshold_abs": 0.12,
     "convergence_threshold_trend": 0.18,
     "soft_limit_small": 8,

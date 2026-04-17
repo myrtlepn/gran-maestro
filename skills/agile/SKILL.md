@@ -577,6 +577,7 @@ Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
 
 `mst:plan -a` 호출 시 아래 컨텍스트를 반드시 전달한다.
 
+- `[의도층]`: MANDATORY Read — objective.md (JTBD 원문) + 선택된 DoD 소속 `details/{DOMAIN_SLUG}.md`. literal 주입이 아닌 "반드시 Read" 지시 + plan.md 필수 기록 필드 2개(`충족 JTBD 조항`, `도메인 참조 ID`).
 - `[고정층]`: objective.md 전체 (JTBD + 프로젝트 DoD + 제약 + 설계 결정 + NFR + 리스크)
 - `[활성층]`: 현재 선택된 미완료 DoD 항목
 - `[변화층]`: 직전 Sprint 결과
@@ -587,8 +588,12 @@ Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md
 
 ```text
 Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
+[의도층] MANDATORY Read (반드시 두 파일 모두 Read한 뒤 plan 작성):
+  1. objective 원본: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+  2. 선택된 DoD 소속 도메인 상세: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/details/{DOMAIN_SLUG}.md
+  plan.md에 반드시 기록: (1) 충족 JTBD 조항 (2) 도메인 참조 ID (domain-slug + AD-NNN 목록)
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
-[활성층] 현재 대상: {SELECTED_WORK_ITEM} | 미완료 DoD: {INCOMPLETE_DOD_LIST}
+[활성층] 현재 대상: {SELECTED_WORK_ITEM} | 소속 도메인: {DOMAIN_SLUG} | 미완료 DoD: {INCOMPLETE_DOD_LIST}
 [변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
 [회고층] 직전 회고: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md | 직전 교훈: {PREVIOUS_LESSONS}
 [이슈층] open known issues: {OPEN_ISSUE_LIST}
@@ -617,9 +622,9 @@ Step 2.2.3은 `dispatch_mode`에 따라 위 plan 호출을 inline 또는 격리 
    ```
 2. 전체 체인을 외부 CLI에 위임:
    ```text
-   Skill(skill: "mst:{dispatch_mode}", args: "exec --dir {worktree_path} '/mst:plan -a \"{SELECTED_WORK_ITEM} [고정층] ... [제약층] ...\" && /mst:request -a --plan PLN-NNN && /mst:approve -a && /mst:accept'")
+   Skill(skill: "mst:{dispatch_mode}", args: "exec --dir {worktree_path} '/mst:plan -a \"{SELECTED_WORK_ITEM} [의도층] ... [제약층] ...\" && /mst:request -a --plan PLN-NNN && /mst:approve -a && /mst:accept'")
    ```
-   (내부 `mst:plan -a` 호출 인자는 inline 경로와 동일한 7층 컨텍스트를 그대로 전달한다.)
+   (내부 `mst:plan -a` 호출 인자는 inline 경로와 동일한 N계층 컨텍스트를 그대로 전달한다.)
 3. 결과 회수: dispatch 완료 후 부모 Sprint 세션이 아래 파일에 결과를 기록한다.
    ```text
    {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json
@@ -647,6 +652,23 @@ Step 2.2.3은 `dispatch_mode`에 따라 위 plan 호출을 inline 또는 격리 
 - 스프린트 목표는 작업 항목 명사가 아니라 **관찰 가능한 결과/동작**으로 작성한다.
   - 예: `"설정 탭 추가"` 대신 `"설정 페이지에서 포트 변경 후 저장 시 서버 재시작 없이 반영됨"` 형태로 작성한다.
 - 컨텍스트가 비어 있으면 `"N/A"`로 채워 graceful fallback 한다.
+
+##### 2.2.3.b MANDATORY Read 누락 자동 재지시 루프
+
+Step 2.2.3 이후 plan-a 완료 직후 parent(Sprint 진행자)는 아래 검증/복구 루프를 수행한다.
+
+1. `Read({PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md)`로 산출물 확인.
+2. `plan.md`에 아래 필드가 모두 존재하는지 검사:
+   - `충족 JTBD 조항`
+   - `도메인 참조 ID`
+3. 누락 시 자동 재지시:
+   - 재지시 메시지: `plan.md에 JTBD/도메인 참조 필드가 누락되었습니다. objective.md와 details/{DOMAIN_SLUG}.md를 Read한 뒤 plan을 보완하세요.`
+   - 동일 `SELECTED_WORK_ITEM`과 동일 N계층 컨텍스트로 plan-a 재호출.
+4. 재시도 한도:
+   - 최대 `agile.intent_redirect_max_retries` 회(기본 3)까지 자동 재지시 반복.
+5. 한도 도달 후에도 누락이면:
+   - 현재 Sprint의 known issue에 자동 등록한다.
+   - 등록 항목에는 `agi_id`, `dod_id`, 누락 필드 목록, 재시도 횟수, 마지막 plan 경로를 포함한다.
 
 ##### [추가 섹션] Sprint 중 디자인 수정 경로 (Step 번호 유지 전용)
 
