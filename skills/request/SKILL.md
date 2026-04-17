@@ -157,11 +157,19 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
 
 #### auto_mode config 읽기
 
-1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`에서 `config.auto_mode.request` 값을 확인한다.
-2. CLI 인자에서 `--auto` / `-a`가 감지되지 않았고 `config.auto_mode.request == true`이면:
-   - `AUTO_APPROVE=true`로 설정 (`request.json.auto_approve=true`)
+1. CLI 인자에서 `--auto` / `-a` 감지 시 `AUTO_APPROVE=true`로 설정한다 (CLI 최우선).
+1.5. CLI 인자에 `-a`/`--auto`가 없으면 state guarded fallback을 시도한다:
+   - `{PLUGIN_ROOT}/scripts` 경유로 `read_workflow_state_auto_mode("mst:request", expected_source_id)` 호출
+   - `expected_source_id` 결정:
+     - `--plan PLN-NNN`이 있으면 `PLN-NNN`
+     - `--resume REQ-NNN`이 있으면 `REQ-NNN`
+     - 둘 다 없으면 생략(`None`)
+   - 반환값이 bool이면 `AUTO_APPROVE`에 채택
+   - `None`이면 Step 2(config)로 진행
+2. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`에서 `config.auto_mode.request` 값을 확인한다.
+   - `config.auto_mode.request == true`면 `AUTO_APPROVE=true`로 설정 (`request.json.auto_approve=true`)
    - `"[config] auto_mode.request=true — 자동 승인 모드 활성화"` 메시지를 표시한다.
-3. CLI 인자에 `--auto` / `-a`가 있으면 config 값은 무시한다 (CLI 우선).
+3. 최종 우선순위는 `args > state(guarded) > config > default(false)`를 적용한다.
 
 ### Step 1: 요청 생성/재개
 

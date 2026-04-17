@@ -227,14 +227,20 @@ Step 0.5 처리 완료 후, `--from-picks` 유무와 무관하게 사용자 입�
 1. args 전체 토큰에서 `-a` 또는 `--auto` 존재 여부를 검사:
    - 하나라도 존재하면 `AUTO_MODE=true` (args 어느 위치든 허용)
    - 없으면 `AUTO_MODE=false`
-2. `AUTO_MODE=false`인 경우 config를 읽어 `config.auto_mode.plan` 확인:
+2. `AUTO_MODE=false`인 경우 state guarded fallback을 시도한다:
+   - 2.5. args에 `-a`/`--auto`가 없으면, `{PLUGIN_ROOT}/scripts` 경유로
+     `read_workflow_state_auto_mode("mst:plan")` 호출
+   - 반환값이 bool이면 `AUTO_MODE`에 채택
+   - `None`이면 Step 3(config fallback)로 진행
+3. `AUTO_MODE=false`인 경우 config를 읽어 `config.auto_mode.plan` 확인:
    - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)` 우선
    - 키가 없으면 `Read(templates/defaults/config.json)` fallback
    - `config.auto_mode.plan == true`면 `AUTO_MODE=true`
-3. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장:
+4. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장:
    - 미설정 시 기본값 `0.7`
    - CLI 플래그(`-a`/`--auto`)가 config보다 우선한다
-4. `AUTO_MODE=true`이면 아래 초기값을 메모리에 보관:
+5. 우선순위는 `args > state(guarded) > config > default(false)`를 적용한다.
+6. `AUTO_MODE=true`이면 아래 초기값을 메모리에 보관:
    - `AUTO_DECISION_TOTAL=0`
    - `AUTO_PM_COUNT=0`
    - `AUTO_DISCUSSION_COUNT=0`

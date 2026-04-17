@@ -239,6 +239,84 @@ def _workflow_state_load(path: Path):
         return payload
     return None
 
+def read_workflow_state_auto_mode(
+    skill_name: str,
+    expected_source_id: Optional[str] = None,
+    ttl_minutes: int = 30,
+) -> Optional[bool]:
+    """
+    Returns auto_mode value from tmp/mst-state-{PPID}.json IFF all authoritative
+    conditions pass. Returns None when state should be treated as absent
+    (caller must fall back to config/default).
+
+    Authoritative gates:
+      1) payload.workflow_active == True
+      2) payload.next_action.expected_skill == skill_name
+      3) when expected_source_id is provided:
+         payload.next_action.source_id == expected_source_id
+      4) payload.updated_at within ttl_minutes of now (UTC)
+      5) PPID liveness: os.kill(pid, 0) does not raise
+
+    On ANY failure (missing file, JSON parse error, key missing, gate fail,
+    liveness fail) -> return None (never raise).
+    """
+    try:
+        state_path = _workflow_state_file(_skill_state_base_dir())
+        payload = _workflow_state_load(state_path)
+        if not isinstance(payload, dict):
+            return None
+
+        if payload.get("workflow_active") is not True:
+            return None
+
+        next_action = payload.get("next_action")
+        if not isinstance(next_action, dict):
+            return None
+        if "expected_skill" not in next_action or next_action.get("expected_skill") != skill_name:
+            return None
+        if expected_source_id is not None:
+            if "source_id" not in next_action or next_action.get("source_id") != expected_source_id:
+                return None
+
+        if "updated_at" not in payload:
+            return None
+        updated_at_raw = payload.get("updated_at")
+        if not isinstance(updated_at_raw, str):
+            return None
+        updated_at_text = updated_at_raw.strip()
+        if not updated_at_text:
+            return None
+        if updated_at_text.endswith("Z"):
+            updated_at_text = f"{updated_at_text[:-1]}+00:00"
+        updated_at = datetime.fromisoformat(updated_at_text)
+        if updated_at.tzinfo is None:
+            return None
+        updated_at_utc = updated_at.astimezone(timezone.utc)
+
+        ttl_delta = timedelta(minutes=int(ttl_minutes))
+        if ttl_delta.total_seconds() < 0:
+            return None
+        now_utc = datetime.now(timezone.utc)
+        age = now_utc - updated_at_utc
+        if age < timedelta(0) or age > ttl_delta:
+            return None
+
+        state_pid = int(state_path.stem.rsplit("-", 1)[1])
+        if state_pid not in (0, os.getpid()):
+            try:
+                os.kill(state_pid, 0)
+            except (OSError, ValueError):
+                return None
+
+        if "auto_mode" not in next_action:
+            return None
+        auto_mode = next_action.get("auto_mode")
+        if not isinstance(auto_mode, bool):
+            return None
+        return auto_mode
+    except Exception:
+        return None
+
 def _workflow_state_atomic_write(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")

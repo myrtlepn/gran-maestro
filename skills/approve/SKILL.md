@@ -211,7 +211,13 @@ approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 
 ### 단건 승인 프로토콜
 
 **AUTO_MODE 초기화** (단건 프로토콜 진입 즉시):
-`AUTO_MODE = ($ARGUMENTS에 --auto 또는 -a 포함) OR (request.json.auto_approve == true)`
+1. args에 `--auto` 또는 `-a`가 있으면 `AUTO_MODE=true` (최우선)
+2. args가 없으면 `{PLUGIN_ROOT}/scripts` 경유로 `read_workflow_state_auto_mode("mst:approve", "{REQ-ID}")` 호출
+   - 반환값이 bool이면 `AUTO_MODE`에 채택
+3. state fallback이 `None`이면 `request.json.auto_approve == true` 여부를 확인
+4. 그래도 미결정이면 `config.auto_mode.approve` 확인
+5. 모두 해당 없으면 `AUTO_MODE=false`
+우선순위: `args > state(guarded, expected_source_id=REQ_ID) > request.json.auto_approve > config > false`
 이후 모든 Step에서 이 변수를 사용한다.
 
 `AUTO_MODE=true`이면 단건 프로토콜 진입 직후 workflow state를 기록한다 (non-blocking):
@@ -1134,14 +1140,15 @@ mst:review 반환 후, review 결과 처리(3번) 진입 전에 실행:
 
    **review_issues_summary 로드**: 최신 `reviews/RV-NNN/review.json`을 Read → `review_issues_summary` 파싱 (critical/major/minor 카운트 + auto_fixed/skipped 배열)
 
-   - **`status: "passed"`**: `review_summary.status → "passed"` → `workflow.auto_accept_result` 설정에 따라 즉시 실행:
-     - **`true` (기본)**: 아래와 같이 accept 스킬을 명시적으로 호출:
-       ```
-       Skill(skill: "mst:accept", args: "{REQ_ID}")
-       ```
-       > ⚠️ **MANDATORY**: in-context 실행 시 Plan 상태 동기화가 생략되는 것을 방지하기 위해
-       > 반드시 Skill 도구를 통해 mst:accept를 호출해야 합니다.
-       accept 완료 후 아래 **DAG 자동 연쇄 실행**을 즉시 판단한다.
+	   - **`status: "passed"`**: `review_summary.status → "passed"` → `workflow.auto_accept_result` 설정에 따라 즉시 실행:
+	     - **`true` (기본)**: 아래와 같이 accept 스킬을 명시적으로 호출:
+	       ```
+	       AUTO_MODE=true  -> Skill(skill: "mst:accept", args: "-a {REQ_ID}")
+	       AUTO_MODE=false -> Skill(skill: "mst:accept", args: "{REQ_ID}")
+	       ```
+	       > ⚠️ **MANDATORY**: in-context 실행 시 Plan 상태 동기화가 생략되는 것을 방지하기 위해
+	       > 반드시 Skill 도구를 통해 mst:accept를 호출해야 합니다.
+	       accept 완료 후 아래 **DAG 자동 연쇄 실행**을 즉시 판단한다.
      - **`false`**: Phase 3 리뷰 PASS 후 멈추고, 사용자에게 `/mst:accept {REQ_ID}`를 수동으로 호출하라고 안내. 설정 변경: `/mst:settings workflow.auto_accept_result false`
 
      **DAG 자동 연쇄 실행** (accept 완료 직후, `auto_accept_result == true`인 경우에만 실행):

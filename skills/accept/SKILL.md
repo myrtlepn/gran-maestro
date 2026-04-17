@@ -50,6 +50,30 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 
+### Step 0.1: 자율 모드 감지
+
+1. args 전체 토큰에서 `-a` 또는 `--auto` 존재 여부 검사:
+   - 감지 시 `AUTO_MODE=true` (args 어느 위치든 허용)
+2. args에 없으면 `read_workflow_state_auto_mode("mst:accept", REQ_ID)` 호출 (helper는 T01에서 추가됨)
+   - 반환 bool → `AUTO_MODE`에 채택
+   - `None` → 3번 단계로 진행
+3. `config.auto_mode.accept` 확인 (`{PROJECT_ROOT}/.gran-maestro/config.resolved.json`)
+   - true이면 `AUTO_MODE=true`
+4. 미설정 또는 false이면 `AUTO_MODE=false` (기본)
+5. `AUTO_MODE=true`이면 수락 AskUserQuestion을 전부 생략하고 최종 머지 단계까지 무정지 진행한다.
+
+### AUTO_MODE와 DAG 연쇄 정책 분리 (MANDATORY)
+
+AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `dependencies.blocks`를 기반으로 한 DAG 연쇄 재기동 여부는 기존 정책 플래그만 참조합니다:
+- `workflow.auto_approve_on_unblock` (config)
+- `request.json.auto_approve` (해당 REQ 속성)
+
+따라서 `/mst:accept -a REQ-N`이 `workflow.auto_approve_on_unblock=false` 환경에서 호출되어도 후속 REQ로의 자동 연쇄는 **발생하지 않습니다**. AUTO_MODE와 DAG 연쇄를 같은 신호로 취급하지 마십시오.
+
+### 세션 중 자율 모드 전환
+
+사용자가 대기 중 "auto로", "자율 모드로", "-a로", "지금부터 자동으로" 등 입력 시 즉시 `AUTO_MODE=true`로 전환하고 `[자율 모드 전환] 이제부터 -a 모드로 진행합니다.` 출력 후 현재 Step부터 재개합니다.
+
 ### REQ ID 결정 (인자 없이 호출 시)
 
 `requests/`의 모든 `request.json` 스캔 → `current_phase==3` + `phase3_review`/PASS 상태 필터링 → REQ 번호 오름차순 첫 번째 선택 (없으면 "대기 중 요청 없음" 알림)
@@ -177,16 +201,25 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
   --active true \
   --skill mst:agile \
   --req "{ACTIVE_REQ}" \
+  --auto {AUTO_MODE} \
 || echo "[mst:accept] warning: failed to restore agile workflow state" >&2
 ```
+
+- `--auto` 값은 현재 accept의 AUTO_MODE(= Step 0.1 판정 결과)를 그대로 전달하여
+  retrospective → 새 sprint 진입 시 AUTO_MODE가 false로 덮이지 않도록 한다.
+- 기존 `--auto false` 고정 호출(clear 경로, :186)은 변경하지 않는다
+  (active=false로 state를 닫을 때는 auto_mode도 의미가 없으므로 false 유지).
 
 - `agile_loop_active!=true`이면, 기존처럼 워크플로우 비활성:
 
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active false \
+  --auto false \
 || echo "[mst:accept] warning: failed to clear workflow state" >&2
 ```
+
+- 이 호출은 workflow 종료용이며 `--auto false` 고정을 유지한다.
 
 - 두 호출 모두 비차단(non-blocking)으로 처리한다: 실패 시 경고만 출력하고 워크플로우를 계속 진행한다.
 - `approve`의 `state set-workflow --active true` 호출과 대칭을 이룬다.

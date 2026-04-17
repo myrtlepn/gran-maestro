@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 
 from scripts.mst_cmds import _common
+from scripts.mst_cmds._common import (
+    read_workflow_state_auto_mode,
+)
 from scripts.mst_cmds import request
 from scripts.mst_cmds import workflow
 from scripts.mst_cmds import worktree
