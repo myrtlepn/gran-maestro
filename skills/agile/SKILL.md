@@ -629,7 +629,7 @@ Step 2.2.3은 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `config.agi
    - 위 `Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}...")` 호출을 그대로 실행 (부모 Sprint 세션 컨텍스트)
 3. 기본값은 `false`이며 `templates/defaults/config.json`의 `agile.dispatch.enabled`를 따른다.
 
-##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider)
+##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider, MANDATORY)
 
 1. Sprint prompt 조립:
    - `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
@@ -641,9 +641,28 @@ Step 2.2.3은 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `config.agi
 4. 종료 신호 수신:
    - `claude` 프로세스 exit code를 확인하고, `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json` 파일 존재 여부를 함께 확인한다.
 5. 실패 처리:
-   - 실패 조건: `exit_code != 0` 또는 `dispatch-result.json` 미생성.
-   - 실패 시 `python3 {PROJECT_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {CURRENT_SPRINT} --status failed --summary "{failure_reason}"`를 호출한다.
-   - inline fallback은 절대 수행하지 않는다 (ADR-007).
+   - 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
+
+###### 1회 안내 메시지 (MANDATORY)
+
+- Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력한다.
+- 정확한 출력 문자열:
+  - `[Sprint Dispatch 모드] Sprint 실행을 별도 세션으로 격리합니다. 비활성화: config.agile.dispatch.enabled = false`
+- 1회 출력 판정은 아래 중 하나로 구현한다.
+  - 세션 메모리 플래그: `dispatch_notice_shown_{AGI_ID}` 존재 여부 확인
+  - 파일 플래그: `{PROJECT_ROOT}/.gran-maestro/tmp/dispatch-notice-shown-{AGI_ID}` 존재 여부 확인
+- 플래그가 없으면 메시지를 출력하고 즉시 플래그를 기록한다(동일 세션 재출력 금지).
+
+###### 실패 처리 (MANDATORY)
+
+- 실패 조건: `exit_code != 0` 또는 `dispatch-result.json` 미생성.
+- 실패 시 반드시 아래 명령으로 실패 결과를 기록한다.
+  - `python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {N} --status failed --summary "{failure_reason}"`
+- `failure_reason`은 구체 원인을 남긴다.
+  - 예: `"dispatch chain exited with code 137"`
+  - 예: `"dispatch-result.json missing after chain"`
+- 다음 Sprint 시작 시 Step `2.2.1 프로젝트 건강 점검`에서 이전 실패 Sprint를 감지하면 재시도 경로로 진입한다.
+- inline fallback 수행 금지 (ADR-007): dispatch 실패 후 parent 세션에서 `plan/request/approve/accept`를 즉시 대체 실행하지 않는다.
 
 **호환성**:
 - `config.agile.dispatch.enabled == false` 경로는 기존 동작과 100% 동일하며 `dispatch-result.json`을 생성하지 않는다.

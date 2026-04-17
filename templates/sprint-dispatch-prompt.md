@@ -46,67 +46,12 @@ Read: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT}/inte
 3. `/mst:approve -a`에서 태스크를 실행한다.
 4. `/mst:accept`에서 결과를 머지한다.
 
-## Post-Execution Records (MANDATORY)
+## Post-Execution (MANDATORY)
 
-chain 완료 후 반드시 아래를 기록하라. 기록 누락 시 Sprint가 failed로 처리된다.
-
-### 1. Sprint Result
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
-  --sprint {CURRENT_SPRINT} \
-  --status done|failed \
-  --planned "{SELECTED_DOD_IDS}" \
-  --completed "{COMPLETED_DOD_IDS}" \
-  --pln {PLN_ID} \
-  --req {REQ_ID} \
-  --sprint-kind user_observable|foundational \
-  --user-observable-change "{사용자가 이제 할 수 있는 것}" \
-  --foundational-reason "{관찰 불가한 이유 + 향후 관찰 가능 계획}" \
-  --sprint-goals '{JSON array}' \
-  --previous-lessons "{PREVIOUS_LESSONS}" \
-  --json
-```
-
-sprint-kind 판단 기준:
-- `user_observable`: 사용자 진입점 1개 이상이 추가/변경되거나, 기존 진입점의 동작이 가시적으로 변하는 경우
-- `foundational`: 테스트 환경, 내부 스키마, 헬퍼 등 사용자에게 보이지 않는 변경
-
-### 2. Sprint Retrospective
+`/mst:plan -a -> /mst:request -a -> /mst:approve -a -> /mst:accept` chain이 완료되면, `/mst:accept` 직후 아래 두 명령을 반드시 순서대로 실행한다.
+슬롯(`{AGI_ID}`, `{N}`, `{PLN_ID}`, `{REQ_ID}` 등)은 parent dispatch 조립 단계에서 치환된다.
 
 ```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
-  --sprint {CURRENT_SPRINT} \
-  --status done|failed \
-  --succeeded "{성공한 DOD IDs}" \
-  --failed '{"item":"{DOD_ID}","cause":"{실패 원인}","attempt":"{시도한 접근"}"}' \
-  --velocity-planned {계획 항목 수} \
-  --velocity-completed {완료 항목 수} \
-  --limitations "{발견된 제약/블로커}" \
-  --lessons "{이번 Sprint에서 배운 교훈}" \
-  --direction "{다음 Sprint 우선순위/방향 제안}" \
-  --json
-```
-
-### 3. Dispatch Result
-
-아래 JSON을 파일로 저장:
-경로: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT}/dispatch-result.json`
-
-```json
-{
-  "agi_id": "{AGI_ID}",
-  "sprint": {CURRENT_SPRINT},
-  "status": "success|failed",
-  "pln_id": "{PLN_ID}",
-  "req_id": "{REQ_ID}",
-  "commit_sha": "{마지막 커밋 SHA}",
-  "sprint_kind": "user_observable|foundational",
-  "worktree_path": "{worktree 경로}",
-  "exit_code": 0,
-  "failure_reason": null,
-  "files_changed": {변경 파일 수},
-  "result_recorded": true,
-  "retrospective_recorded": true
-}
+python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {N} --status {success|failed} --planned "..." --completed "..." --pln {PLN_ID} --req {REQ_ID} --sprint-kind user_observable --user-observable-change "..." --json
+python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} --sprint {N} --status done --succeeded "..." --failed '[]' --velocity-planned N --velocity-completed N --limitations "..." --lessons "..." --direction "..." --json
 ```
