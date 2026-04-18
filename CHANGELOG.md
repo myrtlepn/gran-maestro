@@ -4,6 +4,25 @@
 
 ---
 
+## [0.59.0] — 2026-04-19
+
+### 새 기능
+- **적대적 검토 게이트(Adversarial Review Gate)**: `/mst:plan`·`/mst:agile-plan`의 D3 Gate 직전과 `/mst:request`의 질문 생성 직전에, 독립 에이전트가 plan/objective를 적대적으로 검토해 사용자가 **놓친 엣지케이스·빠진 흐름·페르소나/NFR/통합 gap**을 찾아 DoD/AC에 보강합니다. 5종 perspective(edge/flow/persona/nfr/integration) 중 edge/flow/integration이 기본 on, persona/nfr은 기본 off. 대시보드 Settings 탭 "적대적 검토" 섹션에서 전체/perspective별 on/off와 max_rounds, auto_apply_severity_threshold, agent provider/tier를 편집할 수 있습니다. config로는 `agile.adversarial_review.enabled=false`로 끌 수 있습니다. (REQ-667)
+- **MST HUD 스킬 호출 체인 표시**: statusline HUD에서 실행 중 스킬 체인(예: plan → request → approve)을 가시화합니다. (REQ-668)
+
+### 개선
+- **worktree remove 정리 안전화**: remove 절차 중 비정상 상태에 대한 방어가 강화되어 정리 실패로 인한 상태 오염이 줄어듭니다. (REQ-666)
+- **worktree 중첩 생성 차단 가드**: 이미 worktree인 경로 안에 추가 worktree 생성 시도를 사전에 차단합니다. (REQ-665)
+- **스킬 프롬프트 압축**: 상위 5개 스킬의 SKILL.md 크기를 평균 30% 이상 축소하고, 공통 블록을 include 메커니즘으로 재사용하도록 재구성했습니다. 컨텍스트 소비가 감소합니다. (REQ-664, REQ-662)
+- **mst-session-init에 session_id 브리지 writer**: 세션 식별자가 여러 훅·스킬 간에 일관되게 전달되도록 session-init에서 writer를 보강했습니다. (REQ-663)
+- **config get CLI 복수 키 지원**: `mst.py config get KEY1 KEY2 ...` 로 한 번에 여러 키를 조회하고, 스킬에서 `config.resolved.json` 전체 Read를 제거해 IO를 줄였습니다. (REQ-660)
+- **statusline fallback 판정 보강**: authoritative 판정 경로를 명확히 하고 stop-hook과 계약을 정렬했습니다. (REQ-658)
+
+### 버그 수정
+- **Ultrareview 관련 3종 수정**: session-init fallback, gardening cascade, stop-hook의 unquoted `find` 경로에서 발생하던 이슈를 수정했습니다. (REQ-661)
+
+---
+
 ## [0.58.4] — 2026-04-18
 
 ### 개선
