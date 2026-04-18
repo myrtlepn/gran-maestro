@@ -41,6 +41,7 @@ Claude Code status line을 MST HUD 래퍼(`scripts/mst-statusline.sh`)로 교체
    - `MST HUD 설치 완료`
    - `statusLine.command -> bash "{WRAPPER_PATH}"`
    - `backup -> ~/.claude/mst-statusline-backup.json`
+   - 모델 정보가 있으면 MST 라인에 prefix가 표시됨 (예: `[Claude/Opus] MST idle`)
 
 ## 예시 구현 명령 (Bash + Python)
 

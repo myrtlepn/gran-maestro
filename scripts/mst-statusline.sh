@@ -94,15 +94,81 @@ build_mst_line() {
   local state_file="$1"
   local transcript_path="${2:-}"
   local dispatch_run_dir="${3:-}"
+  local input_json="${4:-}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
 state_path = sys.argv[1] if len(sys.argv) > 1 else ""
 transcript_path = sys.argv[2] if len(sys.argv) > 2 else ""
 dispatch_run_dir = sys.argv[3] if len(sys.argv) > 3 else ""
+input_json = sys.argv[4] if len(sys.argv) > 4 else ""
 MAX_TAIL_BYTES = 512 * 1024
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
+
+
+def clean_text(value):
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def derive_model_label(model_id):
+    value = clean_text(model_id)
+    if not value:
+        return ""
+    candidate = re.split(r"\s+", value, maxsplit=1)[0]
+    for token in re.split(r"[-_/:\.]+", candidate):
+        if token:
+            return token
+    return candidate
+
+
+def detect_provider(model_id):
+    value = clean_text(model_id).lower()
+    if "claude" in value:
+        return "Claude"
+    if "gpt" in value or "codex" in value or "openai" in value:
+        return "OpenAI"
+    if "gemini" in value:
+        return "Gemini"
+    return "Unknown"
+
+
+def build_model_prefix(raw_input):
+    if not isinstance(raw_input, str) or not raw_input.strip():
+        return ""
+    try:
+        payload = json.loads(raw_input)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    model = payload.get("model")
+    if not isinstance(model, dict):
+        return ""
+
+    display_name = clean_text(model.get("display_name"))
+    model_id = clean_text(model.get("id"))
+    if not display_name and not model_id:
+        return ""
+
+    provider = detect_provider(model_id)
+    short_model = display_name or derive_model_label(model_id)
+    if short_model:
+        return f"[{provider}/{short_model}]"
+    return f"[{provider}]"
+
+
+def prepend_model_prefix(line, prefix):
+    if not prefix:
+        return line
+    if not isinstance(line, str):
+        return prefix
+    if line:
+        return f"{prefix} {line}"
+    return prefix
 
 
 def parse_iso(ts: str):
@@ -376,18 +442,26 @@ def merge_with_dispatch_prefix(base_line, run_dir):
     return prefix
 
 
+model_prefix = build_model_prefix(input_json)
+
+
+def render_output(base_line):
+    merged = merge_with_dispatch_prefix(base_line, dispatch_run_dir)
+    return prepend_model_prefix(merged, model_prefix)
+
+
 state_line = render_from_state(state_path)
 if state_line is not None:
-    print(merge_with_dispatch_prefix(state_line, dispatch_run_dir))
+    print(render_output(state_line))
     sys.exit(0)
 
 transcript_line = render_from_transcript(transcript_path)
 if transcript_line is not None:
-    print(merge_with_dispatch_prefix(transcript_line, dispatch_run_dir))
+    print(render_output(transcript_line))
     sys.exit(0)
 
-print(merge_with_dispatch_prefix("MST idle", dispatch_run_dir))
-' "$state_file" "$transcript_path" "$dispatch_run_dir" 2>/dev/null || printf 'MST idle\n'
+print(render_output("MST idle"))
+' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
@@ -396,7 +470,7 @@ STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
