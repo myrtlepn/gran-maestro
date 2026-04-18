@@ -1,3 +1,4 @@
+import { fromFileUrl, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { setRegistry } from "../config.ts";
 import { projectAgileApi } from "./agile.ts";
 
@@ -35,14 +36,65 @@ async function setupSessionFixture(
   );
   await Deno.writeTextFile(
     `${sessionDir}/index/links.json`,
-    JSON.stringify({ agi_id: "AGI-001", pln: ["PLN-1"], req: ["REQ-1"] }, null, 2) + "\n",
+    JSON.stringify(
+      { agi_id: "AGI-001", pln: ["PLN-1"], req: ["REQ-1"] },
+      null,
+      2,
+    ) + "\n",
   );
-  await Deno.writeTextFile(`${sessionDir}/objective/objective.md`, objectiveContent);
+  await Deno.writeTextFile(
+    `${sessionDir}/objective/objective.md`,
+    objectiveContent,
+  );
 
   return {
     baseDir,
     cleanup: async () => {
       await Deno.remove(baseDir, { recursive: true });
+    },
+  };
+}
+
+async function copyDirectoryRecursive(
+  sourceDir: string,
+  targetDir: string,
+): Promise<void> {
+  await Deno.mkdir(targetDir, { recursive: true });
+
+  for await (const entry of Deno.readDir(sourceDir)) {
+    const sourcePath = join(sourceDir, entry.name);
+    const targetPath = join(targetDir, entry.name);
+
+    if (entry.isDirectory) {
+      await copyDirectoryRecursive(sourcePath, targetPath);
+      continue;
+    }
+
+    if (entry.isFile) {
+      await Deno.copyFile(sourcePath, targetPath);
+    }
+  }
+}
+
+async function setupSampleAgiFixture(
+  agiId = "AGI-016",
+): Promise<
+  { baseDir: string; sessionDir: string; cleanup: () => Promise<void> }
+> {
+  const tempRoot = await Deno.makeTempDir({ prefix: "agile-route-sample-" });
+  const baseDir = join(tempRoot, ".gran-maestro");
+  const sourceDir = fromFileUrl(
+    new URL(`../../../../agile/${agiId}`, import.meta.url),
+  );
+  const sessionDir = join(baseDir, "agile", agiId);
+
+  await copyDirectoryRecursive(sourceDir, sessionDir);
+
+  return {
+    baseDir,
+    sessionDir,
+    cleanup: async () => {
+      await Deno.remove(tempRoot, { recursive: true });
     },
   };
 }
@@ -60,6 +112,175 @@ function createApp(baseDir: string) {
   });
   return projectAgileApi;
 }
+Deno.test("GET /agile/sessions/:agiId exposes integrationReview, alignmentCheck, deferred_dod_count from fixture", async () => {
+  const fixture = await setupSampleAgiFixture();
+
+  try {
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-016",
+    );
+    assertEquals(response.status, 200);
+
+    const payload = await response.json() as {
+      session: Record<string, unknown>;
+      sprints: Array<Record<string, unknown>>;
+    };
+
+    assertEquals(payload.session.current_sprint, 5);
+    assertEquals(payload.session.deferred_dod_count, 0);
+
+    const sprintsById = new Map(
+      payload.sprints.map((sprint) =>
+        [String(sprint.sprint_id), sprint] as const
+      ),
+    );
+
+    const sprintS02 = sprintsById.get("S02");
+    assert(sprintS02);
+    assertEquals(sprintS02.status, "done");
+    assertEquals(
+      sprintS02.user_observable_change,
+      "agile CLI에서 result/objective-transition에 --dod-ref/--domain/--evidence-ref 플래그 사용 가능. DoD 마커에 evidence_refs 자동 누적.",
+    );
+    assertEquals(sprintS02.integrationReview, {
+      verdict: {
+        new_island_threshold: 0.2,
+        exceeded: false,
+        force_wire_recommended: false,
+        escape_hatch_used: false,
+        escape_reason: null,
+      },
+      ratios: {
+        new_island: 0,
+      },
+      files: {
+        new_island: 0,
+      },
+      force_wire_recommended: false,
+    });
+    assertEquals(sprintS02.alignmentCheck, {
+      verdict: "aligned",
+      raw_excerpt:
+        "# Alignment Check — S02 ## 판정: aligned ## A. DoD-변경 매핑 충실도",
+    });
+
+    const sprintS00 = sprintsById.get("S00");
+    assert(sprintS00);
+    assertEquals(sprintS00.integrationReview, null);
+    assertEquals(sprintS00.alignmentCheck, null);
+
+    const sprintS03 = sprintsById.get("S03");
+    assert(sprintS03);
+    assertEquals(sprintS03.integrationReview, {
+      verdict: {
+        new_island_threshold: 0.2,
+        exceeded: false,
+        force_wire_recommended: false,
+        escape_hatch_used: false,
+        escape_reason: null,
+      },
+      ratios: {
+        new_island: 0,
+      },
+      files: {
+        new_island: 0,
+      },
+      force_wire_recommended: false,
+    });
+    assertEquals(sprintS03.alignmentCheck, null);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId counts proposed_done DoD markers", async () => {
+  const fixture = await setupSessionFixture(
+    {
+      steering_every: 3,
+    },
+    [
+      "# Objective",
+      "",
+      "<!-- dod:DOD-001 status:proposed_done priority:must -->",
+      "DOD-001",
+      "",
+      "<!-- dod:DOD-002 status:done priority:must -->",
+      "DOD-002",
+      "",
+      "<!-- dod:DOD-003 status:proposed_done priority:should -->",
+      "DOD-003",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const sprintDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01`;
+    await Deno.mkdir(sprintDir, { recursive: true });
+    await Deno.writeTextFile(
+      `${sprintDir}/result.json`,
+      JSON.stringify(
+        {
+          sprint_id: "S01",
+          status: "done",
+          sprint_goals: [],
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001",
+    );
+    assertEquals(response.status, 200);
+
+    const payload = await response.json() as {
+      session: Record<string, unknown>;
+    };
+    assertEquals(payload.session.deferred_dod_count, 2);
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
+
+Deno.test("GET /agile/sessions/:agiId falls back to null when integration-review.json is invalid", async () => {
+  const fixture = await setupSampleAgiFixture();
+
+  try {
+    await Deno.writeTextFile(
+      `${fixture.sessionDir}/sprints/S02/integration-review.json`,
+      "{ invalid json",
+    );
+
+    const app = createApp(fixture.baseDir);
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-016",
+    );
+    assertEquals(response.status, 200);
+
+    const payload = await response.json() as {
+      sprints: Array<Record<string, unknown>>;
+    };
+    const sprintS02 = payload.sprints.find((sprint) =>
+      sprint.sprint_id === "S02"
+    );
+
+    assert(sprintS02);
+    assertEquals(sprintS02.integrationReview, null);
+    assertEquals(sprintS02.alignmentCheck, {
+      verdict: "aligned",
+      raw_excerpt:
+        "# Alignment Check — S02 ## 판정: aligned ## A. DoD-변경 매핑 충실도",
+    });
+  } finally {
+    await fixture.cleanup();
+    setRegistry({ projects: [] });
+  }
+});
 
 Deno.test("GET /agile/sessions exposes steering_every, queue_size, refs_count", async () => {
   const fixture = await setupSessionFixture({
@@ -99,15 +320,21 @@ Deno.test("GET /agile/sessions and /agile/sessions/:agiId default queue/refs to 
 
     const listResponse = await app.request("http://localhost/agile/sessions");
     assertEquals(listResponse.status, 200);
-    const listPayload = await listResponse.json() as Array<Record<string, unknown>>;
+    const listPayload = await listResponse.json() as Array<
+      Record<string, unknown>
+    >;
     assertEquals(listPayload.length, 1);
     assertEquals(listPayload[0].steering_every, 5);
     assertEquals(listPayload[0].queue_size, 0);
     assertEquals(listPayload[0].refs_count, 0);
 
-    const detailResponse = await app.request("http://localhost/agile/sessions/AGI-001");
+    const detailResponse = await app.request(
+      "http://localhost/agile/sessions/AGI-001",
+    );
     assertEquals(detailResponse.status, 200);
-    const detailPayload = await detailResponse.json() as { session: Record<string, unknown> };
+    const detailPayload = await detailResponse.json() as {
+      session: Record<string, unknown>;
+    };
 
     assertEquals(detailPayload.session.steering_every, 5);
     assertEquals(detailPayload.session.queue, []);
@@ -130,11 +357,15 @@ Deno.test("GET /agile/sessions/:agiId/objective returns stable non-empty ETag", 
   try {
     const app = createApp(fixture.baseDir);
 
-    const responseA = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const responseA = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(responseA.status, 200);
     const etagA = responseA.headers.get("ETag");
 
-    const responseB = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const responseB = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(responseB.status, 200);
     const etagB = responseB.headers.get("ETag");
 
@@ -159,14 +390,26 @@ Deno.test("GET /agile/sessions/:agiId/objective/files returns objective root + d
     await Deno.writeTextFile(`${detailsDir}/readme.txt`, "ignore");
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective/files");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective/files",
+    );
     assertEquals(response.status, 200);
-    const payload = await response.json() as { files: Array<Record<string, unknown>> };
+    const payload = await response.json() as {
+      files: Array<Record<string, unknown>>;
+    };
 
     assertEquals(payload.files, [
       { name: "objective.md", path: "objective/objective.md", type: "root" },
-      { name: "architecture.md", path: "objective/details/architecture.md", type: "detail" },
-      { name: "frontend-design.md", path: "objective/details/frontend-design.md", type: "detail" },
+      {
+        name: "architecture.md",
+        path: "objective/details/architecture.md",
+        type: "detail",
+      },
+      {
+        name: "frontend-design.md",
+        path: "objective/details/frontend-design.md",
+        type: "detail",
+      },
     ]);
   } finally {
     await fixture.cleanup();
@@ -181,7 +424,9 @@ Deno.test("GET /agile/sessions/:agiId/objective/files returns empty list when de
 
   try {
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective/files");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective/files",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as { files: unknown[] };
     assertEquals(payload.files, []);
@@ -199,10 +444,15 @@ Deno.test("GET /agile/sessions/:agiId/objective/details/:filename returns detail
   try {
     const detailsDir = `${fixture.baseDir}/agile/AGI-001/objective/details`;
     await Deno.mkdir(detailsDir, { recursive: true });
-    await Deno.writeTextFile(`${detailsDir}/architecture.md`, "# Architecture detail");
+    await Deno.writeTextFile(
+      `${detailsDir}/architecture.md`,
+      "# Architecture detail",
+    );
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective/details/architecture.md");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective/details/architecture.md",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as { content: string; path: string };
 
@@ -224,7 +474,9 @@ Deno.test("GET /agile/sessions/:agiId/objective/details/:filename returns 404 fo
     await Deno.mkdir(detailsDir, { recursive: true });
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective/details/nonexistent.md");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective/details/nonexistent.md",
+    );
     assertEquals(response.status, 404);
   } finally {
     await fixture.cleanup();
@@ -243,7 +495,9 @@ Deno.test("GET /agile/sessions/:agiId/objective/details/:filename rejects traver
 
     const app = createApp(fixture.baseDir);
 
-    const parentTraversal = await app.request("http://localhost/agile/sessions/AGI-001/objective/details/..hack.md");
+    const parentTraversal = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective/details/..hack.md",
+    );
     assertEquals(parentTraversal.status, 400);
 
     const encodedSlashTraversal = await app.request(
@@ -262,19 +516,30 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/files ret
   }, "Objective root");
 
   try {
-    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    const resultDetailsDir =
+      `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
     await Deno.mkdir(resultDetailsDir, { recursive: true });
     await Deno.writeTextFile(`${resultDetailsDir}/frontend.md`, "# Frontend");
-    await Deno.writeTextFile(`${resultDetailsDir}/architecture.md`, "# Architecture");
+    await Deno.writeTextFile(
+      `${resultDetailsDir}/architecture.md`,
+      "# Architecture",
+    );
     await Deno.writeTextFile(`${resultDetailsDir}/notes.txt`, "ignore");
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files",
+    );
     assertEquals(response.status, 200);
-    const payload = await response.json() as { files: Array<Record<string, unknown>> };
+    const payload = await response.json() as {
+      files: Array<Record<string, unknown>>;
+    };
 
     assertEquals(payload.files, [
-      { name: "architecture.md", path: "sprints/S01/result-details/architecture.md" },
+      {
+        name: "architecture.md",
+        path: "sprints/S01/result-details/architecture.md",
+      },
       { name: "frontend.md", path: "sprints/S01/result-details/frontend.md" },
     ]);
   } finally {
@@ -290,7 +555,9 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/files ret
 
   try {
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/files",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as { files: unknown[] };
     assertEquals(payload.files, []);
@@ -306,12 +573,18 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename
   }, "Objective root");
 
   try {
-    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    const resultDetailsDir =
+      `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
     await Deno.mkdir(resultDetailsDir, { recursive: true });
-    await Deno.writeTextFile(`${resultDetailsDir}/frontend.md`, "# Frontend detail");
+    await Deno.writeTextFile(
+      `${resultDetailsDir}/frontend.md`,
+      "# Frontend detail",
+    );
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/frontend.md");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/frontend.md",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as { content: string; path: string };
 
@@ -329,11 +602,14 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename
   }, "Objective root");
 
   try {
-    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    const resultDetailsDir =
+      `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
     await Deno.mkdir(resultDetailsDir, { recursive: true });
 
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/nonexistent.md");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/sprints/S01/result-details/nonexistent.md",
+    );
     assertEquals(response.status, 404);
   } finally {
     await fixture.cleanup();
@@ -347,7 +623,8 @@ Deno.test("GET /agile/sessions/:agiId/sprints/:sprintId/result-details/:filename
   }, "Objective root");
 
   try {
-    const resultDetailsDir = `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
+    const resultDetailsDir =
+      `${fixture.baseDir}/agile/AGI-001/sprints/S01/result-details`;
     await Deno.mkdir(resultDetailsDir, { recursive: true });
 
     const app = createApp(fixture.baseDir);
@@ -375,13 +652,18 @@ Deno.test("GET /agile/sessions/:agiId/file serves image files with matching Cont
   try {
     const relativePath = "sprints/S01/screenshots/screen.png";
     const imageFile = `${fixture.baseDir}/agile/AGI-001/${relativePath}`;
-    await Deno.mkdir(`${fixture.baseDir}/agile/AGI-001/sprints/S01/screenshots`, { recursive: true });
+    await Deno.mkdir(
+      `${fixture.baseDir}/agile/AGI-001/sprints/S01/screenshots`,
+      { recursive: true },
+    );
     const expectedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     await Deno.writeFile(imageFile, expectedBytes);
 
     const app = createApp(fixture.baseDir);
     const response = await app.request(
-      `http://localhost/agile/sessions/AGI-001/file?path=${encodeURIComponent(relativePath)}`,
+      `http://localhost/agile/sessions/AGI-001/file?path=${
+        encodeURIComponent(relativePath)
+      }`,
     );
 
     assertEquals(response.status, 200);
@@ -436,24 +718,31 @@ Deno.test("PUT /agile/sessions/:agiId/objective succeeds when If-Match matches c
   try {
     const app = createApp(fixture.baseDir);
 
-    const getBefore = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const getBefore = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(getBefore.status, 200);
     const etagBefore = getBefore.headers.get("ETag");
     assert(etagBefore !== null && etagBefore.length > 0);
 
-    const putResponse = await app.request("http://localhost/agile/sessions/AGI-001/objective", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "If-Match": etagBefore,
+    const putResponse = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": etagBefore,
+        },
+        body: JSON.stringify({ content: "Objective after update" }),
       },
-      body: JSON.stringify({ content: "Objective after update" }),
-    });
+    );
     assertEquals(putResponse.status, 200);
     const etagFromPut = putResponse.headers.get("ETag");
     assert(etagFromPut !== null && etagFromPut.length > 0);
 
-    const getAfter = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const getAfter = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     const payloadAfter = await getAfter.json() as { content: string };
     const etagAfter = getAfter.headers.get("ETag");
 
@@ -472,40 +761,49 @@ Deno.test("PUT /agile/sessions/:agiId/objective revalidates If-Match immediately
     steering_every: 3,
   }, "Original objective");
 
-  const objectiveFile = `${fixture.baseDir}/agile/AGI-001/objective/objective.md`;
+  const objectiveFile =
+    `${fixture.baseDir}/agile/AGI-001/objective/objective.md`;
   const originalReadTextFile = Deno.readTextFile;
-  const mutableDeno = Deno as unknown as { readTextFile: typeof Deno.readTextFile };
+  const mutableDeno = Deno as unknown as {
+    readTextFile: typeof Deno.readTextFile;
+  };
   let objectiveReadCount = 0;
 
   try {
     const app = createApp(fixture.baseDir);
 
-    const getBefore = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const getBefore = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(getBefore.status, 200);
     const etagBefore = getBefore.headers.get("ETag");
     assert(etagBefore !== null && etagBefore.length > 0);
 
-    mutableDeno.readTextFile = (async (path: string | URL, options?: Deno.ReadFileOptions) => {
-      if (path === objectiveFile) {
-        objectiveReadCount += 1;
-        if (objectiveReadCount === 1) {
-          return "Original objective";
+    mutableDeno.readTextFile =
+      (async (path: string | URL, options?: Deno.ReadFileOptions) => {
+        if (path === objectiveFile) {
+          objectiveReadCount += 1;
+          if (objectiveReadCount === 1) {
+            return "Original objective";
+          }
+          if (objectiveReadCount === 2) {
+            return "Changed by another writer";
+          }
         }
-        if (objectiveReadCount === 2) {
-          return "Changed by another writer";
-        }
-      }
-      return await originalReadTextFile(path, options);
-    }) as typeof Deno.readTextFile;
+        return await originalReadTextFile(path, options);
+      }) as typeof Deno.readTextFile;
 
-    const putResponse = await app.request("http://localhost/agile/sessions/AGI-001/objective", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "If-Match": etagBefore,
+    const putResponse = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": etagBefore,
+        },
+        body: JSON.stringify({ content: "Client stale write" }),
       },
-      body: JSON.stringify({ content: "Client stale write" }),
-    });
+    );
 
     assertEquals(putResponse.status, 409);
     assert(objectiveReadCount >= 2);
@@ -527,24 +825,34 @@ Deno.test("PUT /agile/sessions/:agiId/objective returns 409 when If-Match is sta
   try {
     const app = createApp(fixture.baseDir);
 
-    const getBefore = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const getBefore = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(getBefore.status, 200);
     const staleEtag = getBefore.headers.get("ETag");
     assert(staleEtag !== null && staleEtag.length > 0);
 
-    await Deno.writeTextFile(`${fixture.baseDir}/agile/AGI-001/objective/objective.md`, "Changed by another writer");
+    await Deno.writeTextFile(
+      `${fixture.baseDir}/agile/AGI-001/objective/objective.md`,
+      "Changed by another writer",
+    );
 
-    const putResponse = await app.request("http://localhost/agile/sessions/AGI-001/objective", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "If-Match": staleEtag,
+    const putResponse = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": staleEtag,
+        },
+        body: JSON.stringify({ content: "Client stale write" }),
       },
-      body: JSON.stringify({ content: "Client stale write" }),
-    });
+    );
 
     assertEquals(putResponse.status, 409);
-    const current = await Deno.readTextFile(`${fixture.baseDir}/agile/AGI-001/objective/objective.md`);
+    const current = await Deno.readTextFile(
+      `${fixture.baseDir}/agile/AGI-001/objective/objective.md`,
+    );
     assertEquals(current, "Changed by another writer");
   } finally {
     await fixture.cleanup();
@@ -560,17 +868,22 @@ Deno.test("PUT /agile/sessions/:agiId/objective keeps backward compatibility wit
   try {
     const app = createApp(fixture.baseDir);
 
-    const putResponse = await app.request("http://localhost/agile/sessions/AGI-001/objective", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
+    const putResponse = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: "After compatibility write" }),
       },
-      body: JSON.stringify({ content: "After compatibility write" }),
-    });
+    );
 
     assertEquals(putResponse.status, 200);
 
-    const getAfter = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const getAfter = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     const payloadAfter = await getAfter.json() as { content: string };
     assertEquals(payloadAfter.content, "After compatibility write");
   } finally {
@@ -624,7 +937,9 @@ Deno.test("GET /agile/sessions/:agiId/objective parses project DoD markers and n
 
   try {
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as Record<string, unknown>;
     const parsed = payload.parsed as Record<string, unknown>;
@@ -676,7 +991,9 @@ Deno.test("GET /agile/sessions/:agiId/objective parses DoD contentText from line
 
   try {
     const app = createApp(fixture.baseDir);
-    const response = await app.request("http://localhost/agile/sessions/AGI-001/objective");
+    const response = await app.request(
+      "http://localhost/agile/sessions/AGI-001/objective",
+    );
     assertEquals(response.status, 200);
     const payload = await response.json() as Record<string, unknown>;
     const parsed = payload.parsed as Record<string, unknown>;
@@ -715,25 +1032,32 @@ Deno.test("PATCH /agile/:agiId/objective reinserts DoD markers for edited object
 
   try {
     const app = createApp(fixture.baseDir);
-    const patchResponse = await app.request("http://localhost/agile/AGI-001/objective", {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
+    const patchResponse = await app.request(
+      "http://localhost/agile/AGI-001/objective",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: [
+            "# Objective",
+            "",
+            "## 프로젝트 완료 기준 (DoD)",
+            "- [ ] DOD-010: Objective 마커 유지 (edited)",
+            "",
+          ].join("\n"),
+        }),
       },
-      body: JSON.stringify({
-        content: [
-          "# Objective",
-          "",
-          "## 프로젝트 완료 기준 (DoD)",
-          "- [ ] DOD-010: Objective 마커 유지 (edited)",
-          "",
-        ].join("\n"),
-      }),
-    });
+    );
 
     assertEquals(patchResponse.status, 200);
     const payload = await patchResponse.json() as { content: string };
-    assert(payload.content.includes("<!-- dod:DOD-010 status:todo priority:must -->"));
+    assert(
+      payload.content.includes(
+        "<!-- dod:DOD-010 status:todo priority:must -->",
+      ),
+    );
   } finally {
     await fixture.cleanup();
     setRegistry({ projects: [] });
@@ -750,6 +1074,8 @@ function assertEquals(actual: unknown, expected: unknown): void {
   const actualJson = JSON.stringify(actual);
   const expectedJson = JSON.stringify(expected);
   if (actualJson !== expectedJson) {
-    throw new Error(`Assertion failed: expected ${expectedJson}, received ${actualJson}`);
+    throw new Error(
+      `Assertion failed: expected ${expectedJson}, received ${actualJson}`,
+    );
   }
 }

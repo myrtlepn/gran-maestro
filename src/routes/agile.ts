@@ -1,7 +1,13 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { resolveBaseDir } from "../config.ts";
 import { broadcastSse } from "../sse.ts";
-import { dirExists, listDirs, readJsonFile, readTextFile, writeJsonFile } from "../utils.ts";
+import {
+  dirExists,
+  listDirs,
+  readJsonFile,
+  readTextFile,
+  writeJsonFile,
+} from "../utils.ts";
 
 const projectAgileApi = new Hono();
 
@@ -16,7 +22,8 @@ const IMAGE_EXTENSION_TO_CONTENT_TYPE: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
 };
-const OBJECTIVE_DOD_MARKER_LINE_RE = /^<!--\s*dod:\s*(DOD-[A-Z0-9_-]+)\s+status:\s*([a-z_]+)\s+priority:\s*([a-z_]+)\s*-->$/i;
+const OBJECTIVE_DOD_MARKER_LINE_RE =
+  /^<!--\s*dod:\s*(DOD-[A-Z0-9_-]+)\s+status:\s*([a-z_]+)\s+priority:\s*([a-z_]+)\s*-->$/i;
 const MARKER_ANCHOR_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
 const MARKER_ANCHOR_CHECKLIST_RE = /^\s*[-*+]\s+\[[ xX]\]\s+/;
 const OBJECTIVE_L2_HEADING_RE = /^\s{0,3}##\s+(.+?)\s*$/;
@@ -90,6 +97,28 @@ type ParsedObjective = {
   sections: ObjectiveParsedSection[];
 };
 
+type SprintIntegrationReview = {
+  verdict: Record<string, unknown> | null;
+  ratios: {
+    new_island: number | null;
+  };
+  files: {
+    new_island: number;
+  };
+  force_wire_recommended: boolean | null;
+};
+
+type AlignmentCheckVerdict =
+  | "aligned"
+  | "drift_warning"
+  | "objective_stale"
+  | "unknown";
+
+type SprintAlignmentCheck = {
+  verdict: AlignmentCheckVerdict;
+  raw_excerpt: string;
+};
+
 const OBJECTIVE_SECTION_DEFINITIONS: Array<{
   key: ObjectiveParsedSectionKey;
   title: string;
@@ -103,7 +132,14 @@ const OBJECTIVE_SECTION_DEFINITIONS: Array<{
   {
     key: "constraints",
     title: "제약사항",
-    aliases: ["제약사항", "제약 사항", "out-of-scope", "out of scope", "기술적 제약", "비즈니스 제약"],
+    aliases: [
+      "제약사항",
+      "제약 사항",
+      "out-of-scope",
+      "out of scope",
+      "기술적 제약",
+      "비즈니스 제약",
+    ],
   },
   {
     key: "moscow",
@@ -152,6 +188,10 @@ function asNumberOrNull(value: unknown): number | null {
   return null;
 }
 
+function asBooleanOrNull(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -179,20 +219,29 @@ function isCommentStatus(value: unknown): value is ObjectiveCommentStatus {
 }
 
 async function toSha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)].map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 async function objectiveRevisionFromContent(content: string): Promise<string> {
   return (await toSha256Hex(content)).slice(0, 12);
 }
 
-async function objectiveEtagFromContent(content: string | null): Promise<string | null> {
+async function objectiveEtagFromContent(
+  content: string | null,
+): Promise<string | null> {
   if (content === null) return null;
   return `"${await toSha256Hex(content)}"`;
 }
 
-async function listObjectiveSnapshotVersions(historyDir: string): Promise<number[]> {
+async function listObjectiveSnapshotVersions(
+  historyDir: string,
+): Promise<number[]> {
   const versions: number[] = [];
 
   try {
@@ -243,13 +292,17 @@ function normalizeObjectiveComment(entry: unknown): ObjectiveComment | null {
   };
 }
 
-async function objectiveRevisionFromFile(objectiveFile: string): Promise<string | null> {
+async function objectiveRevisionFromFile(
+  objectiveFile: string,
+): Promise<string | null> {
   const content = await readTextFile(objectiveFile);
   if (content === null) return null;
   return await toSha256Hex(content);
 }
 
-async function objectiveMtimeFromFile(objectiveFile: string): Promise<string | null> {
+async function objectiveMtimeFromFile(
+  objectiveFile: string,
+): Promise<string | null> {
   try {
     const stat = await Deno.stat(objectiveFile);
     return stat.mtime ? stat.mtime.toISOString() : null;
@@ -276,7 +329,9 @@ async function loadObjectiveComments(
   }
 
   const comments = Array.isArray(loaded.comments)
-    ? loaded.comments.map(normalizeObjectiveComment).filter((item): item is ObjectiveComment => item !== null)
+    ? loaded.comments.map(normalizeObjectiveComment).filter((
+      item,
+    ): item is ObjectiveComment => item !== null)
     : [];
 
   return {
@@ -309,7 +364,10 @@ function trimSurroundingEmptyLines(lines: string[]): string[] {
   return lines.slice(start, end);
 }
 
-function markerAnchorFromOriginalLine(lines: string[], markerLineIndex: number): {
+function markerAnchorFromOriginalLine(
+  lines: string[],
+  markerLineIndex: number,
+): {
   anchorType: MarkerAnchorType;
   anchorText: string | null;
 } {
@@ -343,7 +401,10 @@ function markerAnchorFromOriginalLine(lines: string[], markerLineIndex: number):
   };
 }
 
-function markerContentFromFollowingLine(lines: string[], markerLineIndex: number): string | null {
+function markerContentFromFollowingLine(
+  lines: string[],
+  markerLineIndex: number,
+): string | null {
   for (let i = markerLineIndex + 1; i < lines.length; i += 1) {
     const currentLine = lines[i];
     const trimmed = currentLine.trim();
@@ -365,7 +426,10 @@ function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
     const dod = match[1].toUpperCase();
     const status = match[2].toLowerCase();
     const priority = match[3].toLowerCase();
-    const { anchorType, anchorText } = markerAnchorFromOriginalLine(lines, lineIndex);
+    const { anchorType, anchorText } = markerAnchorFromOriginalLine(
+      lines,
+      lineIndex,
+    );
     const contentText = markerContentFromFollowingLine(lines, lineIndex);
     markers.push({
       markerLine: `<!-- dod:${dod} status:${status} priority:${priority} -->`,
@@ -381,7 +445,10 @@ function extractObjectiveMarkers(content: string): ObjectiveMarker[] {
   return markers;
 }
 
-function findMarkerAnchorIndex(lines: string[], marker: ObjectiveMarker): number {
+function findMarkerAnchorIndex(
+  lines: string[],
+  marker: ObjectiveMarker,
+): number {
   const dodToken = marker.dod.toLowerCase();
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -394,8 +461,13 @@ function findMarkerAnchorIndex(lines: string[], marker: ObjectiveMarker): number
   if (marker.anchorText) {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
-      if (marker.anchorType === "heading" && !MARKER_ANCHOR_HEADING_RE.test(line)) continue;
-      if (marker.anchorType === "checklist" && !MARKER_ANCHOR_CHECKLIST_RE.test(line)) continue;
+      if (
+        marker.anchorType === "heading" && !MARKER_ANCHOR_HEADING_RE.test(line)
+      ) continue;
+      if (
+        marker.anchorType === "checklist" &&
+        !MARKER_ANCHOR_CHECKLIST_RE.test(line)
+      ) continue;
       if (normalizeAnchorText(line) === marker.anchorText) {
         return i;
       }
@@ -405,7 +477,10 @@ function findMarkerAnchorIndex(lines: string[], marker: ObjectiveMarker): number
   return -1;
 }
 
-function reinsertObjectiveMarkers(originalContent: string, editedContent: string): string {
+function reinsertObjectiveMarkers(
+  originalContent: string,
+  editedContent: string,
+): string {
   const markers = extractObjectiveMarkers(originalContent);
   if (markers.length === 0) {
     return editedContent;
@@ -436,10 +511,16 @@ function reinsertObjectiveMarkers(originalContent: string, editedContent: string
   return merged;
 }
 
-function findObjectiveSectionDefinition(title: string): (typeof OBJECTIVE_SECTION_DEFINITIONS)[number] | null {
+function findObjectiveSectionDefinition(
+  title: string,
+): (typeof OBJECTIVE_SECTION_DEFINITIONS)[number] | null {
   const normalizedTitle = normalizeHeadingText(title);
   for (const definition of OBJECTIVE_SECTION_DEFINITIONS) {
-    if (definition.aliases.some((alias) => normalizedTitle.includes(normalizeHeadingText(alias)))) {
+    if (
+      definition.aliases.some((alias) =>
+        normalizedTitle.includes(normalizeHeadingText(alias))
+      )
+    ) {
       return definition;
     }
   }
@@ -460,14 +541,22 @@ function extractObjectiveSections(content: string): ObjectiveParsedSection[] {
   }
 
   const sections: ObjectiveParsedSection[] = [];
-  for (let headingIndex = 0; headingIndex < headings.length; headingIndex += 1) {
+  for (
+    let headingIndex = 0;
+    headingIndex < headings.length;
+    headingIndex += 1
+  ) {
     const currentHeading = headings[headingIndex];
     const definition = findObjectiveSectionDefinition(currentHeading.title);
     if (!definition) continue;
 
     const startLine = currentHeading.lineIndex + 1;
-    const endLine = headingIndex + 1 < headings.length ? headings[headingIndex + 1].lineIndex : lines.length;
-    const sectionLines = trimSurroundingEmptyLines(lines.slice(startLine, endLine));
+    const endLine = headingIndex + 1 < headings.length
+      ? headings[headingIndex + 1].lineIndex
+      : lines.length;
+    const sectionLines = trimSurroundingEmptyLines(
+      lines.slice(startLine, endLine),
+    );
     if (sectionLines.length === 0) continue;
 
     sections.push({
@@ -494,6 +583,120 @@ function parseObjectiveContent(content: string): ParsedObjective {
   };
 }
 
+function warnAgileReadFailure(
+  context: string,
+  path: string,
+  error: unknown,
+): void {
+  if (error instanceof Deno.errors.NotFound) {
+    return;
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`[agile] ${context}: ${path} (${detail})`);
+}
+
+async function readOptionalObjectJson(
+  path: string,
+  context: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = JSON.parse(await Deno.readTextFile(path));
+    if (!isRecord(parsed)) {
+      console.warn(`[agile] ${context}: ${path} (expected JSON object)`);
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    warnAgileReadFailure(context, path, error);
+    return null;
+  }
+}
+
+async function readSprintIntegrationReview(
+  path: string,
+): Promise<SprintIntegrationReview | null> {
+  const review = await readOptionalObjectJson(
+    path,
+    "Failed to read integration review",
+  );
+  if (!review) {
+    return null;
+  }
+
+  const verdict = isRecord(review.verdict) ? review.verdict : null;
+  const ratios = isRecord(review.ratios) ? review.ratios : {};
+  const files = isRecord(review.files) ? review.files : {};
+
+  return {
+    verdict,
+    ratios: {
+      new_island: asNumberOrNull(ratios.new_island),
+    },
+    files: {
+      new_island: asNumberOrNull(files.new_island) ?? 0,
+    },
+    force_wire_recommended: verdict === null
+      ? null
+      : asBooleanOrNull(verdict.force_wire_recommended),
+  };
+}
+
+function summarizeAlignmentCheck(content: string): string {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 3)
+    .join(" ")
+    .replace(/\s+/g, " ");
+}
+
+function parseAlignmentCheckVerdict(content: string): AlignmentCheckVerdict {
+  const normalized = content.toLowerCase();
+
+  if (
+    normalized.includes("objective_stale") ||
+    normalized.includes("objective stale") ||
+    normalized.includes(" stale")
+  ) {
+    return "objective_stale";
+  }
+  if (
+    normalized.includes("drift_warning") ||
+    normalized.includes("drift warning") ||
+    normalized.includes("drift")
+  ) {
+    return "drift_warning";
+  }
+  if (normalized.includes("aligned")) {
+    return "aligned";
+  }
+  return "unknown";
+}
+
+async function readSprintAlignmentCheck(
+  path: string,
+): Promise<SprintAlignmentCheck | null> {
+  try {
+    const content = await Deno.readTextFile(path);
+    return {
+      verdict: parseAlignmentCheckVerdict(content),
+      raw_excerpt: summarizeAlignmentCheck(content),
+    };
+  } catch (error) {
+    warnAgileReadFailure("Failed to read alignment check", path, error);
+    return null;
+  }
+}
+
+function countDeferredDods(parsedObjective: ParsedObjective | null): number {
+  if (parsedObjective === null) {
+    return 0;
+  }
+  return parsedObjective.dods.filter((dod) => dod.status === "proposed_done")
+    .length;
+}
+
 projectAgileApi.get("/agile/sessions", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
@@ -505,10 +708,14 @@ projectAgileApi.get("/agile/sessions", async (c) => {
     return c.json([]);
   }
 
-  const sessionDirs = (await listDirs(agileDir)).filter((dir) => AGI_ID_RE.test(dir));
+  const sessionDirs = (await listDirs(agileDir)).filter((dir) =>
+    AGI_ID_RE.test(dir)
+  );
   const sessions = await Promise.all(
     sessionDirs.map(async (dir) => {
-      const session = await readJsonFile<SessionJson>(`${agileDir}/${dir}/session.json`);
+      const session = await readJsonFile<SessionJson>(
+        `${agileDir}/${dir}/session.json`,
+      );
       if (!session) return null;
       const queue = asArray(session.queue);
       const refs = asArray(session.refs);
@@ -525,7 +732,9 @@ projectAgileApi.get("/agile/sessions", async (c) => {
     }),
   );
 
-  const filtered = sessions.filter((session): session is NonNullable<typeof session> => session !== null);
+  const filtered = sessions.filter((
+    session,
+  ): session is NonNullable<typeof session> => session !== null);
   filtered.sort((a, b) => {
     const aKey = a.updated_at ?? a.created_at ?? "";
     const bKey = b.updated_at ?? b.created_at ?? "";
@@ -557,36 +766,57 @@ projectAgileApi.get("/agile/sessions/:agiId", async (c) => {
   }
 
   const sprintsDir = `${sessionDir}/sprints`;
-  const sprintDirs = (await listDirs(sprintsDir)).filter((dir) => SPRINT_ID_RE.test(dir));
+  const sprintDirs = (await listDirs(sprintsDir)).filter((dir) =>
+    SPRINT_ID_RE.test(dir)
+  );
   sprintDirs.sort((a, b) => a.localeCompare(b));
 
   const sprints = await Promise.all(
     sprintDirs.map(async (sprintId) => {
-      const result = await readJsonFile<Record<string, unknown>>(`${sprintsDir}/${sprintId}/result.json`);
+      const sprintDir = `${sprintsDir}/${sprintId}`;
+      const result = await readJsonFile<Record<string, unknown>>(
+        `${sprintDir}/result.json`,
+      );
       if (!result) return null;
+
+      const [integrationReview, alignmentCheck] = await Promise.all([
+        readSprintIntegrationReview(`${sprintDir}/integration-review.json`),
+        readSprintAlignmentCheck(`${sprintDir}/alignment-check.md`),
+      ]);
+
       return {
         ...result,
         sprint_id: sprintId,
+        integrationReview,
+        alignmentCheck,
       };
     }),
   );
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
   const objectiveVersion = asNumberOrNull(objectiveMeta.version);
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveContent = await readTextFile(`${sessionDir}/${objectivePath}`);
-  const parsedObjective = objectiveContent === null ? null : parseObjectiveContent(objectiveContent);
-  const links = await readJsonFile<Record<string, unknown>>(`${sessionDir}/index/links.json`);
+  const parsedObjective = objectiveContent === null
+    ? null
+    : parseObjectiveContent(objectiveContent);
+  const links = await readJsonFile<Record<string, unknown>>(
+    `${sessionDir}/index/links.json`,
+  );
   const sessionResponse = {
     ...session,
     steering_every: asNumberOrNull(session.steering_every) ?? 0,
     queue: asArray(session.queue),
     refs: asArray(session.refs),
+    deferred_dod_count: countDeferredDods(parsedObjective),
   };
 
   return c.json({
     session: sessionResponse,
-    sprints: sprints.filter((item): item is NonNullable<typeof item> => item !== null),
+    sprints: sprints.filter((item): item is NonNullable<typeof item> =>
+      item !== null
+    ),
     objective: {
       version: objectiveVersion,
       path: objectivePath,
@@ -671,8 +901,14 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/files", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(/\\/g, "/");
-  const objectiveDir = objectivePath.includes("/") ? objectivePath.slice(0, objectivePath.lastIndexOf("/")) : "objective";
+  const objectivePath =
+    (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(
+      /\\/g,
+      "/",
+    );
+  const objectiveDir = objectivePath.includes("/")
+    ? objectivePath.slice(0, objectivePath.lastIndexOf("/"))
+    : "objective";
   const detailsDir = `${sessionDir}/${objectiveDir}/details`;
   const detailFiles: string[] = [];
 
@@ -691,7 +927,11 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/files", async (c) => {
   detailFiles.sort((a, b) => a.localeCompare(b));
   return c.json({
     files: [
-      { name: objectivePath.split("/").at(-1) ?? "objective.md", path: objectivePath, type: "root" },
+      {
+        name: objectivePath.split("/").at(-1) ?? "objective.md",
+        path: objectivePath,
+        type: "root",
+      },
       ...detailFiles.map((name) => ({
         name,
         path: `${objectiveDir}/details/${name}`,
@@ -701,139 +941,166 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/files", async (c) => {
   });
 });
 
-projectAgileApi.get("/agile/sessions/:agiId/objective/details/:filename", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
-
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
-
-  const filename = c.req.param("filename");
-  if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-    return c.json({ error: "Invalid filename" }, 400);
-  }
-
-  const sessionDir = `${baseDir}/agile/${agiId}`;
-  if (!(await dirExists(sessionDir))) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-
-  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-
-  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(/\\/g, "/");
-  const objectiveDir = objectivePath.includes("/") ? objectivePath.slice(0, objectivePath.lastIndexOf("/")) : "objective";
-  const detailPath = `${objectiveDir}/details/${filename}`;
-  const content = await readTextFile(`${sessionDir}/${detailPath}`);
-  if (content === null) {
-    return c.json({ error: "Objective detail not found" }, 404);
-  }
-
-  return c.json({
-    content,
-    path: detailPath,
-  });
-});
-
-projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/result-details/files", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
-
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
-
-  const sprintId = c.req.param("sprintId").toUpperCase();
-  if (!isValidSprintId(sprintId)) {
-    return c.json({ error: "Invalid sprint id" }, 400);
-  }
-
-  const sessionDir = `${baseDir}/agile/${agiId}`;
-  if (!(await dirExists(sessionDir))) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-
-  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-
-  const resultDetailsDir = `${sessionDir}/sprints/${sprintId}/result-details`;
-  const files: string[] = [];
-
-  try {
-    for await (const entry of Deno.readDir(resultDetailsDir)) {
-      if (!entry.isFile || !entry.name.endsWith(".md")) continue;
-      files.push(entry.name);
+projectAgileApi.get(
+  "/agile/sessions/:agiId/objective/details/:filename",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
     }
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return c.json({ files: [] });
+
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
     }
-    throw error;
-  }
 
-  files.sort((a, b) => a.localeCompare(b));
-  return c.json({
-    files: files.map((name) => ({
-      name,
-      path: `sprints/${sprintId}/result-details/${name}`,
-    })),
-  });
-});
+    const filename = c.req.param("filename");
+    if (
+      filename.includes("..") || filename.includes("/") ||
+      filename.includes("\\")
+    ) {
+      return c.json({ error: "Invalid filename" }, 400);
+    }
 
-projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/result-details/:filename", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+    const sessionDir = `${baseDir}/agile/${agiId}`;
+    if (!(await dirExists(sessionDir))) {
+      return c.json({ error: "Session not found" }, 404);
+    }
 
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
+    const session = await readJsonFile<SessionJson>(
+      `${sessionDir}/session.json`,
+    );
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
 
-  const sprintId = c.req.param("sprintId").toUpperCase();
-  if (!isValidSprintId(sprintId)) {
-    return c.json({ error: "Invalid sprint id" }, 400);
-  }
+    const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+    const objectivePath =
+      (asStringOrNull(objectiveMeta.path) ?? "objective/objective.md").replace(
+        /\\/g,
+        "/",
+      );
+    const objectiveDir = objectivePath.includes("/")
+      ? objectivePath.slice(0, objectivePath.lastIndexOf("/"))
+      : "objective";
+    const detailPath = `${objectiveDir}/details/${filename}`;
+    const content = await readTextFile(`${sessionDir}/${detailPath}`);
+    if (content === null) {
+      return c.json({ error: "Objective detail not found" }, 404);
+    }
 
-  const filename = c.req.param("filename");
-  if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-    return c.json({ error: "Invalid filename" }, 400);
-  }
+    return c.json({
+      content,
+      path: detailPath,
+    });
+  },
+);
 
-  const sessionDir = `${baseDir}/agile/${agiId}`;
-  if (!(await dirExists(sessionDir))) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+projectAgileApi.get(
+  "/agile/sessions/:agiId/sprints/:sprintId/result-details/files",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
+    }
 
-  const detailPath = `sprints/${sprintId}/result-details/${filename}`;
-  const content = await readTextFile(`${sessionDir}/${detailPath}`);
-  if (content === null) {
-    return c.json({ error: "Result detail not found" }, 404);
-  }
+    const sprintId = c.req.param("sprintId").toUpperCase();
+    if (!isValidSprintId(sprintId)) {
+      return c.json({ error: "Invalid sprint id" }, 400);
+    }
 
-  return c.json({
-    content,
-    path: detailPath,
-  });
-});
+    const sessionDir = `${baseDir}/agile/${agiId}`;
+    if (!(await dirExists(sessionDir))) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const session = await readJsonFile<SessionJson>(
+      `${sessionDir}/session.json`,
+    );
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const resultDetailsDir = `${sessionDir}/sprints/${sprintId}/result-details`;
+    const files: string[] = [];
+
+    try {
+      for await (const entry of Deno.readDir(resultDetailsDir)) {
+        if (!entry.isFile || !entry.name.endsWith(".md")) continue;
+        files.push(entry.name);
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return c.json({ files: [] });
+      }
+      throw error;
+    }
+
+    files.sort((a, b) => a.localeCompare(b));
+    return c.json({
+      files: files.map((name) => ({
+        name,
+        path: `sprints/${sprintId}/result-details/${name}`,
+      })),
+    });
+  },
+);
+
+projectAgileApi.get(
+  "/agile/sessions/:agiId/sprints/:sprintId/result-details/:filename",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
+    }
+
+    const sprintId = c.req.param("sprintId").toUpperCase();
+    if (!isValidSprintId(sprintId)) {
+      return c.json({ error: "Invalid sprint id" }, 400);
+    }
+
+    const filename = c.req.param("filename");
+    if (
+      filename.includes("..") || filename.includes("/") ||
+      filename.includes("\\")
+    ) {
+      return c.json({ error: "Invalid filename" }, 400);
+    }
+
+    const sessionDir = `${baseDir}/agile/${agiId}`;
+    if (!(await dirExists(sessionDir))) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const session = await readJsonFile<SessionJson>(
+      `${sessionDir}/session.json`,
+    );
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const detailPath = `sprints/${sprintId}/result-details/${filename}`;
+    const content = await readTextFile(`${sessionDir}/${detailPath}`);
+    if (content === null) {
+      return c.json({ error: "Result detail not found" }, 404);
+    }
+
+    return c.json({
+      content,
+      path: detailPath,
+    });
+  },
+);
 
 projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
@@ -857,10 +1124,13 @@ projectAgileApi.get("/agile/sessions/:agiId/objective", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const content = await readTextFile(`${sessionDir}/${objectivePath}`);
   const etag = await objectiveEtagFromContent(content);
-  const revision = content === null ? null : await objectiveRevisionFromContent(content);
+  const revision = content === null
+    ? null
+    : await objectiveRevisionFromContent(content);
   const parsed = content === null ? null : parseObjectiveContent(content);
   if (etag !== null) {
     c.header("ETag", etag);
@@ -898,11 +1168,14 @@ projectAgileApi.put("/agile/sessions/:agiId/objective", async (c) => {
   try {
     const body = await c.req.json();
     if (!isRecord(body) || typeof body.content !== "string") {
-      return c.json({ error: "Content body must be a JSON object with string content" }, 400);
+      return c.json({
+        error: "Content body must be a JSON object with string content",
+      }, 400);
     }
 
     const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-    const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+    const objectivePath = asStringOrNull(objectiveMeta.path) ??
+      "objective/objective.md";
     const objectiveFile = `${sessionDir}/${objectivePath}`;
     const ifMatch = c.req.header("If-Match");
 
@@ -966,11 +1239,14 @@ projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
   }
 
   if (!isRecord(body) || typeof body.content !== "string") {
-    return c.json({ error: "Content body must be a JSON object with string content" }, 400);
+    return c.json({
+      error: "Content body must be a JSON object with string content",
+    }, 400);
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveFile = `${sessionDir}/${objectivePath}`;
   const ifMatch = c.req.header("If-Match");
   const currentContent = await readTextFile(objectiveFile);
@@ -1029,7 +1305,8 @@ projectAgileApi.get("/agile/:agiId/objective", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveFile = `${sessionDir}/${objectivePath}`;
   const content = await readTextFile(objectiveFile);
   if (content === null) {
@@ -1076,7 +1353,10 @@ projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  if (!isRecord(payload) || typeof payload.content !== "string" || typeof payload.baseRevision !== "string") {
+  if (
+    !isRecord(payload) || typeof payload.content !== "string" ||
+    typeof payload.baseRevision !== "string"
+  ) {
     return c.json({ error: "content and baseRevision are required" }, 400);
   }
 
@@ -1086,7 +1366,8 @@ projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveFile = `${sessionDir}/${objectivePath}`;
   const currentContent = await readTextFile(objectiveFile);
   if (currentContent === null) {
@@ -1095,7 +1376,10 @@ projectAgileApi.patch("/agile/:agiId/objective", async (c) => {
 
   const currentRevision = await objectiveRevisionFromContent(currentContent);
   if (baseRevision !== currentRevision) {
-    return c.json({ error: "Objective has been modified", revision: currentRevision }, 409);
+    return c.json({
+      error: "Objective has been modified",
+      revision: currentRevision,
+    }, 409);
   }
 
   try {
@@ -1130,11 +1414,18 @@ projectAgileApi.get("/agile/:agiId/objective/comments", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveFile = `${sessionDir}/${objectivePath}`;
-  const commentsFile = `${sessionDir}/${objectiveCommentsPathFromObjectivePath(objectivePath)}`;
+  const commentsFile = `${sessionDir}/${
+    objectiveCommentsPathFromObjectivePath(objectivePath)
+  }`;
   const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
-  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
+  const commentsState = await loadObjectiveComments(
+    commentsFile,
+    objectivePath,
+    objectiveRevision,
+  );
   return c.json(commentsState);
 });
 
@@ -1176,12 +1467,17 @@ projectAgileApi.post("/agile/:agiId/objective/comments", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveFile = `${sessionDir}/${objectivePath}`;
   const commentsPath = objectiveCommentsPathFromObjectivePath(objectivePath);
   const commentsFile = `${sessionDir}/${commentsPath}`;
   const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
-  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
+  const commentsState = await loadObjectiveComments(
+    commentsFile,
+    objectivePath,
+    objectiveRevision,
+  );
 
   const now = new Date().toISOString();
   const comment: ObjectiveComment = {
@@ -1227,122 +1523,145 @@ projectAgileApi.post("/agile/:agiId/objective/comments", async (c) => {
   return c.json({ id: comment.id, comment }, 201);
 });
 
-projectAgileApi.patch("/agile/:agiId/objective/comments/:commentId", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+projectAgileApi.patch(
+  "/agile/:agiId/objective/comments/:commentId",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
+    }
 
-  const sessionDir = `${baseDir}/agile/${agiId}`;
-  if (!(await dirExists(sessionDir))) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+    const sessionDir = `${baseDir}/agile/${agiId}`;
+    if (!(await dirExists(sessionDir))) {
+      return c.json({ error: "Session not found" }, 404);
+    }
 
-  const session = await readJsonFile<SessionJson>(`${sessionDir}/session.json`);
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+    const session = await readJsonFile<SessionJson>(
+      `${sessionDir}/session.json`,
+    );
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
 
-  let payload: unknown;
-  try {
-    payload = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
+    let payload: unknown;
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
 
-  if (!isRecord(payload) || !isCommentStatus(payload.status)) {
-    return c.json({ error: "status must be either open or resolved" }, 400);
-  }
+    if (!isRecord(payload) || !isCommentStatus(payload.status)) {
+      return c.json({ error: "status must be either open or resolved" }, 400);
+    }
 
-  const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
-  const objectiveFile = `${sessionDir}/${objectivePath}`;
-  const commentsFile = `${sessionDir}/${objectiveCommentsPathFromObjectivePath(objectivePath)}`;
-  const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
-  const commentsState = await loadObjectiveComments(commentsFile, objectivePath, objectiveRevision);
-  const commentId = c.req.param("commentId");
-  const index = commentsState.comments.findIndex((item) => item.id === commentId);
-  if (index === -1) {
-    return c.json({ error: "Comment not found" }, 404);
-  }
+    const objectiveMeta = isRecord(session.objective) ? session.objective : {};
+    const objectivePath = asStringOrNull(objectiveMeta.path) ??
+      "objective/objective.md";
+    const objectiveFile = `${sessionDir}/${objectivePath}`;
+    const commentsFile = `${sessionDir}/${
+      objectiveCommentsPathFromObjectivePath(objectivePath)
+    }`;
+    const objectiveRevision = await objectiveRevisionFromFile(objectiveFile);
+    const commentsState = await loadObjectiveComments(
+      commentsFile,
+      objectivePath,
+      objectiveRevision,
+    );
+    const commentId = c.req.param("commentId");
+    const index = commentsState.comments.findIndex((item) =>
+      item.id === commentId
+    );
+    if (index === -1) {
+      return c.json({ error: "Comment not found" }, 404);
+    }
 
-  const now = new Date().toISOString();
-  const updatedComment: ObjectiveComment = {
-    ...commentsState.comments[index],
-    status: payload.status,
-  };
+    const now = new Date().toISOString();
+    const updatedComment: ObjectiveComment = {
+      ...commentsState.comments[index],
+      status: payload.status,
+    };
 
-  const nextComments = [...commentsState.comments];
-  nextComments[index] = updatedComment;
+    const nextComments = [...commentsState.comments];
+    nextComments[index] = updatedComment;
 
-  const saved = await writeJsonFile(commentsFile, {
-    docPath: objectivePath,
-    docRevision: objectiveRevision,
-    updatedAt: now,
-    comments: nextComments,
-  } satisfies ObjectiveCommentsFile);
-  if (!saved) {
-    return c.json({ error: "Failed to persist objective comments" }, 500);
-  }
+    const saved = await writeJsonFile(
+      commentsFile,
+      {
+        docPath: objectivePath,
+        docRevision: objectiveRevision,
+        updatedAt: now,
+        comments: nextComments,
+      } satisfies ObjectiveCommentsFile,
+    );
+    if (!saved) {
+      return c.json({ error: "Failed to persist objective comments" }, 500);
+    }
 
-  return c.json({ ok: true, comment: updatedComment });
-});
+    return c.json({ ok: true, comment: updatedComment });
+  },
+);
 
-projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+projectAgileApi.get(
+  "/agile/sessions/:agiId/sprints/:sprintId/retrospective",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
+    }
 
-  const sprintId = c.req.param("sprintId").toUpperCase();
-  if (!isValidSprintId(sprintId)) {
-    return c.json({ error: "Invalid sprint id" }, 400);
-  }
+    const sprintId = c.req.param("sprintId").toUpperCase();
+    if (!isValidSprintId(sprintId)) {
+      return c.json({ error: "Invalid sprint id" }, 400);
+    }
 
-  const retrospective = await readJsonFile<Record<string, unknown>>(
-    `${baseDir}/agile/${agiId}/sprints/${sprintId}/retrospective.json`,
-  );
-  if (!retrospective) {
-    return c.json({ error: "Retrospective not found" }, 404);
-  }
-  return c.json(retrospective);
-});
+    const retrospective = await readJsonFile<Record<string, unknown>>(
+      `${baseDir}/agile/${agiId}/sprints/${sprintId}/retrospective.json`,
+    );
+    if (!retrospective) {
+      return c.json({ error: "Retrospective not found" }, 404);
+    }
+    return c.json(retrospective);
+  },
+);
 
-projectAgileApi.get("/agile/sessions/:agiId/sprints/:sprintId/retrospective-md", async (c) => {
-  const baseDir = resolveBaseDir(c.req.param("projectId"));
-  if (!baseDir) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+projectAgileApi.get(
+  "/agile/sessions/:agiId/sprints/:sprintId/retrospective-md",
+  async (c) => {
+    const baseDir = resolveBaseDir(c.req.param("projectId"));
+    if (!baseDir) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-  const agiId = c.req.param("agiId");
-  if (!isValidAgiId(agiId)) {
-    return c.json({ error: "Invalid AGI id" }, 400);
-  }
+    const agiId = c.req.param("agiId");
+    if (!isValidAgiId(agiId)) {
+      return c.json({ error: "Invalid AGI id" }, 400);
+    }
 
-  const sprintId = c.req.param("sprintId").toUpperCase();
-  if (!isValidSprintId(sprintId)) {
-    return c.json({ error: "Invalid sprint id" }, 400);
-  }
+    const sprintId = c.req.param("sprintId").toUpperCase();
+    if (!isValidSprintId(sprintId)) {
+      return c.json({ error: "Invalid sprint id" }, 400);
+    }
 
-  const content = await readTextFile(
-    `${baseDir}/agile/${agiId}/sprints/${sprintId}/retrospective.md`
-  );
+    const content = await readTextFile(
+      `${baseDir}/agile/${agiId}/sprints/${sprintId}/retrospective.md`,
+    );
 
-  if (content === null) {
-    return c.json({ error: "Retrospective not found" }, 404);
-  }
-  return c.text(content);
-});
+    if (content === null) {
+      return c.json({ error: "Retrospective not found" }, 404);
+    }
+    return c.text(content);
+  },
+);
 
 projectAgileApi.get("/agile/sessions/:agiId/objective/diff", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
@@ -1366,7 +1685,8 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/diff", async (c) => {
   }
 
   const objectiveMeta = isRecord(session.objective) ? session.objective : {};
-  const objectivePath = asStringOrNull(objectiveMeta.path) ?? "objective/objective.md";
+  const objectivePath = asStringOrNull(objectiveMeta.path) ??
+    "objective/objective.md";
   const objectiveContent = await readTextFile(`${sessionDir}/${objectivePath}`);
   if (objectiveContent === null) {
     return c.json({ error: "Objective not found" }, 404);
@@ -1374,20 +1694,27 @@ projectAgileApi.get("/agile/sessions/:agiId/objective/diff", async (c) => {
 
   const historyDir = `${sessionDir}/objective/history`;
   const versions = await listObjectiveSnapshotVersions(historyDir);
-  const snapshotVersion = versions.length > 0 ? versions[versions.length - 1] : null;
-  const previousSnapshotVersion = versions.length > 1 ? versions[versions.length - 2] : null;
+  const snapshotVersion = versions.length > 0
+    ? versions[versions.length - 1]
+    : null;
+  const previousSnapshotVersion = versions.length > 1
+    ? versions[versions.length - 2]
+    : null;
 
   let changed = false;
   if (snapshotVersion !== null && previousSnapshotVersion !== null) {
     const latest = await readTextFile(`${historyDir}/v${snapshotVersion}.md`);
-    const previous = await readTextFile(`${historyDir}/v${previousSnapshotVersion}.md`);
+    const previous = await readTextFile(
+      `${historyDir}/v${previousSnapshotVersion}.md`,
+    );
     changed = latest !== null && previous !== null && latest !== previous;
   } else if (snapshotVersion !== null) {
     const snapshot = await readTextFile(`${historyDir}/v${snapshotVersion}.md`);
     changed = snapshot !== null && snapshot !== objectiveContent;
   }
 
-  const objectiveVersion = asNumberOrNull(objectiveMeta.version) ?? snapshotVersion ?? 0;
+  const objectiveVersion = asNumberOrNull(objectiveMeta.version) ??
+    snapshotVersion ?? 0;
 
   return c.json({
     agi_id: agiId,
