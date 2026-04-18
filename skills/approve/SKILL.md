@@ -1139,17 +1139,27 @@ mst:review 반환 후, review 결과 처리(3번) 진입 전에 실행:
 3. review 결과 처리:
 
    **review_issues_summary 로드**: 최신 `reviews/RV-NNN/review.json`을 Read → `review_issues_summary` 파싱 (critical/major/minor 카운트 + auto_fixed/skipped 배열)
+   - `auto_accept_guard` 메타 파싱:
+     - allow/block 정책 원본은 `workflow.auto_accept_guard` (기본값: `templates/defaults/config.json`)를 단일 기준으로 사용한다.
+     - `skipped_minor_count` = `review_issues_summary.auto_accept_guard.skipped_minor_count` (없으면 `0`)
+     - `protection_flags_count` = `review_issues_summary.auto_accept_guard.protection_flags_count` (없으면 `0`)
+     - `guard_blocked` = `review_issues_summary.auto_accept_guard.blocked == true OR skipped_minor_count > 0 OR protection_flags_count > 0`
+     - `auto_accept_guard.blocked_reasons`가 있으면 차단 사유로 그대로 보고한다.
 
-	   - **`status: "passed"`**: `review_summary.status → "passed"` → `workflow.auto_accept_result` 설정에 따라 즉시 실행:
-	     - **`true` (기본)**: 아래와 같이 accept 스킬을 명시적으로 호출:
-	       ```
-	       AUTO_MODE=true  -> Skill(skill: "mst:accept", args: "-a {REQ_ID}")
-	       AUTO_MODE=false -> Skill(skill: "mst:accept", args: "{REQ_ID}")
-	       ```
-	       > ⚠️ **MANDATORY**: in-context 실행 시 Plan 상태 동기화가 생략되는 것을 방지하기 위해
-	       > 반드시 Skill 도구를 통해 mst:accept를 호출해야 합니다.
-	       accept 완료 후 아래 **DAG 자동 연쇄 실행**을 즉시 판단한다.
-     - **`false`**: Phase 3 리뷰 PASS 후 멈추고, 사용자에게 `/mst:accept {REQ_ID}`를 수동으로 호출하라고 안내. 설정 변경: `/mst:settings workflow.auto_accept_result false`
+	   - **`status: "passed"`**: `review_summary.status → "passed"` 이후 아래 규칙으로 분기한다:
+	     - `workflow.auto_accept_result == true AND guard_blocked == false`:
+	       - 아래와 같이 accept 스킬을 명시적으로 호출:
+	         ```
+	         AUTO_MODE=true  -> Skill(skill: "mst:accept", args: "-a {REQ_ID}")
+	         AUTO_MODE=false -> Skill(skill: "mst:accept", args: "{REQ_ID}")
+	         ```
+	       - ⚠️ **MANDATORY**: in-context 실행 시 Plan 상태 동기화가 생략되는 것을 방지하기 위해 반드시 Skill 도구를 통해 mst:accept를 호출한다.
+	       - accept 완료 후 아래 **DAG 자동 연쇄 실행**을 즉시 판단한다.
+	     - `workflow.auto_accept_result == true AND guard_blocked == true`:
+	       - 즉시 auto accept를 호출하지 않는다.
+	       - `auto_accept_guard.blocked_reasons`와 함께 보호 차단 상태를 보고하고, 사용자에게 `/mst:accept {REQ_ID}` 수동 호출 경로를 안내한다.
+	     - `workflow.auto_accept_result == false`:
+	       - 기존과 동일하게 Phase 3 리뷰 PASS 후 멈추고, 사용자에게 `/mst:accept {REQ_ID}`를 수동으로 호출하라고 안내한다. 설정 변경: `/mst:settings workflow.auto_accept_result false`
 
      **DAG 자동 연쇄 실행** (accept 완료 직후, `auto_accept_result == true`인 경우에만 실행):
 

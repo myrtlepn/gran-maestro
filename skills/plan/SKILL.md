@@ -239,8 +239,18 @@ Step 0.5 처리 완료 후, `--from-picks` 유무와 무관하게 사용자 입�
 4. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장:
    - 미설정 시 기본값 `0.7`
    - CLI 플래그(`-a`/`--auto`)가 config보다 우선한다
-5. 우선순위는 `args > state(guarded) > config > default(false)`를 적용한다.
-6. `AUTO_MODE=true`이면 아래 초기값을 메모리에 보관:
+5. `workflow.high_pass_guard`를 읽어 `HIGH_PASS_GUARD`에 저장:
+   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)` 우선
+   - 키가 없으면 `Read(templates/defaults/config.json)` fallback
+   - 미설정 시 기본값:
+     - `enabled=true`
+     - `confidence_supporting_only=true`
+     - `require_external_execution_evidence=true`
+     - `require_independent_judgement=true`
+     - `block_self_report_only_pass=true`
+     - `plan_bypass_requires_explicit_rationale=true`
+6. 우선순위는 `args > state(guarded) > config > default(false)`를 적용한다.
+7. `AUTO_MODE=true`이면 아래 초기값을 메모리에 보관:
    - `AUTO_DECISION_TOTAL=0`
    - `AUTO_PM_COUNT=0`
    - `AUTO_DISCUSSION_COUNT=0`
@@ -424,12 +434,20 @@ Cynefin 자동 분류 보조 규칙(가드레일):
 
 프레이밍 원칙:
 - `confidence`는 PM의 유능함 점수가 아니라, 현재 근거의 충분도를 표현하는 작업 신호다.
+- confidence는 보조 신호이며, high-pass 단독 근거로 사용하지 않는다.
 - `discussion/ideation` 호출은 확신 부족의 대체재가 아니라, 결정 품질과 반례 점검을 높이는 표준 절차다.
 - 높은 confidence 자체를 discussion 생략의 정당화로 사용하지 않는다.
 
 `AUTO_MODE=true`일 때 각 미결 항목을 아래 순서로 처리:
 1. PM이 해당 항목의 confidence score(0.0~1.0)를 자체 산정
-2. `confidence >= CONFIDENCE_THRESHOLD`:
+2. `workflow.high_pass_guard` Hard Gate를 confidence 분기보다 먼저 평가:
+   - self-report만으로 pass를 확정하지 않는다.
+   - 입력 증거가 LLM self-report(markdown/json)만 있고 외부 실행 증거가 없으면 confidence와 무관하게 discussion 경로로 강제한다.
+   - 분리된 판정 단계(예: discussion/ideation/독립 리뷰)가 없으면 confidence와 무관하게 discussion 경로로 강제한다.
+   - 영향 범위·다중 모듈·상태 전이·계약 변경 중 하나라도 감지되면 `risk_signal_review_required`로 기록하고 confidence 단독 high-pass를 금지한다.
+   - Hard Gate에 걸린 경우 `auto-decisions.md`에 즉시 행 추가:
+     - `| {항목명} | {결정값} | {confidence:.2f} | hard-gate ({reason_token}) | 강제(L1) |`
+3. `confidence >= CONFIDENCE_THRESHOLD` AND Hard Gate 통과:
    - PM 자율 결정을 기본 경로로 수행
    - 단, 대안 비교·영향 범위·이해관계자 정렬이 중요한 항목은 confidence가 높아도 Step 2.5의 `discussion/ideation`을 호출해 결정 품질을 보강할 수 있다.
    - `auto-decisions.md`에 즉시 행 추가:
@@ -438,13 +456,13 @@ Cynefin 자동 분류 보조 규칙(가드레일):
    - 카운터 업데이트:
      - discussion/ideation 미호출 시: `AUTO_DECISION_TOTAL++`, `AUTO_PM_COUNT++`
      - discussion/ideation 호출 시: `AUTO_DECISION_TOTAL++`, `AUTO_DISCUSSION_COUNT++`
-3. `CONFIDENCE_THRESHOLD > confidence >= 0.4`:
+4. `CONFIDENCE_THRESHOLD > confidence >= 0.4`:
    - `Skill(skill: "mst:discussion", args: "{현재 미결 항목} --from-plan --auto")`
    - `consensus.md` 핵심 3~5개 추출 후 결정에 반영
    - `auto-decisions.md`에 즉시 행 추가:
      - `| {항목명} | {결정값} | {confidence:.2f} | discussion 결과 | 자율 |`
    - 카운터 업데이트: `AUTO_DECISION_TOTAL++`, `AUTO_DISCUSSION_COUNT++`
-4. `confidence < 0.4`:
+5. `confidence < 0.4`:
    - `WebSearch(query: "{관련 업계 표준/유사 사례 검색어}")` 선행 (필요 시 복수 실행)
    - 검색 결과 반영 후 confidence 재산정
    - 재산정 confidence `>= 0.4`이면 discussion 실행 후 반영
@@ -452,7 +470,7 @@ Cynefin 자동 분류 보조 규칙(가드레일):
    - `auto-decisions.md`에 즉시 행 추가:
      - `| {항목명} | {결정값} | {confidence:.2f} | web-search→discussion 결과 | 자율 |`
    - 카운터 업데이트: `AUTO_DECISION_TOTAL++`, `AUTO_EXPLORE_DISCUSSION_COUNT++`
-5. 로그 기록은 plan.md 저장 시 일괄 처리하지 않고, **각 항목 결정 직후 Edit로 즉시 append**한다
+6. 로그 기록은 plan.md 저장 시 일괄 처리하지 않고, **각 항목 결정 직후 Edit로 즉시 append**한다
 
 **공통:** Step 2 분석 후 자동 ideation/discussion 판단 필요 시 Step 2.5 실행 (confidence 수준과 무관하게 품질 보강이 필요하면 우선 적용 가능)
 

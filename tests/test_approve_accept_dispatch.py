@@ -1,17 +1,40 @@
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.skip(reason="T02 변경이 merge된 환경에서만 검증")
-def test_approve_accept_args_dash_a():
+def test_approve_passed_branch_has_auto_accept_guard_gate():
     skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
     assert skill_doc.exists(), f"missing file: {skill_doc}"
 
-    lines = skill_doc.read_text(encoding="utf-8").splitlines()
-    near_1140 = "\n".join(lines[1119:1165])
+    content = skill_doc.read_text(encoding="utf-8")
 
-    assert "AUTO_MODE" in near_1140
-    assert "-a" in near_1140
+    # passed 분기에서도 review 가드 메타가 남아 있으면 즉시 accept 연쇄 금지
+    assert "guard_blocked" in content
+    assert "skipped_minor_count" in content
+    assert "protection_flags_count" in content
+    assert "workflow.auto_accept_result == true AND guard_blocked == false" in content
+    assert "workflow.auto_accept_result == true AND guard_blocked == true" in content
+
+
+def test_approve_guard_blocked_branch_keeps_manual_accept_path():
+    skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
+    content = skill_doc.read_text(encoding="utf-8")
+
+    # guard 차단 시 auto accept 대신 수동 accept 경로를 유지해야 한다.
+    assert "/mst:accept {REQ_ID}" in content
+    assert "auto_accept_guard.blocked_reasons" in content
+
+
+def test_review_guard_metadata_contract_reaches_approve_and_accept():
+    review_doc = (ROOT / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8")
+    approve_doc = (ROOT / "skills" / "approve" / "SKILL.md").read_text(encoding="utf-8")
+    accept_doc = (ROOT / "skills" / "accept" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "blocked_reasons" in review_doc
+    assert "review_issues_summary.auto_accept_guard.blocked == false" in review_doc
+    assert "auto_accept_guard.blocked_reasons" in approve_doc
+    assert "guard_blocked == true" in approve_doc
+    assert "guard_blocked == false" in approve_doc
+    assert "approve의 auto-accept guard 차단은 AUTO_MODE와 별개" in accept_doc

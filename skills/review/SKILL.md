@@ -1242,7 +1242,18 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
 
 ##### (b-2) MINOR만 존재 + 개수 <= threshold (스킵+리포트)
 
-- `critical_count == 0 AND major_count == 0 AND minor_count > 0 AND minor_count <= config.review.severity_auto_fix.minor_skip_threshold` 인 경우.
+- **MINOR-only high-pass 보호 가드 (MANDATORY)**:
+  - 운영 단일 기준 위치: `workflow.auto_accept_guard` (기본값 정의: `templates/defaults/config.json`).
+  - 단순 count 임계값만으로 `passed` 처리하지 않는다.
+  - `review_issues_summary.auto_accept_guard` 메타를 항상 기록:
+    - `skipped_minor_count`: 현재/누적 스킵된 MINOR 개수
+    - `protection_flags_count`: 보호 규칙 플래그 개수
+    - `blocked`: auto accept 차단 여부
+    - `blocked_reasons`: 차단 사유 배열
+  - 아래 조건 중 하나라도 참이면 `blocked=true`로 판단하고 **(c) 경로**로 전환한다:
+    - `review_issues_summary.auto_accept_guard.skipped_minor_count > 0`
+    - `review_issues_summary.auto_accept_guard.protection_flags_count > 0`
+- `critical_count == 0 AND major_count == 0 AND minor_count > 0 AND minor_count <= config.review.severity_auto_fix.minor_skip_threshold AND review_issues_summary.auto_accept_guard.blocked == false` 인 경우에만 `passed`.
 - MINOR 이슈를 `review-report.md`에 기록하고 `review_issues_summary.skipped` 배열에 기록.
 - `review.json.status = "passed"`.
 - `request.json.review_summary = { "iteration": N, "status": "passed" }` 업데이트.
@@ -1262,9 +1273,9 @@ Pass B에서 `review-impact.md`를 통해 `[impact-check]` AC verdict가 보고�
 |------|------|
 | CRITICAL | 자동 태스크 생성 + 재외주 (c 경로) |
 | MAJOR | 자동 태스크 생성 + 재외주 (c 경로) |
-| MINOR | `minor_skip_threshold` **무시**, 무조건 스킵+리포트. `review.json.status`는 CRITICAL/MAJOR 유무에 따라 결정. |
+| MINOR | MINOR-only인 경우에도 `minor_skip_threshold` + `review_issues_summary.auto_accept_guard`를 함께 검사한다. 가드 차단 시 (c) 경로로 전환한다. |
 
-- CRITICAL/MAJOR 없이 MINOR만 있는 경우: `review.json.status = "passed"`. Phase 5 자동 진행.
+- CRITICAL/MAJOR 없이 MINOR만 있는 경우: `minor_count <= config.review.severity_auto_fix.minor_skip_threshold` 이고 `auto_accept_guard.blocked == false`일 때만 `review.json.status = "passed"`.
 - CRITICAL/MAJOR와 MINOR 혼재: CRITICAL/MAJOR만 태스크 생성, MINOR 스킵. `review.json.status = "gap_found"`.
 
 #### (c) 갭 있음 + iteration ≤ max_iterations
@@ -1522,7 +1533,15 @@ Step 5(b) 등급별 분류 결과를 기록합니다. `review.json`과 `request.
     "skipped": [
       { "severity": "MINOR", "description": "변수명 컨벤션 불일치" },
       { "severity": "MINOR", "description": "주석 누락" }
-    ]
+    ],
+    "auto_accept_guard": {
+      "skipped_minor_count": 2,
+      "protection_flags_count": 0,
+      "blocked": true,
+      "blocked_reasons": [
+        "review_issues_summary.auto_accept_guard.skipped_minor_count > 0"
+      ]
+    }
   }
 }
 ```
@@ -1534,6 +1553,7 @@ Step 5(b) 등급별 분류 결과를 기록합니다. `review.json`과 `request.
 | `minor` | number | MINOR 등급 이슈 수. |
 | `auto_fixed` | array | 자동 태스크 생성되어 재외주된 이슈 목록. 각 항목: `{ "severity": string, "description": string, "task_id": string }`. |
 | `skipped` | array | 스킵 처리된 이슈 목록 (threshold 이하 MINOR 또는 `--auto` 모드 MINOR). 각 항목: `{ "severity": string, "description": string }`. |
+| `auto_accept_guard` | object | auto accept 허용/차단 메타. `{ "skipped_minor_count": number, "protection_flags_count": number, "blocked": boolean, "blocked_reasons": string[] }`. |
 
 ### gap_source 필드
 

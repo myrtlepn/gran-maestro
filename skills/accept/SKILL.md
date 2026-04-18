@@ -69,6 +69,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
 - `request.json.auto_approve` (해당 REQ 속성)
 
 따라서 `/mst:accept -a REQ-N`이 `workflow.auto_approve_on_unblock=false` 환경에서 호출되어도 후속 REQ로의 자동 연쇄는 **발생하지 않습니다**. AUTO_MODE와 DAG 연쇄를 같은 신호로 취급하지 마십시오.
+또한 approve의 auto-accept guard 차단은 AUTO_MODE와 별개이며, 차단된 건은 approve 단계에서 연쇄 호출이 멈춘 뒤 수동 `/mst:accept`로만 진입합니다.
 
 ### 세션 중 자율 모드 전환
 

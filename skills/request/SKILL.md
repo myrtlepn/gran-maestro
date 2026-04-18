@@ -286,23 +286,50 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - A. 의존 fan-out이 넓어져 다수 모듈에 연쇄 영향이 예상되는가?
         - B. 인터페이스 계약(API/함수 시그니처/이벤트 계약) 변경이 필요한가?
         - C. 데이터 흐름의 분기점(입력/출력 경로, 상태 전이 경계) 변경이 있는가?
-      - PM 확신도(`pm_arch_confidence`, 0.0~1.0)를 산정하고 `workflow.arch_gate_threshold`와 비교해 게이트 개폐를 결정:
+      - PM 확신도(`pm_arch_confidence`, 0.0~1.0)를 산정하고 `workflow.arch_gate_threshold`와 비교하되, `workflow.high_pass_guard` 하드 게이트를 먼저 적용한다.
       - pm_arch_confidence 산정 기준 (rubric):
         - 0.0~0.3: 변경 범위 명확, 단일 모듈 한정, 기존 패턴 단순 적용 가능
         - 0.4~0.6: 일부 모듈 의존성 변경 예상되나 영향 범위 파악 가능
         - 0.7~1.0: 다수 모듈 연쇄 영향, 아키텍처 방향 불명확, 설계 리스크 존재
-      - 트리거-게이트 결정 관계:
-        - Gate Open 조건: A/B/C 중 1개 이상 충족 AND `pm_arch_confidence >= arch_gate_threshold`
-        - Gate Close 조건: A/B/C 모두 미충족 (`pm_arch_confidence` 무관) 또는 `pm_arch_confidence < arch_gate_threshold`
-      - `arch_gate_threshold` 읽기 순서:
+      - `arch_gate_threshold` 읽기 순서(기존 유지):
         1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `workflow.arch_gate_threshold`
         2. fallback: `templates/defaults/config.json`의 `workflow.arch_gate_threshold`
         3. 최종 fallback: `0.7`
+      - `workflow.high_pass_guard` 읽기 순서(신규, 상수/문구 단일 기준):
+        1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `workflow.high_pass_guard`
+        2. fallback: `templates/defaults/config.json`의 `workflow.high_pass_guard`
+        3. 최종 fallback:
+           - `enabled=true`, `confidence_supporting_only=true`
+           - `require_external_execution_evidence=true`
+           - `require_independent_judgement=true`
+           - `block_self_report_only_pass=true`
+           - `plan_bypass_requires_explicit_rationale=true`
+           - reason token:
+             - `self_report_only_block`
+             - `external_evidence_missing`
+             - `independent_judgement_required`
+             - `risk_signal_review_required`
+      - 하드 게이트 규칙 (`enabled=true` 기준):
+        - `confidence`는 보조 신호이며, risk signal(A/B/C) 중 하나라도 감지되면 confidence 값만으로 gate를 닫을 수 없다.
+        - 입력 증거가 LLM self-report(markdown/json)만 있고 외부 실행 증거가 없으면 gate를 닫지 않는다.
+        - 외부 실행 증거와 분리된 판정 단계(예: discussion/ideation/독립 리뷰) 중 하나라도 없으면 gate를 닫지 않는다.
+        - 위 조건에 걸리면 `req-arch-decision.md`의 `reason`에 `risk_signal_review_required` 또는 해당 reason token을 기록하고 추가 검토 경로를 유지한다.
+      - 트리거-게이트 결정 관계:
+        - Gate Open 조건:
+          - A/B/C 중 1개 이상 충족 AND `pm_arch_confidence >= arch_gate_threshold`
+          - 또는 A/B/C 중 1개 이상 충족 + `workflow.high_pass_guard.enabled=true`
+          - 또는 self-report only + 외부 실행 증거/분리된 판정 단계 부족
+        - Gate Close 조건:
+          - A/B/C 모두 미충족
+          - AND self-report only가 아님
+          - AND 외부 실행 증거 + 분리된 판정 단계가 모두 확인됨
+          - AND (`pm_arch_confidence < arch_gate_threshold` 또는 명시적 비위험 근거가 기록됨)
       - `--plan` bypass 조건 (plan.md 선로드 필요):
         - `--plan PLN-NNN`이 제공된 경우, plan.md가 아직 Read되지 않았다면 여기서 먼저 Read
-        - Read 후 plan.md에 아키텍처 방향이 이미 결정된 경우
-          (예: `## 아키텍처 결정` 섹션, 기술스택 확정, 접근법 명시)
-          → 게이트 실행 없이 skip. `req-arch-decision.md`에 `gate: skip`, `reason: "plan 참조"` 저장.
+        - Read 후 plan.md에 아키텍처 방향이 이미 결정되어도, `workflow.high_pass_guard.plan_bypass_requires_explicit_rationale=true`이면
+          plan 기반 명시적 우회 근거(외부 실행 증거 + 분리된 판정 단계 출처)가 있어야만 bypass 허용.
+        - 위 명시적 근거가 없으면 bypass를 거부하고 Gate Open으로 처리한다.
+        - bypass 허용 시에도 `req-arch-decision.md`에 `gate: skip`, `reason: "plan 참조 + explicit rationale"` 저장.
         - `--plan` 미제공 시 bypass 없이 게이트 정상 실행
       - AUTO_APPROVE=false + Gate Open:
         - `AskUserQuestion`으로 방향 선택 요청 (기본 선택지 2개 + 보조 선택지 3종):
@@ -320,7 +347,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - Gate Open이든 Close든, 게이트 판단 결과를 `REQ-NNN/discussion/req-arch-decision.md`에 저장한다.
         ```yaml
         gate: open | close | skip
-        reason: "plan 참조, gate skip" | "트리거 미충족" | "confidence 충분" | "게이트 열림"
+        reason: "plan 참조 + explicit rationale" | "트리거 미충족" | "confidence 보조 신호" | "게이트 열림" | "risk_signal_review_required" | "self_report_only_block" | "external_evidence_missing" | "independent_judgement_required"
         confidence: 0.75
         threshold: 0.7
         triggers:

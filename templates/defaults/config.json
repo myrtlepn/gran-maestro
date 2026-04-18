@@ -15,11 +15,37 @@
     "auto_accept_result": true,
     "default_agent": "codex-dev",
     "arch_gate_threshold": 0.7,
+    "high_pass_guard": {
+      "enabled": true,
+      "confidence_supporting_only": true,
+      "require_external_execution_evidence": true,
+      "require_independent_judgement": true,
+      "block_self_report_only_pass": true,
+      "plan_bypass_requires_explicit_rationale": true,
+      "reason_tokens": {
+        "self_report_only_block": "SELF_REPORT_ONLY_BLOCK",
+        "external_evidence_missing": "EXTERNAL_EVIDENCE_MISSING",
+        "independent_judgement_required": "INDEPENDENT_JUDGEMENT_REQUIRED",
+        "risk_signal_review_required": "RISK_SIGNAL_REVIEW_REQUIRED"
+      }
+    },
     "spec_prereview": true,
     "spec_prereview_max_iterations": 3,
     "spec_prereview_escalation_trigger": "major",
     "spec_prereview_minor_escalation_threshold": 3,
-    "auto_approve_on_unblock": false
+    "auto_approve_on_unblock": false,
+    "auto_accept_guard": {
+      "single_source_of_truth": "workflow.auto_accept_guard",
+      "allow_when": [
+        "review_summary.status == passed",
+        "workflow.auto_accept_result == true",
+        "review_issues_summary.auto_accept_guard.blocked == false"
+      ],
+      "block_when": [
+        "review_issues_summary.auto_accept_guard.skipped_minor_count > 0",
+        "review_issues_summary.auto_accept_guard.protection_flags_count > 0"
+      ]
+    }
   },
   "intent_verification": {
     "enabled": true,
