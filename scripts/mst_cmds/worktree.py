@@ -24,6 +24,7 @@ from scripts.mst_cmds._common import (
     _project_root,
 )
 
+
 def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int:
     source_claude_dir = project_root / ".claude"
     source_hooks_dir = source_claude_dir / "hooks"
@@ -64,17 +65,77 @@ def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int
 
     return 0
 
+
+def _normalize_target_path(path_value) -> Path:
+    return Path(path_value).expanduser().resolve(strict=False)
+
+
+def _resolve_master_project_root() -> Path:
+    project_root = _project_root()
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "git rev-parse --git-common-dir failed"
+        )
+
+    git_common_dir = Path(result.stdout.strip())
+    if not git_common_dir.is_absolute():
+        git_common_dir = (project_root / git_common_dir).resolve(strict=False)
+    return git_common_dir.parent
+
+
+def _list_worktree_roots(project_root: Path) -> list[Path]:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "git worktree list --porcelain failed"
+        )
+
+    worktree_roots: list[Path] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            worktree_roots.append(_normalize_target_path(line[len("worktree "):]))
+    return worktree_roots
+
+
+def _find_nested_worktree_root(target_path, worktree_roots) -> Path | None:
+    normalized_target = _normalize_target_path(target_path)
+    matches: list[Path] = []
+    for worktree_root in worktree_roots:
+        normalized_root = _normalize_target_path(worktree_root)
+        if normalized_target == normalized_root or normalized_root in normalized_target.parents:
+            matches.append(normalized_root)
+    if not matches:
+        return None
+    return max(matches, key=lambda candidate: len(candidate.parts))
+
+
 def _resolve_worktree_source_root() -> Path:
     project_root = _project_root()
     source_claude_dir = project_root / ".claude"
     if (source_claude_dir / "hooks").is_dir() and (source_claude_dir / "settings.local.json").is_file():
         return project_root
-    return _common.BASE_DIR.parent
+    return _resolve_master_project_root()
+
 
 def cmd_worktree_create(args):
-    project_root = _common.BASE_DIR.parent
-    source_root = _resolve_worktree_source_root()
-    worktree_path = Path(args.path).expanduser().resolve()
+    # Worktree creation commands must resolve master cwd and reject nested targets.
+    # Currently this policy applies only to cmd_worktree_create.
+    worktree_path = _normalize_target_path(args.path)
     branch = str(args.branch or "").strip()
     base = str(args.base or "").strip()
 
@@ -83,6 +144,23 @@ def cmd_worktree_create(args):
         return 1
     if not base:
         print("Error: --base is required", file=sys.stderr)
+        return 1
+
+    try:
+        project_root = _resolve_master_project_root()
+        source_root = _resolve_worktree_source_root()
+        nested_root = _find_nested_worktree_root(worktree_path, _list_worktree_roots(project_root))
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if nested_root is not None:
+        print(
+            "Error: nested worktree path detected. "
+            f"현재 target 경로 {worktree_path}는 기존 worktree {nested_root}의 내부입니다. "
+            f"master({project_root})에서 다시 실행하세요.",
+            file=sys.stderr,
+        )
         return 1
 
     result = subprocess.run(
@@ -102,8 +180,9 @@ def cmd_worktree_create(args):
     print(str(worktree_path))
     return 0
 
+
 def cmd_worktree_remove(args):
-    project_root = _common.BASE_DIR.parent
+    project_root = Path(_common.BASE_DIR).parent
     worktree_path = Path(args.path).expanduser().resolve()
 
     remove_cmd = ["git", "worktree", "remove"]
@@ -133,6 +212,7 @@ def cmd_worktree_remove(args):
 
     print(str(worktree_path))
     return 0
+
 
 
 def register(subparsers):
