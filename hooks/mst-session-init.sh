@@ -26,8 +26,11 @@ resolve_project_root() {
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
+SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 mkdir -p "$MST_TMP"
+
+STDIN_RAW="$(cat || true)"
 
 
 debug_log() {
@@ -263,10 +266,71 @@ PY
   debug_log "session_init_state_initialized" "state_file=$STATE_FILE"
 }
 
+write_session_bridge() {
+  STDIN_RAW="$STDIN_RAW" python3 - "$SESSION_BRIDGE_FILE" <<'PY'
+import json
+import os
+import sys
+import uuid
+
+path = sys.argv[1]
+raw_stdin = os.environ.get("STDIN_RAW", "")
+
+try:
+    payload = json.loads(raw_stdin)
+except Exception:
+    print("[mst-session-init] warning: skipped session bridge write (invalid stdin json).", file=sys.stderr)
+    raise SystemExit(0)
+
+if not isinstance(payload, dict):
+    print("[mst-session-init] warning: skipped session bridge write (stdin payload is not a JSON object).", file=sys.stderr)
+    raise SystemExit(0)
+
+raw_value = payload.get("session_id")
+if not isinstance(raw_value, str) or not raw_value:
+    print("[mst-session-init] warning: skipped session bridge write (missing or empty session_id).", file=sys.stderr)
+    raise SystemExit(0)
+
+try:
+    session_id = uuid.UUID(raw_value)
+except ValueError:
+    print("[mst-session-init] warning: skipped session bridge write (invalid session_id uuid).", file=sys.stderr)
+    raise SystemExit(0)
+
+canonical = str(session_id)
+if session_id.variant != uuid.RFC_4122 or canonical != raw_value:
+    print("[mst-session-init] warning: skipped session bridge write (non-canonical or non-RFC4122 session_id).", file=sys.stderr)
+    raise SystemExit(0)
+
+tmp_path = path + ".tmp"
+try:
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(canonical)
+        f.write("\n")
+    os.replace(tmp_path, path)
+    os.chmod(path, 0o644)
+except Exception as exc:
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    except Exception:
+        pass
+    print(f"[mst-session-init] warning: failed to write session bridge: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+  debug_log "session_init_session_bridge_written" "bridge_file=$SESSION_BRIDGE_FILE"
+}
+
 cleanup_stale_markers
 clear_next_action_from_plan_json
 check_hook_version_mismatch
-write_initial_state
+if ! write_initial_state; then
+  echo "[mst-session-init] warning: failed to initialize state file." >&2
+fi
+if ! write_session_bridge; then
+  echo "[mst-session-init] warning: failed to write session bridge file." >&2
+fi
 
 # === Auto-gardening trigger (PLN-475 / REQ-633-T03) ===
 # config.gardening.auto_archive.enabled=true일 때만 백그라운드로 실행
