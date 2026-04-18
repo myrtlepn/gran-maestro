@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SAMPLE_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _run_set_workflow(workspace: Path, ppid: int, *extra_args: str) -> subprocess.CompletedProcess:
@@ -31,6 +32,13 @@ def _setup_workspace(tmp_path: Path, req_id: str, initial_data: dict) -> tuple[P
     return tmp_path, req_json
 
 
+def _write_session_bridge(workspace: Path, ppid: int, value: str = SAMPLE_SESSION_ID) -> Path:
+    bridge_path = workspace / ".gran-maestro" / "tmp" / f"claude-session-{ppid}.id"
+    bridge_path.parent.mkdir(parents=True, exist_ok=True)
+    bridge_path.write_text(value + "\n", encoding="utf-8")
+    return bridge_path
+
+
 def test_owner_ppid_injected_on_active_true(tmp_path):
     """AC-004: set-workflow --active true injects owner_ppid into request.json."""
     req_id = "REQ-001"
@@ -38,6 +46,7 @@ def test_owner_ppid_injected_on_active_true(tmp_path):
         tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
     )
     fake_ppid = 54321
+    _write_session_bridge(workspace, fake_ppid)
 
     result = _run_set_workflow(
         workspace,
@@ -51,6 +60,7 @@ def test_owner_ppid_injected_on_active_true(tmp_path):
     data = json.loads(req_json.read_text(encoding="utf-8"))
     assert "owner_ppid" in data, f"owner_ppid not injected; got: {data}"
     assert data["owner_ppid"] == fake_ppid, f"expected {fake_ppid}, got {data['owner_ppid']}"
+    assert data["owner_session_id"] == SAMPLE_SESSION_ID
 
 
 def test_owner_ppid_not_injected_on_active_false(tmp_path):
@@ -71,6 +81,7 @@ def test_owner_ppid_not_injected_on_active_false(tmp_path):
 
     data = json.loads(req_json.read_text(encoding="utf-8"))
     assert "owner_ppid" not in data, f"owner_ppid should not be set on active=false; got: {data}"
+    assert "owner_session_id" not in data, f"owner_session_id should not be set on active=false; got: {data}"
 
 
 def test_owner_ppid_idempotent(tmp_path):
@@ -95,6 +106,7 @@ def test_owner_ppid_idempotent(tmp_path):
     assert data["owner_ppid"] == original_ppid, (
         f"owner_ppid should remain {original_ppid} (idempotent), got {data['owner_ppid']}"
     )
+    assert data["owner_session_id"] is None
 
 
 def test_owner_ppid_plan_injected(tmp_path):
@@ -109,6 +121,7 @@ def test_owner_ppid_plan_injected(tmp_path):
         encoding="utf-8",
     )
     fake_ppid = 54321
+    _write_session_bridge(tmp_path, fake_ppid)
 
     result = _run_set_workflow(
         tmp_path,
@@ -123,6 +136,53 @@ def test_owner_ppid_plan_injected(tmp_path):
     data = json.loads(pln_json.read_text(encoding="utf-8"))
     assert "owner_ppid" in data, f"owner_ppid not injected into plan.json; got: {data}"
     assert data["owner_ppid"] == fake_ppid
+    assert data["owner_session_id"] == SAMPLE_SESSION_ID
+
+
+def test_owner_session_id_null_when_bridge_missing(tmp_path):
+    req_id = "REQ-004"
+    workspace, req_json = _setup_workspace(
+        tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
+    )
+    fake_ppid = 65432
+
+    result = _run_set_workflow(
+        workspace,
+        fake_ppid,
+        "--active", "true",
+        "--skill", "mst:request",
+        "--req", req_id,
+    )
+    assert result.returncode == 0, result.stderr
+
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_ppid"] == fake_ppid
+    assert "owner_session_id" in data
+    assert data["owner_session_id"] is None
+
+
+def test_owner_session_id_null_when_bridge_read_fails(tmp_path):
+    req_id = "REQ-005"
+    workspace, req_json = _setup_workspace(
+        tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
+    )
+    fake_ppid = 76543
+    bridge_path = workspace / ".gran-maestro" / "tmp" / f"claude-session-{fake_ppid}.id"
+    bridge_path.mkdir(parents=True, exist_ok=True)
+
+    result = _run_set_workflow(
+        workspace,
+        fake_ppid,
+        "--active", "true",
+        "--skill", "mst:request",
+        "--req", req_id,
+    )
+    assert result.returncode == 0, result.stderr
+
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_ppid"] == fake_ppid
+    assert "owner_session_id" in data
+    assert data["owner_session_id"] is None
 
 
 def test_read_owner_ppid_rejects_bool(tmp_path):
