@@ -58,49 +58,36 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - LLM이 objective.md를 직접 Write/Edit로 수정하는 행위.
 - `mst.py agile objective-transition` / `objective-check` 우회.
 - Step 0(세션 초기화) 없이 바로 objective 생성으로 진입.
-- 스프린트 횟수/완료 시점을 예측·확정·암시하는 표현을 objective/plan 입력/중간 보고/스티어링 보고에 기재하는 행위.
-- objective.md에 "예상 스프린트", "N회 스프린트", "X주 내 완료" 등 필드/문장을 추가하는 행위.
-- `plan -a` 입력, 중간 보고, 스티어링 보고에서 잔여 스프린트 수/완료 예정 스프린트 표현을 전달·기재하는 행위.
-- 캘린더 단위로 변환한 기간 추정(예: "4~8주 소요")을 기재하는 행위.
+- 스프린트 횟수/완료 시점을 예측·확정·암시하는 표현을 objective/plan 입력/중간 보고/스티어링 보고에 기재하는 행위. ("예상 스프린트", "N회 스프린트", "X주 내 완료", "4~8주 소요" 등 포함)
 - 과거 실적을 현재 프로젝트의 완료 시점/스프린트 횟수 예측 근거로 인용하는 행위.
-- 스프린트 진행 중/스프린트 완료 직후 `"계속 진행하시겠습니까?"`, `"계속할까요?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
-- `AUTO_MODE=true`이거나 `STEERING_DISABLED=true(STEERING_EVERY=0)`인 스프린트 루프에서 텍스트 출력으로 `"계속할까요?"`, `"진행할까요?"`, `"멈추고"` 등 질문을 생성하는 행위.
-- `"컨텍스트가 길어지고 있으므로"`, `"요약하고 계속"`, `"정리하고 계속"`, `"컨텍스트를 줄이기 위해"` 등 컨텍스트 길이/요약/정리를 사유로 스프린트 간 정지하는 행위.
-- `AUTO_MODE=true`이거나 `STEERING_DISABLED=true(STEERING_EVERY=0)`에서 스프린트 완료 후 `"다음 Sprint로 진행합니다"`라고 선언한 뒤 확인 질문을 삽입하는 행위.
-- 스프린트 루프 중 어떤 자체 판단 사유(컨텍스트 길이, 세션 정리, 토큰 절약 등)로든 자발적으로 정지하는 행위.
-- 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 중간 보고/스티어링 보고/자유 텍스트에 기재하는 행위.
+- 스프린트 진행 중/완료 직후 `"계속 진행하시겠습니까?"` 등 스프린트 간 확인 질문을 `AskUserQuestion`으로 삽입하는 행위.
+- `AUTO_MODE=true` 또는 `STEERING_DISABLED=true`인 루프에서 텍스트 출력으로 확인/정지 질문을 생성하는 행위.
+- 컨텍스트 길이/요약/정리를 사유로 스프린트 간 정지하는 행위.
+- `AUTO_MODE=true` 또는 `STEERING_DISABLED=true`에서 스프린트 완료 후 선언 뒤 확인 질문을 삽입하는 행위.
+- 스프린트 루프 중 어떤 자체 판단 사유로든 자발적으로 정지하는 행위.
+- 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 기재하는 행위.
 - 정기 스티어링 해당 Sprint에서 Step 3을 건너뛰고 Step 2를 계속 진행하는 행위.
-- 정기 스티어링 미해당 Sprint에서 자의적으로 `"계속할까요?"`, `"멈출까요?"` 질문을 삽입하는 행위.
-- 2.2.0.7 누적 통합 리뷰의 `verdict.force_wire_recommended=true`를 **사유 기록 없이** 무시하는 행위 (Escape Hatch는 반드시 `auto-decisions.md` 또는 `retrospective.md`에 사유를 남길 때만 허용).
-- 2.2.0.7 Escape Hatch를 동일 세션에서 **연속 2회 이상** 사용하는 행위 (통합 부채 누적 위장).
+- 정기 스티어링 미해당 Sprint에서 자의적으로 확인 질문을 삽입하는 행위.
+- 2.2.0.7 누적 통합 리뷰의 `verdict.force_wire_recommended=true`를 **사유 기록 없이** 무시하는 행위.
+- 2.2.0.7 Escape Hatch를 동일 세션에서 **연속 2회 이상** 사용하는 행위.
 - 2.2.4 Sprint 종류 자기선언을 누락(`sprint_kind` 미지정)하거나 `foundational`로 선언하면서 `--foundational-reason`을 생략하는 행위.
 - `foundational` Sprint를 `config.agile.foundational_streak_max` 초과로 연속 선언하는 행위 (Sprint 0 제외).
 - `foundational` Sprint에서 DoD를 곧바로 `done`으로 승격하는 행위 (반드시 `proposed_done`으로만 기록하고, 후속 `user_observable` Sprint에서 `--deferred-promote`로만 승격).
 - 2.2.0.8 alignment 판정 `objective_stale`에서 비상 스티어링 진입 없이 Sprint를 계속 진행하는 행위.
+- "컨텍스트 압박"을 이유로 sub-plan chain을 우회하여 직접 `codex exec` + master 커밋으로 전환하는 행위. 격리 실행이 필요하면 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 경로를 사용한다.
 - 허용 표현: DoD 진행률(%), 완료/미완료 항목 수, 스티어링 방향 추천, 종료 후 총 스프린트 수 사후 집계, `proposed_done` 대기 DoD 수, 분류별 변경 파일 비율, alignment 판정 분포.
-- "컨텍스트 압박"을 이유로 sub-plan chain(plan→request→approve→accept)을 우회하여 직접 `codex exec` + master 커밋으로 전환한다. 격리 실행이 필요하면 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 경로를 사용한다.
 
 ### AskUserQuestion 허용 지점 (Whitelist)
 
-- 허용 지점 1: Step 3.3 DoD 제안 approve/reject 확인
-  - 필수 마커: `[스티어링 체크포인트]`
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 증거 기반으로 approve/reject를 자율 판단한다.
-- 허용 지점 2: Step 3 비상 스티어링 강제 진입 후 사용자 개입 요청
-  - 필수 마커: `[비상 스티어링]`
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 계속 진행/방향 수정/중단을 자율 판단한다.
-- 허용 지점 3: Step 2.1 Sprint 0 smoke test 실패 후 재시도/중단 확인
-  - 필수 마커: `[Sprint 0]`
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 재시도/중단을 자율 판단한다.
-- 허용 지점 4: Step 2.2.6 소스 검증 3회 실패 초과 시 사용자 에스컬레이션
-  - 필수 마커: `[자동 중단]`
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 자동 중단 절차로 즉시 전환한다.
-- 허용 지점 5: Step 3.5 변경 후 정합성 정책 레벨 확인
-  - 필수 마커: `[스티어링 체크포인트]`
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 PM이 정합성 정책 레벨을 자율 판단한다.
+| 허용 지점 | 필수 마커 | AUTO_MODE=true 시 |
+|-----------|-----------|-------------------|
+| Step 3.3 DoD 제안 approve/reject | `[스티어링 체크포인트]` | skip → PM 자율 판단 |
+| Step 3 비상 스티어링 강제 진입 후 | `[비상 스티어링]` | skip → PM 자율 판단 |
+| Step 2.1 Sprint 0 smoke test 실패 후 | `[Sprint 0]` | skip → PM 자율 판단 |
+| Step 2.2.6 소스 검증 3회 실패 초과 | `[자동 중단]` | skip → 자동 중단 전환 |
+| Step 3.5 변경 후 정합성 정책 레벨 확인 | `[스티어링 체크포인트]` | skip → PM 자율 판단 |
 
-동기화 규칙:
-- 위 허용 지점/마커 목록을 변경하면 `hooks/mst-stop-hook.sh`의 agile AskUserQuestion 화이트리스트를 같은 PR에서 동시에 갱신한다.
-- stop hook 화이트리스트에 없는 마커가 포함된 AskUserQuestion은 스프린트 루프에서 허용되지 않는다.
+동기화 규칙: 위 허용 지점/마커 목록을 변경하면 `hooks/mst-stop-hook.sh`의 agile AskUserQuestion 화이트리스트를 같은 PR에서 동시에 갱신한다. stop hook 화이트리스트에 없는 마커가 포함된 AskUserQuestion은 스프린트 루프에서 허용되지 않는다.
 
 ## 실행 프로토콜
 
@@ -138,18 +125,15 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 
 args 전체 토큰에서 아래 플래그를 감지한다:
 
-| 플래그 | 설명 | 예시 |
-|--------|------|------|
-| `-a`, `--auto` | 자율 모드 활성화 | `-a`, `--auto` |
-| `--resume AGI-NNN` | 기존 세션 재개 | `--resume AGI-001` |
-| `--doc 파일경로` | 기존 문서 지정 (파싱 모드) | `--doc docs/goals.md` |
-| `--steering-every N` | 스티어링 체크포인트 간격 (기본값: 3) | `--steering-every 5` |
+| 플래그 | 설명 |
+|--------|------|
+| `-a`, `--auto` | 자율 모드 활성화 |
+| `--resume AGI-NNN` | 기존 세션 재개 |
+| `--doc 파일경로` | 기존 문서 지정 (파싱 모드) |
+| `--steering-every N` | 스티어링 체크포인트 간격 (기본값: 3) |
 
 - `-a` 또는 `--auto`가 args 어디에든 포함되면 `AUTO_MODE=true`, 없으면 `AUTO_MODE=false`.
-- `AUTO_MODE=false`인 경우 config fallback을 적용한다:
-  1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.agile)`에서 `auto_mode.agile` 확인
-  2. 키가 없으면 `Read(templates/defaults/config.json)`에서 `auto_mode.agile` 확인
-  3. `auto_mode.agile == true`면 `AUTO_MODE=true`, 아니면 `false`
+- `AUTO_MODE=false`인 경우 config fallback: `mst.py config get auto_mode.agile` → 없으면 `templates/defaults/config.json` 확인 → `auto_mode.agile == true`면 `AUTO_MODE=true`.
 - 우선순위: CLI 플래그(`-a`/`--auto`)가 config보다 우선한다.
 - `--steering-every` 미지정 시: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.steering_every)` 값을 사용한다. config에도 없으면 기본값 `3`.
 - `STEERING_DISABLED`는 `STEERING_EVERY == 0`이면 `true`, 아니면 `false`로 계산한다.
@@ -169,14 +153,12 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 ```
 4. 세션 상태 출력: `[재개] AGI-{NNN} — 스프린트 {N} 상태: {status}`
 5. Step 1 건너뜀 → 스프린트 루프(2.2)로 진행
-6. session.json 로드 실패 또는 AGI-NNN 미존재 시:
-  - 에러 메시지 출력: `[오류] AGI-{NNN} 세션을 찾을 수 없습니다.`
-  - 복구 안내: `.gran-maestro/agile/` 디렉토리 확인 방법 안내 후 중단
+6. 로드 실패 또는 AGI-NNN 미존재 시: 에러 메시지 출력 + `.gran-maestro/agile/` 디렉토리 확인 안내 후 중단
 
 #### 0.3 분기: 신규 세션 (--resume 없는 경우)
 
 1. 신규 세션 생성과 objective 초기화는 Step 1의 `agile-plan` 서브스킬에서 수행한다.
-2. Step 1 호출을 위해 사용자 입력 목표(`PROJECT_GOAL`)와 선택 플래그(`DOC_PATH`, `STEERING_EVERY`)를 메모리에 보관한다.
+2. 사용자 입력 목표(`PROJECT_GOAL`)와 선택 플래그(`DOC_PATH`, `STEERING_EVERY`)를 메모리에 보관한다.
 3. `[신규 세션 준비] agile-plan 위임 예정 (steering-every: {STEERING_EVERY})` 출력
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
@@ -213,68 +195,38 @@ Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --
 
 > 목적: agile-plan이 objective 준비를 마치고 복귀한 직후, 스프린트 루프 진입 전에 스티어링 주기와 비상 스티어링 활성화 여부를 확정한다.
 
-**진입 가드**:
-- `--resume` 경로는 이 단계를 skip한다 (session.json의 기존 `steering_every` 값을 그대로 사용).
-- 신규 세션(Step 1에서 복귀)에서만 실행한다.
+**진입 가드**: `--resume` 경로는 이 단계를 skip한다 (session.json의 기존 `steering_every` 값 사용). 신규 세션(Step 1에서 복귀)에서만 실행한다.
 
 **AUTO_MODE=true 분기**:
-1. `STEERING_EVERY`를 아래 우선순위로 결정한다:
-   1) CLI `--steering-every N` 값
-   2) `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.steering_every)`
-   3) 기본값 `3`
-2. `STEERING_DISABLED = (STEERING_EVERY == 0)`
-3. `EMERGENCY_STEERING_ENABLED = true` (기본값 고정)
-4. `STEERING_EVERY`가 기본값 3과 다르고 세션이 기본값으로 생성되어 있으면 아래 명령으로 동기화:
-   ```bash
-   python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --steering-every {STEERING_EVERY} --json
-   ```
-5. `[자율] 스티어링 설정: {STEERING_EVERY} 스프린트마다, 비상 {활성/비활성}` 출력
-6. 사용자 질의 프롬프트는 호출하지 않는다.
+1. `STEERING_EVERY` 우선순위: CLI `--steering-every N` → config `agile.steering_every` → 기본값 `3`
+2. `STEERING_DISABLED = (STEERING_EVERY == 0)`, `EMERGENCY_STEERING_ENABLED = true` (기본값 고정)
+3. `STEERING_EVERY`가 기본값 3과 다르면 `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --steering-every {STEERING_EVERY} --json`으로 동기화
+4. `[자율] 스티어링 설정: {STEERING_EVERY} 스프린트마다, 비상 {활성/비활성}` 출력, 사용자 질의 없음
 
 **AUTO_MODE=false 분기**:
-1. CLI `--steering-every N`이 사전 지정된 경우: Q&A를 skip하고 해당 값을 `STEERING_EVERY`로 적용한다. `STEERING_EVERY > 0`이고 기본값 3과 다르면 `mst.py agile update --steering-every {STEERING_EVERY}`를 호출한다.
+1. CLI `--steering-every N` 사전 지정 시: Q&A skip하고 해당 값 적용. `STEERING_EVERY > 0`이고 기본값 3과 다르면 `mst.py agile update --steering-every {STEERING_EVERY}` 호출.
 2. CLI 미지정 시 `AskUserQuestion` 1회 호출 (`questions` 배열 2개 탭 동시 제시):
    - 탭 1 (`id: regular_steering`, `header: 정기 스티어링`)
      - `question`: `정기 스티어링 체크포인트를 어떤 주기로 운영할까요?`
      - `options`:
-       - `label`: `3 스프린트마다 (기본값)`
-         - `description`: |
-             - 기본 추천 주기입니다.
-             - Sprint 3/6/9 완료 직후 Step 3 체크포인트가 자동 실행됩니다.
-             - 탐색/구현 사이 균형을 유지하면서 drift 누적 전에 방향을 교정할 수 있습니다.
-       - `label`: `5 스프린트마다`
-         - `description`: |
-             - 보고 빈도를 낮추고 긴 실행 구간을 확보합니다.
-             - Sprint 5/10/15 완료 직후 Step 3 체크포인트가 실행됩니다.
-             - 대규모 구현 구간에서 컨텍스트 전환 비용을 줄이고 싶을 때 적합합니다.
-       - `label`: `비활성화 (정기 스티어링 없이 진행)`
-         - `description`: |
-             - 정기 체크포인트를 완전히 끄고 스프린트 루프를 연속 실행합니다.
-             - Step 3 정기 진입 조건은 skip되며, 필요한 경우 비상 스티어링만 사용합니다.
-             - 이 선택은 프롬프트 레벨에서 `STEERING_EVERY=0`으로 해석됩니다.
+       - `label`: `3 스프린트마다 (기본값)` — Sprint 3/6/9 완료 직후 Step 3 자동 실행. 탐색/구현 균형 유지.
+       - `label`: `5 스프린트마다` — Sprint 5/10/15 완료 직후 Step 3 실행. 긴 실행 구간 확보.
+       - `label`: `비활성화 (정기 스티어링 없이 진행)` — `STEERING_EVERY=0`, 비상 스티어링만 사용.
    - 탭 2 (`id: emergency_steering`, `header: 비상 스티어링`)
      - `question`: `이상 징후 발생 시 비상 스티어링 자동 개입을 사용할까요?`
      - `options`:
-       - `label`: `활성화 (연속실패/drift/blocked 등 이상 시 자동 개입)`
-         - `description`: |
-             - 연속 실패, drift 누적, blocked 비율 급증 같은 위험 신호를 감지합니다.
-             - 위험 신호 발생 시 Step 3 비상 스티어링을 즉시 강제 실행합니다.
-             - 장기 루프 정체를 줄이고, 조기 개입으로 손실을 제한하는 기본 권장 설정입니다.
-       - `label`: `비활성화 (모든 스티어링 비활성화)`
-         - `description`: |
-             - 비상 트리거 기반 Step 3 강제 진입을 사용하지 않습니다.
-             - 정기 스티어링도 비활성화했다면 스티어링 자체가 완전히 꺼진 상태로 동작합니다.
-             - 사용자는 자동 개입 없이 연속 스프린트 실행만 원할 때 선택합니다.
+       - `label`: `활성화 (연속실패/drift/blocked 등 이상 시 자동 개입)` — 기본 권장 설정.
+       - `label`: `비활성화 (모든 스티어링 비활성화)` — 자동 개입 없이 연속 실행만 원할 때.
 3. 응답 매핑:
    - `3 스프린트마다 (기본값)` → `STEERING_EVERY=3`, `STEERING_DISABLED=false`
    - `5 스프린트마다` → `STEERING_EVERY=5`, `STEERING_DISABLED=false`
    - `비활성화 (정기 스티어링 없이 진행)` → `STEERING_EVERY=0`, `STEERING_DISABLED=true`
    - 비상 활성화/비활성화 → `EMERGENCY_STEERING_ENABLED=true/false`
-4. `STEERING_EVERY > 0` 그리고 값이 3(기본값)과 다르면:
+4. `STEERING_EVERY > 0` 이고 값이 3(기본값)과 다르면:
    ```bash
    python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --steering-every {STEERING_EVERY} --json
    ```
-   `STEERING_EVERY == 0`인 경우 프롬프트 레벨 변수(`STEERING_DISABLED=true`)로만 해석하고 `agile update`는 호출하지 않는다.
+   `STEERING_EVERY == 0`이면 `STEERING_DISABLED=true`로만 해석하고 `agile update`는 호출하지 않는다.
 5. `[확정] 스티어링 설정: {STEERING_EVERY} 스프린트마다, 비상 {활성/비활성}` 출력
 
 Step 1.5 완료 후 Step 2(스프린트 루프)로 진행한다.
@@ -288,18 +240,10 @@ Step 1.5 완료 후 Step 2(스프린트 루프)로 진행한다.
 #### 2.0 상태 복원
 
 세션 초기화(Step 0) 또는 Step 1 복귀 결과로 `CURRENT_SPRINT`, `STEERING_EVERY`를 복원한다.
-- `STEERING_DISABLED`는 기본값 `false`로 두고, `STEERING_EVERY == 0`이면 즉시 `true`로 해석한다.
-- `EMERGENCY_STEERING_ENABLED`는 기본값 `true`로 두고, 세션/복귀 컨텍스트에 명시값이 있으면 해당 값을 우선한다.
-
-- `--resume AGI-NNN` 진입:
-  - session.json에서 `current_sprint`를 복원한다.
-  - session.json 손상 또는 `current_sprint` 필드 누락 시:
-    - `[오류] AGI-{AGI_ID} session.json 손상 — current_sprint 값을 읽을 수 없습니다.` 출력
-    - 복구 안내: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/session.json`을 직접 점검하거나 삭제 후 신규 세션으로 재시작
-    - 실행 중단
-- 신규 세션(Step 1에서 복귀):
-  - `agile-plan` 생성 결과의 `AGI_ID`를 사용한다.
-  - `CURRENT_SPRINT=0`으로 시작한다.
+- `STEERING_DISABLED`: 기본값 `false`, `STEERING_EVERY == 0`이면 즉시 `true`로 해석.
+- `EMERGENCY_STEERING_ENABLED`: 기본값 `true`, 세션/복귀 컨텍스트에 명시값이 있으면 우선 적용.
+- `--resume AGI-NNN` 진입: session.json에서 `current_sprint`를 복원. 손상 또는 `current_sprint` 필드 누락 시 에러 출력 + 파일 점검 안내 후 중단.
+- 신규 세션(Step 1에서 복귀): `agile-plan` 생성 결과의 `AGI_ID` 사용, `CURRENT_SPRINT=0`으로 시작.
 
 분기:
 - `CURRENT_SPRINT == 0` 또는 Sprint 0 미완료 → **2.1 (Sprint 0)** 으로 진행
@@ -327,18 +271,14 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
 
 아래 파일을 순서대로 확인하여 테스트 러너를 감지한다:
 
-1. `package.json` — `scripts.test` 필드 확인 (jest, vitest, mocha 등)
-2. `Makefile` — `test` 타깃 확인
-3. `pyproject.toml` / `setup.cfg` / `pytest.ini` — pytest 감지
+1. `package.json` — `scripts.test` 필드 (jest, vitest, mocha 등)
+2. `Makefile` — `test` 타깃
+3. `pyproject.toml` / `setup.cfg` / `pytest.ini` — pytest
 4. `Cargo.toml` — `cargo test` (Rust)
 5. `go.mod` — `go test ./...` (Go)
 6. `.github/workflows/` — CI 설정에서 테스트 명령어 추출
 
-감지 결과를 `TEST_RUNNER` 변수에 저장하고 출력:
-
-```text
-[Sprint 0] 테스트 러너 감지: {TEST_RUNNER}
-```
+감지 결과를 `TEST_RUNNER` 변수에 저장 후 `[Sprint 0] 테스트 러너 감지: {TEST_RUNNER}` 출력
 
 ##### 2.1.2 테스트 환경 미존재 시
 
@@ -370,13 +310,13 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
       --summary "smoke test 통과" \
       --json
     ```
-    - `PLN_ID_IF_EXISTS` / `REQ_ID_IF_EXISTS`: Sprint 0에서 `mst:plan`을 호출하여 PLN/REQ가 생성된 경우에만 전달. 테스트 환경이 이미 존재하여 plan 호출 없이 통과한 경우 `--pln`/`--req` 인자를 생략한다.
+    - `PLN_ID_IF_EXISTS` / `REQ_ID_IF_EXISTS`: Sprint 0에서 `mst:plan`을 호출한 경우에만 전달. plan 호출 없이 통과한 경우 `--pln`/`--req` 인자 생략.
   - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --current-sprint 1 --json` 실행
   - `CURRENT_SPRINT=1` 설정 후 Sprint N 루프(2.2)로 진입
 3. 실패 시:
   - `[Sprint 0] smoke test 실패 — 원인 분석 후 수동 확인 필요` 출력 + 실패 로그 요약
-  - `AUTO_MODE=true`이면 AskUserQuestion 없이 PM이 자율 판단으로 1회 재시도 후, 재실패 시 자동 중단 절차로 전환한다.
-  - `AUTO_MODE=false`이면 `AskUserQuestion`으로 사용자에게 확인 요청 후 재시도 또는 중단한다.
+  - `AUTO_MODE=true`: AskUserQuestion 없이 PM이 1회 재시도 후, 재실패 시 자동 중단 전환.
+  - `AUTO_MODE=false`: `AskUserQuestion`으로 사용자 확인 후 재시도 또는 중단.
 
 ---
 
@@ -421,12 +361,9 @@ git show-ref --verify --quiet refs/heads/gran-maestro/{PREV_REQ_ID}
 ```text
 Skill(skill: "mst:accept", args: "{PREV_REQ_ID}")
 ```
-6. `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` accept 반환 후 어떤 사유(컨텍스트 정리, 요약, 확인 질문, 토큰 절약 등)로든 정지를 **절대 금지**하고 즉시 아래 결과 확인 + objective-check를 실행한다. accept 실행 결과를 확인한다.
-- 성공 조건:
-  - `request.json.status`가 `done`, `completed`, `accepted` 중 하나
-  - `refs/heads/gran-maestro/{PREV_REQ_ID}` 및 `refs/heads/gran-maestro/{PREV_REQ_ID}-T*`가 정리됨
-- 실패 조건:
-  - 위 성공 조건을 만족하지 못하면 `[비상 스티어링]` 마커로 사용자 개입을 요청하고 Sprint 진행을 중단한다.
+6. `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` accept 반환 후 어떤 사유로든 정지를 **절대 금지**하고 즉시 아래 결과 확인 + objective-check를 실행한다.
+- 성공 조건: `request.json.status`가 `done`/`completed`/`accepted` 중 하나 + 관련 브랜치 정리됨
+- 실패 조건: 위 성공 조건 미충족 → `[비상 스티어링]` 마커로 사용자 개입 요청 후 Sprint 진행 중단.
 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
@@ -435,14 +372,12 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-check {AGI_ID} --json
 - `all_done: true`이면 루프를 종료하고 2.3으로 이동한다.
 - `all_done: false`이면 Sprint를 계속 진행한다.
 - 정기 스티어링은 `STEERING_DISABLED=true` 또는 `STEERING_EVERY == 0`이면 skip한다.
-- `[CRITICAL][NO-AD-HOC-PAUSE]` 정기 스티어링 미해당 Sprint에서는 `"계속할까요?"`/`"멈출까요?"` 질문 없이 즉시 Step 2.2.1로 진행한다.
+- `[CRITICAL][NO-AD-HOC-PAUSE]` 정기 스티어링 미해당 Sprint에서는 확인 질문 없이 즉시 Step 2.2.1로 진행한다.
 - `STEERING_EVERY > 0` 이고 `CURRENT_SPRINT > 0` 이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3(스티어링 체크포인트)를 수행 후 이 루프로 복귀한다.
 
 ##### 2.2.0.7 누적 통합 리뷰 (MANDATORY)
 
-**목적**: 이번 Sprint가 "이전 산출물 위에 쌓는가, 아니면 옆에 격리된 단위 헬퍼를 또 만드는가"를 결정론 헬퍼로 선검증한다. slide-craft 재발(Sprint 추적상 DoD done 22/22인데 플러그인 미동작) 패턴을 선제 차단한다.
-
-`CURRENT_SPRINT <= 1`이면 직전 Sprint 윈도우가 비어 있으므로 본 단계를 skip하고 2.2.0.8로 진행한다.
+**목적**: 이번 Sprint가 기존 산출물 위에 쌓는지 vs 격리 헬퍼를 또 만드는지를 선검증한다 (slide-craft 재발 패턴 차단). `CURRENT_SPRINT <= 1`이면 skip하고 2.2.0.8로 진행한다.
 
 1. 결정론 헬퍼 호출:
 
@@ -453,64 +388,55 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile integration-review {AGI_ID} \
   --json
 ```
 
-  - `--depth`는 `config.agile.integration_review_depth`(기본 3)를 사용한다. 인자 생략 시 헬퍼가 자동으로 config fallback을 적용한다.
-  - `--threshold`도 생략 시 `config.agile.new_island_threshold`(기본 0.20)를 사용한다.
+  - 인자 생략 시 `--depth`는 `config.agile.integration_review_depth`(기본 3), `--threshold`는 `config.agile.new_island_threshold`(기본 0.20) 자동 fallback.
 
-2. 헬퍼 출력 JSON에서 아래 필드를 확인한다.
-   - `files.total / modify / wire / new_island`
-   - `ratios.new_island`
-   - `verdict.exceeded` (= `ratios.new_island > threshold`)
-   - `verdict.force_wire_recommended`
+2. 헬퍼 출력 JSON에서 아래 필드를 확인한다:
+   - `files.total / modify / wire / new_island`, `ratios.new_island`
+   - `verdict.exceeded` (= `ratios.new_island > threshold`), `verdict.force_wire_recommended`
    - `wire_streak.current / max / exceeded`
-3. 헬퍼는 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/integration-context.md`를 자동 생성한다. 이 파일은 (1) 분류별 변경 파일 트리, (2) entrypoint 상태, (3) wire 파일별 통합 지점 참조, (4) 직전 K Sprint의 `user_observable_change` 요약을 포함하며, 2.2.3 plan -a 호출 시 `[누적층]` 컨텍스트에서 **반드시 Read 강제 대상**으로 전달한다.
+
+3. 헬퍼는 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/integration-context.md`를 자동 생성한다. 2.2.3 plan -a `[누적층]` 컨텍스트에서 **MANDATORY Read 대상**이다.
+
 4. 분기:
-   - `verdict.exceeded=false`이면 일반 경로 — 2.2.0.8로 진행
-   - `verdict.exceeded=true`이면 **강제 wire 전환**:
-     - `SELECTED_WORK_ITEM`을 새 DoD 진행 대신 "이번 Sprint는 직전 누적 new-island(`new_island_files` 목록)를 기존 진입점과 통합하는 작업"으로 재지정한다.
-     - 2.2.2 DoD 선택은 이 Sprint에서 skip하고, `selection_reason`에 `integration-review forced wire`를 기록한다.
-     - `wire_streak.exceeded=true`(연속 `agile.integration_wire_streak_max`=3회 wire)이면 비상 스티어링(Step 3)으로 즉시 강제 진입한다 — 근본적으로 DoD 설계가 잘못됐을 가능성.
+   - `verdict.exceeded=false` → 2.2.0.8로 진행
+   - `verdict.exceeded=true` → **강제 wire 전환**: `SELECTED_WORK_ITEM`을 "직전 누적 new-island를 기존 진입점과 통합"으로 재지정, 2.2.2 DoD 선택 skip, `selection_reason`에 `integration-review forced wire` 기록
+   - `wire_streak.exceeded=true` (연속 `agile.integration_wire_streak_max`=3회) → 비상 스티어링(Step 3) 즉시 강제 진입
 
 ##### LLM 스티어링 게이트 (wire_streak.exceeded=true 시)
 
 `config.agile.llm_steering_gate_enabled == true`이면 비상 스티어링 진입 전 LLM 분석을 수행한다:
 
-1. `new_island`로 남은 파일 목록 + 관련 테스트 PASS/FAIL 상태 + `integration-context.md`를 분석
-2. 판정:
-   - `false_positive`: heuristic false positive로 판단 → `wire_streak.exceeded`를 false로 override, 근거를 `integration-review.json`의 `llm_gate`에 기록, 정상 Sprint 진행
-   - `true_positive`: 진짜 통합 부채로 판단 → 기존대로 비상 스티어링 진입
-3. `llm_steering_gate_enabled == false`이면 기존 동작 유지 (게이트 skip)
+1. `new_island` 파일 목록 + 테스트 PASS/FAIL 상태 + `integration-context.md` 분석
+2. `false_positive`: `wire_streak.exceeded`를 false로 override + 근거를 `llm_gate`에 기록 → 정상 Sprint 진행. `true_positive`: 비상 스티어링 진입.
+3. `llm_steering_gate_enabled == false`이면 게이트 skip
 
-5. **PM Escape Hatch**: PM이 구조적 판단으로 verdict를 무시해야 하는 경우(예: 프로젝트 특성상 grep 휴리스틱이 false positive를 낸 경우, 동적 import/매크로 기반 언어 등) 아래 조건을 모두 만족할 때만 허용:
-   - `AUTO_MODE=true`: `auto-decisions.md`에 `[integration-review override] reason: {...}` 행을 반드시 기록
-   - `AUTO_MODE=false`: 다음 `retrospective.md`에 `integration_review_override` 섹션으로 사유 기록
-   - Escape Hatch 사용 시 `verdict.force_wire_recommended`를 무시하고 기존 DoD 진행을 허용하되, 동일 세션에서 **연속 2회 이상 override 금지** (드리프트 누적 방지)
-   - 사유 없이 무시하는 것은 금지 패턴(`### 금지 패턴` 참조)
-- **Dispatch 결과 수집**: `config.agile.dispatch.enabled == true`로 Sprint chain을 격리 실행한 경우 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json`을 Read하여 통합 검증 대상에 포함한다.
+5. **PM Escape Hatch** (grep false positive, 동적 import 언어 등): `AUTO_MODE=true` → `auto-decisions.md`에 `[integration-review override] reason: {...}` 기록 필수. `AUTO_MODE=false` → `retrospective.md`에 `integration_review_override` 섹션으로 사유 기록. 동일 세션 **연속 2회 이상 override 금지**.
+- **Dispatch 결과 수집**: `config.agile.dispatch.enabled == true`면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json`을 Read하여 통합 검증 대상에 포함한다.
 
 ##### 2.2.0.8 기획-구현 정합성 점검 (MANDATORY)
 
 ##### 2.2.0.8-pre: drift-report.json 신뢰 소스 우선 참조 (AD-RV-004)
 
-본 단계의 3축 판정을 수행하기 전, `.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT-1:02d}/drift-report.json`이 존재하면 해당 파일의 `classification` 필드를 우선 사용한다.
+본 단계의 3축 판정 전, `.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT-1:02d}/drift-report.json`이 존재하면 해당 파일의 `classification` 필드를 우선 사용한다.
 
-- `classification == "aligned"`: alignment 판정을 **aligned**로 확정, 3축 판정 skip.
-- `classification == "drift_warning"`: **drift_warning**으로 확정, 기존 drift 카운터 경로로 진입.
-- `classification == "objective_stale"`: **objective_stale**로 확정, 비상 스티어링 강제 진입.
-- `classification == "pending"`: MVP skeleton 상태 -> 기존 3축 판정으로 fallback.
-- 파일 미존재 또는 파싱 실패: 기존 3축 판정으로 fallback (graceful).
+| classification | 처리 |
+|----------------|------|
+| `aligned` | alignment 판정을 **aligned**로 확정, 3축 판정 skip |
+| `drift_warning` | **drift_warning**으로 확정, drift 카운터 경로 진입 |
+| `objective_stale` | **objective_stale**로 확정, 비상 스티어링 강제 진입 |
+| `pending` | MVP skeleton 상태 → 기존 3축 판정으로 fallback |
+| 파일 미존재/파싱 실패 | 기존 3축 판정으로 fallback (graceful) |
 
 ##### 2.2.0.8-recall: Recall Patch Manifest 자동 생성 (AD-SU)
 
 drift-report classification이 `drift_warning` 또는 `objective_stale`이면 `.gran-maestro/agile/{AGI_ID}/sprints/S{N}/recall-patch-manifest.json` 초안을 자동 생성한다.
 
 - `drift_warning` → Level 2 manifest (DoD 추가/삭제/순서/병합/문구 정밀화만 허용, `requires_user_approval: false`)
-- `objective_stale` → Level 3 manifest (의미 변경, `requires_user_approval: true`로 사용자 승인 필요)
+- `objective_stale` → Level 3 manifest (의미 변경, `requires_user_approval: true`)
 
-manifest는 MVP에서 placeholder + TODO 마커로 기록되며, 실제 patch operation apply는 `mst.py agile recall --apply` 후속 커맨드에서 처리한다. 자동 block 없음 (dashboard 표시만).
+manifest는 MVP에서 placeholder + TODO 마커로 기록되며, 실제 patch apply는 `mst.py agile recall --apply`로 처리한다. 자동 block 없음 (dashboard 표시만).
 
-**목적**: 2.2.0.7가 "코드 통합 부채"를 잡는다면, 본 단계는 "**기획(objective.md) ↔ 구현(누적 변경)**의 정합성"을 점검한다. slide-craft 재발의 또 다른 축인 "DoD가 코드의 현실과 어긋나는 기획 노후화"를 감지한다.
-
-`CURRENT_SPRINT <= 1`이면 직전 데이터가 없으므로 본 단계를 skip하고 2.2.1로 진행한다.
+**목적**: 기획(objective.md) ↔ 구현(누적 변경) 정합성 점검. "DoD가 코드 현실과 어긋나는 기획 노후화"를 감지한다. `CURRENT_SPRINT <= 1`이면 skip하고 2.2.1로 진행한다.
 
 1. alignment 데이터 패키지 조회:
 
@@ -521,95 +447,51 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile alignment-package {AGI_ID} \
   --json
 ```
 
-  - 반환: `{objective_dods[], integration_context_path, recent_results[], recent_retrospectives[]}`
-  - objective.md가 없으면 `warning: "objective file missing"` 포함 → 본 단계를 graceful skip하고 2.2.1로 진행한다.
+  - 반환: `{objective_dods[], integration_context_path, recent_results[], recent_retrospectives[]}`. objective.md 없으면 graceful skip → 2.2.1로 진행.
 
-2. 패키지의 `integration_context_path`와 `recent_results`/`recent_retrospectives`를 Read한 뒤, PM이 3축으로 정합성을 판정한다:
-   - **A. DoD-변경 매핑 충실도**: 직전 K Sprint의 변경 내용이 objective.md의 어떤 DoD를 충족시키는가? 상당수 변경이 어떤 DoD에도 매핑되지 않으면 `drift_warning` 후보
-   - **B. DoD 현실 가능성**: objective.md의 DoD가 현재 코드 상태에서 "관찰 가능"하게 만들어지고 있는가? DoD가 "사용자가 X 화면에서 Y를 본다"인데 변경 파일에 X 화면이 없으면 `drift_warning` 후보
-   - **C. 기획 노후화**: objective.md의 DoD/제약/우선순위가 현재 코드 현실과 모순되는가? 코드가 기획 가정 구조를 이미 떠났는데 objective.md가 안 갱신됐으면 `objective_stale` 후보
+2. 패키지를 Read한 뒤 PM이 3축으로 정합성을 판정한다:
+   - **A. DoD-변경 매핑 충실도**: 상당수 변경이 어떤 DoD에도 매핑되지 않으면 `drift_warning` 후보
+   - **B. DoD 현실 가능성**: DoD가 현재 코드 상태에서 "관찰 가능"하게 구현되고 있는가? 없으면 `drift_warning` 후보
+   - **C. 기획 노후화**: DoD/제약/우선순위가 현재 코드 현실과 모순되는가? 그렇다면 `objective_stale` 후보
 
-3. 판정 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/alignment-check.md`에 기록한다.
-
-   ```markdown
-   # Alignment Check — S{CURRENT_SPRINT}
-
-   ## 판정: aligned | drift_warning | objective_stale
-
-   ## A. DoD-변경 매핑 충실도
-   (매핑된 DoD 목록 + 매핑되지 않은 변경 파일)
-
-   ## B. DoD 현실 가능성
-   (각 DoD별 "관찰 가능한가" 판단)
-
-   ## C. 기획 노후화
-   (기획이 현실을 반영하는가 + 노후화 증거)
-   ```
+3. 판정 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/alignment-check.md`에 기록한다 (헤더: `판정`, `A. DoD-변경 매핑 충실도`, `B. DoD 현실 가능성`, `C. 기획 노후화`).
 
 4. 분기:
-   - `aligned` — 일반 경로, 2.2.1로 진행
-   - `drift_warning` — `drift_count += 1` (기존 Drift 감지 카운터와 공유). 경고 출력 + 2.2.1 진행. 단, `drift_count >= agile.drift_count_trigger`이면 기존 Drift 감지 규칙대로 비상 스티어링 진입
-   - `objective_stale` — **비상 스티어링 강제 진입**(Step 3). 기획 자체가 코드와 어긋나므로 `mst:agile-plan --resume`으로 objective 재계획이 필요할 가능성 높음. 진행 보고서에 `alignment: objective_stale` 마커 포함
+   - `aligned` → 2.2.1로 진행
+   - `drift_warning` → `drift_count += 1`, 경고 출력 + 2.2.1 진행. `drift_count >= agile.drift_count_trigger`이면 비상 스티어링 진입
+   - `objective_stale` → **비상 스티어링 강제 진입**(Step 3), 진행 보고서에 `alignment: objective_stale` 마커 포함
 
-5. `AUTO_MODE=true`에서는 PM이 3축 판정과 분기를 자율적으로 수행하고, 판정 근거를 `alignment-check.md`에 기록한 뒤 해당 분기로 진행한다.
+5. `AUTO_MODE=true`에서는 PM이 3축 판정과 분기를 자율 수행하고 근거를 `alignment-check.md`에 기록한다.
 
 ##### 2.2.1 프로젝트 건강 점검 (Sprint 시작 시 MANDATORY)
 
-Sprint 시작 즉시 `in_progress` 결과를 기록한 뒤 건강 점검을 수행한다.
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
-  --sprint {CURRENT_SPRINT} \
-  --status in_progress \
-  --summary "프로젝트 건강 점검 중" \
-  --json
-```
+Sprint 시작 즉시 `in_progress` 결과를 기록(`python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {CURRENT_SPRINT} --status in_progress --summary "프로젝트 건강 점검 중" --json`)한 뒤 건강 점검을 수행한다.
 
 점검 항목:
-1. 테스트 실행 (`npm test` 등 프로젝트 표준 명령)
-2. 빌드/타입체크 확인
-3. known issues 조회
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json
-```
-4. 직전 Sprint 회고의 미해결 항목(`failed`, `limitations`) 및 교훈(`lessons_learned`) 확인
-```bash
-Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md)
-```
-  - `lessons_learned` 값을 `PREVIOUS_LESSONS` 변수에 저장한다. 이 값은 2.2.3 plan 컨텍스트 및 result 기록 시 사용한다.
+1. 테스트 실행 (`npm test` 등 프로젝트 표준 명령) + 빌드/타입체크 확인
+2. known issues 조회: `python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json`
+3. 직전 Sprint 회고 `Read({PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/retrospective.md)` — 미해결 항목(`failed`, `limitations`) 확인, `lessons_learned`를 `PREVIOUS_LESSONS` 변수에 저장 (2.2.3 plan 컨텍스트 및 result 기록 시 사용)
 
-판정:
-- 실패 테스트/빌드, open known issues, 미해결 회고 항목 중 하나라도 있으면 `HEALTH_ISSUE_FOUND=true`로 두고 **수정 작업을 DoD 진행보다 우선**한다.
-- 모두 정상인 경우 `HEALTH_ISSUE_FOUND=false`로 두고 2.2.2로 진행한다.
+판정: 실패 테스트/빌드, open known issues, 미해결 회고 항목 중 하나라도 있으면 `HEALTH_ISSUE_FOUND=true` → 수정 작업을 DoD 진행보다 우선. 모두 정상이면 `HEALTH_ISSUE_FOUND=false` → 2.2.2로 진행.
 
 ##### 2.2.2 DoD 항목 선택 (MoSCoW + 의존성 기반)
 
 `HEALTH_ISSUE_FOUND=false`일 때만 DoD 선택을 수행한다.
 
-선택 규칙:
-1. objective.md의 프로젝트 DoD에서 미완료 항목 조회 (`objective-check --json`)
-2. MoSCoW `must` 우선, 없으면 `should`, 그다음 `could`
-3. 의존성이 충족된 항목만 후보(`deps`가 모두 `done`)
-4. 직전 회고 `direction`을 반영하여 우선순위 미세 조정
+선택 규칙: `objective-check --json`으로 미완료 항목 조회 → MoSCoW `must` > `should` > `could` 우선 → `deps`가 모두 `done`인 항목만 후보 → 직전 회고 `direction` 반영하여 미세 조정.
 
-결정:
-- 건강 이슈가 있으면 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 확정한다.
-- 건강 이슈가 없으면 `SELECTED_WORK_ITEM={SELECTED_DOD}`로 확정한다.
-- 의존성 미충족으로 선택 불가하면 아래 분기를 적용한다.
-  - `AUTO_MODE=true`: AskUserQuestion 없이 의존성 해소 작업을 자동 생성하고 즉시 진행한다. `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
-  - `AUTO_MODE=false`: 기존 동작을 유지한다. 의존성 해소 작업을 생성하고 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환한다.
+결정: 건강 이슈 있으면 `SELECTED_WORK_ITEM={FIX_TARGET}`, 없으면 `SELECTED_WORK_ITEM={SELECTED_DOD}`. 의존성 미충족 시 의존성 해소 작업 자동 생성 후 `SELECTED_WORK_ITEM={FIX_TARGET}`으로 전환.
 
 ##### 2.2.3 plan -a 호출 (N계층 컨텍스트)
 
 `mst:plan -a` 호출 시 아래 컨텍스트를 반드시 전달한다.
 
-- `[의도층]`: MANDATORY Read — objective.md (JTBD 원문) + 선택된 DoD 소속 `details/{DOMAIN_SLUG}.md`. literal 주입이 아닌 "반드시 Read" 지시 + plan.md 필수 기록 필드 2개(`충족 JTBD 조항`, `도메인 참조 ID`).
+컨텍스트 계층 (모두 전달 필수):
+- `[의도층]`: MANDATORY Read — objective.md (JTBD 원문) + `details/{DOMAIN_SLUG}.md`. plan.md 필수 기록: `충족 JTBD 조항`, `도메인 참조 ID`.
 - `[고정층]`: objective.md 전체 (JTBD + 프로젝트 DoD + 제약 + 설계 결정 + NFR + 리스크)
-- `[활성층]`: 현재 선택된 미완료 DoD 항목
-- `[변화층]`: 직전 Sprint 결과
-- `[회고층]`: 직전 retrospective
+- `[활성층]`: 현재 선택된 미완료 DoD 항목 | `[변화층]`: 직전 Sprint 결과 | `[회고층]`: 직전 retrospective
 - `[이슈층]`: open known issues
-- `[누적층]`: 직전 K Sprint의 누적 통합 컨텍스트 (2.2.0.7에서 생성한 `integration-context.md`). plan -a는 이 파일을 반드시 Read하여 "이전 산출물 위에 쌓을지 / 고칠지"를 판단한다.
+- `[누적층]`: 2.2.0.7 생성 `integration-context.md` (MANDATORY Read — 이번 Sprint가 어디에 쌓을지 결정)
 - `[제약층]`: 프로젝트 DoD + 성공 지표
 
 ```text
@@ -629,80 +511,55 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 
 ##### 2.2.3.a Dispatch 활성화 분기 (`config.agile.dispatch.enabled`)
 
-Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.enabled)` 값을 기준으로 위 plan 호출 실행 경로를 분기한다.
+Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.enabled)` 값을 기준으로 분기한다.
 
-1. `enabled == true`면 `2.2.3.D dispatch 실행 경로`를 수행한다.
-2. `enabled == false` 또는 키 미설정이면 기존 inline 경로를 수행한다:
-   - 위 `Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}...")` 호출을 그대로 실행 (부모 Sprint 세션 컨텍스트)
-   - **추가: inline 경로 경량 추적 마커 (MANDATORY)**:
-     - Sprint 시작 시 부모 세션이 아래 페이로드를 `{PROJECT_ROOT}/.gran-maestro/run/{AGI_ID}-S{NN}.json`에 Write한다:
-       ```json
-       {
-         "task_id": "{AGI_ID}-S{NN}",
-         "phase": "running",
-         "provider": "claude",
-         "model": "{resolved_model}",
-         "started_at": "{ISO8601}",
-         "last_heartbeat": "{ISO8601}",
-         "inline": true
-       }
-       ```
-     - Sprint 종료 시 동일 파일을 `phase: "done"` (성공) 또는 `phase: "failed"` (실패)와 `terminated_at`, `exit_code`, `last_heartbeat` 필드로 업데이트한다.
-     - inline 경로는 `dispatch-result.json`을 **생성하지 않는다** (ADR-007 하위 호환 유지).
-3. 기본값은 `false`이며 `templates/defaults/config.json`의 `agile.dispatch.enabled`를 따른다.
+- `enabled == true`: `2.2.3.D dispatch 실행 경로` 수행
+- `enabled == false` 또는 키 미설정: inline 경로 수행 (기본값 `false`)
+  - 위 `Skill(skill: "mst:plan", args: "-a ...")` 호출을 그대로 실행
+  - **추가: inline 경로 경량 추적 마커 (MANDATORY)**: Sprint 시작 시 `{PROJECT_ROOT}/.gran-maestro/run/{AGI_ID}-S{NN}.json`에 아래 페이로드를 Write:
+    ```json
+    {"task_id": "{AGI_ID}-S{NN}", "phase": "running", "provider": "claude", "model": "{resolved_model}", "started_at": "{ISO8601}", "last_heartbeat": "{ISO8601}", "inline": true}
+    ```
+  - Sprint 종료 시 동일 파일을 `phase: "done"` (성공) 또는 `phase: "failed"` (실패)와 `terminated_at`, `exit_code`, `last_heartbeat` 필드로 업데이트.
+  - inline 경로는 `dispatch-result.json`을 **생성하지 않는다** (ADR-007 하위 호환 유지).
 
 ##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider, MANDATORY)
 
-1. Sprint prompt 조립:
-   - `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
-2. worktree 생성:
-   - 경로 규칙: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
-3. 외부 프로세스 dispatch 실행:
-   - Bash tool의 background 실행으로 아래 명령을 호출한다 (wrapper 경유로 dashboard 실시간 추적 확보).
+1. Sprint prompt 조립: `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
+2. worktree 생성: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
+3. 외부 프로세스 dispatch 실행 (Bash background):
    - 모델 resolve: `MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default 2>/dev/null || echo "sonnet")`
-   - 실행:
-     ```bash
-     python3 {PLUGIN_ROOT}/scripts/mst.py run \
-       --task-id "{AGI_ID}-S{NN}" \
-       --provider claude \
-       --model "$MODEL" \
-       --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
-       -- claude -p "$(cat sprint-prompt.md)" --model "$MODEL" --permission-mode bypassPermissions
-     ```
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py run \
+     --task-id "{AGI_ID}-S{NN}" \
+     --provider claude \
+     --model "$MODEL" \
+     --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
+     -- claude -p "$(cat sprint-prompt.md)" --model "$MODEL" --permission-mode bypassPermissions
+   ```
    - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록한다.
-4. 종료 신호 수신:
-   - `claude` 프로세스 exit code를 확인하고, `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json` 파일 존재 여부를 함께 확인한다.
-5. 실패 처리:
-   - 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
+4. 종료 신호 수신: `claude` 프로세스 exit code 확인 + `dispatch-result.json` 파일 존재 여부 확인.
+5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
 ###### 1회 안내 메시지 (MANDATORY)
 
-- Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력한다.
-- 정확한 출력 문자열:
-  - `[Sprint Dispatch 모드] Sprint 실행을 별도 세션으로 격리합니다. 비활성화: config.agile.dispatch.enabled = false`
-- 1회 출력 판정은 아래 중 하나로 구현한다.
-  - 세션 메모리 플래그: `dispatch_notice_shown_{AGI_ID}` 존재 여부 확인
-  - 파일 플래그: `{PROJECT_ROOT}/.gran-maestro/tmp/dispatch-notice-shown-{AGI_ID}` 존재 여부 확인
-- 플래그가 없으면 메시지를 출력하고 즉시 플래그를 기록한다(동일 세션 재출력 금지).
+Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력한다:
+`[Sprint Dispatch 모드] Sprint 실행을 별도 세션으로 격리합니다. 비활성화: config.agile.dispatch.enabled = false`
+
+1회 출력 판정: 세션 메모리 플래그 `dispatch_notice_shown_{AGI_ID}` 또는 파일 플래그 `{PROJECT_ROOT}/.gran-maestro/tmp/dispatch-notice-shown-{AGI_ID}` 존재 여부 확인. 플래그 없으면 메시지 출력 후 즉시 플래그 기록(동일 세션 재출력 금지).
 
 ###### 실패 처리 (MANDATORY)
 
 - 실패 조건: `exit_code != 0` 또는 `dispatch-result.json` 미생성.
-- 실패 시 반드시 아래 명령으로 실패 결과를 기록한다.
+- 실패 시 반드시 아래 명령으로 실패 결과를 기록한다:
   - `python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {N} --status failed --summary "{failure_reason}"`
-- `failure_reason`은 구체 원인을 남긴다.
-  - 예: `"dispatch chain exited with code 137"`
-  - 예: `"dispatch-result.json missing after chain"`
-- 다음 Sprint 시작 시 Step `2.2.1 프로젝트 건강 점검`에서 이전 실패 Sprint를 감지하면 재시도 경로로 진입한다.
+- `failure_reason`은 구체 원인 기재 (예: `"dispatch chain exited with code 137"`)
+- 다음 Sprint의 Step `2.2.1 프로젝트 건강 점검`에서 이전 실패 Sprint를 감지하면 재시도 경로로 진입한다.
 - inline fallback 수행 금지 (ADR-007): dispatch 실패 후 parent 세션에서 `plan/request/approve/accept`를 즉시 대체 실행하지 않는다.
-
-**호환성**:
-- `config.agile.dispatch.enabled == false` 경로는 기존 동작과 100% 동일하며 `dispatch-result.json`을 생성하지 않는다.
 
 규칙:
 - `plan -a` 입력에 완료 시점/잔여 횟수 예측 문구를 포함하지 않는다.
 - 스프린트 목표는 작업 항목 명사가 아니라 **관찰 가능한 결과/동작**으로 작성한다.
-  - 예: `"설정 탭 추가"` 대신 `"설정 페이지에서 포트 변경 후 저장 시 서버 재시작 없이 반영됨"` 형태로 작성한다.
 - 컨텍스트가 비어 있으면 `"N/A"`로 채워 graceful fallback 한다.
 
 ##### 2.2.3.b MANDATORY Read 누락 자동 재지시 루프
@@ -710,41 +567,19 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
 Step 2.2.3 이후 plan-a 완료 직후 parent(Sprint 진행자)는 아래 검증/복구 루프를 수행한다.
 
 1. `Read({PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md)`로 산출물 확인.
-2. `plan.md`에 아래 필드가 모두 존재하는지 검사:
-   - `충족 JTBD 조항`
-   - `도메인 참조 ID`
-3. 누락 시 자동 재지시:
-   - 재지시 메시지: `plan.md에 JTBD/도메인 참조 필드가 누락되었습니다. objective.md와 details/{DOMAIN_SLUG}.md를 Read한 뒤 plan을 보완하세요.`
-   - 동일 `SELECTED_WORK_ITEM`과 동일 N계층 컨텍스트로 plan-a 재호출.
-4. 재시도 한도:
-   - 최대 `agile.intent_redirect_max_retries` 회(기본 3)까지 자동 재지시 반복.
-5. 한도 도달 후에도 누락이면:
-   - 현재 Sprint의 known issue에 자동 등록한다.
-   - 등록 항목에는 `agi_id`, `dod_id`, 누락 필드 목록, 재시도 횟수, 마지막 plan 경로를 포함한다.
+2. `plan.md`에 `충족 JTBD 조항`, `도메인 참조 ID` 두 필드가 모두 존재하는지 검사.
+3. 누락 시 자동 재지시 + 동일 N계층 컨텍스트로 plan-a 재호출. 최대 `agile.intent_redirect_max_retries` 회(기본 3)까지 반복.
+4. 한도 도달 후에도 누락이면 현재 Sprint의 known issue에 `agi_id`, `dod_id`, 누락 필드 목록, 재시도 횟수, 마지막 plan 경로를 포함하여 자동 등록.
 
 ##### [추가 섹션] Sprint 중 디자인 수정 경로 (Step 번호 유지 전용)
 
 아래 경로는 기존 Step `2.2.1~2.2.6`를 대체하지 않고, sprint 진행 중 필요한 경우에만 추가로 적용한다.
 
-**경로 1: AI 자율 판단 (AUTO_MODE)**
-- 트리거: `2.2.3`의 `mst:plan -a` 컨텍스트 작성/실행 중, 기존 디자인 baseline과 새 요구사항의 불일치가 감지된 경우 (plan 스킬 Step 4의 UI 감지 키워드/의미 판단 포함).
-- 실행 방법:
-  1. `mst:plan`의 UI 감지 흐름으로 디자인 수정 필요성을 확정한다.
-  2. 확정되면 `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {plan 주제}")`를 재호출한다.
-  3. Stitch 결과를 현재 sprint plan 컨텍스트에 반영한 뒤 루프를 계속 진행한다.
+**경로 1: AI 자율 판단 (AUTO_MODE)** — `2.2.3` plan -a 실행 중 디자인 불일치 감지 시: `mst:plan` UI 감지 흐름으로 필요성 확정 → `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {plan 주제}")` 재호출 → 결과를 sprint plan 컨텍스트에 반영 후 계속.
 
-**경로 2: 사용자 명시 요청**
-- 트리거: sprint 중 사용자가 `"디자인 수정해줘"`, `"화면 추가해줘"` 등 디자인 변경을 직접 요청한 경우.
-- 실행 방법:
-  1. 요청을 plan 스킬의 UI 감지 흐름으로 전달하거나, 즉시 `Skill(skill: "mst:stitch", args: "{요청 맥락}")`를 호출한다.
-  2. 생성된 디자인 결과를 sprint 기준선에 반영하고 필요 시 `2.2.3`을 재실행한다.
+**경로 2: 사용자 명시 요청** — sprint 중 사용자가 디자인 변경 요청 시: plan 스킬 UI 감지 흐름으로 전달하거나 즉시 `Skill(skill: "mst:stitch", args: "{요청 맥락}")` 호출 → 결과를 기준선에 반영 후 필요 시 `2.2.3` 재실행.
 
-**경로 3: review 발견**
-- 트리거: 구현 후 review에서 디자인과 구현의 괴리가 감지된 경우.
-- 실행 방법:
-  1. review 결과를 기준으로 `디자인 수정 필요` / `구현 수정 필요`를 분기한다.
-  2. 디자인 수정이 필요하면 plan 스킬 UI 감지 흐름으로 재진입 후 `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {보정 주제}")`를 호출한다.
-  3. 구현 수정만 필요하면 기존 sprint 수정 루프로 처리하고 디자인 baseline은 유지한다.
+**경로 3: review 발견** — 구현 후 review에서 디자인과 구현 괴리 감지 시: 디자인 수정 필요 시 `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {보정 주제}")` 호출. 구현 수정만 필요 시 기존 sprint 수정 루프로 처리하고 디자인 baseline 유지.
 
 ###### objective.md 디자인 컨텍스트 baseline 업데이트 규칙 (MANDATORY)
 
@@ -762,12 +597,12 @@ Sprint 실행 결과를 기록하고, 이번 Sprint에서 완료 근거가 확�
 
 이 Sprint는 시작 시점 또는 결과 기록 시점에 **반드시 종류를 자기선언**한다:
 
-- `user_observable` (기본값): 사용자가 이 Sprint 전에는 할 수 없었던 것을 이제는 할/볼 수 있게 됨. 진입점(CLI 명령, SKILL 호출, UI 클릭 경로, 생성된 산출물 등) 중 최소 1개가 추가/변경되어 관찰 가능. `--user-observable-change` 필드로 "사용자가 이제 무엇을 볼/할 수 있는가"를 자유 텍스트로 기록한다.
-- `foundational` (예외): 사용자 관찰이 불가능한 기반 작업(테스트 인프라, 빌드 파이프라인, 내부 스키마 정의, 타입 선언 등). `--foundational-reason` 필드로 "왜 사용자 관찰 불가한지 + 어느 후속 Sprint에서 사용자 관찰 가능해질 예정인지"를 기록한다.
+- `user_observable` (기본값): 사용자가 이 Sprint 전에는 할 수 없었던 것을 이제는 할/볼 수 있게 됨. 진입점(CLI 명령, SKILL 호출, UI 클릭 경로, 생성된 산출물 등) 중 최소 1개가 추가/변경되어 관찰 가능. `--user-observable-change` 필드로 기록한다.
+- `foundational` (예외): 사용자 관찰이 불가능한 기반 작업(테스트 인프라, 빌드 파이프라인, 내부 스키마 정의, 타입 선언 등). `--foundational-reason` 필드로 "왜 사용자 관찰 불가한지 + 어느 후속 Sprint에서 관찰 가능해질 예정인지"를 기록한다.
 
-**연속 한도 (MANDATORY)**: `foundational` Sprint는 `config.agile.foundational_streak_max`(기본 2) 이상 연속 선언할 수 없다. 한도 도달 후 다음 Sprint가 또 `foundational`을 시도하면 비상 스티어링(Step 3) 강제 진입. Sprint 0(테스트 환경 구축)은 이 카운트에 포함하지 않는다.
+**연속 한도 (MANDATORY)**: `foundational` Sprint는 `config.agile.foundational_streak_max`(기본 2) 이상 연속 선언할 수 없다. 한도 도달 후 다음 Sprint가 또 `foundational`을 시도하면 비상 스티어링(Step 3) 강제 진입. Sprint 0은 이 카운트에 포함하지 않는다.
 
-**지연 승격 (MANDATORY)**: `foundational` Sprint에 포함된 DoD는 `proposed_done` 상태로만 기록한다(=아직 `done` 승격 불가). 첫 번째 후속 `user_observable` Sprint가 완료되는 시점에 `agile objective-transition --deferred-promote --sprint {N}` 호출로 누적된 `proposed_done` DoD를 **일괄 `done`으로 승격**한다.
+**지연 승격 (MANDATORY)**: `foundational` Sprint에 포함된 DoD는 `proposed_done` 상태로만 기록한다(=아직 `done` 승격 불가). 첫 번째 후속 `user_observable` Sprint 완료 시 `agile objective-transition --deferred-promote --sprint {N}` 호출로 누적된 `proposed_done` DoD를 **일괄 `done`으로 승격**한다.
 
 1. Sprint 결과 기록:
 ```bash
@@ -786,9 +621,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} \
   --json
 ```
   - `--sprint-kind` 생략 시 기본값 `user_observable`.
-  - `--sprint-kind user_observable`인 경우 `--user-observable-change`를 반드시 지정한다. 비어 있으면 경보 출력.
-  - `--sprint-kind foundational`인 경우 `--foundational-reason`을 반드시 지정한다.
-  - 동일 Sprint에서 한 필드만 지정하고 다른 필드는 생략한다 (두 종류는 상호 배타).
+  - `--sprint-kind user_observable` → `--user-observable-change` 필수 (비어 있으면 경보 출력).
+  - `--sprint-kind foundational` → `--foundational-reason` 필수.
+  - 두 종류는 상호 배타 (한 필드만 지정).
 
 1.5. `user_observable` Sprint 완료 시 지연 승격 호출:
 ```bash
@@ -799,34 +634,10 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} \
   --sprint {CURRENT_SPRINT} \
   --json
 ```
-  - 이 호출은 이번 Sprint가 실제로 기여한 DoD를 `done`으로 승격하면서, 동시에 `--sprint {CURRENT_SPRINT}` 이전의 foundational Sprint 체인에 포함된 모든 `proposed_done` DoD를 역추적하여 일괄 `done`으로 승격한다.
-  - 직전 `foundational` Sprint가 없으면 `--deferred-promote`는 단일 DoD 전이와 동일하게 동작한다 (graceful).
-  - `--sprint-goals`는 **optional**이다. sprint_goals를 구성할 수 없는 경우 인자를 생략하고 기존 방식으로 기록한다.
-  - `SPRINT_GOALS_JSON_IF_AVAILABLE` 구조:
-    ```json
-    [
-      {
-        "goal": "목표 텍스트",
-        "status": "achieved|not_achieved|partial",
-        "change_summary": "체감 변화 설명",
-        "evidence": {
-          "screenshots": ["path"],
-          "test_results": {
-            "passed": 0,
-            "failed": 0,
-            "summary": "text"
-          },
-          "diff": {
-            "files_changed": 0,
-            "insertions": 0,
-            "deletions": 0,
-            "commits": ["hash"]
-          }
-        }
-      }
-    ]
-    ```
-  - `evidence` 및 하위 필드(`screenshots`, `test_results`, `diff`)는 모두 선택적으로 포함한다. 수집 가능한 데이터만 채운다.
+  - 이 호출은 이번 Sprint가 기여한 DoD를 `done`으로 승격하면서, 이전 foundational Sprint 체인의 모든 `proposed_done` DoD를 역추적하여 일괄 `done`으로 승격한다.
+  - 직전 `foundational` Sprint가 없으면 단일 DoD 전이와 동일하게 동작한다 (graceful).
+  - `--sprint-goals`는 **optional** (수집 가능한 데이터만 채움): `[{"goal": "...", "status": "achieved|not_achieved|partial", "change_summary": "...", "evidence": {"screenshots": [...], "test_results": {...}, "diff": {...}}}]`
+
 2. 회고 기록:
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
@@ -846,10 +657,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile retrospective {AGI_ID} \
 python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status open --json
 python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues resolve {AGI_ID} --issue-id {KI_ID} --json
 ```
-4. DoD 갱신 제안 생성:
-  - `{dod_id, suggested_status, evidence_ref, reason}` 형태로 구성
-  - `evidence_ref`는 `result.md`, 테스트/빌드 로그, `source-verify.md` 경로를 포함한다.
-  - authoritative 상태 확정(`done`)은 Step 3 승인 절차(3.3)에서만 수행한다.
+4. DoD 갱신 제안 생성: `{dod_id, suggested_status, evidence_ref, reason}` 형태로 구성. `evidence_ref`는 `result.md`, 테스트/빌드 로그, `source-verify.md` 경로를 포함한다. authoritative 상태 확정(`done`)은 Step 3 승인 절차(3.3)에서만 수행한다.
 
 ##### Step 2.2.5 Sprint Review Gate (Step 2.2.4 직후 MANDATORY)
 
@@ -865,7 +673,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile evidence-check \
 
 판정 규칙 (3-tier):
 - `PASS`: evidence 충족, 위반 0건. 즉시 Step 2.2.6으로 진행.
-- `WARN`: 차단하지 않음(예: `TBD`, gate disabled 경고). 경고를 Sprint 메모에 남기고 Step 2.2.6으로 진행.
+- `WARN`: 차단하지 않음. 경고를 Sprint 메모에 남기고 Step 2.2.6으로 진행.
 - `FAIL`: 스프린트 진행 차단. 위반(artifact 미존재, `required_globs` 미충족 등)을 수정한 뒤 `evidence-check`를 재실행한다.
 
 Objective Surface Coverage drift-check (MANDATORY):
@@ -877,36 +685,17 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile drift-check \
 ```
 
 drift-check 판정:
-- `PASS`: objective surface coverage가 threshold 이상. Step 2.2.6으로 진행.
-- `WARN`: coverage가 threshold 미만. 스프린트 메모에 `covered_surface`/`uncovered_surface`를 기록하고 계속 진행.
-- `ESCALATE`: WARN이 `warn_streak_limit` 이상 연속되면 `escalate_flag=true`. 비상 스티어링 트리거로 간주하고 Step 3 진입 또는 recall 정책(사용 가능 시)을 실행한다.
+- `PASS`: coverage가 threshold 이상. Step 2.2.6으로 진행.
+- `WARN`: coverage 미만. 스프린트 메모에 `covered_surface`/`uncovered_surface` 기록 후 계속 진행.
+- `ESCALATE`: WARN이 `warn_streak_limit` 이상 연속되면 비상 스티어링 트리거로 간주, Step 3 진입 또는 recall 정책 실행.
 
-drift-check config:
-- `config.agile.drift.enabled`가 `false`면 drift-check는 skip WARN으로 처리하고 차단하지 않는다.
-- `config.agile.drift.threshold` 기본값 `0.7`
-- `config.agile.drift.warn_streak_limit` 기본값 `2`
+drift-check config: `config.agile.drift.enabled=false`면 skip WARN. `config.agile.drift.threshold` 기본값 `0.7`. `config.agile.drift.warn_streak_limit` 기본값 `2`.
 
-recall 트리거 조건 (Step 2.2.5 내부, Level 2 patch만):
-- `evidence-check == FAIL`이면 아래를 실행한다.
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile recall \
-  --agi-id {AGI_ID} \
-  --level 2 \
-  --reason fail \
-  --trigger evidence \
-  --json
-```
-- `drift-check` 결과에서 `ESCALATE`면 아래를 실행한다.
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile recall \
-  --agi-id {AGI_ID} \
-  --level 2 \
-  --reason drift \
-  --trigger drift-warn-streak \
-  --json
-```
-- `config.agile.recall.enabled=false`면 recall은 skip + warn으로 처리하고 기존 스프린트 워크플로우를 유지한다.
-- cooldown bypass는 evidence hard fail에서만 허용한다 (`--bypass-cooldown --fingerprint <hard-fail-id>`). drift 트리거에는 bypass를 사용하지 않는다.
+recall 트리거 조건 (Level 2 patch만):
+- `evidence-check == FAIL`: `python3 {PLUGIN_ROOT}/scripts/mst.py agile recall --agi-id {AGI_ID} --level 2 --reason fail --trigger evidence --json`
+- `drift-check ESCALATE`: `python3 {PLUGIN_ROOT}/scripts/mst.py agile recall --agi-id {AGI_ID} --level 2 --reason drift --trigger drift-warn-streak --json`
+- `config.agile.recall.enabled=false`면 recall skip + warn, 기존 워크플로우 유지.
+- cooldown bypass는 evidence hard fail에서만 허용 (`--bypass-cooldown --fingerprint <hard-fail-id>`). drift 트리거에는 bypass 금지.
 
 `required_globs` 규칙:
 - 프로젝트 타입별 `required_globs`는 `config.agile.evidence_gate.required_globs`에서 읽는다.
@@ -916,13 +705,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile recall \
 예외 bypass (긴급 시에만):
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile evidence-check \
-  --agi-id {AGI_ID} \
-  --sprint {CURRENT_SPRINT} \
-  --accept-evidence-gap "{REASON}" \
-  --json
+  --agi-id {AGI_ID} --sprint {CURRENT_SPRINT} --accept-evidence-gap "{REASON}" --json
 ```
-- `REASON`은 필수다.
-- bypass 사용 시 `.gran-maestro/agile/sprint-log.json`에 사유가 영구 기록된다.
+- `REASON`은 필수다. bypass 사용 시 `.gran-maestro/agile/sprint-log.json`에 사유가 영구 기록된다.
 
 ##### 2.2.6 외부 에이전트 소스 검증 (Sprint 완료 후 MANDATORY)
 
@@ -946,13 +731,8 @@ fallback: `mst:explore` 사용 불가 시 `mst:codex` 또는 `mst:claude`를 동
 
 검증 루프:
 1. 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT}/source-verify.md`에 기록한다.
-2. `verdict=fail` 또는 `CRITICAL|MAJOR` 발견 시:
-  - 검증 실패로 간주한다.
-  - 자동 수정 태스크를 생성해 즉시 보완 작업을 수행한다.
-  - 보완 후 테스트/빌드를 재실행하고 다시 소스 검증을 수행한다.
-3. 최대 재시도는 **3회**다. 3회 초과 시 `AskUserQuestion`으로 사용자 에스컬레이션 후 지시를 따른다.
-  - `AUTO_MODE=true`이면 AskUserQuestion을 skip하고 `[자동 중단]` 절차로 즉시 전환한다.
-  - `AUTO_MODE=false`이면 기존대로 AskUserQuestion 에스컬레이션을 수행한다.
+2. `verdict=fail` 또는 `CRITICAL|MAJOR` 발견 시: 자동 수정 태스크 생성 → 보완 → 테스트/빌드 재실행 → 소스 검증 재수행.
+3. 최대 재시도 **3회**. 초과 시: `AUTO_MODE=true` → `[자동 중단]` 전환. `AUTO_MODE=false` → `AskUserQuestion` 에스컬레이션.
 4. `pass` 또는 `MINOR`만 남으면:
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
@@ -962,10 +742,10 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 5. `CONTINUATION GUARD`:
   - 위 update 호출 직후 `CURRENT_SPRINT = CURRENT_SPRINT + 1`로 갱신한다.
   - `[CRITICAL][STEERING-CHECK-ON-INCREMENTED-SPRINT]` 증가된 `CURRENT_SPRINT` 기준으로 스티어링 해당 여부를 **반드시 즉시 판정**한다.
-  - `STEERING_DISABLED=true` 또는 `STEERING_EVERY == 0`이면 정기 스티어링을 skip하고 Step 2.2.1로 즉시 진행한다.
-  - `STEERING_EVERY > 0`이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3를 실행한 뒤 루프 상단으로 복귀한다.
-  - 위 조건에 해당하지 않으면 `[CRITICAL][NO-AD-HOC-PAUSE]` 어떤 확인 질문도 삽입하지 말고 Step 2.2.1로 즉시 진행한다.
-  - `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` 스티어링 체크포인트 또는 비상 스티어링 트리거에 해당하지 않는 한, 어떤 사유(컨텍스트 길이, 요약 필요, 세션 정리, 토큰 절약 등)로든 스프린트 간 정지를 절대 금지하고 Step 2.2.1로 즉시 진행한다.
+  - `STEERING_DISABLED=true` 또는 `STEERING_EVERY == 0`이면 정기 스티어링 skip → Step 2.2.1로 즉시 진행.
+  - `STEERING_EVERY > 0`이고 `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0`이면 `[MANDATORY][STEERING-DUE]` Step 3 실행 후 루프 상단으로 복귀.
+  - 위 조건 해당 없으면 `[CRITICAL][NO-AD-HOC-PAUSE]` 확인 질문 없이 Step 2.2.1로 즉시 진행.
+  - `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` 스티어링/비상 스티어링 트리거 해당 없는 한 어떤 사유로든 스프린트 간 정지를 절대 금지하고 Step 2.2.1로 즉시 진행한다.
 
 ---
 
@@ -1018,8 +798,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 | **정기** | `STEERING_DISABLED != true` AND `STEERING_EVERY > 0` AND `CURRENT_SPRINT > 0` AND `(CURRENT_SPRINT - 1) % STEERING_EVERY == 0` |
 | **비상** | 안전장치 섹션의 비상 스티어링 트리거 조건 충족 시 즉시 진입 |
 
-`steering_every` 값은 session.json에서 로드하며 기본값은 3이다.
-`STEERING_EVERY == 0` 또는 `STEERING_DISABLED == true`이면 정기 스티어링은 비활성화 상태로 간주한다.
+`steering_every` 값은 session.json에서 로드하며 기본값은 3이다. `STEERING_EVERY == 0` 또는 `STEERING_DISABLED == true`이면 정기 스티어링은 비활성화 상태로 간주한다.
 
 #### 3.2 진행 보고서 출력
 
@@ -1078,41 +857,19 @@ DoD 체크 갱신 제안 (pending)
 
 진행 보고서 출력 후 아래 분기를 적용한다.
 
-- `AUTO_MODE=true`:
-  - AskUserQuestion을 호출하지 않는다.
-  - PM이 `evidence_ref`, 테스트/빌드 결과, `source-verify.md`를 근거로 DoD별 approve/reject를 자율 판단한다.
-  - 판단 결과를 `[스티어링 체크포인트] AUTO_MODE 자율 판단` 로그로 기록한 뒤 즉시 상태 전이를 수행한다.
-- `AUTO_MODE=false`:
-  - `AskUserQuestion`으로 사용자에게 확인한다.
+- `AUTO_MODE=true`: AskUserQuestion 없이 PM이 `evidence_ref`/테스트 결과/`source-verify.md` 근거로 자율 판단 → `[스티어링 체크포인트] AUTO_MODE 자율 판단` 로그 기록 후 즉시 상태 전이.
+- `AUTO_MODE=false`: `AskUserQuestion`으로 사용자에게 확인한다.
 
 > "DoD 제안 목록을 승인/반려해주세요. (예: approve DOD-001,DOD-002 / reject DOD-003)"
 
 처리 규칙:
-- **approve된 DoD**:
-  - `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status done --json`
-  - authoritative 상태를 `done`으로 확정
-- **reject된 DoD**:
-  - `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status todo --json`
-  - reject 사유 + `evidence_ref`를 Sprint 메모에 기록
-  - 다음 Sprint의 2.2.1 문제 우선 해결 대상으로 큐잉
+- **approve**: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status done --json`
+- **reject**: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition {AGI_ID} --story {DOD_ID} --status todo --json` + reject 사유 + `evidence_ref` Sprint 메모 기록 + 다음 Sprint 2.2.1 큐잉
 
 #### 3.4 방향 수정 (Objective 변경)
 
-진행 방향 수정이 필요하면 아래 순서로 처리한다:
-
-1. 버전 스냅샷 저장:
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} \
-  --reason "{사용자 입력 요약}" --json
-```
-
-2. objective 재계획 서브스킬 재호출:
-
-```text
-Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID}")
-```
-
+1. 버전 스냅샷: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} --reason "{사용자 입력 요약}" --json`
+2. `Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID}")` 재호출
 3. 재계획 결과 반영 후 2.2 루프로 복귀
 
 #### 3.5 변경 후 정합성 정책
@@ -1125,11 +882,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 | **Level B** (중간) | DoD 범위 조정, 우선순위 재조정 | 영향받는 DoD만 부분 재검증 후 루프 계속 |
 | **Level C** (중대) | JTBD 목표 변경, DoD 대규모 재정의 | 영향 DoD 재계산, 필요 시 부분 롤백 task 생성 |
 
-**원칙**: 완료 기록 삭제 금지. 변경된 항목은 `superseded` 또는 `revalidated` 상태로 보존한다.
-
-레벨 결정 후 아래 분기를 적용하고 루프로 복귀한다.
-- `AUTO_MODE=true`: AskUserQuestion을 skip하고 PM이 정합성 정책 레벨(Level A/B/C)을 자율 판단해 적용한다.
-- `AUTO_MODE=false`: `AskUserQuestion`으로 처리 방식 확인 후 적용한다.
+**원칙**: 완료 기록 삭제 금지. 변경된 항목은 `superseded` 또는 `revalidated`로 보존. 레벨 결정 후: `AUTO_MODE=true` → PM 자율 판단 적용. `AUTO_MODE=false` → `AskUserQuestion` 확인 후 적용. 루프로 복귀.
 
 ---
 
@@ -1154,11 +907,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 | **Level 2** | 스킵 + blocked | 외부 의존성 미해소 | 현재 작업 단위를 `blocked` 상태로 마킹하고 다음 단위로 이동 |
 | **Level 3** | 비상 스티어링 | Level 0~2로 해결 불가 또는 자동 중단 트리거 발동 | 사용자 개입 요청 → Step 3 강제 진입 |
 
-복구 절차:
-1. 실패 감지 → 실패 유형 분류 (transient / scope / external / unknown)
-2. 해당 Level 복구 시도
-3. 복구 성공 시: 결과 기록 후 루프 재진입
-4. 복구 실패 시: 다음 Level로 에스컬레이션
+복구 절차: 실패 감지 → 유형 분류 (transient/scope/external/unknown) → 해당 Level 복구 시도 → 성공 시 루프 재진입, 실패 시 다음 Level 에스컬레이션.
 
 ### Drift 감지
 
@@ -1170,14 +919,9 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 **감지 절차**:
 
-1. 스프린트에서 변경된 파일 목록 추출 (`git diff --name-only`)
-2. objective.md의 활성 DoD 항목과 변경 파일의 관련성 확인
-  - 관련 없는 변경이 80% 이상인 경우: **drift 경고**
-3. **형태 정합성 검증** (관련성 체크 직후, MANDATORY):
-  - objective.md의 프로젝트 DoD 항목에서 이번 작업의 기대 산출물 유형(`DELIVERABLE_SHAPE_EXPECTED`)을 추출한다.
-  - 변경된 파일의 구조/형태(`DELIVERABLE_SHAPE_OBSERVED`)가 기대 유형과 부합하는지 LLM 판단으로 검증한다.
-  - 미부합 시 drift 경고 태그에 `[형태 불일치]`를 추가한다.
-  - 프로젝트 DoD 또는 산출물 유형 정보가 없으면 형태 정합성 검증은 skip하고 관련성 판정만으로 계속 진행한다 (graceful fallback).
+1. 변경된 파일 목록 추출 (`git diff --name-only`)
+2. 활성 DoD와 변경 파일의 관련성 확인. 관련 없는 변경이 80% 이상인 경우: **drift 경고**
+3. **형태 정합성 검증** (관련성 체크 직후, MANDATORY): DoD 항목에서 `DELIVERABLE_SHAPE_EXPECTED`를 추출하여 `DELIVERABLE_SHAPE_OBSERVED`와 LLM 판단으로 비교. 미부합 시 `[형태 불일치]` 태그 추가. DoD/산출물 정보 없으면 skip (graceful fallback).
 4. drift 감지 시 아래 메시지 출력:
 ```text
 [drift 감지] Sprint {N}
@@ -1244,10 +988,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 ```
    - `AUTO_MODE=true`: AskUserQuestion을 skip하고 PM이 위 1~3 중 하나를 자율 판단해 즉시 실행한다.
    - `AUTO_MODE=false`: `AskUserQuestion`으로 사용자 개입을 요청한다.
-4. 사용자 응답에 따라 분기:
-  - **계속 진행**: 해당 DoD `blocked` 처리 후 다음 DoD로 진행
-  - **objective 수정**: Step 3.4 수행 후 루프 재진입
-  - **완전 중단**: session을 `paused` 상태로 저장 후 종료
+4. 사용자 응답에 따라 분기: **계속 진행** → DoD `blocked` 처리 후 다음 DoD. **objective 수정** → Step 3.4 후 루프 재진입. **완전 중단** → session `paused` 저장 후 종료.
 
 ---
 
@@ -1271,7 +1012,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 | 세션 상태 업데이트 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status {active\|paused\|completed}` |
 | 스프린트 결과 기록 | `python3 {PLUGIN_ROOT}/scripts/mst.py agile result {AGI_ID} --sprint {N} ...` |
 
-**이유**: LLM의 YAML/Markdown 파싱 오류 누적을 방지하고 상태 파일의 무결성을 보장한다. (DSC-044 critic 합의)
+**이유**: LLM YAML/Markdown 파싱 오류 누적 방지 및 상태 파일 무결성 보장. (DSC-044 critic 합의)
 
 ---
 

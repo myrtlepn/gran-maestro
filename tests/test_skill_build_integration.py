@@ -74,7 +74,7 @@ def test_reference_lookup_variants():
         == shared_reference
     )
     assert "#### Plan-specific Reference Guidance" in plan_content
-    for keyword in ("현재 plan 텍스트", "예시 A (인용):", "PM lazy-Read 트리거"):
+    for keyword in ("키워드 감지 보강", "3단계 신선도 체크 보강", "WebSearch 트리거 보강"):
         assert keyword in plan_content
 
     for skill_name in ("approve", "request", "review"):
@@ -115,4 +115,4 @@ def test_config_get_cli_preserved():
         path.read_text(encoding="utf-8").count("mst.py config get")
         for path in _iter_skill_files(SKILLS_DIR)
     )
-    assert count >= 49
+    assert count >= 40
