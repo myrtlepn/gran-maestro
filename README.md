@@ -62,6 +62,7 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 
 **0.54.x** 주요 업데이트:
 
+- **적대적 검토(Adversarial Review) 게이트**: `/mst:plan`·`/mst:agile-plan`의 D3 Gate 직전과 `/mst:request`의 질문 생성 직전에, 독립 에이전트가 plan/objective를 적대적으로 검토해 사용자가 **놓친 엣지케이스·빠진 흐름·페르소나/NFR/통합 gap**을 찾아 DoD/AC에 보강합니다. 대시보드 Settings 탭 "적대적 검토" 섹션에서 전체/perspective별 on/off가 가능하고, config로는 `agile.adversarial_review.enabled=false`로 끌 수 있습니다.
 - **Intent 시스템**: 기능 의도(JTBD)를 저장·추적하여 plan에서 구현·검증까지 의도 일관성을 보장합니다 (`/mst:intent`)
 - **브라우저 UI 테스트**: UI 변경 시 plan/request/review에서 브라우저 테스트를 자동 연계하고, 스크린샷을 캡처·검증합니다
 - **Q&A 컨텍스트 캡처**: 사용자 질문/답변을 자동 학습하여 선호 패턴을 축적, 반복 질문을 줄입니다

@@ -447,6 +447,32 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
 4. `AUTO_MODE`에서는 사용자 확인 대신 PM이 자율 확정하고 근거를 함께 기록한다.
 5. 확정된 클러스터 맵은 Step 1A.10 저장 입력으로 사용한다.
 
+### Step 1A.9.7 적대적 검토 게이트
+
+Step 1A.9.5 도메인 클러스터링 직후, objective 저장 직전에 완전성 보강 목적의 적대적 검토를 수행한다. 이 게이트는 D3의 명료도 검증이 아니라 엣지케이스, 누락 흐름, 통합 경계, persona/NFR gap을 찾아 Step 1A.4 재귀 정제 루프에 "적대적 검토 라운드" 1회로 주입하는 절차다.
+
+1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.adversarial_review)`로 설정을 읽는다.
+   - `agile.adversarial_review.enabled != true`이면 graceful skip 후 Step 1A.10으로 진행한다.
+   - enabled perspective만 실행한다. 기본 enabled는 `edge`, `flow`, `integration`이며 `persona`, `nfr`은 설정이 true인 경우에만 실행한다.
+   - `max_rounds` 기본값은 3, `current_round` 초기값은 1이다.
+2. 각 perspective마다 아래 CLI로 context 경로와 output schema 경로만 조회한다.
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py agile review --agi {AGI_ID} --perspective {name} --json
+   ```
+3. CLI 결과의 `context_files` 경로와 `output_schema` 경로만 독립 에이전트에 전달한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이며 반드시 독립 컨텍스트로 실행한다. 프롬프트에는 plan/objective 원문, detail 본문, DoD/JTBD 원문을 절대 포함하지 않는다.
+   ```text
+   역할: {perspective} 관점의 적대적 검토자.
+   Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
+   ```
+4. findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/objective/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, 반영 여부를 포함한다.
+5. 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. 수렴 전에는 critical finding과 PM이 필요하다고 판단한 major finding을 Step 1A.4 재귀 정제 루프의 추가 입력으로 반영하고 `current_round += 1` 후 재검토한다.
+6. `AUTO_MODE=true`:
+   - `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다.
+   - `severity=critical` finding은 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
+7. `AUTO_MODE=false`:
+   - 기본 실행은 `edge` + `flow` 2종을 순차 실행한다. 설정에서 다른 perspective가 enabled여도 PM이 필요하다고 판단한 경우에만 추가 실행한다.
+   - `severity=critical` finding은 `AskUserQuestion`으로 사용자 confirm 후 objective/detail 보강에 반영한다. major/minor는 요약만 제시하고 사용자가 반영을 선택한 경우에만 재정제한다.
+
 ##### 1A.10 objective.md + details/*.md 저장
 
 ###### evidence 필드별 강제 시점 표

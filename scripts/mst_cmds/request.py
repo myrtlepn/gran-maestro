@@ -24,6 +24,66 @@ from scripts.mst_cmds._common import (
     iter_request_dirs,
 )
 
+ADVERSARIAL_REVIEW_PERSPECTIVES = ("edge", "flow", "persona", "nfr", "integration")
+ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
+    "findings": [
+        {
+            "type": "...",
+            "description": "...",
+            "suggested_dod": "...",
+            "severity": "critical|major|minor",
+        }
+    ]
+}
+
+
+def _load_adversarial_review_config() -> dict:
+    plugin_root = _common._plugin_root()
+    defaults = _common.load_json(plugin_root / "templates" / "defaults" / "config.json") or {}
+    resolved = _common.load_json(_common.BASE_DIR / "config.resolved.json") or {}
+    overrides = _common.load_json(_common.BASE_DIR / "config.json") or {}
+    merged = _common.deep_merge(defaults, resolved)
+    merged = _common.deep_merge(merged, overrides)
+    agile_cfg = merged.get("agile") if isinstance(merged, dict) else {}
+    review_cfg = agile_cfg.get("adversarial_review") if isinstance(agile_cfg, dict) else {}
+    return review_cfg if isinstance(review_cfg, dict) else {}
+
+
+def _validate_adversarial_review_enabled(perspective: str) -> int:
+    review_cfg = _load_adversarial_review_config()
+    if review_cfg.get("enabled", True) is False:
+        print("adversarial_review is globally disabled", file=sys.stderr)
+        return 2
+    perspectives = review_cfg.get("perspectives")
+    perspectives = perspectives if isinstance(perspectives, dict) else {}
+    perspective_cfg = perspectives.get(perspective)
+    perspective_cfg = perspective_cfg if isinstance(perspective_cfg, dict) else {}
+    if perspective_cfg.get("enabled", True) is False:
+        print(f"perspective '{perspective}' is disabled", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _adversarial_review_template_path(perspective: str) -> Path:
+    return (
+        _common._plugin_root()
+        / "scripts"
+        / "adversarial_review"
+        / "perspectives"
+        / f"{perspective}.md"
+    ).resolve()
+
+
+def _emit_adversarial_review_payload(context_files: List[Path], perspective: str) -> int:
+    payload = {
+        "context_files": [str(path.resolve()) for path in context_files],
+        "role_template": str(_adversarial_review_template_path(perspective)),
+        "output_schema": ADVERSARIAL_REVIEW_OUTPUT_SCHEMA,
+        "perspective": perspective,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
 def format_table_row(req_id, data):
     status = data.get("status", "?")
     phase = data.get("current_phase", "?")
@@ -134,6 +194,25 @@ def cmd_request_set_phase(args):
     return 0
 
 
+def cmd_request_review(args):
+    perspective = str(args.perspective).strip()
+    enabled_status = _validate_adversarial_review_enabled(perspective)
+    if enabled_status:
+        return enabled_status
+
+    req_path = Path(args.req_path).expanduser().resolve()
+    if not req_path.exists() or not req_path.is_dir():
+        print(f"Error: request not found: {req_path}", file=sys.stderr)
+        return 1
+
+    context_files = sorted((req_path / "tasks").glob("*/spec.md"))
+    if not context_files:
+        print(f"Error: request specs not found: {req_path}", file=sys.stderr)
+        return 1
+
+    return _emit_adversarial_review_payload(context_files, perspective)
+
+
 def register(subparsers):
     sub = subparsers
     req = sub.add_parser("request")
@@ -169,3 +248,8 @@ def register(subparsers):
     req_set_phase.add_argument("req_id")
     req_set_phase.add_argument("phase", type=int)
     req_set_phase.add_argument("status")
+
+    req_review = req_sub.add_parser("review")
+    req_review.add_argument("--req-path", required=True)
+    req_review.add_argument("--perspective", required=True, choices=ADVERSARIAL_REVIEW_PERSPECTIVES)
+    req_review.add_argument("--json", action="store_true", required=True)

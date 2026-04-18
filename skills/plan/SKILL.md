@@ -659,6 +659,58 @@ PM이 분석 결과를 이슈로 분류:
 
 Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
 
+### Step 3.8.5 적대적 검토 게이트
+
+> 목적: D3 Reverse Simulation Gate 진입 전, plan 초안의 완전성을 적대적으로 점검해 엣지케이스, 누락 흐름, persona/NFR gap, 통합 경계 gap을 AC/리스크/제약 보강 후보로 승격한다. 이 단계는 D3의 "명료도" 검증이 아니라 "완전성" 검증이다.
+
+#### 3.8.5.0: config 읽기 및 enabled 확인
+
+`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.adversarial_review)`로 설정을 읽는다.
+- `agile.adversarial_review.enabled != true`이면 graceful skip 후 Step 3.9로 진행한다.
+- enabled perspective만 실행한다. 기본 enabled는 `edge`, `flow`, `integration`이며 `persona`, `nfr`은 설정이 true인 경우에만 실행한다.
+- `max_rounds` 기본값은 3, `current_round` 초기값은 1이다.
+
+#### 3.8.5.1: perspective별 context 조회
+
+각 perspective마다 아래 CLI를 실행한다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py plan review --plan-path {path} --perspective {name} --json
+```
+
+CLI 반환값은 `context_files`, `output_schema`, `perspective`만 사용한다. plan 원문, Q&A 대화 맥락, DoD/JTBD 원문을 에이전트 프롬프트에 직접 포함하지 않는다.
+
+#### 3.8.5.2: 독립 에이전트 dispatch
+
+에이전트는 반드시 독립 컨텍스트로 호출한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이다.
+
+프롬프트 예시는 아래 두 줄만 허용한다.
+
+```text
+역할: {perspective} 관점의 적대적 검토자.
+Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
+```
+
+#### 3.8.5.3: findings 기록 및 수렴
+
+findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/adversarial-review-findings.md`에 기록한다.
+
+수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다.
+- findings가 비어 있으면 Step 3.9로 진행한다.
+- findings가 있고 `current_round < max_rounds`이면 반영 대상 finding을 plan 초안의 AC, 제약, 리스크 레지스터, 제외 범위 중 적절한 위치에 보강한 뒤 `current_round += 1`로 재실행한다.
+- `current_round >= max_rounds`이면 남은 finding을 파일에 기록하고 Step 3.9로 진행한다.
+
+#### 3.8.5.4: AUTO_MODE 분기
+
+`AUTO_MODE=true`:
+- `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다.
+- `severity=critical` finding은 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
+
+`AUTO_MODE=false`:
+- 기본 실행은 `edge` + `flow` 2종을 순차 실행한다.
+- `severity=critical` finding은 `AskUserQuestion`으로 사용자 confirm 후 plan 초안에 반영한다.
+- major/minor finding은 요약으로 제시하되, 사용자가 반영을 선택한 경우에만 plan 초안에 반영한다.
+
 ### Step 3.9: D3 Reverse Simulation Gate (MANDATORY)
 
 > 목적: request 단계 진입 전, plan AC(인수 기준 초안)의 해석 분기점과 모호성을 역방향으로 점검해 의도 전달 손실을 차단한다.

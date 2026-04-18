@@ -116,6 +116,43 @@
     },
     "integration_wire_streak_max": 3,
     "llm_steering_gate_enabled": true,
+    "adversarial_review": {
+      "enabled": true,
+      "perspectives": {
+        "edge": {
+          "enabled": true
+        },
+        "flow": {
+          "enabled": true
+        },
+        "integration": {
+          "enabled": true
+        },
+        "persona": {
+          "enabled": false
+        },
+        "nfr": {
+          "enabled": false
+        }
+      },
+      "agents": {
+        "codex": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "gemini": {
+          "count": 0,
+          "tier": "premium"
+        },
+        "claude": {
+          "count": 0,
+          "tier": "economy"
+        }
+      },
+      "max_rounds": 3,
+      "auto_apply_severity_threshold": "critical",
+      "parallel_in_auto_mode": true
+    },
     "retrospective": {
       "enabled": true,
       "max_fix_sprint_depth": 2,

@@ -28,6 +28,66 @@ from scripts.mst_cmds._common import (
     save_json,
 )
 
+ADVERSARIAL_REVIEW_PERSPECTIVES = ("edge", "flow", "persona", "nfr", "integration")
+ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
+    "findings": [
+        {
+            "type": "...",
+            "description": "...",
+            "suggested_dod": "...",
+            "severity": "critical|major|minor",
+        }
+    ]
+}
+
+
+def _load_adversarial_review_config() -> dict:
+    plugin_root = _common._plugin_root()
+    defaults = load_json(plugin_root / "templates" / "defaults" / "config.json") or {}
+    resolved = load_json(_common.BASE_DIR / "config.resolved.json") or {}
+    overrides = load_json(_common.BASE_DIR / "config.json") or {}
+    merged = _common.deep_merge(defaults, resolved)
+    merged = _common.deep_merge(merged, overrides)
+    agile_cfg = merged.get("agile") if isinstance(merged, dict) else {}
+    review_cfg = agile_cfg.get("adversarial_review") if isinstance(agile_cfg, dict) else {}
+    return review_cfg if isinstance(review_cfg, dict) else {}
+
+
+def _validate_adversarial_review_enabled(perspective: str) -> int:
+    review_cfg = _load_adversarial_review_config()
+    if review_cfg.get("enabled", True) is False:
+        print("adversarial_review is globally disabled", file=sys.stderr)
+        return 2
+    perspectives = review_cfg.get("perspectives")
+    perspectives = perspectives if isinstance(perspectives, dict) else {}
+    perspective_cfg = perspectives.get(perspective)
+    perspective_cfg = perspective_cfg if isinstance(perspective_cfg, dict) else {}
+    if perspective_cfg.get("enabled", True) is False:
+        print(f"perspective '{perspective}' is disabled", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _adversarial_review_template_path(perspective: str) -> Path:
+    return (
+        _common._plugin_root()
+        / "scripts"
+        / "adversarial_review"
+        / "perspectives"
+        / f"{perspective}.md"
+    ).resolve()
+
+
+def _emit_adversarial_review_payload(context_files: List[Path], perspective: str) -> int:
+    payload = {
+        "context_files": [str(path.resolve()) for path in context_files],
+        "role_template": str(_adversarial_review_template_path(perspective)),
+        "output_schema": ADVERSARIAL_REVIEW_OUTPUT_SCHEMA,
+        "perspective": perspective,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
 def cmd_plan_list(args):
     rows = []
     for pln_id, path, data in iter_plan_dirs():
@@ -168,6 +228,20 @@ def cmd_plan_render_review(args):
     return 0 if generated else 1
 
 
+def cmd_plan_review(args):
+    perspective = str(args.perspective).strip()
+    enabled_status = _validate_adversarial_review_enabled(perspective)
+    if enabled_status:
+        return enabled_status
+
+    plan_path = Path(args.plan_path).expanduser().resolve()
+    if not plan_path.exists() or not plan_path.is_file():
+        print(f"Error: plan not found: {plan_path}", file=sys.stderr)
+        return 1
+
+    return _emit_adversarial_review_payload([plan_path], perspective)
+
+
 def register(subparsers):
     sub = subparsers
     plan = sub.add_parser("plan")
@@ -196,3 +270,8 @@ def register(subparsers):
     plan_render_review.add_argument("--plan-draft", dest="plan_draft", default="")
     plan_render_review.add_argument("--plan-draft-file", dest="plan_draft_file", default=None)
     plan_render_review.add_argument("--qa-summary", dest="qa_summary", default="")
+
+    plan_review = plan_sub.add_parser("review")
+    plan_review.add_argument("--plan-path", required=True)
+    plan_review.add_argument("--perspective", required=True, choices=ADVERSARIAL_REVIEW_PERSPECTIVES)
+    plan_review.add_argument("--json", action="store_true", required=True)

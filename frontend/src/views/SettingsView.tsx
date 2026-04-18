@@ -124,6 +124,7 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
     'recall',
     'unlock',
     'dispatch',
+    'adversarial_review',
   ],
   reference: ['cache_ttl_days', 'cutoff_threshold_months', 'auto_search', 'max_searches_per_step'],
   test_enforcement: ['enabled', 'backend_tdd', 'web_execution_test', 'exempt_patterns', 'require_exemption_reason'],
@@ -1223,6 +1224,76 @@ export function SettingsView() {
       );
     }
 
+    if (fullPathKey === 'agile.adversarial_review.agents' && isObject(value)) {
+      return (
+        <div key={fullPathKey}>
+          <div style={{ paddingLeft: indent }} className="text-xs font-semibold text-muted-foreground py-1 mt-2">
+            {label}
+          </div>
+          {description && (
+            <div style={{ paddingLeft: indent }} className="text-xs text-muted-foreground pb-2">
+              {description}
+            </div>
+          )}
+          <Card style={{ marginLeft: indent }}>
+            <CardContent className="p-0">
+              <div className="rounded-md border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-xs font-semibold">Agent</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold">Count</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold">Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {AGENT_PROVIDERS.map((provider) => {
+                      const fallbackTier = resolveDefaultTier(merged, provider);
+                      const normalized = normalizeAgentEntry(value[provider], fallbackTier);
+                      return (
+                        <tr key={provider} className="border-t">
+                          <td className="px-3 py-2 font-mono text-xs">{provider}</td>
+                          <td className="px-3 py-2">
+                            <Input
+                              value={normalized.count}
+                              type="number"
+                              min={0}
+                              className="h-8 w-28"
+                              onChange={(event) => {
+                                const parsed = Number(event.target.value);
+                                handleFieldChange(
+                                  [...fullPath, provider, 'count'],
+                                  Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0
+                                );
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <Select
+                              value={normalized.tier}
+                              onValueChange={(tier) => handleFieldChange([...fullPath, provider, 'tier'], tier)}
+                            >
+                              <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="premium" className="font-mono">premium</SelectItem>
+                                <SelectItem value="economy" className="font-mono">economy</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     if (
       path.join('.') === 'models.roles' &&
       (key === 'developer' || key === 'reviewer') &&
@@ -1371,6 +1442,7 @@ export function SettingsView() {
           'drift',
           'recall',
           'unlock',
+          'adversarial_review',
         ].filter((key) => key in merged.agile)
       : [];
   const saveAriaLabel = isDirty ? 'Save : 미저장 변경사항이 있습니다' : 'Save : 변경된 설정을 저장합니다';

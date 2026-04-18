@@ -45,6 +45,66 @@ from scripts.mst_cmds._common import (
     save_json,
 )
 
+ADVERSARIAL_REVIEW_PERSPECTIVES = ("edge", "flow", "persona", "nfr", "integration")
+ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
+    "findings": [
+        {
+            "type": "...",
+            "description": "...",
+            "suggested_dod": "...",
+            "severity": "critical|major|minor",
+        }
+    ]
+}
+
+
+def _load_adversarial_review_config() -> dict:
+    plugin_root = _plugin_root()
+    defaults = load_json(plugin_root / "templates" / "defaults" / "config.json") or {}
+    resolved = load_json(_common.BASE_DIR / "config.resolved.json") or {}
+    overrides = load_json(_common.BASE_DIR / "config.json") or {}
+    merged = _common.deep_merge(defaults, resolved)
+    merged = _common.deep_merge(merged, overrides)
+    agile_cfg = merged.get("agile") if isinstance(merged, dict) else {}
+    review_cfg = agile_cfg.get("adversarial_review") if isinstance(agile_cfg, dict) else {}
+    return review_cfg if isinstance(review_cfg, dict) else {}
+
+
+def _validate_adversarial_review_enabled(perspective: str) -> int:
+    review_cfg = _load_adversarial_review_config()
+    if review_cfg.get("enabled", True) is False:
+        print("adversarial_review is globally disabled", file=sys.stderr)
+        return 2
+    perspectives = review_cfg.get("perspectives")
+    perspectives = perspectives if isinstance(perspectives, dict) else {}
+    perspective_cfg = perspectives.get(perspective)
+    perspective_cfg = perspective_cfg if isinstance(perspective_cfg, dict) else {}
+    if perspective_cfg.get("enabled", True) is False:
+        print(f"perspective '{perspective}' is disabled", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _adversarial_review_template_path(perspective: str) -> Path:
+    return (
+        _plugin_root()
+        / "scripts"
+        / "adversarial_review"
+        / "perspectives"
+        / f"{perspective}.md"
+    ).resolve()
+
+
+def _emit_adversarial_review_payload(context_files: List[Path], perspective: str) -> int:
+    payload = {
+        "context_files": [str(path.resolve()) for path in context_files],
+        "role_template": str(_adversarial_review_template_path(perspective)),
+        "output_schema": ADVERSARIAL_REVIEW_OUTPUT_SCHEMA,
+        "perspective": perspective,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
 def _normalize_known_issue_id(value: str) -> str:
     issue_id = (value or "").strip().upper()
     if not re.fullmatch(r"KI-\d+", issue_id):
@@ -859,6 +919,32 @@ def cmd_agile_known_issues(args):
     return fn(args)
 
 
+def cmd_agile_review(args):
+    perspective = str(args.perspective).strip()
+    enabled_status = _validate_adversarial_review_enabled(perspective)
+    if enabled_status:
+        return enabled_status
+
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    objective_path = _agi_objective_path(agi_id)
+    if not objective_path.exists():
+        print(f"Error: objective not found: {objective_path}", file=sys.stderr)
+        return 1
+
+    context_files = [objective_path]
+    details_dir = objective_path.parent / "details"
+    if details_dir.exists():
+        context_files.extend(sorted(details_dir.glob("*.md")))
+
+    return _emit_adversarial_review_payload(context_files, perspective)
+
+
 def register(subparsers):
     sub = subparsers
     agile = sub.add_parser("agile")
@@ -972,6 +1058,11 @@ def register(subparsers):
     agile_known_issues_list.add_argument("agi_id")
     agile_known_issues_list.add_argument("--status", choices=["open", "resolved"])
     agile_known_issues_list.add_argument("--json", action="store_true")
+
+    agile_review = agile_sub.add_parser("review")
+    agile_review.add_argument("--agi", dest="agi_id", required=True)
+    agile_review.add_argument("--perspective", required=True, choices=ADVERSARIAL_REVIEW_PERSPECTIVES)
+    agile_review.add_argument("--json", action="store_true", required=True)
 
     agile_detail = agile_sub.add_parser("detail")
     agile_detail_sub = agile_detail.add_subparsers(dest="detail_subcommand")

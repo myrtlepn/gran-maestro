@@ -405,6 +405,24 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
          result: ALIGNED | DEVIATION | DUPLICATE | BETTER_ALTERNATIVE
          spec_changes: "변경 없음 | {변경 내용 요약}"
          ```
+   1.7.5. **적대적 검토 silent review** (질문 생성 단계 직전):
+      - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.adversarial_review)`로 설정을 읽는다.
+      - `agile.adversarial_review.enabled != true`이면 graceful skip 후 Step 1.8로 진행한다.
+      - enabled perspective만 실행한다. 기본 enabled는 `edge`, `flow`, `integration`이며 `persona`, `nfr`은 설정이 true인 경우에만 실행한다.
+      - 각 perspective마다 아래 CLI로 context 경로와 output schema 경로만 조회한다.
+        ```bash
+        python3 {PLUGIN_ROOT}/scripts/mst.py request review --req-path {path} --perspective {name} --json
+        ```
+      - 에이전트는 반드시 독립 컨텍스트로 호출한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이다. 프롬프트에는 request 원문, plan 원문, spec 초안, DoD/JTBD 원문을 절대 포함하지 않는다.
+        ```text
+        역할: {perspective} 관점의 적대적 검토자.
+        Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
+        ```
+      - findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/adversarial-review-findings.md`에 기록한다.
+      - 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. `max_rounds` 기본값은 3, `current_round` 초기값은 1이다.
+      - `AUTO_MODE=true`: `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다. `severity=critical` finding은 spec 작성 컨텍스트에 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/auto-decisions.md`에 기록한다.
+      - `AUTO_MODE=false`: 기본 실행은 `edge` + `flow` 2종을 순차 실행한다. critical severity finding만 사용자에게 `[적대적 검토 silent] N개 critical finding 감지` 형식으로 노출하고, 반영이 필요한 critical은 기존 질문 슬롯 안의 `AskUserQuestion` confirm에 통합한다. 별도 질문을 추가해 사용자에게 노출되는 질문 수를 절대 증가시키지 않는다.
+      - critical이 아닌 severity는 사용자에게 노출하지 않고 내부 보강에만 사용한다. 질문 생성 prompt에는 `silent_review_findings` 추가 컨텍스트로 제공하되, 질문 수 한도와 기존 질문 생성 순서를 유지한다.
    1.8. **구현 세부 Q&A Pass** (Step 1g 완료 직후, Step h-0 이전):
       - `AUTO_APPROVE=true`면 이 단계 전체를 완전 skip하고 Step h-0으로 즉시 진행
       - `AUTO_APPROVE=false`면 아래 7개 카테고리를 **고정 순서로 순차 처리**한다:
