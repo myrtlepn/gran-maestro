@@ -124,6 +124,18 @@ def _find_nested_worktree_root(target_path, worktree_roots) -> Path | None:
     return max(matches, key=lambda candidate: len(candidate.parts))
 
 
+def _find_child_worktree_root(target_path, worktree_roots) -> Path | None:
+    normalized_target = _normalize_target_path(target_path)
+    matches: list[Path] = []
+    for worktree_root in worktree_roots:
+        normalized_root = _normalize_target_path(worktree_root)
+        if normalized_root != normalized_target and normalized_target in normalized_root.parents:
+            matches.append(normalized_root)
+    if not matches:
+        return None
+    return min(matches, key=lambda candidate: len(candidate.parts))
+
+
 def _resolve_worktree_source_root() -> Path:
     project_root = _project_root()
     source_claude_dir = project_root / ".claude"
@@ -182,11 +194,57 @@ def cmd_worktree_create(args):
 
 
 def cmd_worktree_remove(args):
-    project_root = Path(_common.BASE_DIR).parent
-    worktree_path = Path(args.path).expanduser().resolve()
+    project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
+    worktree_path = _normalize_target_path(args.path)
+    force = getattr(args, "force", False)
+
+    try:
+        child_worktree = _find_child_worktree_root(worktree_path, _list_worktree_roots(project_root))
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if child_worktree is not None:
+        print(
+            "Error: child worktree detected. "
+            f"worktree {worktree_path}에 자식 worktree {child_worktree}가 존재합니다. "
+            "자식부터 정리하세요.",
+            file=sys.stderr,
+        )
+        return 1
+
+    status_result = subprocess.run(
+        ["git", "-C", str(worktree_path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if status_result.returncode != 0:
+        print(
+            status_result.stderr.strip()
+            or status_result.stdout.strip()
+            or "git status --porcelain failed",
+            file=sys.stderr,
+        )
+        return status_result.returncode or 1
+
+    if status_result.stdout:
+        if not force:
+            print(
+                "Error: uncommitted changes detected. "
+                f"worktree {worktree_path}에 미커밋 변경이 있습니다. "
+                "커밋 후 재시도하거나 --force 사용.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            "Warning: uncommitted changes detected; removing this dirty worktree may cause data loss. "
+            f"worktree {worktree_path}에 미커밋 변경이 있습니다.",
+            file=sys.stderr,
+        )
 
     remove_cmd = ["git", "worktree", "remove"]
-    if getattr(args, "force", False):
+    if force:
         remove_cmd.append("--force")
     remove_cmd.append(str(worktree_path))
 
