@@ -92,7 +92,7 @@ def _last_line(result: subprocess.CompletedProcess) -> str:
     return lines[-1]
 
 
-def test_statusline_includes_dispatch_summary_prefix(tmp_path):
+def test_statusline_includes_dispatch_group_node(tmp_path):
     workspace = tmp_path / "workspace"
     run_dir = workspace / ".gran-maestro" / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -102,16 +102,10 @@ def test_statusline_includes_dispatch_summary_prefix(tmp_path):
     _write_dispatch_state(run_dir / "test-02.json", "test-02", now - timedelta(seconds=90))
 
     result = _run_statusline(workspace)
-    assert result.returncode == 0, result.stderr
+    last_line = _last_line(result)
 
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert lines, "statusline output is empty"
-    last_line = lines[-1]
-
-    match = re.search(r"MST 2 run · oldest (\d+)s", last_line)
-    assert match, last_line
-    oldest = int(match.group(1))
-    assert oldest >= 80
+    assert "· oldest" not in last_line
+    assert re.fullmatch(r"\[codex:test-01\((?:3[0-9]|4[0-9])s\), codex:test-02\(1m\)\]", last_line), last_line
 
 
 def test_statusline_omits_dispatch_summary_when_no_run_files(tmp_path):
@@ -374,7 +368,7 @@ def test_foreign_or_invalid_owner_fixture_falls_back_to_idle(tmp_path):
     assert last_line == "MST idle"
 
 
-def test_dispatch_summary_prefix_is_preserved_with_fallback_active_line(tmp_path):
+def test_dispatch_group_node_is_appended_to_fallback_active_line(tmp_path):
     workspace = tmp_path / "workspace"
     run_dir = workspace / ".gran-maestro" / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -396,4 +390,4 @@ def test_dispatch_summary_prefix_is_preserved_with_fallback_active_line(tmp_path
     )
     last_line = _last_line(result)
 
-    assert re.fullmatch(r"MST 1 run · oldest \d+s · active \(REQ-659\)", last_line), last_line
+    assert re.fullmatch(r"active \(REQ-659\) > \[codex:dispatch-01\((?:4[5-9]|5[0-9])s\)\]", last_line), last_line

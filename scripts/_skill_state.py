@@ -60,7 +60,11 @@ def _normalize_stack(value: Any) -> list:
         skill = item.get("skill")
         step = item.get("step")
         if isinstance(skill, str) and isinstance(step, int):
-            normalized.append({"skill": skill, "step": step})
+            frame = {"skill": skill, "step": step}
+            entered_at = item.get("enteredAt")
+            if isinstance(entered_at, str):
+                frame["enteredAt"] = entered_at
+            normalized.append(frame)
     return normalized
 
 
@@ -138,7 +142,7 @@ def apply_event(
         current_skill = data.get("currentSkill")
         current_step = data.get("currentStep")
         if isinstance(current_skill, str) and current_skill and isinstance(current_step, int):
-            stack.append({"skill": current_skill, "step": current_step})
+            stack.append({"skill": current_skill, "step": current_step, "enteredAt": event_time})
 
         data["currentSkill"] = skill
         data["currentStep"] = step

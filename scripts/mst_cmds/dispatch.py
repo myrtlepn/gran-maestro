@@ -139,6 +139,7 @@ def _build_status_row(path: Path, stale_threshold: int, now: datetime) -> dict |
         "task_id": task_id,
         "pid": payload.get("pid"),
         "provider": payload.get("provider"),
+        "skill": payload.get("skill", ""),
         "model": payload.get("model"),
         "phase": phase,
         "status": status,
@@ -262,6 +263,7 @@ def cmd_dispatch_register(args):
         "started_at": now,
         "phase": "running",
         "provider": str(args.provider).strip().lower(),
+        "skill": str(getattr(args, "skill", "")).strip(),
         "model": str(args.model).strip(),
         "worktree_dir": str(args.worktree_dir),
         "last_heartbeat": now,
@@ -402,6 +404,7 @@ def register(subparsers):
     register_cmd.add_argument("--task-id", required=True)
     register_cmd.add_argument("--pid", required=True)
     register_cmd.add_argument("--provider", required=True)
+    register_cmd.add_argument("--skill", default="")
     register_cmd.add_argument("--model", required=True)
     register_cmd.add_argument("--worktree-dir", required=True)
 

@@ -97,6 +97,7 @@ build_mst_line() {
   local project_root="${5:-}"
   local current_ppid="${6:-}"
   local guard_window_sec="${7:-900}"
+  local snapshot_path="${8:-}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
@@ -107,6 +108,7 @@ input_json = sys.argv[4] if len(sys.argv) > 4 else ""
 project_root = sys.argv[5] if len(sys.argv) > 5 else ""
 current_ppid_raw = sys.argv[6] if len(sys.argv) > 6 else ""
 guard_window_raw = sys.argv[7] if len(sys.argv) > 7 else "900"
+snapshot_path = sys.argv[8] if len(sys.argv) > 8 else ""
 MAX_TAIL_BYTES = 512 * 1024
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
@@ -246,6 +248,47 @@ def render_line(labels, context_id):
     if context_id:
         line += f" ({context_id})"
     return line
+
+
+def render_snapshot_label(skill_name, entered_at):
+    skill = clean_skill(skill_name)
+    if not skill:
+        return ""
+    if isinstance(entered_at, str) and entered_at.strip():
+        return f"{skill}({format_elapsed(entered_at.strip())})"
+    return skill
+
+
+def render_from_snapshot(path):
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    labels = []
+    stack = data.get("skillStack")
+    if isinstance(stack, list):
+        for frame in stack:
+            if not isinstance(frame, dict):
+                continue
+            label = render_snapshot_label(frame.get("skill"), frame.get("enteredAt"))
+            if label:
+                labels.append(label)
+
+    current_label = render_snapshot_label(data.get("currentSkill"), data.get("enteredAt"))
+    if current_label:
+        labels.append(current_label)
+
+    if not labels:
+        return None
+    if len(labels) > 4:
+        labels = [labels[0], "...", labels[-1]]
+    return render_line(labels, "")
 
 
 def load_state_payload(path):
@@ -501,54 +544,59 @@ def render_from_authoritative_fallback(base_dir):
     return None
 
 
-def build_dispatch_prefix(run_dir):
+def build_dispatch_node_group(run_dir):
     if not run_dir or not os.path.isdir(run_dir):
         return ""
 
-    now = datetime.now(timezone.utc)
-    count = 0
-    oldest_age = 0
-    for name in os.listdir(run_dir):
+    items = []
+    for name in sorted(os.listdir(run_dir)):
         if not name.endswith(".json"):
             continue
         path = os.path.join(run_dir, name)
         if not os.path.isfile(path):
             continue
 
-        count += 1
-        age = 10**9
+        task_id = os.path.splitext(name)[0]
+        provider = "unknown"
+        heartbeat = ""
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
-            if isinstance(payload, dict):
-                heartbeat = payload.get("last_heartbeat")
-                heartbeat_dt = parse_iso(heartbeat) if isinstance(heartbeat, str) else None
-                if heartbeat_dt is not None:
-                    age = int((now - heartbeat_dt).total_seconds())
-                    if age < 0:
-                        age = 0
         except Exception:
-            age = 10**9
+            payload = None
 
-        if age > oldest_age:
-            oldest_age = age
+        if isinstance(payload, dict):
+            task_id = clean_text(payload.get("task_id")) or task_id
+            provider = clean_text(payload.get("provider"))
+            if not provider:
+                provider = clean_skill(payload.get("skill"), strip_namespace=True) or "unknown"
+            value = payload.get("last_heartbeat")
+            if isinstance(value, str):
+                heartbeat = value
 
-    if count == 0:
+        items.append((task_id, f"{provider}:{task_id}({format_elapsed(heartbeat)})"))
+
+    if not items:
         return ""
-    return f"MST {count} run · oldest {oldest_age}s"
+
+    labels = [label for _, label in sorted(items, key=lambda item: item[0])]
+    if len(labels) > 4:
+        labels = [labels[0], "...", labels[-1]]
+    joined = ", ".join(labels)
+    return f"[{joined}]"
 
 
 def merge_with_dispatch_prefix(base_line, run_dir):
-    prefix = build_dispatch_prefix(run_dir)
-    if not prefix:
+    dispatch_node = build_dispatch_node_group(run_dir)
+    if not dispatch_node:
         return base_line
 
-    suffix = base_line
-    if isinstance(suffix, str) and suffix.startswith("MST "):
+    suffix = base_line if isinstance(base_line, str) else ""
+    if suffix.startswith("MST "):
         suffix = suffix[4:]
-    if suffix:
-        return f"{prefix} · {suffix}"
-    return prefix
+    if not suffix or suffix == "idle":
+        return dispatch_node
+    return f"{suffix} > {dispatch_node}"
 
 
 model_prefix = build_model_prefix(input_json)
@@ -558,6 +606,11 @@ def render_output(base_line):
     merged = merge_with_dispatch_prefix(base_line, dispatch_run_dir)
     return prepend_model_prefix(merged, model_prefix)
 
+
+snapshot_line = render_from_snapshot(snapshot_path)
+if snapshot_line is not None:
+    print(render_output(snapshot_line))
+    sys.exit(0)
 
 state_payload, state_status = load_state_payload(state_path)
 state_line = render_from_state(state_payload)
@@ -576,7 +629,7 @@ if fallback_line is not None:
     sys.exit(0)
 
 print(render_output("MST idle"))
-' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" "$project_root" "$current_ppid" "$guard_window_sec" 2>/dev/null || printf 'MST idle\n'
+' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" "$project_root" "$current_ppid" "$guard_window_sec" "$snapshot_path" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
@@ -584,8 +637,9 @@ HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || tr
 STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
+SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"

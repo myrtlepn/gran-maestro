@@ -65,6 +65,7 @@ def _register_state(args) -> str:
         "started_at": now,
         "phase": "running",
         "provider": str(args.provider).strip().lower(),
+        "skill": str(getattr(args, "skill", "")).strip(),
         "model": str(args.model).strip(),
         "worktree_dir": str(Path.cwd()),
         "last_heartbeat": now,
@@ -299,6 +300,7 @@ def register(subparsers):
     run = subparsers.add_parser("run", help="Run external CLI with dispatch state/heartbeat/log tee")
     run.add_argument("--task-id", required=True)
     run.add_argument("--provider", choices=["codex", "gemini", "claude"], required=True)
+    run.add_argument("--skill", default="")
     run.add_argument("--model", required=True)
     run.add_argument("--log-dir", required=True)
     run.add_argument("--trace")
