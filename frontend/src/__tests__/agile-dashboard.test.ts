@@ -82,7 +82,7 @@ describe('agile dashboard components', () => {
 
     expect(html).toContain('68%');
     expect(html).toContain('0.24');
-    expect(html).toContain('Open Known Issues');
+    expect(html).toContain('미해결 이슈');
   });
 
   it('renders alignment view traffic-light verdicts', () => {

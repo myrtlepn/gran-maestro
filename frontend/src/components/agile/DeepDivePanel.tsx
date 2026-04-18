@@ -63,7 +63,7 @@ export function DeepDivePanel({
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {!sprint ? (
           <div className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-10 text-center text-sm text-zinc-500">
-            Overview나 Sprint Detail에서 스프린트를 선택하면 evidence, retrospective, raw metadata를 확인할 수 있습니다.
+            개요 또는 스프린트 상세에서 스프린트를 선택하면 증빙·회고·원문 메타데이터를 확인할 수 있습니다.
           </div>
         ) : (
           <Tabs defaultValue="evidence" className="space-y-4">

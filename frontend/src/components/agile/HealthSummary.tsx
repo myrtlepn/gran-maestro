@@ -34,7 +34,7 @@ export function HealthSummary({ dodProgress, openIssuesCount, newIslandRatio }: 
         </div>
 
         <div>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Open Known Issues</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">미해결 이슈</span>
           <div className="mt-2 text-4xl font-black tracking-tight text-zinc-950">{openIssuesCount}</div>
         </div>
 

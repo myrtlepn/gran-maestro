@@ -120,7 +120,7 @@ export function SprintDetailView({
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <FileText className="h-4 w-4" /> Sprint Detail
+              <FileText className="h-4 w-4" /> 스프린트 상세
             </CardTitle>
             <CardDescription>{selectedSprint ? `${selectedSprint.sprint_id} 결과 보고서와 비교 뷰` : '스프린트를 선택하세요'}</CardDescription>
           </div>
@@ -145,7 +145,7 @@ export function SprintDetailView({
             <Skeleton className="h-40 w-full" />
           </div>
         ) : !selectedSprint ? (
-          <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center text-sm text-zinc-500">Overview에서 Sprint를 선택하세요.</div>
+          <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center text-sm text-zinc-500">개요에서 스프린트를 선택하세요.</div>
         ) : (
           <>
             {reportError ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{reportError}</div> : null}
