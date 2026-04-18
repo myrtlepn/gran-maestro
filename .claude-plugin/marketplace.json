@@ -9,7 +9,7 @@
     {
       "name": "mst",
       "description": "AI 오케스트레이션의 그랜드마스터 — PM이 코드를 쓰지 않고 AI 에이전트를 지휘하여 개발",
-      "version": "0.58.3",
+      "version": "0.58.4",
       "author": {
         "name": "bran.dev"
       },
