@@ -21,6 +21,7 @@ argument-hint: "[--all | --active | --completed]"
   - `source_plan == null` 또는 필드 부재(레거시)면 태그를 표시하지 않음
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -34,6 +35,7 @@ argument-hint: "[--all | --active | --completed]"
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 출력 형식
 

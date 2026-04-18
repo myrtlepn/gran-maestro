@@ -11,6 +11,7 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -18,11 +19,7 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
->
-> **Placeholder 유도 규칙 (MANDATORY)**:
-> - `{task_id}`: 워크플로우에서 `{REQ-ID}-T{TASK-NUM}` 형식으로 자동 치환 (예: `REQ-001-T01`). 독립 호출 시에는 호출자가 임의 고유 ID 지정.
-> - `{task_dir}`: `.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/` 절대경로
-> - `{working_dir}`: codex `-C` 대상 경로 (워크플로우에서는 worktree 경로). wrapper의 cwd와 다를 수 있음.
+<!-- @end-include -->
 
 1. 프롬프트/옵션 파싱 (`--network` 포함; 지정 시 `NETWORK_MODE=true`)
 2. **프롬프트 소스**: `--prompt-file` 있으면 파일 우선 (미존재 시 에러 중단); 없으면 인라인 사용

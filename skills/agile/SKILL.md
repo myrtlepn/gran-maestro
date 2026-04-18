@@ -24,6 +24,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 
 허용 경로 외 수정 요청 시: 즉시 중단 → mst.py 스크립트 사용 안내 출력
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -35,8 +36,9 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
 - C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
 - 예시:
-  - `[MST skill=agile step=0/4 return_to=null]`
-  - `[MST skill=plan step=returned return_to=agile/2]`
+  - `[MST skill={name} step=1/3 return_to=null]`
+  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## Gate
 
@@ -102,24 +104,29 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
 > PROJECT_ROOT=$(pwd)
 > ```
-> `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 절대경로입니다.
+>
+> `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/hooks-sync.md -->
 ### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 ```
 
+플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
+<!-- @end-include -->
+
 직후에 `.claude/hooks/mst-stop-hook.sh` 파일 존재를 `Bash("test -f ...")`로 반드시 검증한다.
 - 파일이 존재하면 다음 단계로 계속 진행한다.
 - 파일이 여전히 없으면 `"[warn] stop hook 미설치 — 자발 정지 가드가 동작하지 않을 수 있음"` 경고를 출력하되 agile 진입은 계속 허용한다 (graceful fallback, 에러 아님).
-
-플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
 
 ---
 

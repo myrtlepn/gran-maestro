@@ -42,6 +42,7 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -49,6 +50,7 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
 ### Step 0.1: 자율 모드 감지
 
@@ -268,6 +270,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
    - 미완료 REQ 존재 시: 스킵; `source_plan` 없으면 스킵
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -281,6 +284,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 예시
 

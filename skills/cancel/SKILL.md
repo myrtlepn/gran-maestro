@@ -11,11 +11,15 @@ argument-hint: "{REQ-ID} [--force]"
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
 > PROJECT_ROOT=$(pwd)
 > ```
+>
+> `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
 1. REQ ID 파싱 → 활성 태스크 확인 → 취소 확인 프롬프트 (`--force` 아닌 경우)
 2. 취소 처리: 에이전트/CLI 프로세스 종료 → `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {worktree_path} [--force]` 실행 → 임시 브랜치 정리 → `status="cancelled"`
@@ -23,6 +27,7 @@ argument-hint: "{REQ-ID} [--force]"
 4. 모든 요청이 terminal 상태이고 `auto_deactivate:true`이면 Maestro 모드 자동 비활성화
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -36,6 +41,7 @@ argument-hint: "{REQ-ID} [--force]"
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 옵션
 

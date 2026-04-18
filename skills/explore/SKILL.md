@@ -20,6 +20,7 @@ argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] 
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -27,6 +28,7 @@ argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] 
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
@@ -207,8 +209,21 @@ PM(Claude)이 탐색 목표를 분석하여 `explorers` 수만큼 역할을 배�
 ```markdown
 # 코드베이스 탐색 요청
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]` 출력
+
+- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
+- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
+- 필드 규칙:
+  - `skill`: 현재 실행 중인 스킬 이름
+  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
+  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
+- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
+- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
+- 예시:
+  - `[MST skill={name} step=1/3 return_to=null]`
+  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 탐색 목표
 {사용자 탐색 목표 전체 내용}

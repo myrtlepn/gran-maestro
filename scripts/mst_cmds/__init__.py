@@ -39,6 +39,7 @@ from scripts.mst_cmds import extension
 from scripts.mst_cmds import config
 from scripts.mst_cmds import preset
 from scripts.mst_cmds import hooks
+from scripts.mst_cmds import skill
 from scripts.mst_cmds import agile_detail
 from scripts.mst_cmds import agile_governance
 from scripts.mst_cmds import agile_stop_audit
@@ -90,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     config.register(sub)
     preset.register(sub)
     hooks.register(sub)
+    skill.register(sub)
     dispatch.register(sub)
     run_cmd.register(sub)
 
@@ -209,6 +211,7 @@ DISPATCH = {
     ("preset", "save"): preset.cmd_preset_save,
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
     ("hooks", "sync"): hooks.cmd_hooks_sync,
+    ("skill", "build"): skill.cmd_skill_build,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
     ("dispatch", "preflight"): dispatch.cmd_dispatch_preflight,
     ("dispatch", "register"): dispatch.cmd_dispatch_register,

@@ -61,6 +61,7 @@ Maestro 모드 비활성 시 자동 활성화:
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -68,7 +69,9 @@ Maestro 모드 비활성 시 자동 활성화:
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/hooks-sync.md -->
 ### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
 
 ```bash
@@ -76,7 +79,9 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 ```
 
 플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
 1. `~/.claude/user-profile.json`을 Read한다.
@@ -91,37 +96,38 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
    - `communication_style`을 최우선 반영한다.
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
+<!-- @end-include -->
 
+<!-- @include _shared/reference-lookup.md -->
 ### Reference Lookup Protocol (MANDATORY)
 
-외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 관련 spec 판단은 아래 공통 프로토콜을 따른다.
+외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 관련 판단은 아래 공통 프로토콜을 따른다.
 
 0. **자동 트리거 게이트**:
-   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search` 확인.
-   - `reference.auto_search == true`일 때만 자동 WebSearch 허용.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search`를 확인한다.
+   - `reference.auto_search == true`일 때만 자동 WebSearch를 허용한다.
    - 설정 미존재 시 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
-   - 요청 원문, plan 컨텍스트, Step 1c 탐색 결과, 접근법 후보 텍스트에서 `library/framework/api/sdk/protocol/version/dependency` 계열(한국어 동의어 포함) 키워드를 감지.
+   - 현재 단계 입력 컨텍스트에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜 계열)를 감지한다.
    - `reference.llm_auto_trigger == true`이면 키워드 매칭과 별도로 PM이 "인터넷에 최신 정보가 있을 법한 내용"이라고 판단할 때 자율적으로 WebSearch를 트리거한다.
    - `reference.llm_auto_trigger == false`이면 기존 키워드 매칭 기반 동작만 유지한다.
 2. **3단계 신선도 체크**:
-   - (a) `.gran-maestro/references/` 캐시 존재 확인: `python3 {PLUGIN_ROOT}/scripts/mst.py reference search --keyword "{keyword}" --json`
-   - (b) TTL 체크: `searched_at + cache_ttl_days` 경과 여부로 `fresh/stale` 판정
-   - (c) cutoff 괴리 체크: 현재 시각 대비 `cutoff_threshold_months` 초과 시 `expired` 판정
+   - (a) `.gran-maestro/references/` 캐시 존재를 `python3 {PLUGIN_ROOT}/scripts/mst.py reference search --keyword "{keyword}" --json`으로 확인한다.
+   - (b) TTL 체크: `searched_at + cache_ttl_days` 경과 여부로 `fresh/stale`를 판정한다.
+   - (c) cutoff 괴리 체크: 현재 시각 대비 `cutoff_threshold_months` 초과 시 `expired`를 판정한다.
 3. **WebSearch 트리거**:
-   - 캐시 없음 또는 `stale/expired`일 때만 검색.
-   - `reference.auto_search == true`일 때만 실행, Step당 최대 `max_searches_per_step` 유지.
+   - 캐시 없음 또는 `stale/expired`일 때만 검색한다.
+   - `reference.auto_search == true`일 때만 실행하고, Step당 최대 `max_searches_per_step`을 유지한다.
    - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
    - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
 4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
    - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
-   - 표/텍스트 결론 요약만으로는 저장이 완료되지 않는다 — `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
-   - WebSearch N건 실행 → `mst.py reference add` 최소 N회 호출 (1:1 대응 원칙).
+   - 표/텍스트 결론 요약만으로는 저장이 완료되지 않는다. `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
    - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{raw 발췌 본문}"`
    - 작성 원칙 요약: 인용/표/코드 스니펫 + 출처 URL/날짜를 함께 기록한다 (`summary`는 한 줄 인덱스 유지).
    - 상세 예시/품질 체크리스트/lazy-Read 트리거는 `skills/plan/SKILL.md`의 Reference Lookup Protocol 4번 항목을 동일 기준으로 따른다.
 5. **프롬프트 주입**:
-   - 이후 spec 작성 프롬프트와 outsource brief 컨텍스트에 `[REFERENCE_CONTEXT]`를 주입한다.
+   - 이후 단계 프롬프트 컨텍스트에 `[REFERENCE_CONTEXT]`를 주입한다.
    - 형식:
      ```text
      [REFERENCE_CONTEXT]
@@ -132,7 +138,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
      [/REFERENCE_CONTEXT]
      ```
    - 참조가 없으면 `references: none`으로 명시한다.
-
+<!-- @end-include -->
 ### Step 0: 아카이브 체크 (자동)
 
 `archive.auto_archive_on_create`가 true이면:
@@ -1083,6 +1089,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
    - **세션 중 자율 모드 전환**: spec 요약 표시 후 대기 중 사용자가 "auto로", "자율 모드로", "-a로" 등을 입력하면 `/mst:approve -a REQ-NNN`으로 자동 진입한다
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -1096,6 +1103,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 옵션
 

@@ -23,6 +23,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -30,7 +31,9 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
 1. `~/.claude/user-profile.json`을 Read한다.
@@ -45,6 +48,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
    - `communication_style`을 최우선 반영한다.
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
+<!-- @end-include -->
 
 
 1. `{PROJECT_ROOT}/.gran-maestro/` 디렉토리 생성, `.gitignore`에 `.gran-maestro/` 등록 (미존재 시)

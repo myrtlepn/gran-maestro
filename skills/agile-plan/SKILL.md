@@ -59,12 +59,17 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 ## 실행 프로토콜
 
-> **경로 규칙 (MANDATORY)**: `.gran-maestro/` 경로는 절대경로로 사용한다.
+<!-- @include _shared/path-rules.md -->
+> **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
+> 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
 > PROJECT_ROOT=$(pwd)
 > ```
-> `{PLUGIN_ROOT}`는 이 스킬의 Base directory에서 `skills/agile-plan/`을 제거한 절대경로다.
+>
+> `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/hooks-sync.md -->
 ### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
 
 ```bash
@@ -72,6 +77,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 ```
 
 플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
+<!-- @end-include -->
 
 ---
 

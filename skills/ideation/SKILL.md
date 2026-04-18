@@ -11,6 +11,7 @@ argument-hint: "{주제} [--focus {architecture|ux|performance|security|cost}]"
 
 ## 실행 프로토콜
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -18,6 +19,7 @@ argument-hint: "{주제} [--focus {architecture|ux|performance|security|cost}]"
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
 ### Step 1: 초기화
 
@@ -160,6 +162,7 @@ PM이 주제와 focus를 분석하여 `participants` 수만큼 관점을 배정�
 # {Role} 관점 의견 요청
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -173,6 +176,7 @@ PM이 주제와 focus를 분석하여 `participants` 수만큼 관점을 배정�
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 공유 컨텍스트
 {absolute_path}/context.md 파일을 Read하세요.

@@ -41,6 +41,7 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
         - 실패/타임아웃(또는 재시도 실패): `[Stitch] 연결 불가 — 건너뜀. /mst:stitch로 수동 실행 가능.` 출력 후 종료
 
 
+<!-- @include _shared/skill-execution-marker.md -->
 ## 스킬 실행 마커 (MANDATORY)
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
@@ -54,6 +55,7 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 - 예시:
   - `[MST skill={name} step=1/3 return_to=null]`
   - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
+<!-- @end-include -->
 
 ## 시안 제시 금지 행위 (CRITICAL)
 
@@ -69,6 +71,7 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 
 ## DES 채번 및 프로젝트 확인/생성
 
+<!-- @include _shared/path-rules.md -->
 > **경로 규칙 (MANDATORY)**: 이 스킬의 모든 `.gran-maestro/` 경로는 **절대경로**로 사용합니다.
 > 스킬 실행 시작 시 `PROJECT_ROOT`를 취득하고, 이후 모든 경로에 `{PROJECT_ROOT}/` 접두사를 붙입니다.
 > ```bash
@@ -76,7 +79,9 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
+<!-- @end-include -->
 
+<!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
 1. `~/.claude/user-profile.json`을 Read한다.
@@ -91,6 +96,7 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
    - `communication_style`을 최우선 반영한다.
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
+<!-- @end-include -->
 
 
 > ⚠️ **DES 채번 스킵 조건**: `--edit`, `--alt`, `--redesign`, `--list`, `--init` 플래그가 있으면

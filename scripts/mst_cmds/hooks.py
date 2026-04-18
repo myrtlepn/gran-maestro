@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import skill as skill_cmd
 from scripts.mst_cmds._common import (
     TYPE_DIRS,
     _archive_run_type,
@@ -114,6 +115,7 @@ def _sha256_file(path: Path) -> str:
 
 def cmd_hooks_sync(args):
     silent = bool(getattr(args, "silent", False))
+    plugin_root = None
     try:
         mst_script = _common._mst_script_path().resolve()
         plugin_root = mst_script.parent.parent
@@ -158,21 +160,25 @@ def cmd_hooks_sync(args):
                     print(f"[hooks] resynced {resynced_files} files by hash (v{plugin_version})")
                 else:
                     print(f"[hooks] up-to-date (v{plugin_version})")
-            return 0
+        else:
+            synced_files = 0
+            for src_file in source_files:
+                dest_file = project_hooks_dir / src_file.name
+                _atomic_copy_file(src_file, dest_file)
+                synced_files += 1
 
-        synced_files = 0
-        for src_file in source_files:
-            dest_file = project_hooks_dir / src_file.name
-            _atomic_copy_file(src_file, dest_file)
-            synced_files += 1
-
-        _atomic_write_text(version_stamp_path, f"{plugin_version}\n")
-        if not silent:
-            old_version = current_version or "none"
-            print(f"[hooks] synced {synced_files} files (v{old_version}→v{plugin_version})")
+            _atomic_write_text(version_stamp_path, f"{plugin_version}\n")
+            if not silent:
+                old_version = current_version or "none"
+                print(f"[hooks] synced {synced_files} files (v{old_version}→v{plugin_version})")
     except Exception as exc:
         reason = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
         print(f"[hooks] warning: sync skipped ({reason})", file=sys.stderr)
+    if plugin_root is not None:
+        try:
+            skill_cmd.build_all(plugin_root / "skills", silent=True)
+        except Exception:
+            pass
     return 0
 
 
