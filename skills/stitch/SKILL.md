@@ -64,7 +64,7 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 > - 기타 외부 도구를 사용한 시안 직접 미리보기
 >
 > 시안 확인은 **대시보드 Designs 탭**에서만 수행합니다.
-> 모든 결과 보고에 `{DASHBOARD_BASE_URL}/designs/{DES-NNN}` URL만 안내하세요.
+> 모든 결과 보고에 `{DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}` URL만 안내하세요.
 > 이 규칙은 최초 시안, Edit 결과, Alt 결과, Redesign 결과 등 **모든 시안 제시 시점**에 적용됩니다.
 
 ## DES 채번 및 프로젝트 확인/생성
@@ -154,8 +154,12 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
 3. `server.port`가 없거나 파일 Read에 실패하면 `3847`을 사용한다.
 4. 아래 변수를 구성한다:
    - `{DASHBOARD_BASE_URL}` = `http://{server.host}:{server.port}`
-5. 이후 모든 사용자 출력에서 대시보드 링크는 반드시 아래 형식을 사용한다:
-   - `{DASHBOARD_BASE_URL}/designs/{DES-NNN}`
+5. 대시보드 API를 호출하여 현재 프로젝트의 `projectId`를 해석한다:
+   - `curl -s "{DASHBOARD_BASE_URL}/api/projects"`
+   - 응답 JSON 배열에서 `path`가 `{PROJECT_ROOT}/.gran-maestro`와 일치하는 항목의 `id`를 `{projectId}`로 사용한다.
+   - 매칭 항목이 없으면 로컬 대시보드 링크 출력을 생략하고 원인을 사용자에게 안내한다.
+6. 이후 모든 사용자 출력에서 로컬 대시보드 링크는 반드시 아래 형식을 사용한다:
+   - `{DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}`
 
 ## 기존 화면 컨텍스트 수집 (선택)
 
@@ -538,7 +542,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
    ```
    [Stitch] {N}개 스타일 × {M}개 화면 시안이 생성되었습니다.
 
-   대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}
+   대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}
    Stitch 프로젝트: https://stitch.withgoogle.com/projects/{stitch_project_id}
    ```
 
@@ -762,7 +766,7 @@ screen-NNN.md 저장 후 design.json의 `screens` 배열에 메타데이터 추�
 [Stitch] {N}개 화면이 생성되었습니다.
 📋 생성된 화면: "{화면명1}", "{화면명2}", ...  ← 생성된 screen_title 목록 (단일 화면 시 생략 가능)
 🔗 DES-NNN 시안 보기: https://stitch.withgoogle.com/projects/{stitch_project_id}
-🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}
+🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}
 📄 이미지 미리보기: design.md 참고
 ```
 
@@ -833,7 +837,7 @@ variants 생성 시:
 5. **결과 안내** (대시보드 URL만 사용):
    ```
    [Stitch] Edit 완료.
-   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}
+   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}
    ```
    > ⚠️ curl/로컬서버/브라우저 자동화로 시안을 직접 보여주는 행위는 금지입니다.
 
@@ -880,7 +884,7 @@ variants 생성 시:
 6. **결과 안내** (대시보드 URL만 사용):
    ```
    [Stitch] Alt 완료.
-   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}
+   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}
    ```
    > ⚠️ curl/로컬서버/브라우저 자동화로 시안을 직접 보여주는 행위는 금지입니다.
 
@@ -956,7 +960,7 @@ Edit/Alt로 결과가 생성된 직후 아래 루프를 실행한다.
    [Stitch] {N}가지 Redesign 방향이 생성되었습니다.
    🔗 원본: {원본_URL} ({원본_TITLE})
    🔗 프로젝트: {프로젝트 URL}
-   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}  ← linked_designs에서 DES-NNN 확보 시에만 표시
+   🌐 대시보드에서 확인: {DASHBOARD_BASE_URL}/designs/{DES-NNN}?project={projectId}  ← linked_designs에서 DES-NNN 확보 시에만 표시
    ```
    > ⚠️ curl/로컬서버/브라우저 자동화로 시안을 직접 보여주는 행위는 금지입니다.
 
