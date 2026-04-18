@@ -8,7 +8,13 @@ export class ApiFetchError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, projectId?: string, options?: RequestInit): Promise<T> {
+export type ApiFetchParseAs = 'json' | 'text' | 'response';
+
+export interface ApiFetchOptions extends RequestInit {
+  parseAs?: ApiFetchParseAs;
+}
+
+export async function apiFetch<T>(path: string, projectId?: string, options?: ApiFetchOptions): Promise<T> {
   // If projectId is provided, rewrite /api/... -> /api/projects/{projectId}/...
   let resolvedPath = path;
   if (projectId && path.startsWith('/api/')) {
@@ -60,7 +66,15 @@ export async function apiFetch<T>(path: string, projectId?: string, options?: Re
       throw new ApiFetchError(resolvedPath, response.status, message);
     }
 
-    return response.json();
+    switch (options?.parseAs ?? 'json') {
+      case 'response':
+        return response as T;
+      case 'text':
+        return await response.text() as T;
+      case 'json':
+      default:
+        return await response.json();
+    }
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
