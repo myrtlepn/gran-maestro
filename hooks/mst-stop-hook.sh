@@ -432,14 +432,13 @@ has_active_workflow_session() {
           continue
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
-        # Legacy file: no owner_ppid — fall back to mtime window
+        # Legacy file: no owner_ppid — stale prevention path only, never authoritative active for current session
         if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
-          debug_log "info" "active_request_session_detected(legacy_mtime) status=$status file=$status_file"
-          return 0
+          debug_log "info" "skipping_recent_legacy_request_without_owner status=$status file=$status_file"
         else
           debug_log "info" "skipping_stale_legacy_request status=$status file=$status_file"
-          continue
         fi
+        continue
       else
         # JSON parse error — skip gracefully, do not block
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
@@ -472,12 +471,11 @@ has_active_workflow_session() {
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
         if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
-          debug_log "info" "active_plan_session_detected(legacy_mtime) status=$status file=$status_file"
-          return 0
+          debug_log "info" "skipping_recent_legacy_plan_without_owner status=$status file=$status_file"
         else
           debug_log "info" "skipping_stale_legacy_plan status=$status file=$status_file"
-          continue
         fi
+        continue
       else
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
         debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"

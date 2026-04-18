@@ -47,15 +47,14 @@ if command:
 }
 
 resolve_state_file() {
-  local by_ppid latest
+  local by_ppid
   by_ppid="${MST_TMP}/mst-state-${PPID}.json"
   if [ -f "$by_ppid" ]; then
     printf '%s' "$by_ppid"
     return 0
   fi
 
-  latest="$(ls -1t "${MST_TMP}"/mst-state-*.json 2>/dev/null | head -n 1 || true)"
-  printf '%s' "$latest"
+  printf ''
 }
 
 extract_transcript_path() {
@@ -95,6 +94,9 @@ build_mst_line() {
   local transcript_path="${2:-}"
   local dispatch_run_dir="${3:-}"
   local input_json="${4:-}"
+  local project_root="${5:-}"
+  local current_ppid="${6:-}"
+  local guard_window_sec="${7:-900}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
@@ -102,9 +104,24 @@ state_path = sys.argv[1] if len(sys.argv) > 1 else ""
 transcript_path = sys.argv[2] if len(sys.argv) > 2 else ""
 dispatch_run_dir = sys.argv[3] if len(sys.argv) > 3 else ""
 input_json = sys.argv[4] if len(sys.argv) > 4 else ""
+project_root = sys.argv[5] if len(sys.argv) > 5 else ""
+current_ppid_raw = sys.argv[6] if len(sys.argv) > 6 else ""
+guard_window_raw = sys.argv[7] if len(sys.argv) > 7 else "900"
 MAX_TAIL_BYTES = 512 * 1024
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
+REQUEST_TERMINAL_STATUSES = {"done", "completed", "accepted", "cancelled"}
+PLAN_TERMINAL_STATUSES = {"done", "completed", "cancelled"}
+
+try:
+    CURRENT_PPID = int(current_ppid_raw)
+except Exception:
+    CURRENT_PPID = None
+
+try:
+    GUARD_WINDOW_SEC = max(0, int(guard_window_raw))
+except Exception:
+    GUARD_WINDOW_SEC = 900
 
 
 def clean_text(value):
@@ -210,10 +227,13 @@ def clean_skill(name, strip_namespace=False):
     return value
 
 
+CONTEXT_ID_PATTERN = re.compile(r"((?:PLN|REQ)-[A-Z0-9]+(?:-[A-Z0-9]+)*)", re.IGNORECASE)
+
+
 def extract_context_id(args):
     if not isinstance(args, str):
         return ""
-    match = re.search(r"\b((?:PLN|REQ)-\d+)\b", args, re.IGNORECASE)
+    match = CONTEXT_ID_PATTERN.search(args)
     if match:
         return match.group(1).upper()
     return ""
@@ -228,16 +248,23 @@ def render_line(labels, context_id):
     return line
 
 
-def render_from_state(path):
+def load_state_payload(path):
     if not path or not os.path.isfile(path):
-        return None
+        return None, "missing"
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        return None
+        return None, "invalid"
 
+    if not isinstance(data, dict):
+        return None, "invalid"
+
+    return data, "valid"
+
+
+def render_from_state(data):
     if not isinstance(data, dict):
         return None
 
@@ -260,7 +287,7 @@ def render_from_state(path):
     else:
         active_req = ""
 
-    if not re.match(r"^(REQ|PLN)-\d+$", active_req):
+    if not CONTEXT_ID_PATTERN.fullmatch(active_req):
         active_req = ""
 
     if not active_req:
@@ -268,9 +295,11 @@ def render_from_state(path):
         if isinstance(next_action, dict):
             for key in ("source_id", "source"):
                 value = next_action.get(key)
-                if isinstance(value, str) and re.match(r"^(REQ|PLN)-\d+$", value.strip().upper()):
-                    active_req = value.strip().upper()
-                    break
+                if isinstance(value, str):
+                    candidate = value.strip().upper()
+                    if CONTEXT_ID_PATTERN.fullmatch(candidate):
+                        active_req = candidate
+                        break
 
     return render_line([label], active_req)
 
@@ -392,6 +421,86 @@ def render_from_transcript(path):
     return render_line(labels, context_id)
 
 
+def read_status_payload(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def read_owner_ppid(payload):
+    owner_ppid = payload.get("owner_ppid")
+    if owner_ppid is None:
+        return None, "legacy"
+    if isinstance(owner_ppid, bool):
+        return None, "invalid"
+    try:
+        return int(owner_ppid), "present"
+    except (TypeError, ValueError):
+        return None, "invalid"
+
+
+def file_age_within_window(path):
+    try:
+        age = datetime.now(timezone.utc).timestamp() - os.path.getmtime(path)
+    except OSError:
+        return False
+    return age <= GUARD_WINDOW_SEC
+
+
+def iter_status_files(root_dir, file_name):
+    if not root_dir or not os.path.isdir(root_dir):
+        return []
+    matches = []
+    for entry in sorted(os.listdir(root_dir)):
+        path = os.path.join(root_dir, entry, file_name)
+        if os.path.isfile(path):
+            matches.append(path)
+    return matches
+
+
+def detect_guard_fallback():
+    if not project_root or CURRENT_PPID is None:
+        return "MST fallback clear"
+
+    requests_root = os.path.join(project_root, ".gran-maestro", "requests")
+    plans_root = os.path.join(project_root, ".gran-maestro", "plans")
+
+    for path in iter_status_files(requests_root, "request.json"):
+        payload = read_status_payload(path)
+        if payload is None:
+            continue
+        status = clean_text(payload.get("status")).lower()
+        if status in REQUEST_TERMINAL_STATUSES:
+            continue
+        owner_ppid, owner_state = read_owner_ppid(payload)
+        req_id = clean_text(payload.get("id")) or extract_context_id(path)
+        if owner_state == "present" and owner_ppid == CURRENT_PPID:
+            return render_line(["MST fallback active"], req_id)
+        if owner_state == "legacy" and file_age_within_window(path):
+            return render_line(["MST fallback clear", "legacy"], req_id)
+
+    for path in iter_status_files(plans_root, "plan.json"):
+        payload = read_status_payload(path)
+        if payload is None:
+            continue
+        status = clean_text(payload.get("status")).lower()
+        if status in PLAN_TERMINAL_STATUSES:
+            continue
+        owner_ppid, owner_state = read_owner_ppid(payload)
+        plan_id = clean_text(payload.get("id")) or extract_context_id(path)
+        if owner_state == "present" and owner_ppid == CURRENT_PPID:
+            return render_line(["MST fallback active"], plan_id)
+        if owner_state == "legacy" and file_age_within_window(path):
+            return render_line(["MST fallback clear", "legacy"], plan_id)
+
+    return "MST fallback clear"
+
+
 def build_dispatch_prefix(run_dir):
     if not run_dir or not os.path.isdir(run_dir):
         return ""
@@ -450,7 +559,8 @@ def render_output(base_line):
     return prepend_model_prefix(merged, model_prefix)
 
 
-state_line = render_from_state(state_path)
+state_payload, state_status = load_state_payload(state_path)
+state_line = render_from_state(state_payload)
 if state_line is not None:
     print(render_output(state_line))
     sys.exit(0)
@@ -460,8 +570,20 @@ if transcript_line is not None:
     print(render_output(transcript_line))
     sys.exit(0)
 
+if transcript_path and state_status == "missing":
+    print(render_output("MST idle"))
+    sys.exit(0)
+
+if state_status == "missing":
+    print(render_output(detect_guard_fallback()))
+    sys.exit(0)
+
+if state_status == "invalid":
+    print(render_output("MST idle"))
+    sys.exit(0)
+
 print(render_output("MST idle"))
-' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" 2>/dev/null || printf 'MST idle\n'
+' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" "$project_root" "$current_ppid" "$guard_window_sec" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
@@ -470,7 +592,7 @@ STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"

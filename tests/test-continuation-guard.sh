@@ -247,7 +247,7 @@ assert_empty "workflow_inactive_agile_loop_false -> allow pass_through" "$output
 
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis"}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID}}" > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_blocks_when_state_missing_and_active_request_exists exits 0" "0" "$STOP_EXIT"
@@ -299,10 +299,15 @@ legacy_markers="$(ls -1 "${MST_TMP}"/mst-* 2>/dev/null | grep -E 'mst-(call-stac
 assert_empty "legacy marker files are absent after session-init" "$legacy_markers"
 
 cleanup
-write_state '{"workflow_active":true,"current_skill":"plan","active_req":"REQ-001","iteration":1,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"mst:request","source":"PLN-001","auto":true}}'
-statusline_output="$(printf '{}' | bash "$STATUSLINE_SCRIPT" 2>/dev/null || true)"
-assert_contains "statusline includes skill" "plan" "$statusline_output"
-assert_contains "statusline includes REQ" "REQ-001" "$statusline_output"
+transcript_fixture="/tmp/mst-statusline-transcript-$$.jsonl"
+cat > "$transcript_fixture" <<'EOF'
+{"timestamp":"2026-04-18T00:00:01Z","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"mst:plan","args":"REQ-001"}}]}}
+EOF
+statusline_output="$(printf '%s' "{\"transcript_path\":\"$transcript_fixture\"}" | bash "$STATUSLINE_SCRIPT" 2>/dev/null || true)"
+rm -f "$transcript_fixture"
+last_statusline_line="$(printf '%s\n' "$statusline_output" | grep -v '^$' | tail -n 1)"
+assert_contains "statusline includes skill" "plan" "$last_statusline_line"
+assert_contains "statusline includes REQ" "REQ-001" "$last_statusline_line"
 
 # ------------------------------------------------------------
 echo ""
@@ -348,7 +353,7 @@ echo "=== Test Suite: session isolation (AC-001, AC-002, AC-003) ==="
 # 다른 PPID owner(99999)의 non-terminal REQ가 있어도 현재 세션 stop은 pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":99999}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":99999,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "other_session_req_does_not_block exits 0" "0" "$STOP_EXIT"
@@ -358,29 +363,28 @@ assert_empty "other_session_req_does_not_block -> no block JSON" "$output"
 # 현재 PPID owner의 non-terminal REQ가 있으면 PPID state 파일 유실 시에도 block
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID}}" > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID},\"owner_session_id\":\"123e4567-e89b-42d3-a456-426614174000\"}" > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "same_session_req_still_blocks exits 0" "0" "$STOP_EXIT"
 assert_contains "same_session_req_still_blocks -> block" '"decision": "block"' "$output"
 assert_contains "same_session_req_still_blocks reason" 'active workflow session detected' "$output"
 
-# AC-003: legacy_request_without_owner_ppid_uses_mtime_window
-# owner_ppid 없는 레거시 파일이 최근 mtime이면 mtime window로 active 판정 → block
+# AC-003: legacy_request_without_owner_ppid_does_not_block
+# owner_ppid 없는 레거시 파일은 최근 mtime이어도 stale prevention only로 처리 → pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis"}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_session_id":null}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
-assert_eq "legacy_request_without_owner_ppid_uses_mtime_window exits 0" "0" "$STOP_EXIT"
-assert_contains "legacy_request_without_owner_ppid_uses_mtime_window -> block" '"decision": "block"' "$output"
-assert_contains "legacy_request_without_owner_ppid_uses_mtime_window reason" 'active workflow session detected' "$output"
+assert_eq "legacy_request_without_owner_ppid_does_not_block exits 0" "0" "$STOP_EXIT"
+assert_empty "legacy_request_without_owner_ppid_does_not_block -> no block JSON" "$output"
 
 # AC-001 (T03): malformed_owner_ppid_true_graceful_skip
 # owner_ppid가 JSON bool true이면 parse failure → graceful skip → pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":true}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":true,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "malformed_owner_ppid_true_graceful_skip exits 0" "0" "$STOP_EXIT"
@@ -390,7 +394,7 @@ assert_empty "malformed_owner_ppid_true_graceful_skip -> no block JSON" "$output
 # 다른 PPID(99999) owner의 non-terminal plan이 있어도 현재 세션 stop은 pass-through
 cleanup
 mkdir -p "$PLAN_FIXTURE_DIR"
-printf '%s\n' '{"id":"PLN-TEST","status":"active","owner_ppid":99999}' > "$PLAN_FIXTURE_FILE"
+printf '%s\n' '{"id":"PLN-TEST","status":"active","owner_ppid":99999,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$PLAN_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "plan_isolation_other_session_does_not_block exits 0" "0" "$STOP_EXIT"
