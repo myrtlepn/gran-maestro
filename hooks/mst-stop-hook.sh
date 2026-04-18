@@ -410,7 +410,8 @@ has_active_workflow_session() {
   plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
 
   if [ -d "$requests_root" ]; then
-    for status_file in $(find "$requests_root" -maxdepth 2 -type f -name request.json 2>/dev/null); do
+    for status_file in "$requests_root"/*/request.json; do
+      [ -f "$status_file" ] || continue
       if ! status="$(read_status_field "$status_file")"; then
         printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
         debug_log "warn" "reason=request_status_parse_failed file=$status_file"
@@ -449,7 +450,8 @@ has_active_workflow_session() {
   fi
 
   if [ -d "$plans_root" ]; then
-    for status_file in $(find "$plans_root" -maxdepth 2 -type f -name plan.json 2>/dev/null); do
+    for status_file in "$plans_root"/*/plan.json; do
+      [ -f "$status_file" ] || continue
       if ! status="$(read_status_field "$status_file")"; then
         printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
         debug_log "warn" "reason=plan_status_parse_failed file=$status_file"

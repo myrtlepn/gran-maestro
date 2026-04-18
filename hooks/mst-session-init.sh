@@ -322,7 +322,7 @@ except Exception:
   mkdir -p "$(dirname "$stamp_file")" 2>/dev/null || return 0
   printf '%s\n' "$now" > "$stamp_file" 2>/dev/null || return 0
 
-  local plugin_root="${PLUGIN_ROOT:-$HOME/.claude/plugins/cache/gran-maestro/mst/0.58.3}"
+  local plugin_root="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
   (python3 "$plugin_root/scripts/mst.py" gardening auto-archive --silent >/dev/null 2>&1 &)
   return 0
 }

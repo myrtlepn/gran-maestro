@@ -542,8 +542,8 @@ def _gardening_update_req_status_cache(request_status_map, req_id: str):
         request_status_map[req_id] = status
         return status
 
-    request_status_map[req_id] = "done"
-    return "done"
+    request_status_map[req_id] = ""
+    return ""
 
 
 def cmd_gardening_auto_archive(args):
