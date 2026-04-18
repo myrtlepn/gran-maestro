@@ -39,14 +39,40 @@ def _resolve_owner_ppid() -> int:
     return os.getppid()
 
 
-def _inject_owner_ppid_to_json(json_path: Path, ppid: int) -> None:
-    """Write owner_ppid into json_path only if the field is absent (idempotent)."""
+def _resolve_owner_session_id(ppid: int) -> Optional[str]:
+    if not _common.BASE_DIR:
+        return None
+    bridge_path = _common.BASE_DIR / "tmp" / f"claude-session-{ppid}.id"
+    try:
+        raw_value = bridge_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    if not raw_value:
+        return None
+    try:
+        session_id = uuid.UUID(raw_value)
+    except ValueError:
+        return None
+    canonical = str(session_id)
+    if session_id.variant != uuid.RFC_4122 or canonical != raw_value:
+        return None
+    return canonical
+
+
+def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optional[str]) -> None:
+    """Write owner metadata into json_path only when fields are absent (idempotent)."""
     data = _common.load_json(json_path)
     if not isinstance(data, dict):
         return
-    if "owner_ppid" in data:
+    should_write = False
+    if "owner_ppid" not in data:
+        data["owner_ppid"] = ppid
+        should_write = True
+    if "owner_session_id" not in data:
+        data["owner_session_id"] = session_id
+        should_write = True
+    if not should_write:
         return
-    data["owner_ppid"] = ppid
     tmp_path = json_path.with_name(f"{json_path.name}.tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -54,17 +80,18 @@ def _inject_owner_ppid_to_json(json_path: Path, ppid: int) -> None:
     os.replace(tmp_path, json_path)
 
 
-def _inject_owner_ppid_if_missing(args) -> None:
+def _inject_owner_metadata_if_missing(args) -> None:
     ppid = _resolve_owner_ppid()
+    session_id = _resolve_owner_session_id(ppid)
 
     req_id = (getattr(args, "req", "") or "").strip()
     if req_id.startswith("REQ-") and _common.BASE_DIR:
         req_json = _common.BASE_DIR / "requests" / req_id / "request.json"
         if req_json.exists():
             try:
-                _inject_owner_ppid_to_json(req_json, ppid)
+                _inject_owner_metadata_to_json(req_json, ppid, session_id)
             except Exception as exc:
-                print(f"[mst] warning: failed to inject owner_ppid into {req_json}: {exc}", file=sys.stderr)
+                print(f"[mst] warning: failed to inject owner metadata into {req_json}: {exc}", file=sys.stderr)
 
     next_source = (getattr(args, "next_source", "") or "").strip()
     source_skill = (getattr(args, "source_skill", "") or "").strip()
@@ -72,9 +99,9 @@ def _inject_owner_ppid_if_missing(args) -> None:
         plan_json = _common.BASE_DIR / "plans" / next_source / "plan.json"
         if plan_json.exists():
             try:
-                _inject_owner_ppid_to_json(plan_json, ppid)
+                _inject_owner_metadata_to_json(plan_json, ppid, session_id)
             except Exception as exc:
-                print(f"[mst] warning: failed to inject owner_ppid into {plan_json}: {exc}", file=sys.stderr)
+                print(f"[mst] warning: failed to inject owner metadata into {plan_json}: {exc}", file=sys.stderr)
 
 
 def cmd_state_set_workflow(args):
@@ -159,7 +186,7 @@ def cmd_state_set_workflow(args):
         _workflow_state_atomic_write(state_path, payload)
 
         if args.active:
-            _inject_owner_ppid_if_missing(args)
+            _inject_owner_metadata_if_missing(args)
 
         if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
             na = payload.get("next_action", {})

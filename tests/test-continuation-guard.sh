@@ -348,7 +348,7 @@ echo "=== Test Suite: session isolation (AC-001, AC-002, AC-003) ==="
 # 다른 PPID owner(99999)의 non-terminal REQ가 있어도 현재 세션 stop은 pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":99999}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":99999,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "other_session_req_does_not_block exits 0" "0" "$STOP_EXIT"
@@ -358,7 +358,7 @@ assert_empty "other_session_req_does_not_block -> no block JSON" "$output"
 # 현재 PPID owner의 non-terminal REQ가 있으면 PPID state 파일 유실 시에도 block
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID}}" > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID},\"owner_session_id\":\"123e4567-e89b-42d3-a456-426614174000\"}" > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "same_session_req_still_blocks exits 0" "0" "$STOP_EXIT"
@@ -369,7 +369,7 @@ assert_contains "same_session_req_still_blocks reason" 'active workflow session 
 # owner_ppid 없는 레거시 파일이 최근 mtime이면 mtime window로 active 판정 → block
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis"}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_session_id":null}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "legacy_request_without_owner_ppid_uses_mtime_window exits 0" "0" "$STOP_EXIT"
@@ -380,7 +380,7 @@ assert_contains "legacy_request_without_owner_ppid_uses_mtime_window reason" 'ac
 # owner_ppid가 JSON bool true이면 parse failure → graceful skip → pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":true}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":true,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "malformed_owner_ppid_true_graceful_skip exits 0" "0" "$STOP_EXIT"
@@ -390,7 +390,7 @@ assert_empty "malformed_owner_ppid_true_graceful_skip -> no block JSON" "$output
 # 다른 PPID(99999) owner의 non-terminal plan이 있어도 현재 세션 stop은 pass-through
 cleanup
 mkdir -p "$PLAN_FIXTURE_DIR"
-printf '%s\n' '{"id":"PLN-TEST","status":"active","owner_ppid":99999}' > "$PLAN_FIXTURE_FILE"
+printf '%s\n' '{"id":"PLN-TEST","status":"active","owner_ppid":99999,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$PLAN_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "plan_isolation_other_session_does_not_block exits 0" "0" "$STOP_EXIT"
