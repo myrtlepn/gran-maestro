@@ -627,6 +627,21 @@ Step 2.2.3은 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `config.agi
 1. `enabled == true`면 `2.2.3.D dispatch 실행 경로`를 수행한다.
 2. `enabled == false` 또는 키 미설정이면 기존 inline 경로를 수행한다:
    - 위 `Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}...")` 호출을 그대로 실행 (부모 Sprint 세션 컨텍스트)
+   - **추가: inline 경로 경량 추적 마커 (MANDATORY)**:
+     - Sprint 시작 시 부모 세션이 아래 페이로드를 `{PROJECT_ROOT}/.gran-maestro/run/{AGI_ID}-S{NN}.json`에 Write한다:
+       ```json
+       {
+         "task_id": "{AGI_ID}-S{NN}",
+         "phase": "running",
+         "provider": "claude",
+         "model": "{resolved_model}",
+         "started_at": "{ISO8601}",
+         "last_heartbeat": "{ISO8601}",
+         "inline": true
+       }
+       ```
+     - Sprint 종료 시 동일 파일을 `phase: "done"` (성공) 또는 `phase: "failed"` (실패)와 `terminated_at`, `exit_code`, `last_heartbeat` 필드로 업데이트한다.
+     - inline 경로는 `dispatch-result.json`을 **생성하지 않는다** (ADR-007 하위 호환 유지).
 3. 기본값은 `false`이며 `templates/defaults/config.json`의 `agile.dispatch.enabled`를 따른다.
 
 ##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider, MANDATORY)
@@ -636,8 +651,18 @@ Step 2.2.3은 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `config.agi
 2. worktree 생성:
    - 경로 규칙: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
 3. 외부 프로세스 dispatch 실행:
-   - Bash tool의 background 실행으로 아래 명령을 호출한다.
-   - `claude -p "$(cat sprint-prompt.md)" --permission-mode bypassPermissions`
+   - Bash tool의 background 실행으로 아래 명령을 호출한다 (wrapper 경유로 dashboard 실시간 추적 확보).
+   - 모델 resolve: `MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default 2>/dev/null || echo "sonnet")`
+   - 실행:
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py run \
+       --task-id "{AGI_ID}-S{NN}" \
+       --provider claude \
+       --model "$MODEL" \
+       --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
+       -- claude -p "$(cat sprint-prompt.md)" --model "$MODEL" --permission-mode bypassPermissions
+     ```
+   - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록한다.
 4. 종료 신호 수신:
    - `claude` 프로세스 exit code를 확인하고, `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT:02d}/dispatch-result.json` 파일 존재 여부를 함께 확인한다.
 5. 실패 처리:

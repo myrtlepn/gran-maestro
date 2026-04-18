@@ -12,6 +12,7 @@
 
 ### 개선
 - **plan/agile-plan/request/agile 진입 시 hooks 자동 동기화**: 해당 스킬 진입 시 `hooks/` 원본이 프로젝트로 자동 복사되어 수동 동기화 없이 최신 hook이 적용됩니다.
+- Agile Sprint 실행이 dashboard에서 실시간으로 추적됩니다. dispatch 모드에서는 `mst.py run` wrapper 경유로 register/heartbeat가 자동 기록되고, inline 모드에서도 경량 추적 마커가 작성되어 Sprint 진행 상태를 실시간으로 확인할 수 있습니다.
 
 ---
 
