@@ -80,7 +80,7 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
    - 존재 시 `AUTO_MODE=true`
    - 없으면 `AUTO_MODE=false`
 2. `AUTO_MODE=false`이면 config 확인
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)` 우선
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.plan)` 우선
    - 없으면 `Read(templates/defaults/config.json)` fallback
    - `config.auto_mode.plan == true`면 `AUTO_MODE=true`
 3. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD` 저장 (기본값 `0.7`)
@@ -203,7 +203,7 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
    - `Glob`/`Grep`으로 관련 파일, README, docs, 주석, API 시그니처 탐색
 2. 웹 검색
    - `WebSearch`로 업계 표준, 공식 레퍼런스, 유사 문서 사례, 최신 권고 수집
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search`를 확인
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search`를 확인
    - `reference.auto_search == true`일 때만 WebSearch 유효 결과를 REF로 자동 저장
      - **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**: WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 아래 명령을 호출해야 한다. 표/텍스트 결론 요약만으로는 저장이 완료되지 않으며 `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
      - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{raw 발췌 본문}"`

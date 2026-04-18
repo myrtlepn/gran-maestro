@@ -20,7 +20,7 @@ argument-hint: "[--run] [--dry-run]"
 
 ## 설정 참조
 
-`config.resolved.json`의 `cleanup` 섹션:
+`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get cleanup)`의 `cleanup` 섹션:
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
@@ -58,7 +58,7 @@ argument-hint: "[--run] [--dry-run]"
 
 ### 인자 없음: 정리 대상 미리보기
 
-`config.resolved.json`에서 `cleanup`/`archive` 설정 로드 → 각 타입 스캔:
+`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get cleanup archive)`로 `cleanup`/`archive` 설정 로드 → 각 타입 스캔:
 - **Ideation/Discussion/Debug**: 각 타입 디렉토리에서 `session.json`의 `created_at`/`status` 읽기 → 내림차순 정렬 → keep_count 초과 중 `done`/`completed` 세션 수 카운트
 - **Plans**: `plans/PLN-*`의 `plan.json`에서 `status`/`created_at` 읽기 → 내림차순 정렬 → `plan_keep_count` 초과 중 `completed`/`archived` 상태 카운트
 - **Requests (자동)**: `request.json`에서 `done`/`completed`/`cancelled` 선별 → 최신 `request_keep_count`개 제외 후 아카이브 대상 카운트
@@ -190,7 +190,7 @@ Gran Maestro — Cleanup 모의 실행
 | 상황 | 대응 |
 |------|------|
 | `.gran-maestro/` 디렉토리 없음 | "Maestro가 초기화되지 않았습니다. `/mst:on`으로 시작하세요." |
-| `config.resolved.json`에 `cleanup` 섹션 없음 | 기본값 사용 (`keep=10, threshold=24h`) |
+| `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get cleanup)` 결과에 `cleanup` 섹션 없음 | 기본값 사용 (`keep=10, threshold=24h`) |
 | tar 명령 실패 | 에러 메시지 표시, 원본 보존 (삭제하지 않음) |
 | `session.json` / `request.json` 파싱 실패 | 해당 세션 건너뛰고 경고 표시 |
 | 아카이브 디렉토리 쓰기 불가 | 권한 확인 안내 |

@@ -140,11 +140,11 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 
 - `-a` 또는 `--auto`가 args 어디에든 포함되면 `AUTO_MODE=true`, 없으면 `AUTO_MODE=false`.
 - `AUTO_MODE=false`인 경우 config fallback을 적용한다:
-  1. `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `auto_mode.agile` 확인
+  1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.agile)`에서 `auto_mode.agile` 확인
   2. 키가 없으면 `Read(templates/defaults/config.json)`에서 `auto_mode.agile` 확인
   3. `auto_mode.agile == true`면 `AUTO_MODE=true`, 아니면 `false`
 - 우선순위: CLI 플래그(`-a`/`--auto`)가 config보다 우선한다.
-- `--steering-every` 미지정 시: `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`의 `agile.steering_every` 값을 사용한다. config에도 없으면 기본값 `3`.
+- `--steering-every` 미지정 시: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.steering_every)` 값을 사용한다. config에도 없으면 기본값 `3`.
 - `STEERING_DISABLED`는 `STEERING_EVERY == 0`이면 `true`, 아니면 `false`로 계산한다.
 
 #### 0.2 분기: --resume 있는 경우
@@ -213,7 +213,7 @@ Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --
 **AUTO_MODE=true 분기**:
 1. `STEERING_EVERY`를 아래 우선순위로 결정한다:
    1) CLI `--steering-every N` 값
-   2) `config.resolved.json`의 `agile.steering_every`
+   2) `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.steering_every)`
    3) 기본값 `3`
 2. `STEERING_DISABLED = (STEERING_EVERY == 0)`
 3. `EMERGENCY_STEERING_ENABLED = true` (기본값 고정)
@@ -622,7 +622,7 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 
 ##### 2.2.3.a Dispatch 활성화 분기 (`config.agile.dispatch.enabled`)
 
-Step 2.2.3은 `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `config.agile.dispatch.enabled` 값을 기준으로 위 plan 호출 실행 경로를 분기한다.
+Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.enabled)` 값을 기준으로 위 plan 호출 실행 경로를 분기한다.
 
 1. `enabled == true`면 `2.2.3.D dispatch 실행 경로`를 수행한다.
 2. `enabled == false` 또는 키 미설정이면 기존 inline 경로를 수행한다:
@@ -1159,7 +1159,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 
 **감지 시점**: 매 스프린트 완료(2.2.6 소스 검증 통과 직후) 수행.
 
-> **Agile config fallback (MANDATORY)**: drift_threshold, drift_count_trigger, no_diff_count_trigger는 `config.resolved.json`의 `agile.{key}` 값을 우선 사용하고, 없으면 기본값(80, 2, 2)을 사용한다.
+> **Agile config fallback (MANDATORY)**: drift_threshold, drift_count_trigger, no_diff_count_trigger는 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.drift_threshold agile.drift_count_trigger agile.no_diff_count_trigger)` 결과를 우선 사용하고, 없으면 기본값(80, 2, 2)을 사용한다.
 
 **감지 절차**:
 

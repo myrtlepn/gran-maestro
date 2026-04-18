@@ -187,7 +187,7 @@ PM(Claude)이 탐색 목표를 분석하여 `explorers` 수만큼 역할을 배�
 
 `explorers` 키를 순회하여 provider별로 동시 실행합니다.
 
-> **Claude 모델 결정**: `config.resolved.json`의 `models.providers.claude[explore.agents.claude.tier || default_tier]`로 resolve (미설정 시 `"sonnet"` 폴백).
+> **Claude 모델 결정**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get explore.agents.claude.tier models.providers.claude.default_tier)`로 tier를 구한 뒤 `models.providers.claude[{tier}]`로 resolve (미설정 시 `"sonnet"` 폴백).
 
 #### 2a. 프롬프트 파일 작성
 

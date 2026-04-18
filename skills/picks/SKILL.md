@@ -57,7 +57,7 @@ argument-hint: "[--list] [--all] [{자연어 선택/변경 요청}]"
 
 목록 표시 전에 대시보드 URL 구성에 필요한 정보를 취득합니다:
 
-1. **포트 취득**: `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`을 Read하여 `server.port` 값을 취득합니다. 파일 미존재 또는 `server.port` 미설정 시 기본값 `3847`을 사용합니다.
+1. **포트 취득**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get server.port)`로 `server.port` 값을 취득합니다. 키 미설정 또는 조회 실패 시 기본값 `3847`을 사용합니다.
 2. **프로젝트 ID 취득**: 대시보드 API를 호출하여 현재 프로젝트의 ID를 취득합니다:
    ```bash
    curl -s "http://127.0.0.1:<port>/api/projects"

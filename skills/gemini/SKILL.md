@@ -21,7 +21,7 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
 3. `--dir` 지정 시 디렉토리 존재 확인 (없으면 에러 중단); 상대경로는 cwd 기준
 4. `--files` 패턴으로 파일 목록 확인; 매칭 없으면 경고
 5. `--trace` 모드 판별 (아래 섹션 참조)
-6. **기본 모델**: `config.resolved.json`의 `models.providers.gemini[default_tier]`로 resolve하고, 실패 시 `gemini-3.1-pro-preview`를 fallback으로 사용
+6. **기본 모델**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get models.providers.gemini.default_tier)`로 tier를 확인해 `models.providers.gemini[{default_tier}]`로 resolve하고, 실패 시 `gemini-3.1-pro-preview`를 fallback으로 사용
 7. Gemini CLI 실행:
    ```bash
    MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null || echo "gemini-3.1-pro-preview")

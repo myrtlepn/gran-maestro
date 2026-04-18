@@ -209,7 +209,7 @@ JTBD 직후 아래 항목을 점검한다. `WHO/WHAT/WHY`는 JTBD에서 이미 �
 외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 판단이 포함되면 아래를 적용한다.
 
 0. **자동 트리거 게이트**
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search` 확인
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search` 확인
    - 설정이 없으면 기본값 사용:
      - `cache_ttl_days=2`
      - `cutoff_threshold_months=0.5`
@@ -558,7 +558,7 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
 
 Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증을 수행한다.
 
-1. `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `d3.objective_detail_threshold`를 조회한다.
+1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get d3.objective_detail_threshold)`에서 `d3.objective_detail_threshold`를 조회한다.
 2. 값이 없으면 기본값 `0.1`을 사용한다.
 3. `objective/details/*.md` 각 파일마다 독립 에이전트로 D3 역방향 시뮬레이션을 실행한다.
 4. 판정은 기존 plan D3 Gate(`mst:plan` Step 3.9) 패턴을 따르되, 임계치는 `objective_detail_threshold`를 사용한다.

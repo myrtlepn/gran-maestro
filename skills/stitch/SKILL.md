@@ -149,7 +149,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
 
 대시보드 링크에 사용할 URL 변수를 DES 채번 직후 명시적으로 구성한다.
 
-1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`을 Read하여 `server.host`, `server.port`를 확인한다.
+1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get server.host server.port)`로 `server.host`, `server.port`를 확인한다.
 2. `server.host`가 없거나 파일 Read에 실패하면 `127.0.0.1`을 사용한다.
 3. `server.port`가 없거나 파일 Read에 실패하면 `3847`을 사용한다.
 4. 아래 변수를 구성한다:

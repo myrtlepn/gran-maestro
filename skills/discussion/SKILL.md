@@ -57,7 +57,7 @@ argument-hint: "{주제 또는 IDN-NNN} [--max-rounds {N}] [--focus {분야}]"
   "source_ideation": "{IDN-NNN 또는 null}",
   "focus": "{focus 또는 null}",
   "status": "analyzing",
-  "max_rounds": "{config.resolved.json의 discussion.default_max_rounds}",
+  "max_rounds": "{Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get discussion.default_max_rounds) 출력값}",
   "current_round": 0,
   "created_at": "{TS — mst.py timestamp now 출력값}",
   "dispatch_started_at": null,
@@ -183,7 +183,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
 
 2. **participant Task() + critic Task() 동시 발송** (단일 응답):
 
-   > **모델 결정**: config.resolved.json `models.providers.claude[discussion.agents.claude.tier || default_tier]`로 resolve (opus / sonnet)
+   > **모델 결정**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get discussion.agents.claude.tier models.providers.claude.default_tier)`로 tier를 구한 뒤 `models.providers.claude[{tier}]`로 resolve (opus / sonnet)
 
    participant 발송 (`participants` 동적 순회):
    - `provider: "codex"`:

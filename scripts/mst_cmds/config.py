@@ -530,28 +530,67 @@ def _get_dotted_path(data, dotted_path):
         current = current[part]
     return True, current
 
-def cmd_config_get(args):
-    key_path = str(args.key_path or "").strip()
-    if not key_path:
-        print("Error: key.path is required", file=sys.stderr)
-        return 1
-
-    config = _load_config_for_get()
-    found, value = _get_dotted_path(config, key_path)
-    if not found:
-        if args.default_value is None:
-            print(f"Error: key not found: {key_path}", file=sys.stderr)
-            return 1
-        value = args.default_value
-
-    if args.json:
-        print(json.dumps({"key": key_path, "value": value}, ensure_ascii=False))
-        return 0
-
+def _print_config_get_value(value):
     if isinstance(value, (dict, list)):
         print(json.dumps(value, ensure_ascii=False))
     else:
         print(value)
+
+def cmd_config_get(args):
+    raw_key_paths = args.key_path
+    if isinstance(raw_key_paths, str):
+        key_paths = [raw_key_paths.strip()]
+    else:
+        key_paths = [str(key_path).strip() for key_path in (raw_key_paths or []) if str(key_path).strip()]
+
+    if not key_paths:
+        print("Error: key.path is required", file=sys.stderr)
+        return 1
+
+    config = _load_config_for_get()
+
+    if len(key_paths) == 1:
+        key_path = key_paths[0]
+        found, value = _get_dotted_path(config, key_path)
+        if not found:
+            if args.default_value is None:
+                print(f"Error: key not found: {key_path}", file=sys.stderr)
+                return 1
+            value = args.default_value
+
+        if args.json:
+            print(json.dumps({"key": key_path, "value": value}, ensure_ascii=False))
+            return 0
+
+        _print_config_get_value(value)
+        return 0
+
+    if args.default_value is not None:
+        print("Error: --default is only supported for a single key", file=sys.stderr)
+        return 1
+
+    found_items = []
+    missing_keys = []
+    for key_path in key_paths:
+        found, value = _get_dotted_path(config, key_path)
+        if not found:
+            missing_keys.append(key_path)
+            continue
+        found_items.append({"key": key_path, "value": value})
+
+    if args.json:
+        if found_items:
+            print(json.dumps(found_items, ensure_ascii=False))
+    else:
+        for item in found_items:
+            _print_config_get_value(item["value"])
+
+    for key_path in missing_keys:
+        print(f"Error: key not found: {key_path}", file=sys.stderr)
+
+    if missing_keys:
+        return 1
+
     return 0
 
 
@@ -562,7 +601,7 @@ def register(subparsers):
     cfg_resolve = cfg_sub.add_parser("resolve", help="defaults + overrides → config.resolved.json")
     cfg_resolve.set_defaults(func=cmd_config_resolve)
     cfg_get = cfg_sub.add_parser("get", help="read config value by dot-path")
-    cfg_get.add_argument("key_path")
+    cfg_get.add_argument("key_path", nargs="+")
     cfg_get.add_argument("--default", dest="default_value")
     cfg_get.add_argument("--json", action="store_true")
     cfg_migrate = cfg_sub.add_parser("migrate", help="구 포맷 config를 신 포맷으로 마이그레이션")

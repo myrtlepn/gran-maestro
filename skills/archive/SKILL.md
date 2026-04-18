@@ -11,7 +11,7 @@ argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {
 
 ## 설정 참조
 
-`config.resolved.json`의 `archive` 섹션:
+`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get archive)`의 `archive` 섹션:
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
@@ -190,7 +190,7 @@ requests (1 archive):
 | tar 명령 실패 | 에러 메시지 표시, 원본 보존 (삭제하지 않음) |
 | 복원 시 ID를 찾을 수 없음 | 아카이브 목록 표시 + 올바른 ID 안내 |
 | 복원 대상 디렉토리가 이미 존재 | 덮어쓰기 전 사용자 확인 |
-| config.resolved.json에 archive 섹션 없음 | 기본값 사용 (max_active=20, retention=null, auto=true) |
+| `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get archive)` 결과에 archive 섹션 없음 | 기본값 사용 (max_active=20, retention=null, auto=true) |
 
 ## 예시
 

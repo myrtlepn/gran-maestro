@@ -97,7 +97,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 관련 spec 판단은 아래 공통 프로토콜을 따른다.
 
 0. **자동 트리거 게이트**:
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search` 확인.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search` 확인.
    - `reference.auto_search == true`일 때만 자동 WebSearch 허용.
    - 설정 미존재 시 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
@@ -146,7 +146,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 > ⚠️ 이 단계는 건너뛸 수 없음: spec.md Assigned Agent 결정 전 반드시 실행.
 > 이 단계 없이 spec.md 작성 금지.
 
-Read(`{PROJECT_ROOT}/.gran-maestro/config.resolved.json`) → `workflow.default_agent` 추출 → DEFAULT_AGENT 변수 보관.
+Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) → `workflow.default_agent` 추출 → DEFAULT_AGENT 변수 보관.
 파일이 없으면 `templates/defaults/config.json`에서 `workflow.default_agent`와 `agent_assignments`를 Read하여 DEFAULT_AGENT 및 도메인 추론 기준으로 사용한다.
 
 이후 모든 spec.md의 Assigned Agent 필드는 반드시
@@ -166,8 +166,8 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
      - 둘 다 없으면 생략(`None`)
    - 반환값이 bool이면 `AUTO_APPROVE`에 채택
    - `None`이면 Step 2(config)로 진행
-2. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`에서 `config.auto_mode.request` 값을 확인한다.
-   - `config.auto_mode.request == true`면 `AUTO_APPROVE=true`로 설정 (`request.json.auto_approve=true`)
+2. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.request)`로 `config.auto_mode.request` 값을 확인한다.
+   - `auto_mode.request == true`면 `AUTO_APPROVE=true`로 설정 (`request.json.auto_approve=true`)
    - `"[config] auto_mode.request=true — 자동 승인 모드 활성화"` 메시지를 표시한다.
 3. 최종 우선순위는 `args > state(guarded) > config > default(false)`를 적용한다.
 
@@ -264,7 +264,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       > ③ 충돌 가능성 감지 (변경 시 영향받는 기존 코드)
       > 구체적인 구현 방법은 에이전트가 worktree에서 직접 판단합니다.
 
-      config 읽기: `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `phase1_exploration.roles` 참조
+      config 읽기: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get phase1_exploration.roles)` 출력의 `phase1_exploration.roles` 참조
       각 role의 모델 결정: `phase1_exploration.roles.{role}.tier` → `providers[agent][tier]`로 resolve (tier 미지정 시 `providers[agent].default_tier` 사용)
       ① `symbol_tracing` role agent [background dispatch] — enabled=true인 경우, 정밀 심볼 추적
       ② `broad_scan` role agent [background dispatch] — enabled=true인 경우, 광역 탐색 (①과 동일 응답에서 dispatch)
@@ -292,11 +292,11 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - 0.4~0.6: 일부 모듈 의존성 변경 예상되나 영향 범위 파악 가능
         - 0.7~1.0: 다수 모듈 연쇄 영향, 아키텍처 방향 불명확, 설계 리스크 존재
       - `arch_gate_threshold` 읽기 순서(기존 유지):
-        1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `workflow.arch_gate_threshold`
+        1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.arch_gate_threshold)` 우선
         2. fallback: `templates/defaults/config.json`의 `workflow.arch_gate_threshold`
         3. 최종 fallback: `0.7`
       - `workflow.high_pass_guard` 읽기 순서(신규, 상수/문구 단일 기준):
-        1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `workflow.high_pass_guard`
+        1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.high_pass_guard)` 우선
         2. fallback: `templates/defaults/config.json`의 `workflow.high_pass_guard`
         3. 최종 fallback:
            - `enabled=true`, `confidence_supporting_only=true`
@@ -654,7 +654,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
    1.9. **테스트 전략 게이트 (Test Strategy Gate)** (Step 1.8 완료 직후, Step h-0 이전):
       - **실행 조건**:
         - 먼저 `test_enforcement`를 로드한다.
-          - 1순위: `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `test_enforcement`
+          - 1순위: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get test_enforcement)`
           - 2순위 fallback: `templates/defaults/config.json`의 `test_enforcement`
           - 둘 다 없으면 기본값 사용:
             - `enabled=true`
@@ -737,7 +737,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
       - 본 단계에서 UI 관련 여부 플래그 `ui_related`를 유지한다:
         - `ui_related=true`: 명시적 디자인 요청 또는 새 화면 추가/약한 UI 신호 감지
         - `ui_related=false`: 그 외
-   h-0.5. **Assigned Agent 기본값 보관**: spec.md 작성 직전, `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `workflow.default_agent` 값을 읽어 Assigned Agent 필드의 기본값으로 설정한다. `templates/spec.md`의 Decision Tree(0~3단계)는 이 기본값의 override 조건으로만 동작한다. config 미참조 시 `claude-dev` 자동 선택은 금지. `config.resolved.json`이 없으면 `templates/defaults/config.json`의 `agent_assignments`를 fallback으로 Read한다. 이때 `workflow.default_agent`도 `templates/defaults/config.json`에서 함께 Read하여 DEFAULT_AGENT로 사용한다.
+   h-0.5. **Assigned Agent 기본값 보관**: spec.md 작성 직전, `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)`로 `workflow.default_agent` 값을 읽어 Assigned Agent 필드의 기본값으로 설정한다. `templates/spec.md`의 Decision Tree(0~3단계)는 이 기본값의 override 조건으로만 동작한다. config 미참조 시 `claude-dev` 자동 선택은 금지. `config.resolved.json`이 없으면 `templates/defaults/config.json`의 `agent_assignments`를 fallback으로 Read한다. 이때 `workflow.default_agent`도 `templates/defaults/config.json`에서 함께 Read하여 DEFAULT_AGENT로 사용한다.
    h-0.6. **Intent Context Load (MANDATORY)**:
       - `{PROJECT_ROOT}/.gran-maestro/request-context.md`를 반드시 Read한다.
         - 파일이 없으면 아래 초기 템플릿으로 생성 후 즉시 Read한다 (비차단):
@@ -762,7 +762,7 @@ config.resolved.json이 없으면 `templates/defaults/config.json`의 `agent_ass
         - `freq` 숫자 직접 인용 금지 (경향 문장만 사용).
       - 사용자가 인용 선호를 반박하면 해당 statement를 `request_disputed_preferences`에 수집하고 Step 6의 요약 트리거 입력으로 전달한다.
       - `intent_fidelity.enabled` 값을 먼저 확인한다.
-        - 1순위: `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `intent_fidelity.enabled`
+        - 1순위: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_fidelity.enabled)`
         - 2순위 fallback: `templates/defaults/config.json`의 `intent_fidelity.enabled`
         - 둘 다 없으면 기본값 `true`
       - `intent_fidelity.enabled=false`면 이 단계 전체를 skip한다 (`intent_context`, `docs_context`, `intent_snapshot` 모두 비활성; 에러 아님).

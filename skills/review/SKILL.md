@@ -73,7 +73,7 @@ argument-hint: "[REQ-ID] [--auto]"
 review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아래 공통 프로토콜을 적용한다.
 
 0. **자동 트리거 게이트**:
-   - `config.resolved.json`의 `reference.auto_search`가 `true`일 때만 자동 WebSearch 허용.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)` 결과가 `true`일 때만 자동 WebSearch 허용.
    - 미설정 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
    - spec AC, Plan AC, 변경 파일 설명, 리뷰 이슈 텍스트에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜 계열)를 감지한다.
@@ -212,7 +212,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
    - Step 2 입력(AC 목록, 변경 파일, plan/request 요약)에서 외부 의존성 키워드를 감지하고 `Reference Lookup Protocol`을 실행한다.
    - 자동 WebSearch는 `reference.auto_search == true`일 때만 수행한다.
    - 결과를 `reference_context_block`으로 보관해 Pass B 모든 리뷰어 프롬프트에 공통 주입한다.
-5. **config 로드**: `config.resolved.json`에서 아래 값을 확인.
+5. **config 로드**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get review.roles review.cross_validation intent_fidelity review.max_iterations auto_mode.review auto_mode.max_review_iterations test_enforcement)`로 아래 값을 확인.
    - `review.roles.*` 에이전트 키
    - `review.roles.browser_tester.agent` / `review.roles.browser_tester.tier` (존재 시 Pass A의 browser-test AC 실행 주체를 PM 직접 실행 → 서브에이전트 위임으로 전환)
    - `review.roles.impact_reviewer.enabled` / `review.roles.impact_reviewer.agent` / `review.roles.impact_reviewer.tier` / `review.roles.impact_reviewer.enhanced_analysis` (기본값: `true`)
@@ -229,7 +229,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
      - `AUTO_MODE=true` 이고 값이 설정되어 있으며 `> 0`이면 `max_iterations`를 이 값으로 override
      - `0` 이하이면 무시하고 `config.review.max_iterations` 값을 사용
    - `test_enforcement` 로드 (테스트 강제화, 하위 호환 MANDATORY):
-     - 1순위: `config.resolved.json.test_enforcement`
+     - 1순위: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get test_enforcement)`
      - 2순위 fallback: `templates/defaults/config.json.test_enforcement`
      - 둘 다 없으면 기본값 사용:
        - `enabled=true`
@@ -391,7 +391,7 @@ review 단계에서 외부 의존성 관련 AC/리뷰 포인트가 보이면 아
      mkdir -p {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/browser-tests/BT-{RV-NNN}/screenshots
      ```
   1.5. 실행 모드를 결정한다.
-     - `config.resolved.json.review.roles.browser_tester.agent`가 존재하면 `execution_mode = delegated`.
+     - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get review.roles.browser_tester.agent review.roles.browser_tester.tier)` 결과에서 `review.roles.browser_tester.agent`가 존재하면 `execution_mode = delegated`.
        - `delegate_agent = review.roles.browser_tester.agent`
        - `delegate_tier = review.roles.browser_tester.tier || providers[delegate_agent].default_tier`
      - 키가 없거나 값이 비어 있으면 `execution_mode = pm_direct`로 간주하고 기존 PM 직접 실행 절차를 그대로 유지한다 (하위 호환).

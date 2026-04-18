@@ -111,7 +111,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 관련 판단이 포함된 plan 주제는 아래 프로토콜을 공통 적용한다.
 
 0. **자동 트리거 게이트**:
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)`에서 `reference.auto_search`를 확인한다.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search`를 확인한다.
    - `reference.auto_search == true`일 때만 자동 WebSearch를 허용한다.
    - 설정이 없으면 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
@@ -233,14 +233,14 @@ Step 0.5 처리 완료 후, `--from-picks` 유무와 무관하게 사용자 입�
    - 반환값이 bool이면 `AUTO_MODE`에 채택
    - `None`이면 Step 3(config fallback)로 진행
 3. `AUTO_MODE=false`인 경우 config를 읽어 `config.auto_mode.plan` 확인:
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)` 우선
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.plan)` 우선
    - 키가 없으면 `Read(templates/defaults/config.json)` fallback
-   - `config.auto_mode.plan == true`면 `AUTO_MODE=true`
+   - `auto_mode.plan == true`면 `AUTO_MODE=true`
 4. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장:
    - 미설정 시 기본값 `0.7`
    - CLI 플래그(`-a`/`--auto`)가 config보다 우선한다
 5. `workflow.high_pass_guard`를 읽어 `HIGH_PASS_GUARD`에 저장:
-   - `Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json)` 우선
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.high_pass_guard)` 우선
    - 키가 없으면 `Read(templates/defaults/config.json)` fallback
    - 미설정 시 기본값:
      - `enabled=true`
@@ -613,7 +613,7 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 - **AskUserQuestion 호출 절대 금지.**
 
 **AUTO_MODE=false**:
-- `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.test_strategy` 값을 먼저 확인한다.
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.test_strategy)` 값을 먼저 확인한다.
   - 키가 없으면 `templates/defaults/config.json`의 `plan_qa_presets.test_strategy`에서 fallback한다.
 - 값이 `"ask"`가 아니면 AskUserQuestion을 생략하고 preset을 자동 적용한다.
   - `"apply-80"` → 테스트 방법론 `"적용"`, 목표 커버리지 `"80%"`
@@ -648,7 +648,7 @@ PM이 요청 맥락에서 제약사항과 MoSCoW를 자율 추론하고 auto-dec
 - **AskUserQuestion 호출 절대 금지.**
 
 **AUTO_MODE=false**:
-- `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `plan_qa_presets.loop_exit` 값을 먼저 확인한다.
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.loop_exit)` 값을 먼저 확인한다.
   - 키가 없으면 `templates/defaults/config.json`의 `plan_qa_presets.loop_exit`에서 fallback한다.
 - 값이 `"ask"`가 아니면 AskUserQuestion을 생략하고 preset을 자동 적용한다.
   - `"default_pass"` → 기존 종료 조건(AC 통과 + max_iterations) 유지
@@ -913,7 +913,7 @@ Q&A 종료 판단 직후, plan 초안 진행 전 5개 항목을 PM이 내부 점
 
 #### 3.8.0: config 읽기 및 enabled 확인
 
-Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json) → plan_review 섹션 취득
+Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_review`) → plan_review 섹션 취득
 plan_review 섹션이 없으면 → Read(templates/defaults/config.json) → plan_review 섹션으로 fallback
 `enabled` 값을 메모리에 보관
 
@@ -1005,7 +1005,7 @@ Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
 
 #### 3.9.0: D3/PAC Trace config 로드
 
-- `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`에서 `d3`, `pac_trace` 섹션을 Read한다.
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get d3 pac_trace)`로 `d3`, `pac_trace` 섹션을 읽는다.
 - 키가 없으면 `templates/defaults/config.json`의 동일 섹션으로 fallback한다.
 - 기본값:
   - `d3.enabled=true`
@@ -1032,7 +1032,7 @@ Step 3.9 진입 시 초안은 전략적 검토가 반영된 정제 버전이다.
 #### 3.9.2: light D3 기본 실행 (독립 에이전트)
 
 - D3 실행 에이전트는 config의 `d3.agents`를 기준으로 결정한다 (`debug.agents`, `explore.agents`와 동일 패턴):
-  1. `{PROJECT_ROOT}/.gran-maestro/config.resolved.json`의 `d3.agents`를 우선 사용
+  1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get d3.agents)`를 우선 사용
   2. 키가 없으면 `templates/defaults/config.json`의 `d3.agents`로 fallback
   3. 둘 다 없으면 기본값 `codex={count:2,tier:"premium"}`, `gemini={count:0,tier:"premium"}`, `claude={count:0,tier:"economy"}` 적용
   4. provider별 `count > 0` 항목만 dispatch 대상에 포함하고, 각 provider의 `count`만큼 독립 실행 엔트리를 생성

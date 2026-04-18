@@ -212,7 +212,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
 > - 각 응답은 파일로 직접 쓰기, 프롬프트도 파일로 저장 후 `--prompt-file` 사용
 > - agent는 프롬프트 파일 실행 전 반드시 공유 컨텍스트 파일을 Read해야 합니다
 
-> **모델 결정**: `config.resolved.json`의 `models.providers.claude[ideation.agents.claude.tier || default_tier]`로 resolve (opus / sonnet)
+> **모델 결정**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get ideation.agents.claude.tier models.providers.claude.default_tier)`로 tier를 구한 뒤 `models.providers.claude[{tier}]`로 resolve (opus / sonnet)
 
 2. **participant Task() 발송** (`participants` 동적 순회):
 

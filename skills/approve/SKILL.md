@@ -63,7 +63,7 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 approve 외주 브리프 작성 시 외부 의존성 판단 최신화를 위해 아래 공통 프로토콜을 적용한다.
 
 0. **자동 트리거 게이트**:
-   - `config.resolved.json`의 `reference.auto_search == true`일 때만 자동 WebSearch 허용.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)` 결과가 `true`일 때만 자동 WebSearch 허용.
    - 미설정 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
 1. **키워드 감지**:
    - 태스크 spec(`§1/§2/§3`), 이전 피드백, plan 요약, IMPL_CONTEXT 초안에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜)를 감지한다.
@@ -278,7 +278,7 @@ REQ 리스트가 1건이거나, 명시적 단건 인자 호출 시 이 프로토
 preflight 검사가 통과된 경우에만 아래 Step 3(worktree 생성 및 구현 착수)로 진행.
 
 **base_branch 안내 (비차단, preflight 통과 이후 실행)**:
-- config.resolved.json에서 `worktree.base_branch` 값 읽기
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch)`로 `worktree.base_branch` 값 읽기
   - 파일 읽기 실패 또는 키 부재 시: 경고를 **silent suppress** — 출력 없이 Step 3 진행
 - `worktree.base_branch` 값이 정확히 `"main"` (대소문자 구분, exact match)인 경우에만 아래 안내 출력:
 
@@ -571,12 +571,12 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 | **프론트엔드, 문서, 대용량 컨텍스트** | **`gemini-dev` → `/mst:gemini`** | **frontend, docs, large-context** |
 | **`.md` 문서, `.json`/`.env` config, `*.config.ts`, 기존 `.ts` 인라인 수정(신규 `.ts` 생성 없음)** | **`claude-dev` → `/mst:claude`** | **code, docs, config, small-inline** |
 
-> **경계 케이스 기본값**: 태스크 유형이 모호한 경우 → `config.resolved.json`의 `workflow.default_agent` 값 사용 (`claude-dev` 하드코딩 금지).
+> **경계 케이스 기본값**: 태스크 유형이 모호한 경우 → `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)` 값 사용 (`claude-dev` 하드코딩 금지).
 > **CLI guard**: Phase 2 진입 전 Codex CLI 설치 확인 필요. `codex-dev` 배정 시 `codex` 명령어 사용 가능 여부를 사전 확인할 것.
 
 `claude`와 `claude-dev`는 동일하게 처리됩니다 (하위 호환).
 
-spec.md의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니다: (1) `최종:` 패턴이 있으면 `최종:` 이후 값을 에이전트명으로 사용합니다. (2) `최종:` 패턴이 없으면 필드 값 전체를 에이전트명으로 사용합니다. (3) 필드가 없거나 값이 비어있으면 `config.resolved.json`의 `workflow.default_agent`를 fallback으로 사용합니다.
+spec.md의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니다: (1) `최종:` 패턴이 있으면 `최종:` 이후 값을 에이전트명으로 사용합니다. (2) `최종:` 패턴이 없으면 필드 값 전체를 에이전트명으로 사용합니다. (3) 필드가 없거나 값이 비어있으면 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)`를 fallback으로 사용합니다.
 
 **`Assigned Agent: claude`/`claude-dev`인 경우**: Step 4 외주 디스패치를 통해 `/mst:claude` 서브에이전트에게 위임. PM은 직접 구현하지 않습니다.
 
@@ -834,7 +834,7 @@ Step 5.5 완료 직후 아래 순서로 실행한다.
 ```pseudo
 req = Read({PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json)
 source_plan = req.source_plan
-intent_cfg = Read({PROJECT_ROOT}/.gran-maestro/config.resolved.json).intent_verification or {}
+intent_cfg = JsonParse(Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification`)) or {}
 intent_enabled = intent_cfg.enabled if boolean else true
 max_iterations = intent_cfg.max_iterations if positive_integer else 5
 all_committed = every(req.tasks[].status in ["committed", "done"])
@@ -1081,7 +1081,7 @@ else:
 
 모든 태스크가 `committed` 상태에 도달하고 `current_phase`가 3으로 전환된 후:
 
-1. `review.auto_review` 설정 확인 (`{PROJECT_ROOT}/.gran-maestro/config.resolved.json` 읽기):
+1. `review.auto_review` 설정 확인 (`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get review.auto_review)`):
    - `AUTO_MODE`는 단건 프로토콜 진입 시 단일 초기화된 값을 그대로 사용한다 (이중 판단 금지).
    - `false` (기본): 아래 태스크 상태 검증 후 최종 수락 실행 (mst:review 미호출):
      1. `request.json.tasks` 전체 확인: 모든 태스크가 `committed` 이상 상태인지 검증

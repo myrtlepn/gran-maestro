@@ -57,7 +57,7 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 �
 2. args에 없으면 `read_workflow_state_auto_mode("mst:accept", REQ_ID)` 호출 (helper는 T01에서 추가됨)
    - 반환 bool → `AUTO_MODE`에 채택
    - `None` → 3번 단계로 진행
-3. `config.auto_mode.accept` 확인 (`{PROJECT_ROOT}/.gran-maestro/config.resolved.json`)
+3. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.accept)`로 `config.auto_mode.accept` 확인
    - true이면 `AUTO_MODE=true`
 4. 미설정 또는 false이면 `AUTO_MODE=false` (기본)
 5. `AUTO_MODE=true`이면 수락 AskUserQuestion을 전부 생략하고 최종 머지 단계까지 무정지 진행한다.
