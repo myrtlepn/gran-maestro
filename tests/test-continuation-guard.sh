@@ -37,8 +37,7 @@ cleanup() {
     "${MST_TMP}/mst-hook-check-done-${MY_PID}" \
     "${MST_TMP}/mst-transcript-${MY_PID}.path" \
     2>/dev/null || true
-  rm -f "$REQUEST_FIXTURE_FILE" "$PLAN_FIXTURE_FILE" 2>/dev/null || true
-  rmdir "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR" 2>/dev/null || true
+  rm -rf "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR" 2>/dev/null || true
   rm -f "$SCRIPT_DIR/.claude/hooks/.mst-hook-version" 2>/dev/null || true
 }
 
@@ -247,7 +246,7 @@ assert_empty "workflow_inactive_agile_loop_false -> allow pass_through" "$output
 
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID}}" > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID},\"owner_session_id\":\"123e4567-e89b-42d3-a456-426614174000\"}" > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_blocks_when_state_missing_and_active_request_exists exits 0" "0" "$STOP_EXIT"
@@ -262,6 +261,15 @@ run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_allows_when_only_terminal_requests_exist exits 0" "0" "$STOP_EXIT"
 assert_empty "stop_hook_allows_when_only_terminal_requests_exist -> allow pass_through" "$output"
+
+cleanup
+mkdir -p "$REQUEST_FIXTURE_DIR/tasks/06"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"done"}' > "$REQUEST_FIXTURE_FILE"
+printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD-T06","status":"pending"}' > "$REQUEST_FIXTURE_DIR/tasks/06/task.json"
+run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "terminal_request_with_stale_pending_task_does_not_block exits 0" "0" "$STOP_EXIT"
+assert_empty "terminal_request_with_stale_pending_task_does_not_block -> allow pass_through" "$output"
 
 cleanup
 write_state '{"workflow_active":false,"current_skill":"mst:agile","agile_loop_active":true,"active_req":"REQ-xxx","iteration":5,"updated_at":"2026-04-14T00:00:00Z"}'

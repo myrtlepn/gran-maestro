@@ -5,9 +5,12 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATUSLINE_SCRIPT = REPO_ROOT / "scripts" / "mst-statusline.sh"
+SAMPLE_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.CompletedProcess:
@@ -53,6 +56,33 @@ def _write_transcript(path: Path, rows: list[dict]) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
+
+
+def _write_context_fixture(
+    workspace: Path,
+    context_id: str,
+    status: str,
+    *,
+    owner_ppid,
+    owner_session_id=SAMPLE_SESSION_ID,
+) -> Path:
+    base_dir = workspace / ".gran-maestro"
+    if context_id.startswith("REQ-"):
+        fixture_path = base_dir / "requests" / context_id / "request.json"
+    elif context_id.startswith("PLN-"):
+        fixture_path = base_dir / "plans" / context_id / "plan.json"
+    else:
+        raise ValueError(f"unsupported context id: {context_id}")
+
+    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": context_id,
+        "status": status,
+        "owner_ppid": owner_ppid,
+        "owner_session_id": owner_session_id,
+    }
+    fixture_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return fixture_path
 
 
 def _last_line(result: subprocess.CompletedProcess) -> str:
@@ -232,3 +262,138 @@ def test_statusline_falls_back_to_idle_on_broken_transcript(tmp_path):
     last_line = _last_line(result)
 
     assert last_line == "MST idle"
+
+
+def test_transcript_fallback_uses_prefixed_context_id_without_free_text(tmp_path):
+    workspace = tmp_path / "workspace"
+    transcript_path = workspace / "transcripts" / "session.jsonl"
+    _write_transcript(
+        transcript_path,
+        [
+            {
+                "timestamp": "2026-04-18T00:00:00Z",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "free text should never be shown"},
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Skill",
+                            "input": {
+                                "skill": "mst:plan",
+                                "args": "REQ-659 free text should never be shown",
+                            },
+                        },
+                    ]
+                },
+            }
+        ],
+    )
+
+    result = _run_statusline(
+        workspace,
+        json.dumps({"transcript_path": str(transcript_path)}, ensure_ascii=False),
+    )
+    last_line = _last_line(result)
+
+    assert re.search(r"plan\(.+\) \(REQ-659\)$", last_line), last_line
+    assert "free text should never be shown" not in last_line
+
+
+@pytest.mark.parametrize(
+    ("context_id", "status"),
+    [
+        ("REQ-659", "phase1_analysis"),
+        ("PLN-499", "active"),
+    ],
+)
+def test_same_session_non_terminal_fixture_becomes_fallback_active(tmp_path, context_id, status):
+    workspace = tmp_path / "workspace"
+    _write_context_fixture(
+        workspace,
+        context_id,
+        status,
+        owner_ppid=os.getpid(),
+    )
+
+    result = _run_statusline(
+        workspace,
+        json.dumps({"transcript_path": str(workspace / "missing.jsonl")}, ensure_ascii=False),
+    )
+    last_line = _last_line(result)
+
+    assert last_line == f"MST active ({context_id})"
+
+
+@pytest.mark.parametrize(
+    ("context_id", "status"),
+    [
+        ("REQ-659", "done"),
+        ("PLN-499", "done"),
+    ],
+)
+def test_terminal_fixture_is_not_promoted_and_stays_clear(tmp_path, context_id, status):
+    workspace = tmp_path / "workspace"
+    _write_context_fixture(
+        workspace,
+        context_id,
+        status,
+        owner_ppid=os.getpid(),
+    )
+
+    result = _run_statusline(
+        workspace,
+        json.dumps({"transcript_path": str(workspace / "missing.jsonl")}, ensure_ascii=False),
+    )
+    last_line = _last_line(result)
+
+    assert last_line == f"MST clear ({context_id})"
+
+
+def test_foreign_or_invalid_owner_fixture_falls_back_to_idle(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_context_fixture(
+        workspace,
+        "REQ-659",
+        "phase1_analysis",
+        owner_ppid=99999,
+    )
+    _write_context_fixture(
+        workspace,
+        "PLN-499",
+        "active",
+        owner_ppid=True,
+    )
+
+    result = _run_statusline(
+        workspace,
+        json.dumps({"transcript_path": str(workspace / "missing.jsonl")}, ensure_ascii=False),
+    )
+    last_line = _last_line(result)
+
+    assert last_line == "MST idle"
+
+
+def test_dispatch_summary_prefix_is_preserved_with_fallback_active_line(tmp_path):
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / ".gran-maestro" / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_dispatch_state(
+        run_dir / "dispatch-01.json",
+        "dispatch-01",
+        datetime.now(timezone.utc) - timedelta(seconds=45),
+    )
+    _write_context_fixture(
+        workspace,
+        "REQ-659",
+        "phase1_analysis",
+        owner_ppid=os.getpid(),
+    )
+
+    result = _run_statusline(
+        workspace,
+        json.dumps({"transcript_path": str(workspace / "missing.jsonl")}, ensure_ascii=False),
+    )
+    last_line = _last_line(result)
+
+    assert re.fullmatch(r"MST 1 run · oldest \d+s · active \(REQ-659\)", last_line), last_line

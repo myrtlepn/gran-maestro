@@ -421,7 +421,26 @@ def render_from_transcript(path):
     return render_line(labels, context_id)
 
 
-def read_status_payload(path):
+def render_fallback_status(status_label, context_id):
+    line = f"MST {status_label}"
+    if context_id:
+        line += f" ({context_id})"
+    return line
+
+
+def _iter_authoritative_candidates(root_dir, pattern):
+    if not root_dir or not os.path.isdir(root_dir):
+        return
+    for current_root, dirnames, filenames in os.walk(root_dir):
+        dirnames.sort()
+        filenames.sort()
+        for filename in filenames:
+            if filename != pattern:
+                continue
+            yield os.path.join(current_root, filename)
+
+
+def _read_same_session_context(path, terminal_statuses):
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
@@ -429,76 +448,57 @@ def read_status_payload(path):
         return None
     if not isinstance(payload, dict):
         return None
-    return payload
 
+    context_id = clean_text(payload.get("id")).upper()
+    if not CONTEXT_ID_PATTERN.fullmatch(context_id):
+        return None
 
-def read_owner_ppid(payload):
     owner_ppid = payload.get("owner_ppid")
-    if owner_ppid is None:
-        return None, "legacy"
     if isinstance(owner_ppid, bool):
-        return None, "invalid"
+        return None
     try:
-        return int(owner_ppid), "present"
+        owner_ppid = int(owner_ppid)
     except (TypeError, ValueError):
-        return None, "invalid"
+        return None
+    if CURRENT_PPID is None or owner_ppid != CURRENT_PPID:
+        return None
+
+    status = clean_text(payload.get("status")).lower()
+    if not status:
+        return None
+    if status in terminal_statuses:
+        return ("clear", context_id)
+    return ("active", context_id)
 
 
-def file_age_within_window(path):
-    try:
-        age = datetime.now(timezone.utc).timestamp() - os.path.getmtime(path)
-    except OSError:
-        return False
-    return age <= GUARD_WINDOW_SEC
+def render_from_authoritative_fallback(base_dir):
+    if not base_dir or not os.path.isdir(base_dir):
+        return None
 
-
-def iter_status_files(root_dir, file_name):
-    if not root_dir or not os.path.isdir(root_dir):
-        return []
-    matches = []
-    for entry in sorted(os.listdir(root_dir)):
-        path = os.path.join(root_dir, entry, file_name)
-        if os.path.isfile(path):
-            matches.append(path)
-    return matches
-
-
-def detect_guard_fallback():
-    if not project_root or CURRENT_PPID is None:
-        return "MST fallback clear"
-
-    requests_root = os.path.join(project_root, ".gran-maestro", "requests")
-    plans_root = os.path.join(project_root, ".gran-maestro", "plans")
-
-    for path in iter_status_files(requests_root, "request.json"):
-        payload = read_status_payload(path)
-        if payload is None:
+    clear_context_id = ""
+    for path in _iter_authoritative_candidates(os.path.join(base_dir, "requests"), "request.json"):
+        match = _read_same_session_context(path, REQUEST_TERMINAL_STATUSES)
+        if match is None:
             continue
-        status = clean_text(payload.get("status")).lower()
-        if status in REQUEST_TERMINAL_STATUSES:
-            continue
-        owner_ppid, owner_state = read_owner_ppid(payload)
-        req_id = clean_text(payload.get("id")) or extract_context_id(path)
-        if owner_state == "present" and owner_ppid == CURRENT_PPID:
-            return render_line(["MST fallback active"], req_id)
-        if owner_state == "legacy" and file_age_within_window(path):
-            return render_line(["MST fallback clear", "legacy"], req_id)
+        status_label, context_id = match
+        if status_label == "active":
+            return render_fallback_status("active", context_id)
+        if not clear_context_id:
+            clear_context_id = context_id
 
-    for path in iter_status_files(plans_root, "plan.json"):
-        payload = read_status_payload(path)
-        if payload is None:
+    for path in _iter_authoritative_candidates(os.path.join(base_dir, "plans"), "plan.json"):
+        match = _read_same_session_context(path, PLAN_TERMINAL_STATUSES)
+        if match is None:
             continue
-        status = clean_text(payload.get("status")).lower()
-        if status in PLAN_TERMINAL_STATUSES:
-            continue
-        owner_ppid, owner_state = read_owner_ppid(payload)
-        plan_id = clean_text(payload.get("id")) or extract_context_id(path)
-        if owner_state == "present" and owner_ppid == CURRENT_PPID:
-            return render_line(["MST fallback active"], plan_id)
-        if owner_state == "legacy" and file_age_within_window(path):
-            return render_line(["MST fallback clear", "legacy"], plan_id)
+        status_label, context_id = match
+        if status_label == "active":
+            return render_fallback_status("active", context_id)
+        if not clear_context_id:
+            clear_context_id = context_id
 
-    return "MST fallback clear"
+    if clear_context_id:
+        return render_fallback_status("clear", clear_context_id)
+    return None
 
 
 def build_dispatch_prefix(run_dir):
@@ -570,16 +570,9 @@ if transcript_line is not None:
     print(render_output(transcript_line))
     sys.exit(0)
 
-if transcript_path and state_status == "missing":
-    print(render_output("MST idle"))
-    sys.exit(0)
-
-if state_status == "missing":
-    print(render_output(detect_guard_fallback()))
-    sys.exit(0)
-
-if state_status == "invalid":
-    print(render_output("MST idle"))
+fallback_line = render_from_authoritative_fallback(os.path.join(project_root, ".gran-maestro"))
+if fallback_line is not None:
+    print(render_output(fallback_line))
     sys.exit(0)
 
 print(render_output("MST idle"))
