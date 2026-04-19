@@ -39,6 +39,10 @@ Claude Code의 PreToolUse hook을 사용하면 매 Skill 실행 전 자동으로
 
 - 대시보드 서버 실행 중에는 서버가 자동으로 resolved.json을 관리하므로 hook이 불필요할 수 있습니다
 
+## Boundary guard 로그
+
+워크트리 경계 가드가 PreToolUse 또는 Stop hook에서 감지, 자동 재시도, 차단을 수행하면 `.gran-maestro/logs/boundary-guard.log`에 한 줄씩 append됩니다. 각 행은 `ISO_TS | hook_name | event_type | task_id | result | message` 형식이며, 예를 들어 `2026-04-19T00:00:00Z | mst-stop-hook.sh | blocked | REQ-681 | merge_conflict | boundary_violation:merge_conflict`처럼 어떤 hook이 어떤 요청을 어떤 결과로 처리했는지 추적할 수 있습니다.
+
 ---
 
 ## PostToolUse Hook으로 스킬 완료 후 자동 정리

@@ -45,7 +45,42 @@ Claude Code 세션 종료 후 진행 중이던 워크플로우를 복구합니�
   - `중단된 스킬: {skill}, Step {N}/{M}`
 - 각 항목별 재개 안내를 함께 출력:
   - `재개: /mst:{skill}` (필요 시 Step 정보 포함)
-- state 스캔 블록 실행 후, 아래 기존 REQ/태스크 복구 로직을 그대로 수행한다.
+- state 스캔 블록 실행 후, 아래 cleaned worktree orphan 청소를 먼저 수행하고 기존 REQ/태스크 복구 로직을 그대로 수행한다.
+
+### cleaned worktree orphan 청소 (`PAC-6`)
+
+REQ/태스크 복구 목록을 만들기 전에 `{PROJECT_ROOT}/.gran-maestro/worktrees/*.meta.json` 중
+`state == "cleaned"`인 메타를 순회한다. cleaned 메타는 정상적으로는 실제 worktree 디렉토리,
+git worktree 등록, 작업 브랜치가 모두 없어야 한다.
+
+아래 조건 중 하나라도 참이면 해당 메타를 orphan으로 판단한다.
+- `git worktree list --porcelain` 결과에 메타의 `path`가 여전히 존재한다.
+- `git branch --list {branch}` 결과가 존재한다.
+- 메타의 `path` 디렉토리/경로가 실제 파일시스템에 존재한다.
+
+orphan 감지 및 정리는 helper를 사용한다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree detect-orphans --clean --json
+```
+
+helper는 orphan마다 아래 순서로 강제 정리한다.
+1. worktree 등록 또는 path가 남아 있으면:
+   `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {p} --force`
+2. branch가 남아 있으면:
+   `git branch -D {branch}`
+3. 위 정리가 성공하면:
+   `{PROJECT_ROOT}/.gran-maestro/worktrees/{taskId}.meta.json` 제거
+
+recover 자체 로그는 stdout에 간결히 남긴다. `--json` 결과의 `orphans[]`를 확인해 아래 형식으로 출력한다.
+
+```text
+[recover-orphan] detected taskId={taskId} path={p} branch={branch} reasons={worktree_listed,branch_exists,path_exists}
+[recover-orphan] cleaned taskId={taskId}
+```
+
+정리 실패(`failed`가 비어 있지 않음) 시에는 해당 taskId와 실패 command/message를 출력하고, 메타를 삭제하지 않는다.
+정상 cleaned 메타(실제 디렉토리/브랜치/등록 없음)는 출력 없이 skip한다.
 
 `requests/` 전체 스캔 → terminal 상태(completed/cancelled/failed) 제외 → 태스크 `status.json` 확인 → 복구 가능 목록 표시 → `AskUserQuestion`으로 복구 대상 선택 → 해당 Phase 재개
 

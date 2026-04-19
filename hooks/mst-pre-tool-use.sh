@@ -27,6 +27,7 @@ PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
+HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
@@ -61,6 +62,30 @@ debug_log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
   printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+}
+
+log_boundary_event() {
+  local event_type="${1:-event}"
+  local task_id="${2:-unknown}"
+  local result="${3:-unknown}"
+  local message="${4:-}"
+  local ts log_dir
+
+  event_type="${event_type//$'\n'/ }"
+  task_id="${task_id//$'\n'/ }"
+  result="${result//$'\n'/ }"
+  message="${message//$'\n'/ }"
+  event_type="${event_type//$'\r'/ }"
+  task_id="${task_id//$'\r'/ }"
+  result="${result//$'\r'/ }"
+  message="${message//$'\r'/ }"
+
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +%FT%TZ)"
+  log_dir="$(dirname "$BOUNDARY_LOG_FILE")"
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+  printf '%s | %s | %s | %s | %s | %s\n' \
+    "$ts" "$HOOK_NAME" "$event_type" "$task_id" "$result" "$message" \
+    >> "$BOUNDARY_LOG_FILE" 2>/dev/null || true
 }
 
 emit_block_json() {
@@ -276,6 +301,11 @@ DETECTED_BASE="$(printf '%s' "$BOUNDARY_INFO" | cut -f4)"
 OWNER_PPID="$(printf '%s' "$BOUNDARY_INFO" | cut -f5)"
 CURRENT_PPID="$(printf '%s' "$BOUNDARY_INFO" | cut -f6)"
 
+if [ "$BOUNDARY_OK" != "true" ]; then
+  [ -n "$BOUNDARY_VIOLATION" ] || BOUNDARY_VIOLATION="unknown"
+  log_boundary_event "detected" "$REQ_ID" "$BOUNDARY_VIOLATION" "entry boundary violation detected"
+fi
+
 if [ "$BOUNDARY_VIOLATION" = "session_mismatch" ]; then
   printf '[boundary] session_mismatch ppid=%s owner=%s, skip enforcement\n' "${CURRENT_PPID:-$PPID}" "${OWNER_PPID:-unknown}" >&2
   debug_log "boundary_session_mismatch" "req=$REQ_ID owner=$OWNER_PPID current=$CURRENT_PPID"
@@ -294,12 +324,16 @@ if [ "$BOUNDARY_VIOLATION" = "worktree_missing" ] && [ "$BOUNDARY_RETRY" = "true
   BOUNDARY_OK="$(printf '%s' "$BOUNDARY_INFO" | cut -f1)"
   BOUNDARY_VIOLATION="$(printf '%s' "$BOUNDARY_INFO" | cut -f2)"
   if [ "$BOUNDARY_OK" = "true" ]; then
+    log_boundary_event "retry_success" "$REQ_ID" "ok" "entry repair succeeded"
     debug_log "boundary_entry_repair_pass" "req=$REQ_ID"
     exit 0
   fi
+  [ -n "$BOUNDARY_VIOLATION" ] || BOUNDARY_VIOLATION="unknown"
+  log_boundary_event "retry_failed" "$REQ_ID" "$BOUNDARY_VIOLATION" "entry repair failed"
 fi
 
 [ -n "$BOUNDARY_VIOLATION" ] || BOUNDARY_VIOLATION="unknown"
 debug_log "boundary_entry_block" "req=$REQ_ID violation=$BOUNDARY_VIOLATION"
+log_boundary_event "blocked" "$REQ_ID" "$BOUNDARY_VIOLATION" "boundary_violation:${BOUNDARY_VIOLATION}"
 emit_block_json "boundary_violation:${BOUNDARY_VIOLATION}"
 exit 0

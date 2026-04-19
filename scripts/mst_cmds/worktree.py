@@ -355,6 +355,195 @@ def cmd_worktree_remove(args):
     return 0
 
 
+def _meta_worktree_path(meta_data: dict, project_root: Path) -> Path | None:
+    raw_path = _coerce_nonempty_str(meta_data.get("path"))
+    if not raw_path:
+        return None
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    return candidate.resolve(strict=False)
+
+
+def _git_branch_exists(project_root: Path, branch: str | None) -> bool:
+    if not branch:
+        return False
+    result = subprocess.run(
+        ["git", "branch", "--list", branch],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"git branch --list {branch} failed"
+        )
+    return bool(result.stdout.strip())
+
+
+def _iter_cleaned_meta_entries(project_root: Path) -> list[dict]:
+    entries: list[dict] = []
+    worktrees_dir = _common.BASE_DIR / "worktrees"
+    if not worktrees_dir.is_dir():
+        return entries
+
+    for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
+        meta_data = _common.load_json(meta_path)
+        if not isinstance(meta_data, dict):
+            print(f"Warning: failed to read worktree meta {meta_path}", file=sys.stderr)
+            continue
+        if meta_data.get("state") != "cleaned":
+            continue
+
+        task_id = _coerce_nonempty_str(meta_data.get("taskId")) or meta_path.name.removesuffix(".meta.json")
+        worktree_path = _meta_worktree_path(meta_data, project_root)
+        entries.append(
+            {
+                "taskId": task_id,
+                "path": str(worktree_path) if worktree_path else None,
+                "branch": _coerce_nonempty_str(meta_data.get("branch")),
+                "meta_path": str(meta_path.resolve(strict=False)),
+            }
+        )
+    return entries
+
+
+def _detect_cleaned_orphans(project_root: Path) -> list[dict]:
+    worktree_roots = set(_list_worktree_roots(project_root))
+    orphans: list[dict] = []
+
+    for entry in _iter_cleaned_meta_entries(project_root):
+        worktree_path = Path(entry["path"]) if entry.get("path") else None
+        worktree_listed = worktree_path in worktree_roots if worktree_path else False
+        path_exists = worktree_path.exists() if worktree_path else False
+        branch_exists = _git_branch_exists(project_root, entry.get("branch"))
+
+        if not (worktree_listed or branch_exists or path_exists):
+            continue
+
+        orphans.append(
+            {
+                **entry,
+                "worktree_listed": worktree_listed,
+                "branch_exists": branch_exists,
+                "path_exists": path_exists,
+            }
+        )
+    return orphans
+
+
+def _run_orphan_cleanup_command(project_root: Path, command: list[str]) -> tuple[bool, str]:
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode == 0:
+        return True, (result.stdout.strip() or result.stderr.strip())
+    return False, (result.stderr.strip() or result.stdout.strip() or f"{' '.join(command)} failed")
+
+
+def _clean_detected_orphan(project_root: Path, orphan: dict) -> tuple[bool, list[dict]]:
+    steps: list[dict] = []
+    worktree_path = orphan.get("path")
+    branch = orphan.get("branch")
+
+    if worktree_path and (orphan.get("worktree_listed") or orphan.get("path_exists")):
+        remove_cmd = [
+            sys.executable,
+            str(_common._mst_script_path()),
+            "worktree",
+            "remove",
+            "--path",
+            worktree_path,
+            "--force",
+        ]
+        ok, message = _run_orphan_cleanup_command(project_root, remove_cmd)
+        steps.append({"command": " ".join(remove_cmd), "ok": ok, "message": message})
+        if not ok:
+            return False, steps
+
+    if branch and orphan.get("branch_exists"):
+        branch_cmd = ["git", "branch", "-D", branch]
+        ok, message = _run_orphan_cleanup_command(project_root, branch_cmd)
+        steps.append({"command": " ".join(branch_cmd), "ok": ok, "message": message})
+        if not ok:
+            return False, steps
+
+    meta_path = Path(str(orphan["meta_path"]))
+    try:
+        meta_path.unlink(missing_ok=True)
+        steps.append({"command": f"remove meta {meta_path}", "ok": True, "message": str(meta_path)})
+    except OSError as exc:
+        steps.append({"command": f"remove meta {meta_path}", "ok": False, "message": str(exc)})
+        return False, steps
+
+    return True, steps
+
+
+def _print_detect_orphans_payload(payload: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    orphans = payload.get("orphans") or []
+    if not orphans:
+        print("[recover-orphan] cleaned meta orphan: none")
+        return
+
+    for orphan in orphans:
+        reasons = [
+            key
+            for key in ("worktree_listed", "branch_exists", "path_exists")
+            if orphan.get(key)
+        ]
+        print(
+            "[recover-orphan] detected "
+            f"taskId={orphan.get('taskId')} path={orphan.get('path')} "
+            f"branch={orphan.get('branch')} reasons={','.join(reasons)}"
+        )
+        cleanup = orphan.get("cleanup")
+        if cleanup:
+            status = "cleaned" if cleanup.get("ok") else "failed"
+            print(f"[recover-orphan] {status} taskId={orphan.get('taskId')}")
+
+
+def cmd_worktree_detect_orphans(args):
+    project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
+
+    try:
+        orphans = _detect_cleaned_orphans(project_root)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "clean", False):
+        for orphan in orphans:
+            ok, steps = _clean_detected_orphan(project_root, orphan)
+            orphan["cleanup"] = {"ok": ok, "steps": steps}
+
+    cleaned = [
+        orphan["taskId"]
+        for orphan in orphans
+        if orphan.get("cleanup", {}).get("ok") is True
+    ]
+    failed = [
+        orphan["taskId"]
+        for orphan in orphans
+        if orphan.get("cleanup", {}).get("ok") is False
+    ]
+    payload = {
+        "orphans": orphans,
+        "cleaned": cleaned,
+        "failed": failed,
+    }
+    _print_detect_orphans_payload(payload, getattr(args, "json", False))
+    return 1 if failed else 0
+
+
 
 def cmd_worktree_resolve_base(args):
     try:
@@ -781,4 +970,9 @@ def register(subparsers):
     worktree_check_boundary.add_argument("--task-id")
     worktree_check_boundary.add_argument("--ppid", type=int)
 
+    worktree_detect_orphans = worktree_sub.add_parser("detect-orphans")
+    worktree_detect_orphans.add_argument("--clean", action="store_true")
+    worktree_detect_orphans.add_argument("--json", action="store_true")
+
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
+    _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)

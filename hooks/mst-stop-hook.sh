@@ -28,6 +28,7 @@ MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
+HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
@@ -63,6 +64,30 @@ debug_log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
   printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+}
+
+log_boundary_event() {
+  local event_type="${1:-event}"
+  local task_id="${2:-unknown}"
+  local result="${3:-unknown}"
+  local message="${4:-}"
+  local ts log_dir
+
+  event_type="${event_type//$'\n'/ }"
+  task_id="${task_id//$'\n'/ }"
+  result="${result//$'\n'/ }"
+  message="${message//$'\n'/ }"
+  event_type="${event_type//$'\r'/ }"
+  task_id="${task_id//$'\r'/ }"
+  result="${result//$'\r'/ }"
+  message="${message//$'\r'/ }"
+
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +%FT%TZ)"
+  log_dir="$(dirname "$BOUNDARY_LOG_FILE")"
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+  printf '%s | %s | %s | %s | %s | %s\n' \
+    "$ts" "$HOOK_NAME" "$event_type" "$task_id" "$result" "$message" \
+    >> "$BOUNDARY_LOG_FILE" 2>/dev/null || true
 }
 
 HOOK_INFO="$(printf '%s' "$STDIN_RAW" | python3 -c 'import json, sys
@@ -758,6 +783,11 @@ run_exit_boundary_guard() {
     owner_ppid="$(printf '%s' "$boundary_info" | cut -f5)"
     current_ppid="$(printf '%s' "$boundary_info" | cut -f6)"
 
+    if [ "$boundary_ok" != "true" ]; then
+      [ -n "$boundary_violation" ] || boundary_violation="unknown"
+      log_boundary_event "detected" "$req_id" "$boundary_violation" "exit boundary violation detected"
+    fi
+
     if [ "$boundary_violation" = "session_mismatch" ]; then
       printf '[boundary] session_mismatch ppid=%s owner=%s, skip enforcement\n' "${current_ppid:-$PPID}" "${owner_ppid:-unknown}" >&2
       debug_log "boundary_session_mismatch" "phase=exit req=$req_id owner=$owner_ppid current=$current_ppid"
@@ -776,13 +806,17 @@ run_exit_boundary_guard() {
       boundary_ok="$(printf '%s' "$boundary_info" | cut -f1)"
       boundary_violation="$(printf '%s' "$boundary_info" | cut -f2)"
       if [ "$boundary_ok" = "true" ]; then
+        log_boundary_event "retry_success" "$req_id" "ok" "exit repair succeeded"
         debug_log "boundary_exit_repair_pass" "req=$req_id"
         continue
       fi
+      [ -n "$boundary_violation" ] || boundary_violation="unknown"
+      log_boundary_event "retry_failed" "$req_id" "$boundary_violation" "exit repair failed"
     fi
 
     [ -n "$boundary_violation" ] || boundary_violation="unknown"
     debug_log "boundary_exit_block" "req=$req_id violation=$boundary_violation"
+    log_boundary_event "blocked" "$req_id" "$boundary_violation" "boundary_violation:${boundary_violation}"
     emit_block_json "boundary_violation:${boundary_violation}"
     exit 0
   done <<EOF

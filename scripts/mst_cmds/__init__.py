@@ -120,6 +120,7 @@ DISPATCH = {
     ("worktree", "is-protected"): worktree.cmd_worktree_is_protected,
     ("worktree", "slug"): worktree.cmd_worktree_slug,
     ("worktree", "branch-name"): worktree.cmd_worktree_branch_name,
+    ("worktree", "detect-orphans"): worktree.cmd_worktree_detect_orphans,
     ("timestamp", "now"): timestamp.cmd_timestamp,
     ("set-status", None): set_mod.cmd_set_status,
     ("set-field", None): set_mod.cmd_set_field,
