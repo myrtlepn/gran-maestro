@@ -123,7 +123,18 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
      - `다른 의도 설명`
 2. 사용자 응답이 `objective 생성으로 진행`이면 Step 1A로 진행한다.
 3. Step 1A 진행 시 요청 원문 + Step 0.5 확인 대화 내용을 JTBD Q&A 초기 컨텍스트로 함께 전달한다.
-4. 사용자 응답이 `다른 의도 설명`이면 적합한 스킬을 안내하고 종료한다.
+4. 사용자 응답이 `다른 의도 설명`이면 Step 0.5.3으로 진행한다.
+
+#### 0.5.3 메타/질문 처리 후 objective 선제시
+
+> 목적: `/mst:agile-plan` 호출 자체는 objective 정의 의도 신호이지만, args 본문이 메타/질문이거나 0.5.2에서 "다른 의도"로 응답한 경우, 요청 동작을 먼저 수행한 뒤 objective 후보를 선제시한다.
+
+1. 사용자가 실제로 요청한 동작(답변·설명·소규모 조사 등)을 먼저 수행한다.
+2. 수행 결과를 바탕으로 **objective로 발전시킬 수 있는 후보 1~3개**를 선제시한다.
+   - 형식: `[objective 후보] 1) {후보1} 2) {후보2} 3) {후보3}`
+   - 후보가 도출되지 않으면 "objective 후보가 도출되지 않았습니다. 다른 스킬(mst:plan, mst:request 등) 사용을 검토해주세요" 출력 후 종료한다.
+3. AskUserQuestion으로 후보 중 선택받거나 Other로 직접 objective 입력받아 Step 1A로 진입한다. "종료" 선택지를 포함한다.
+4. 선택된 주제를 Step 1A JTBD Q&A 초기 컨텍스트로 전달한다.
 
 ---
 

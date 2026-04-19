@@ -207,6 +207,26 @@ Step 0.5 처리 완료 후, 사용자 입력 텍스트 전체에서 `/\[?CAP-\d{
 2. `AUTO_MODE=false`인 경우 state guarded fallback 시도: `read_workflow_state_auto_mode("mst:plan")` 호출. 반환값이 bool이면 채택, `None`이면 Step 3(config fallback)으로 진행.
 3. config 읽기: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.plan)` 우선, 키가 없으면 `Read(templates/defaults/config.json)` fallback. `auto_mode.plan == true`면 `AUTO_MODE=true`.
 4. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장 (미설정 시 기본값 `0.7`). CLI 플래그가 config보다 우선.
+
+### Step 0.8: Args intent 판별 (MANDATORY)
+
+> 목적: `/mst:plan` 호출 자체가 계획 의도 신호이지만, args 본문이 항상 계획 주제인 것은 아니다. 메타/질문/모호한 args를 계획 주제로 오해하지 않도록 PM이 자율 판별한다. Step 0.5(디버그)·0.75(CAP) 이후에 실행한다.
+
+1. PM이 args 본문을 읽고 아래 둘 중 하나로 자율 분류한다.
+   - **topic**: 계획 주제로 해석 가능한 경우 (예: "로그인 흐름 개선", "결제 모듈 리팩터링")
+   - **meta**: 스킬·코드·사용자 질문이거나 주제가 모호한 경우 (예: "plan 스킬 이렇게 바꾸면?", "이 코드 설명해줘", "plan이 뭐야?")
+
+   `debug_context` 또는 `capture_context`가 활성이면 이미 주제가 성립한 것으로 보고 `topic`으로 간주한다. 판별 기준은 규정하지 않고 PM 자율 판단에 맡긴다.
+
+2. **topic 판정**: args 본문을 plan 주제로 삼아 Step 1로 진행한다.
+
+3. **meta 판정**:
+   1. 사용자가 실제로 요청한 동작(답변·설명·소규모 조사·코드 리뷰 등)을 먼저 수행한다.
+   2. 수행 결과를 바탕으로 **파생 가능한 계획 후보 1~3개**를 선제시한다.
+      - 형식: `[계획 후보] 1) {후보1 주제} 2) {후보2 주제} 3) {후보3 주제}`
+      - 후보가 도출되지 않으면 "계획 가능한 후속 작업이 도출되지 않았습니다"만 출력하고 종료한다.
+   3. `AUTO_MODE=false`: `AskUserQuestion`으로 후보 중 선택받거나 Other로 직접 주제 입력받아 Step 1로 진입한다. "계획 없이 종료" 선택지를 포함한다.
+   4. `AUTO_MODE=true`: PM이 최유력 후보 1건을 자율 선택하여 Step 1로 진입한다. 선택 근거를 Step 1에서 초기화되는 `auto-decisions.md`에 함께 기록한다. 후보 도출 불가 시 종료한다.
 5. `workflow.high_pass_guard`를 읽어 `HIGH_PASS_GUARD`에 저장 (미설정 시 기본값: `enabled=true`, `confidence_supporting_only=true`, `require_external_execution_evidence=true`, `require_independent_judgement=true`, `block_self_report_only_pass=true`, `plan_bypass_requires_explicit_rationale=true`).
 6. 우선순위: `args > state(guarded) > config > default(false)`.
 7. `AUTO_MODE=true`이면 아래 초기값을 메모리에 보관:
