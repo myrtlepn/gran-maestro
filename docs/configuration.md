@@ -133,6 +133,7 @@ Git worktree 생성 및 관리 설정입니다.
 | `worktree.root_directory` | `.gran-maestro/worktrees` | worktree 루트 경로 |
 | `worktree.max_active` | `10` | 최대 활성 worktree 수 |
 | `worktree.base_branch` | `main` | worktree 기준 브랜치 |
+| `worktree.protected_branches` | `["main","master","release/*"]` | REQ 시작을 막을 보호 브랜치 목록. glob 패턴 허용 |
 | `worktree.stale_timeout_hours` | `24` | stale 판정 시간 |
 | `worktree.auto_cleanup_on_cancel` | `true` | 취소 시 자동 정리 |
 
