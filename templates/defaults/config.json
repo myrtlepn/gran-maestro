@@ -746,5 +746,11 @@
   "omx": {
     "enabled": false,
     "autopilot": false
+  },
+  "prompt_builder": {
+    "enabled": false,
+    "fallback_on_error": true,
+    "metrics_path": ".gran-maestro/metrics/prompt-builder.ndjson",
+    "max_inline_ask_chars": 200
   }
 }

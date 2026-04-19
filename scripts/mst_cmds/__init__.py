@@ -46,6 +46,7 @@ from scripts.mst_cmds import agile_stop_audit
 from scripts.mst_cmds import dispatch
 from scripts.mst_cmds import run as run_cmd
 from scripts.mst_cmds import prompt
+from scripts.mst_cmds import metrics
 
 
 def set_base_dir(base_dir):
@@ -96,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     dispatch.register(sub)
     run_cmd.register(sub)
     prompt.register(sub)
+    metrics.register(sub)
 
     return parser
 
@@ -232,4 +234,5 @@ DISPATCH = {
     ("prompt", "build"): prompt.cmd_prompt_build,
     ("prompt", "validate"): prompt.cmd_prompt_validate,
     ("prompt", "write-context"): prompt.cmd_prompt_write_context,
+    ("metrics", "summary"): metrics.cmd_metrics_summary,
 }

@@ -146,7 +146,50 @@ PM이 주제와 focus를 분석하여 `participants` 수만큼 관점을 배정�
 
 **단일 응답에서 아래를 동시 Write한 뒤, 모든 Task()를 단일 응답 내에서 동시 발송합니다.**
 
-1. **단일 응답에서 동시 Write 후 split 실행**:
+1. **Dispatch 프롬프트 조립 — feature flag 분기**
+
+   config 확인:
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_builder.fallback_on_error
+   ```
+
+   #### (a) prompt_builder.enabled=true (하이브리드 JSON 경로, 권장)
+   1. `context.md` 본문을 `.gran-maestro/tmp/ctx-{session_id}.md`로 Write (기존 context.md와 동일 내용, tmp 복사본)
+   2. `dispatch-input.json`을 아래 스키마로 Write:
+      ```json
+      {
+        "format": "mst.dispatch",
+        "schema_version": 1,
+        "common": {
+          "topic": "{IDN-NNN 주제}",
+          "constraints": ["..."],
+          "reference_context_file": ".gran-maestro/tmp/ctx-{session_id}.md"
+        },
+        "tasks": [
+          {"role": "{participant.key}", "angle": "{perspective}", "ask": "핵심 질문 1~3개 ≤200자"},
+          {"role": "{participant.key}", "angle": "{perspective}", "ask_file": ".gran-maestro/tmp/task-{role}-ask.md"}
+        ]
+      }
+      ```
+      - `format: "mst.dispatch"`, `schema_version: 1`
+      - `common`: `topic`, `constraints[]`, `reference_context_file: ".gran-maestro/tmp/ctx-{session_id}.md"`
+      - `tasks[]`: 각 participant/critic마다 `{role: "{participant.key}", angle: "{perspective}", ask: "...≤200자"}` 또는 `ask_file: "..."}`
+      - 200자 초과 질문은 `.gran-maestro/tmp/task-{role}-ask.md`로 Write 후 `ask_file` 경로 참조
+   3. CLI 호출:
+      ```bash
+      python3 {PLUGIN_ROOT}/scripts/mst.py prompt build \
+        --input {absolute_path}/dispatch-input.json \
+        --out-dir {absolute_path}/prompts \
+        --sid {session_id}
+      ```
+      (metrics는 자동 기본 경로로 적재됨)
+   4. 성공 시 생성된 `prompts/combined-prompts.txt`를 기존대로 `session split-prompts`로 분할 (기존 3단계 스크립트 호출 유지):
+      ```bash
+      python3 {PLUGIN_ROOT}/scripts/mst.py session split-prompts --dir {absolute_path}/prompts
+      ```
+   5. 실패 시 (exit != 0) → (b) fallback 경로로 자동 전환
+
+   #### (b) prompt_builder.enabled=false 또는 CLI fallback (기존 직접 조립 경로)
    - `context.md` — 공통 배경 컨텍스트 (주제 상세, 코드베이스 현황, 핵심 제약)
    - `prompts/combined-prompts.txt` — N+M개 프롬프트를 `===SPLIT: {filename}===` 구분기호로 구분하여 1개 파일에 모두 포함
      (participant N개 + critic M개, 아래 포맷 그대로 적용)
@@ -156,6 +199,17 @@ PM이 주제와 focus를 분석하여 `participants` 수만큼 관점을 배정�
    python3 {PLUGIN_ROOT}/scripts/mst.py session split-prompts --dir {absolute_path}/prompts
    ```
    → `prompts/{participant.key}-prompt.md` × N, `prompts/critique-{criticKey}-prompt.md` × M 자동 생성
+
+   #### fallback 규약 (MANDATORY)
+   (a) 경로 실행 중 `mst.py prompt build`가 exit 2/3 등 실패 반환 시:
+   - stderr 로그와 구조화 errors JSON을 Read
+   - PM이 지적된 오류를 기반으로 JSON을 1회 수정 후 재시도 (repair 1회)
+   - 재시도 실패 시 즉시 (b) 기존 직접 조립 경로로 전환 (workflow 차단 금지)
+   - `config.prompt_builder.fallback_on_error=false`이면 repair 실패 시 워크플로우를 중단하고 사용자 에스컬레이션
+
+   참고: `mst.py prompt build`는 오류 반환만 담당하며, repair 1회/fallback 전환은 본 스킬(ideation)의 책임이다.
+
+   이후 2번(participant Task 발송)부터는 기존 내용 그대로 진행.
 
 개별 프롬프트 포맷:
 ```markdown

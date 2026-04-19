@@ -87,6 +87,76 @@ def test_prompt_build_valid_inputs(tmp_path):
     assert "LONGER ASK FROM FILE" in combined
 
 
+def test_prompt_build_default_metrics_path(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_context_files(workspace)
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    _write_json(input_path, _valid_payload())
+
+    result = _run_prompt(workspace, "build", "--input", str(input_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 0, result.stderr
+    metrics_file = workspace / ".gran-maestro" / "metrics" / "prompt-builder.ndjson"
+    metric = json.loads(metrics_file.read_text(encoding="utf-8").splitlines()[-1])
+    assert metric["parse_status"] == "ok"
+    assert metric["fallback_reason"] is None
+    assert isinstance(metric["token_count_estimate"], int)
+    assert metric["token_count_estimate"] > 0
+    assert metric["tags"] == []
+
+
+def test_prompt_build_no_metrics_flag(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_context_files(workspace)
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    explicit_metrics = tmp_path / "explicit.ndjson"
+    _write_json(input_path, _valid_payload())
+
+    result = _run_prompt(
+        workspace,
+        "build",
+        "--input",
+        str(input_path),
+        "--out-dir",
+        str(out_dir),
+        "--metrics-file",
+        str(explicit_metrics),
+        "--no-metrics",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (workspace / ".gran-maestro" / "metrics" / "prompt-builder.ndjson").exists()
+    assert not explicit_metrics.exists()
+
+
+def test_prompt_build_records_tags(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_context_files(workspace)
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    metrics_file = tmp_path / "metrics.ndjson"
+    _write_json(input_path, _valid_payload())
+
+    result = _run_prompt(
+        workspace,
+        "build",
+        "--input",
+        str(input_path),
+        "--out-dir",
+        str(out_dir),
+        "--metrics-file",
+        str(metrics_file),
+        "--tag",
+        "baseline",
+    )
+
+    assert result.returncode == 0, result.stderr
+    metric = json.loads(metrics_file.read_text(encoding="utf-8").splitlines()[-1])
+    assert metric["tags"] == ["baseline"]
+
+
 def test_prompt_build_rejects_long_inline_ask(tmp_path):
     workspace = _workspace(tmp_path)
     _seed_context_files(workspace)
@@ -103,6 +173,45 @@ def test_prompt_build_rejects_long_inline_ask(tmp_path):
     assert errors[0]["path"] == "tasks[0].ask"
     assert "exceeds 200 chars" in errors[0]["reason"]
     assert not (out_dir / "combined-prompts.txt").exists()
+
+
+def test_prompt_build_rejects_two_line_ask(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_context_files(workspace)
+    payload = _valid_payload()
+    payload["tasks"] = [{"role": "architect", "ask": "line one\nline two"}]
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    _write_json(input_path, payload)
+
+    result = _run_prompt(workspace, "build", "--input", str(input_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 2
+    errors = json.loads(result.stdout)["errors"]
+    assert any("contains newline" in error["reason"] for error in errors)
+    assert not (out_dir / "combined-prompts.txt").exists()
+
+
+def test_prompt_build_logs_schema_failure_metrics(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_context_files(workspace)
+    payload = _valid_payload()
+    payload.pop("schema_version")
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    _write_json(input_path, payload)
+
+    result = _run_prompt(workspace, "build", "--input", str(input_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 2
+    metric = json.loads(
+        (workspace / ".gran-maestro" / "metrics" / "prompt-builder.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()[-1]
+    )
+    assert metric["parse_status"] == "schema_fail"
+    assert metric["fallback_reason"] == "schema_fail"
+    assert metric["token_count_estimate"] is None
 
 
 def test_prompt_validate_rejects_inline_reference_context(tmp_path):
@@ -219,6 +328,27 @@ def test_prompt_build_missing_reference_file(tmp_path):
     assert result.returncode == 3
     assert ".gran-maestro/tmp/nonexistent_xxx.md" in result.stderr
     assert not (out_dir / "combined-prompts.txt").exists()
+
+
+def test_prompt_build_logs_ref_missing_metrics(tmp_path):
+    workspace = _workspace(tmp_path)
+    payload = _valid_payload()
+    payload["common"]["reference_context_file"] = ".gran-maestro/tmp/nonexistent_xxx.md"
+    input_path = tmp_path / "dispatch.json"
+    out_dir = tmp_path / "prompts"
+    _write_json(input_path, payload)
+
+    result = _run_prompt(workspace, "build", "--input", str(input_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 3
+    metric = json.loads(
+        (workspace / ".gran-maestro" / "metrics" / "prompt-builder.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()[-1]
+    )
+    assert metric["parse_status"] == "ref_missing"
+    assert metric["fallback_reason"] == "ref_missing"
+    assert metric["token_count_estimate"] is None
 
 
 def test_prompt_build_dry_run_metrics(tmp_path):

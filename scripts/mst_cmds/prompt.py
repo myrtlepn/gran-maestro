@@ -118,10 +118,10 @@ def _validate(doc: dict) -> list[dict]:
                     "path": f"{task_path}.ask",
                     "reason": "exceeds 200 chars - use ask_file instead",
                 })
-            if len(ask.splitlines()) >= 3:
+            if "\n" in ask:
                 errors.append({
                     "path": f"{task_path}.ask",
-                    "reason": "contains 3 or more lines - use ask_file instead",
+                    "reason": "ask contains newline — use ask_file for multi-line content",
                 })
             if ask.count('"') >= 3:
                 errors.append({
@@ -264,44 +264,93 @@ def _token_count_estimate(prompts: list[dict]) -> int:
     return max(1, len(text) // 4)
 
 
-def _append_metrics(metrics_file: str, prompts: list[dict], sid: str | None = None) -> int:
-    path = Path(metrics_file)
+def _default_metrics_path() -> Path | None:
+    try:
+        base_dir = _base_dir()
+    except SystemExit:
+        return None
+    return base_dir / "metrics" / "prompt-builder.ndjson"
+
+
+def _metrics_path(args) -> Path | None:
+    if getattr(args, "no_metrics", False):
+        return None
+    metrics_file = getattr(args, "metrics_file", None)
+    if metrics_file:
+        return Path(metrics_file)
+    return _default_metrics_path()
+
+
+def _normalize_tags(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    tags = []
+    for value in values:
+        for tag in value.split(","):
+            tag = tag.strip()
+            if tag:
+                tags.append(tag)
+    return tags
+
+
+def _metrics_payload(
+    parse_status: str,
+    token_count_estimate: int | None,
+    sid: str | None = None,
+    tags: list[str] | None = None,
+) -> dict:
     payload = {
         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "parse_status": "ok",
-        "token_count_estimate": _token_count_estimate(prompts),
-        "fallback_reason": None,
+        "parse_status": parse_status,
+        "token_count_estimate": token_count_estimate,
+        "fallback_reason": None if parse_status == "ok" else parse_status,
+        "tags": _normalize_tags(tags),
     }
     if sid:
         payload["sid"] = sid
+    return payload
 
+
+def _append_metrics(metrics_file: str | Path | None, payload: dict) -> None:
+    if metrics_file is None:
+        return
+    path = Path(metrics_file)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False))
             f.write("\n")
     except OSError as exc:
-        print(f"Error: failed to write metrics file {path}: {exc}", file=sys.stderr)
-        return 1
-    return 0
+        print(f"warning: failed to write metrics file {path}: {exc}", file=sys.stderr)
 
 
-def _load_and_validate(args):
+def _missing_metrics_status(missing: list[tuple[str, str, Path]]) -> str:
+    if any(path_name == "common.reference_context_file" for path_name, _original, _resolved in missing):
+        return "ref_missing"
+    return "ask_file_missing"
+
+
+def _load_and_validate_with_status(args):
     doc, code = _load_doc(args.input)
     if code != 0:
-        return None, code
+        return None, code, "json_decode" if code == 2 else None
 
     errors = _validate(doc)
     if errors:
         _structured_errors(errors)
-        return None, 2
+        return None, 2, "schema_fail"
 
     missing = _missing_files(doc)
     if missing:
         _emit_missing_files(missing)
-        return None, 3
+        return None, 3, _missing_metrics_status(missing)
 
-    return doc, 0
+    return doc, 0, None
+
+
+def _load_and_validate(args):
+    doc, code, _status = _load_and_validate_with_status(args)
+    return doc, code
 
 
 def cmd_prompt_validate(args):
@@ -314,8 +363,14 @@ def cmd_prompt_validate(args):
 
 
 def cmd_prompt_build(args):
-    doc, code = _load_and_validate(args)
+    metrics_file = _metrics_path(args)
+    doc, code, failure_status = _load_and_validate_with_status(args)
     if code != 0:
+        if failure_status:
+            _append_metrics(
+                metrics_file,
+                _metrics_payload(failure_status, None, sid=args.sid, tags=args.tag),
+            )
         return code
 
     _warn_ask_file_wins(doc)
@@ -323,10 +378,10 @@ def cmd_prompt_build(args):
     if code != 0:
         return code
 
-    if args.metrics_file:
-        code = _append_metrics(args.metrics_file, prompts, sid=args.sid)
-        if code != 0:
-            return code
+    _append_metrics(
+        metrics_file,
+        _metrics_payload("ok", _token_count_estimate(prompts), sid=args.sid, tags=args.tag),
+    )
 
     if args.dry_run:
         print(json.dumps(prompts, ensure_ascii=False, indent=2))
@@ -373,6 +428,8 @@ def register(subparsers):
     build.add_argument("--sid")
     build.add_argument("--dry-run", action="store_true")
     build.add_argument("--metrics-file")
+    build.add_argument("--no-metrics", action="store_true")
+    build.add_argument("--tag", action="append", default=[])
 
     validate = prompt_sub.add_parser("validate")
     validate.add_argument("--input", required=True)
