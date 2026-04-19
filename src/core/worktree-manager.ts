@@ -28,6 +28,7 @@ export type WorktreeState =
   | 'stale'
   | 'pre_merge'
   | 'merged'
+  | 'cleaning'
   | 'cleaned'
   | 'create_failed'
   | 'error'
@@ -249,25 +250,35 @@ export class WorktreeManager {
       info?.path ?? resolve(this.rootDirectory, taskId);
     const branch = info?.branch ?? `gran-maestro/${taskId}`;
 
+    if (info) {
+      info.state = 'cleaning';
+      await this.persistMeta(taskId, info);
+    }
+
     try {
       const forceFlag = force ? ' --force' : '';
       const removeCmd = `git worktree remove${forceFlag} "${worktreePath}"`;
-      await runWithTimeout(removeCmd, this.projectRoot, 30_000);
+      const removeResult = await runWithTimeout(removeCmd, this.projectRoot, 30_000);
+      if (!removeResult.success) {
+        throw new Error(`Failed to remove worktree: ${removeResult.stderr}`);
+      }
 
       // Clean up branch
       const branchCmd = `git branch -D "${branch}"`;
-      await runWithTimeout(branchCmd, this.projectRoot, 10_000);
+      const branchResult = await runWithTimeout(branchCmd, this.projectRoot, 10_000);
+      if (!branchResult.success) {
+        throw new Error(`Failed to delete worktree branch: ${branchResult.stderr}`);
+      }
 
       if (info) {
         info.state = 'cleaned';
       }
+      await this.removeMeta(taskId);
     } catch {
       if (info) {
         info.state = 'clean_failed';
         await this.persistMeta(taskId, info);
       }
-    } finally {
-      await this.removeMeta(taskId);
     }
   }
 
@@ -424,7 +435,7 @@ export class WorktreeManager {
     }
 
     return Array.from(this.worktrees.values()).filter(
-      (wt) => !['cleaned', 'create_failed', 'clean_failed'].includes(wt.state),
+      (wt) => !['cleaning', 'cleaned', 'create_failed', 'clean_failed'].includes(wt.state),
     );
   }
 

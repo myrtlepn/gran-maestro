@@ -177,7 +177,9 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      ```
    - **3-3. REQ 브랜치 삭제** (squash merge 후 `-D` 강제 삭제):
      ```bash
-     git -C {PROJECT_ROOT} branch -D "${REQ_BRANCH}"
+     # Step 4의 cleanup helper를 먼저 정의한 뒤 사용한다.
+     # 실패 시 각 태스크 meta를 clean_failed로 기록하고 accept 흐름은 정리 단계로 계속 진행한다.
+     delete_req_branch_safely "${REQ_BRANCH}" "T01" "T02"
      ```
 3.5. **Implementation Decision 기록 (비차단)**:
    - `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`의 `linked_intent` 필드를 읽어 INTENT_ID 취득
@@ -192,12 +194,131 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    > ⚠️ **squash merge 후 브랜치 삭제 규칙**: REQ 브랜치를 `{BASE_BRANCH}`에 squash merge하면 merge ancestor가
    > 생성되지 않으므로 `git branch -d`(soft delete)는 "not fully merged" 오류로 실패합니다.
    > 브랜치 삭제는 `git branch -D`를 사용하세요.
+   > `\|\| true`로 정리 실패를 숨기지 않습니다. 각 호출은 exit code를 수집하고 실패 시
+   > `.gran-maestro/worktrees/{REQ_ID}-{taskId}.meta.json`의 기존 필드를 보존하면서
+   > `state="clean_failed"`와 `clean_failed.{command,exit_code,message,timestamp}`를 기록합니다.
    - `strategy.accept_mode == "file-placement"`이면 worktree가 없을 수 있으므로 worktree 제거 단계는 "없으면 skip"으로 처리한다 (graceful skip, 비차단).
-   - `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path "{worktree_path}" --force || true` — 태스크 worktree 제거 (이미 제거된 경우 오류 무시)
-   - `git -C {PROJECT_ROOT} branch -D "${TASK_BRANCH_PREFIX}01" || true` — 태스크 브랜치 강제 삭제 (`${TASK_BRANCH_PREFIX}02` 등 반복)
-   - `git -C {PROJECT_ROOT} branch -D "${REQ_BRANCH}" || true` — REQ 브랜치 강제 삭제 (기본은 Step 3-3에서 처리, 정리 단계에서는 중복 방지 확인용)
    - 각 태스크를 **독립적으로** 실행 (`&&` 연결 금지 — 하나 실패 시 나머지 미실행됨)
    - 순서: worktree 제거 먼저, 브랜치 삭제 나중
+   ```bash
+record_clean_failed() {
+  local task_id="$1"
+  local exit_code="$2"
+  local failed_command="$3"
+  local error_message="$4"
+
+  python3 - "$PROJECT_ROOT" "$REQ_ID" "$task_id" "$exit_code" "$failed_command" "$error_message" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+req_id = sys.argv[2]
+task_id = sys.argv[3]
+exit_code = int(sys.argv[4])
+failed_command = sys.argv[5]
+error_message = sys.argv[6].strip() or "cleanup command failed"
+now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+meta_path = project_root / ".gran-maestro" / "worktrees" / f"{req_id}-{task_id}.meta.json"
+
+try:
+    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+payload.setdefault("taskId", f"{req_id}-{task_id}")
+payload["state"] = "clean_failed"
+payload["last_activity_at"] = now
+payload["clean_failed"] = {
+    "command": failed_command,
+    "exit_code": exit_code,
+    "message": error_message,
+    "timestamp": now,
+}
+payload["error_message"] = error_message
+payload["exit_code"] = exit_code
+payload["failed_command"] = failed_command
+payload["failed_at"] = now
+
+meta_path.parent.mkdir(parents=True, exist_ok=True)
+tmp_path = Path(str(meta_path) + ".tmp")
+tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp_path, meta_path)
+PY
+}
+
+remove_worktree_safely() {
+  local task_id="$1"
+  local worktree_path="$2"
+  local failed_command output status
+
+  failed_command="python3 ${PLUGIN_ROOT}/scripts/mst.py worktree remove --path ${worktree_path} --force"
+  set +e
+  output=$(python3 "${PLUGIN_ROOT}/scripts/mst.py" worktree remove --path "$worktree_path" --force 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "[mst:accept][WARN] worktree cleanup failed: task=${task_id} status=${status} path=${worktree_path}" >&2
+    record_clean_failed "$task_id" "$status" "$failed_command" "$output"
+  fi
+  return 0
+}
+
+delete_task_branch_safely() {
+  local task_id="$1"
+  local branch="$2"
+  local failed_command output status
+
+  failed_command="git -C ${PROJECT_ROOT} branch -D ${branch}"
+  set +e
+  output=$(git -C "$PROJECT_ROOT" branch -D "$branch" 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "[mst:accept][WARN] task branch cleanup failed: task=${task_id} status=${status} branch=${branch}" >&2
+    record_clean_failed "$task_id" "$status" "$failed_command" "$output"
+  fi
+  return 0
+}
+
+delete_req_branch_safely() {
+  local branch="$1"
+  shift
+  local failed_command output status task_id
+
+  failed_command="git -C ${PROJECT_ROOT} branch -D ${branch}"
+  set +e
+  output=$(git -C "$PROJECT_ROOT" branch -D "$branch" 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "[mst:accept][WARN] request branch cleanup failed: status=${status} branch=${branch}" >&2
+    for task_id in "$@"; do
+      record_clean_failed "$task_id" "$status" "$failed_command" "$output"
+    done
+  fi
+  return 0
+}
+
+cleanup_task_safely() {
+  local task_id="$1"
+  local worktree_path="$2"
+  local task_branch="$3"
+
+  remove_worktree_safely "$task_id" "$worktree_path"
+  delete_task_branch_safely "$task_id" "$task_branch"
+}
+```
+   - 태스크별 실행 예시:
+     ```bash
+     cleanup_task_safely "T01" "{PROJECT_ROOT}/.gran-maestro/worktrees/REQ-NNN-T01" "${TASK_BRANCH_PREFIX}01"
+     cleanup_task_safely "T02" "{PROJECT_ROOT}/.gran-maestro/worktrees/REQ-NNN-T02" "${TASK_BRANCH_PREFIX}02"
+     delete_req_branch_safely "${REQ_BRANCH}" "T01" "T02"
+     ```
 4.5. **Pending Stitch 화면 재확인**:
    - `request.json`의 `stitch_screens` 배열에서 `status: "pending"` 항목 확인
    - 없으면 이 단계 스킵
