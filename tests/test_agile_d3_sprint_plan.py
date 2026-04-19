@@ -38,3 +38,20 @@ def test_plan_skill_has_redirect_loop_spec():
     assert "재지시" in text or "redirect" in text.lower()
     assert "max_escalation_retries" in text
     assert "known-issues" in text or "known_issues" in text
+
+
+def test_plan_skill_requires_easy_option_labels():
+    skill_path = PROJECT_ROOT / "skills" / "plan" / "SKILL.md"
+    text = skill_path.read_text(encoding="utf-8")
+    assert "선택지 표기 형식" in text
+    assert "알파벳 또는 숫자만" in text
+    assert "금지 예시: `α`, `β`, `γ`, `i`, `ii`, `iii`, `I`, `II`, `III`" in text
+
+
+def test_agile_plan_skill_requires_easy_option_labels():
+    skill_path = PROJECT_ROOT / "skills" / "agile-plan" / "SKILL.md"
+    text = skill_path.read_text(encoding="utf-8")
+    assert "질문/선택지 표기 규칙" in text
+    assert "알파벳 또는 숫자만" in text
+    assert "그리스 문자·로마 숫자 금지" in text
+    assert "[objective 후보] A) {후보1} B) {후보2} C) {후보3}" in text

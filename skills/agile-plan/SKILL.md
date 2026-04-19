@@ -116,6 +116,12 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 
 #### 0.5.2 confidence < 0.8 (1회 확인 질문)
 
+질문/선택지 표기 규칙 (MANDATORY):
+- 사용자가 직접 타이핑하기 쉬운 **알파벳 또는 숫자만** 사용한다.
+- 허용 예시: `A`, `B`, `C`, `1`, `2`, `3`, `A1`, `B2`
+- 금지 예시: `α`, `β`, `γ`, `i`, `ii`, `iii`, `I`, `II`, `III`
+- objective 후보를 본문에 나열할 때도 동일 규칙을 적용한다.
+
 1. AskUserQuestion으로 아래 확인 질문을 **1회만** 제시한다.
    - question: `이 요청을 objective 생성으로 진행할까요?`
    - options:
@@ -131,7 +137,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
 
 1. 사용자가 실제로 요청한 동작(답변·설명·소규모 조사 등)을 먼저 수행한다.
 2. 수행 결과를 바탕으로 **objective로 발전시킬 수 있는 후보 1~3개**를 선제시한다.
-   - 형식: `[objective 후보] 1) {후보1} 2) {후보2} 3) {후보3}`
+   - 형식: `[objective 후보] A) {후보1} B) {후보2} C) {후보3}` 또는 `[objective 후보] 1) {후보1} 2) {후보2} 3) {후보3}`
+   - 후보 표기는 알파벳/숫자만 사용한다. 그리스 문자·로마 숫자 금지.
    - 후보가 도출되지 않으면 "objective 후보가 도출되지 않았습니다. 다른 스킬(mst:plan, mst:request 등) 사용을 검토해주세요" 출력 후 종료한다.
 3. AskUserQuestion으로 후보 중 선택받거나 Other로 직접 objective 입력받아 Step 1A로 진입한다. "종료" 선택지를 포함한다.
 4. 선택된 주제를 Step 1A JTBD Q&A 초기 컨텍스트로 전달한다.
