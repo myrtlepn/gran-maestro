@@ -150,6 +150,78 @@ def _normalize_target_path(path_value) -> Path:
     return Path(path_value).expanduser().resolve(strict=False)
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _worktree_task_id_from_path(path_value) -> str | None:
+    raw_path = _coerce_nonempty_str(path_value)
+    if not raw_path:
+        return None
+    return _coerce_nonempty_str(Path(raw_path).expanduser().name)
+
+
+def _worktree_meta_path(project_root: Path, task_id: str) -> Path:
+    return project_root / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+
+
+def _write_worktree_meta_atomic(meta_path: Path, meta_data: dict) -> None:
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = meta_path.with_name(f"{meta_path.name}.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, meta_path)
+
+
+def _persist_active_worktree_meta(project_root: Path, path_value, branch: str) -> None:
+    task_id = _worktree_task_id_from_path(path_value)
+    if not task_id:
+        return
+
+    meta_path = _worktree_meta_path(project_root, task_id)
+    existing = _common.load_json(meta_path)
+    now = _utc_now_iso()
+    created_at = None
+    if isinstance(existing, dict):
+        created_at = _coerce_nonempty_str(existing.get("created_at"))
+
+    meta_data = {
+        "taskId": task_id,
+        "path": str(_normalize_target_path(path_value)),
+        "branch": branch,
+        "state": "active",
+        "created_at": created_at or now,
+        "last_activity_at": now,
+    }
+    _write_worktree_meta_atomic(meta_path, meta_data)
+
+
+def _mark_worktree_meta_cleaned(project_root: Path, path_value) -> None:
+    task_id = _worktree_task_id_from_path(path_value)
+    if not task_id:
+        return
+
+    meta_path = _worktree_meta_path(project_root, task_id)
+    if not meta_path.exists():
+        return
+
+    existing = _common.load_json(meta_path)
+    now = _utc_now_iso()
+    if isinstance(existing, dict):
+        meta_data = dict(existing)
+    else:
+        meta_data = {}
+
+    meta_data.setdefault("taskId", task_id)
+    meta_data.setdefault("path", str(_normalize_target_path(path_value)))
+    meta_data.setdefault("branch", "")
+    meta_data.setdefault("created_at", now)
+    meta_data["state"] = "cleaned"
+    meta_data["last_activity_at"] = now
+    _write_worktree_meta_atomic(meta_path, meta_data)
+
+
 def _resolve_master_project_root() -> Path:
     project_root = _project_root()
     result = subprocess.run(
@@ -268,6 +340,12 @@ def cmd_worktree_create(args):
         print(result.stderr.strip() or result.stdout.strip() or "git worktree add failed", file=sys.stderr)
         return result.returncode or 1
 
+    try:
+        _persist_active_worktree_meta(project_root, args.path, branch)
+    except OSError as exc:
+        print(f"Error: failed to write worktree meta ({exc})", file=sys.stderr)
+        return 1
+
     copy_result = _copy_worktree_support_files(source_root, worktree_path)
     if copy_result != 0:
         return copy_result
@@ -350,6 +428,12 @@ def cmd_worktree_remove(args):
     if prune_result.returncode != 0:
         print(prune_result.stderr.strip() or prune_result.stdout.strip() or "git worktree prune failed", file=sys.stderr)
         return prune_result.returncode or 1
+
+    try:
+        _mark_worktree_meta_cleaned(project_root, args.path)
+    except OSError as exc:
+        print(f"Error: failed to update worktree meta ({exc})", file=sys.stderr)
+        return 1
 
     print(str(worktree_path))
     return 0
@@ -686,6 +770,31 @@ def _boundary_task_ids(request_data: dict, requested_task_id: str | None) -> lis
     return task_ids
 
 
+def _all_tasks_committed_or_done(request_data: dict) -> bool:
+    tasks = request_data.get("tasks") or []
+    if not isinstance(tasks, list) or not tasks:
+        return False
+
+    for task in tasks:
+        if not isinstance(task, dict):
+            return False
+        status = str(task.get("status") or "").strip().lower()
+        if status not in {"committed", "done"}:
+            return False
+    return True
+
+
+def _all_task_metas_missing(req_id: str, task_ids: list[str]) -> bool:
+    if not task_ids:
+        return False
+
+    for task_id in task_ids:
+        meta_path = _boundary_meta_path(req_id, task_id)
+        if meta_path.exists():
+            return False
+    return True
+
+
 def _boundary_retry_possible(violation: str | None, detected_base: str | None, state: str | None) -> bool:
     if violation == "worktree_missing":
         return detected_base is not None
@@ -785,6 +894,17 @@ def _check_exit_boundary(
             _boundary_retry_possible(violation, detected_base, None),
             detected_base,
             f"request status is not done: {status or '<empty>'}",
+            owner_ppid,
+            current_ppid,
+        ), 0
+
+    if _all_tasks_committed_or_done(request_data) and _all_task_metas_missing(req_id, task_ids):
+        return _boundary_payload(
+            True,
+            None,
+            False,
+            detected_base,
+            "legacy_no_meta: all tasks committed and no meta files (legacy CLI path)",
             owner_ppid,
             current_ppid,
         ), 0

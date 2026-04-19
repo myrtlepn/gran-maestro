@@ -102,3 +102,9 @@ Claude Code의 PreToolUse hook을 사용하면 매 Skill 실행 전 자동으로
 
 - 훅 오류는 Claude Code 실행에 영향 없음 (모든 예외 삼킴)
 - `archive.auto_archive_on_complete=false`로 설정하면 훅이 실행되어도 정리하지 않음
+
+## Worktree meta.json 스키마
+
+워크트리 lifecycle 메타데이터는 `{PROJECT_ROOT}/.gran-maestro/worktrees/{taskId}.meta.json`에 저장되며 Python CLI와 TypeScript `WorktreeManager`가 공유하는 JSON 스키마를 따른다. 필드는 작업 식별자인 `taskId`, 워크트리 절대경로 `path`, backing git 브랜치 `branch`, lifecycle 상태 `state`, 생성 시각 `created_at`, 마지막 활동 시각 `last_activity_at`으로 구성된다. 시각 값은 UTC ISO 8601 문자열이다.
+
+공유 state enum은 `active`, `cleaning`, `cleaned`, `clean_failed`, `conflict`, `merged`를 포함한다. Python CLI는 `worktree create`에서 `git worktree add` 성공 직후 `state="active"` 메타를 생성하거나 기존 `created_at`을 보존하며 `last_activity_at`을 갱신하고, `worktree remove`에서 `git worktree remove` 및 `git worktree prune` 성공 직후 기존 메타를 삭제하지 않고 `state="cleaned"`와 새 `last_activity_at`으로 갱신한다.
