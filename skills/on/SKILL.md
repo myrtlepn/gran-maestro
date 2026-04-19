@@ -81,7 +81,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      " 2>/dev/null || echo "")
      ```
    - **skip 조건**: `SAVED_BRANCH`가 비어있지 않고 `SAVED_BRANCH != "main"` 이면:
-     → `"✓ base_branch: {SAVED_BRANCH} (기존 설정 유지)"` 출력 후 Step 4로 진행.
+     → `"✓ base_branch: {SAVED_BRANCH} (기존 설정 유지)"` 출력 후 Step 3.55로 진행.
 
      > ℹ️ `"main"`은 templates/defaults/config.json의 기본값이므로 "미설정"과 동일하게 취급한다.
      > Step 3에서 config.json이 처음 복사된 경우에도 SAVED_BRANCH는 `"main"`이 되어 질문 조건에 진입한다.
@@ -114,7 +114,71 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
      EOF
      ```
    - 완료 메시지: `"✓ base_branch: {BASE_BRANCH_VALUE}"`
-3.6. **MANDATORY (config 변경 후처리)**: Step 3/3.5에서 `config.json`이 생성/수정된 직후 아래 명령을 실행한다.
+3.55. **protected_branches 설정 마법사**:
+   - 기본값은 `["main", "master", "release/*"]`이다.
+   - 현재 `worktree.protected_branches` 값 읽기 및 표시:
+     ```bash
+     CURRENT_PROTECTED_BRANCHES_JSON=$(python3 - << EOF
+     import json
+     default = ["main", "master", "release/*"]
+     try:
+         d = json.load(open('{PROJECT_ROOT}/.gran-maestro/config.json'))
+         v = d.get("worktree", {}).get("protected_branches", default)
+         if not (isinstance(v, list) and all(isinstance(item, str) for item in v)):
+             v = default
+     except Exception:
+         v = default
+     print(json.dumps(v, ensure_ascii=False))
+     EOF
+     )
+     echo "현재 protected_branches: ${CURRENT_PROTECTED_BRANCHES_JSON}"
+     ```
+   - 사용자에게 현재 값을 그대로 유지하거나 편집할지 묻는다.
+     - Enter 또는 기본값 유지 선택 시: `PROTECTED_BRANCHES_JSON=${CURRENT_PROTECTED_BRANCHES_JSON}`로 두고 `config.json`을 변경하지 않고 다음 단계로 진행한다.
+     - 편집 입력은 쉼표 구분 문자열(`main,master,release/*`) 또는 JSON 배열 문자열(`["main", "master", "release/*"]`) 둘 다 허용한다.
+     - 편집 성공 시 `PROTECTED_BRANCHES_JSON`은 파싱 결과를 `json.dumps(value, ensure_ascii=False)`로 직렬화한 JSON 배열 문자열이다.
+   - 편집 입력 파싱 규칙:
+     ```python
+     import json
+
+     default = ["main", "master", "release/*"]
+
+     def parse_protected_branches(raw):
+         raw = raw.strip()
+         if not raw:
+             return None
+         if raw.startswith("["):
+             parsed = json.loads(raw)
+         else:
+             parsed = [item.strip() for item in raw.split(",")]
+         if not isinstance(parsed, list):
+             raise ValueError("protected_branches must be a list")
+         parsed = [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
+         if not parsed:
+             raise ValueError("protected_branches must include at least one branch pattern")
+         return parsed
+     ```
+     - 파싱 실패 시 사용자에게 재입력을 요청한다.
+     - 파싱 실패가 3회 발생하면 `protected_branches_value = default`로 기본값 복구 후 저장한다.
+   - 편집 또는 3회 실패 기본값 복구 시 `config.json`에 반영 (임시파일 + rename 패턴으로 원자적 쓰기):
+     ```bash
+     python3 - << EOF
+     import json, os
+     path = "{PROJECT_ROOT}/.gran-maestro/config.json"
+     protected_branches_value = {PROTECTED_BRANCHES_JSON}
+     try:
+         d = json.load(open(path))
+     except Exception:
+         d = {}
+     d.setdefault("worktree", {})["protected_branches"] = protected_branches_value
+     tmp = path + ".tmp"
+     with open(tmp, "w") as f:
+         json.dump(d, f, indent=2, ensure_ascii=False)
+     os.replace(tmp, path)
+     EOF
+     ```
+   - 완료 메시지: `"✓ protected_branches: {PROTECTED_BRANCHES_JSON}"`
+3.6. **MANDATORY (config 변경 후처리)**: Step 3/3.5/3.55에서 `config.json`이 생성/수정된 직후 아래 명령을 실행한다.
    ```bash
    python3 {PLUGIN_ROOT}/scripts/mst.py config resolve || echo "[warning] config.resolved.json 갱신 실패. 수동으로 'python3 scripts/mst.py config resolve'를 실행하세요." >&2
    ```
