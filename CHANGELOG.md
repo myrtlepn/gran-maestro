@@ -4,6 +4,17 @@
 
 ---
 
+## [0.59.2] — 2026-04-19
+
+### 개선
+
+- `mst:stitch` CLI(`stitch-sdk.mjs`)가 `generate --save-dir <dir> --screen-name <slug>` 옵션을 받아 html/image/meta 3파일을 atomic하게 저장합니다. 스킬을 우회해 CLI를 직접 쓰더라도 산출물이 디스크에 남습니다.
+- `list-screens`가 Stitch SDK의 빈 응답을 받았을 때 MCP `list_screens` fallback을 자동 시도합니다. canvas에만 존재하는 화면이 누락되는 문제가 줄어듭니다.
+- `@google/stitch-sdk`가 설치되어 있지 않으면 CLI가 `install_required:true` JSON과 exit code 2를 반환하고, `mst:stitch` 스킬이 설치 동의 AskUserQuestion으로 안내합니다.
+- `mst:stitch` 스킬 상단에 Bash 직접 orchestration 금지 Gate와 Anti-Rationalization Checklist를 추가했습니다.
+
+---
+
 ## [0.59.1] — 2026-04-19
 
 ### 새 기능
