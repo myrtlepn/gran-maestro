@@ -39,6 +39,13 @@ def _resolve_owner_ppid() -> int:
     return os.getppid()
 
 
+def _snapshot_session_id() -> str:
+    ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
+    if ppid_env:
+        return ppid_env
+    return str(os.getppid())
+
+
 def _resolve_owner_session_id(ppid: int) -> Optional[str]:
     if not _common.BASE_DIR:
         return None
@@ -223,12 +230,14 @@ def cmd_state_set(args):
     from scripts._skill_state import set_snapshot
 
     state_base_dir = _skill_state_base_dir()
+    session_id = _snapshot_session_id()
     data = set_snapshot(
         state_base_dir,
         skill=args.skill,
         step=args.step,
         total=args.total,
         return_to=args.return_to,
+        session_id=session_id,
     )
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
@@ -236,7 +245,7 @@ def cmd_state_set(args):
 def cmd_state_get(args):
     from scripts._skill_state import get_snapshot
 
-    data = get_snapshot(_skill_state_base_dir())
+    data = get_snapshot(_skill_state_base_dir(), session_id=_snapshot_session_id())
     if data is None:
         print("스냅샷 없음")
         return 0
@@ -246,7 +255,7 @@ def cmd_state_get(args):
 def cmd_state_clear(args):
     from scripts._skill_state import clear_snapshot
 
-    clear_snapshot(_skill_state_base_dir())
+    clear_snapshot(_skill_state_base_dir(), session_id=_snapshot_session_id())
     print("스냅샷 초기화 완료")
     return 0
 

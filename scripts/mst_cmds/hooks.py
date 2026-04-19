@@ -29,6 +29,14 @@ from scripts.mst_cmds._common import (
     load_json,
 )
 
+
+def _snapshot_session_id() -> str:
+    ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
+    if ppid_env:
+        return ppid_env
+    return str(os.getppid())
+
+
 def cmd_hooks_post_skill(args):
     try:
         payload = json.loads(sys.stdin.read())
@@ -188,7 +196,7 @@ def _hooks_post_skill_continuation(completed_skill: str) -> None:
         from scripts._skill_state import load_snapshot
 
         state_base_dir = _skill_state_base_dir()
-        snapshot = load_snapshot(state_base_dir)
+        snapshot = load_snapshot(state_base_dir, session_id=_snapshot_session_id())
         if snapshot is None:
             return
 

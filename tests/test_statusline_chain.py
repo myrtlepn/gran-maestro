@@ -4,6 +4,7 @@ import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -41,12 +42,14 @@ def _iso_ago(**kwargs) -> str:
     return (datetime.now(timezone.utc) - timedelta(**kwargs)).isoformat()
 
 
-def _snapshot_path(workspace: Path) -> Path:
-    return workspace / ".gran-maestro" / "state" / "default" / "snapshot.json"
+def _snapshot_path(workspace: Path, session_id: Optional[str] = None) -> Path:
+    if session_id is None:
+        session_id = str(os.getpid())
+    return workspace / ".gran-maestro" / "state" / session_id / "snapshot.json"
 
 
-def _write_snapshot(workspace: Path, payload: dict) -> Path:
-    path = _snapshot_path(workspace)
+def _write_snapshot(workspace: Path, payload: dict, session_id: Optional[str] = None) -> Path:
+    path = _snapshot_path(workspace, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
@@ -95,6 +98,34 @@ def test_chain_render_from_snapshot(tmp_path):
     last_line = _last_line(result)
 
     assert re.fullmatch(r"plan\(8m\) > request\(15m\) > codex\([2-9]s\)", last_line), last_line
+
+
+def test_snapshot_path_is_scoped_to_current_ppid(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:plan",
+            "enteredAt": _iso_ago(seconds=2),
+            "skillStack": [],
+        },
+        session_id=str(os.getpid()),
+    )
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:request",
+            "enteredAt": _iso_ago(seconds=2),
+            "skillStack": [],
+        },
+        session_id="11111",
+    )
+
+    result = _run_statusline(workspace)
+    last_line = _last_line(result)
+
+    assert "plan(" in last_line
+    assert "request" not in last_line
 
 
 @pytest.mark.parametrize(
@@ -185,3 +216,21 @@ def test_bad_snapshot_preserves_state_then_transcript_fallback_order(tmp_path):
     last_line = _last_line(result)
 
     assert re.fullmatch(r"state\(6m\)", last_line), last_line
+
+
+def test_default_snapshot_path_is_used_as_graceful_fallback(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:request",
+            "enteredAt": _iso_ago(seconds=2),
+            "skillStack": [],
+        },
+        session_id="default",
+    )
+
+    result = _run_statusline(workspace)
+    last_line = _last_line(result)
+
+    assert re.fullmatch(r"request\([2-9]s\)", last_line), last_line

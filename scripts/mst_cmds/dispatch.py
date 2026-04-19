@@ -193,7 +193,8 @@ def cmd_dispatch_build(args):
     register_cmd = (
         f"python3 {q(str(mst_script))} dispatch register "
         f"--task-id {q(task_id)} --pid $$ --provider {q(provider)} "
-        f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))}"
+        f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))} "
+        f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}"'
     )
 
     if provider == "codex":
@@ -268,6 +269,14 @@ def cmd_dispatch_register(args):
         "worktree_dir": str(args.worktree_dir),
         "last_heartbeat": now,
     }
+    if getattr(args, "started_by_pid", None) is not None:
+        try:
+            payload["started_by_pid"] = int(args.started_by_pid)
+        except (TypeError, ValueError):
+            print(
+                f"[dispatch] warning: invalid started_by_pid skipped: {args.started_by_pid}",
+                file=sys.stderr,
+            )
     save_json(_dispatch_state_path(task_id), payload)
     print(json.dumps(payload, ensure_ascii=False))
     return 0
@@ -407,6 +416,7 @@ def register(subparsers):
     register_cmd.add_argument("--skill", default="")
     register_cmd.add_argument("--model", required=True)
     register_cmd.add_argument("--worktree-dir", required=True)
+    register_cmd.add_argument("--started-by-pid")
 
     heartbeat = dispatch_sub.add_parser("heartbeat")
     heartbeat.add_argument("--task-id", required=True)

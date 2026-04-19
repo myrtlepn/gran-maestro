@@ -10,9 +10,19 @@ def timestamp_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
+def _safe_session_id(value: str) -> str:
+    cleaned = []
+    for char in value:
+        if char.isalnum() or char in ("-", "_"):
+            cleaned.append(char)
+        else:
+            cleaned.append("_")
+    return "".join(cleaned) or "default"
+
+
 def snapshot_path(base_dir: Path, session_id: str = "default") -> Path:
     """Return snapshot.json path for a session."""
-    return base_dir / "state" / session_id / "snapshot.json"
+    return base_dir / "state" / _safe_session_id(session_id) / "snapshot.json"
 
 
 def snapshots_dir(base_dir: Path) -> Path:
@@ -82,16 +92,6 @@ def _parse_return_to(value: Optional[str]) -> Optional[Dict[str, Any]]:
         except (ValueError, OverflowError):
             pass
     return parsed
-
-
-def _safe_session_id(value: str) -> str:
-    cleaned = []
-    for char in value:
-        if char.isalnum() or char in ("-", "_"):
-            cleaned.append(char)
-        else:
-            cleaned.append("_")
-    return "".join(cleaned) or "default"
 
 
 def _snapshot_file_suffix() -> str:
@@ -250,7 +250,10 @@ def set_snapshot(
 
 
 def get_snapshot(base_dir: Path, session_id: str = "default") -> Optional[Dict[str, Any]]:
-    return load_snapshot(base_dir, session_id)
+    snapshot = load_snapshot(base_dir, session_id)
+    if snapshot is not None or session_id == "default":
+        return snapshot
+    return load_snapshot(base_dir, "default")
 
 
 def clear_snapshot(base_dir: Path, session_id: str = "default") -> None:

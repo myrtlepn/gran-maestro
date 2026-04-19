@@ -5,6 +5,7 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 BACKUP_FILE="${HOME}/.claude/mst-statusline-backup.json"
 INPUT_JSON="$(cat || true)"
+CURRENT_STATUSLINE_PPID="${MST_STATE_PPID:-$PPID}"
 
 DEFAULT_HUD_COMMAND="$(cat <<'CMD'
 bash -c 'plugin_dir=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null | sort -t/ -k$(echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/claude-hud/claude-hud/" | tr "/" "\n" | wc -l)n | tail -1); exec "/opt/homebrew/bin/node" "${plugin_dir}/dist/index.js"'
@@ -48,7 +49,7 @@ if command:
 
 resolve_state_file() {
   local by_ppid
-  by_ppid="${MST_TMP}/mst-state-${PPID}.json"
+  by_ppid="${MST_TMP}/mst-state-${CURRENT_STATUSLINE_PPID}.json"
   if [ -f "$by_ppid" ]; then
     printf '%s' "$by_ppid"
     return 0
@@ -80,7 +81,7 @@ save_transcript_bridge() {
   local bridge_file tmp_file
   [ -n "$transcript_path" ] || return 0
   mkdir -p "$MST_TMP"
-  bridge_file="${MST_TMP}/mst-transcript-${PPID}.path"
+  bridge_file="${MST_TMP}/mst-transcript-${CURRENT_STATUSLINE_PPID}.path"
   tmp_file="${bridge_file}.tmp.$$"
   if printf '%s' "$transcript_path" > "$tmp_file" 2>/dev/null; then
     mv "$tmp_file" "$bridge_file" 2>/dev/null || rm -f "$tmp_file"
@@ -556,23 +557,35 @@ def build_dispatch_node_group(run_dir):
         if not os.path.isfile(path):
             continue
 
-        task_id = os.path.splitext(name)[0]
-        provider = "unknown"
-        heartbeat = ""
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
         except Exception:
             payload = None
 
-        if isinstance(payload, dict):
-            task_id = clean_text(payload.get("task_id")) or task_id
-            provider = clean_text(payload.get("provider"))
-            if not provider:
-                provider = clean_skill(payload.get("skill"), strip_namespace=True) or "unknown"
-            value = payload.get("last_heartbeat")
-            if isinstance(value, str):
-                heartbeat = value
+        if not isinstance(payload, dict):
+            continue
+
+        started_by_pid = payload.get("started_by_pid")
+        if isinstance(started_by_pid, bool):
+            continue
+        try:
+            started_by_pid = int(started_by_pid)
+        except (TypeError, ValueError):
+            continue
+        if CURRENT_PPID is None or started_by_pid != CURRENT_PPID:
+            continue
+        if clean_text(payload.get("phase")).lower() != "running":
+            continue
+
+        task_id = clean_text(payload.get("task_id")) or os.path.splitext(name)[0]
+        provider = clean_text(payload.get("provider"))
+        if not provider:
+            provider = clean_skill(payload.get("skill"), strip_namespace=True) or "unknown"
+        heartbeat = ""
+        value = payload.get("last_heartbeat")
+        if isinstance(value, str):
+            heartbeat = value
 
         items.append((task_id, f"{provider}:{task_id}({format_elapsed(heartbeat)})"))
 
@@ -637,9 +650,12 @@ HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || tr
 STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
-SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
+SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${CURRENT_STATUSLINE_PPID}/snapshot.json"
+if [ ! -f "$SNAPSHOT_PATH" ] && [ -f "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json" ]; then
+  SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
+fi
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
+MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"

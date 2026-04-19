@@ -38,6 +38,7 @@ def _write_dispatch_state(path: Path, task_id: str, heartbeat: datetime) -> None
         "provider": "codex",
         "model": "gpt-test",
         "last_heartbeat": heartbeat.isoformat(),
+        "started_by_pid": os.getpid(),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 

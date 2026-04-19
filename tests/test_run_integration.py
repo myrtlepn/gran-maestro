@@ -2,6 +2,7 @@
 # - 현재 구현에서 `dispatch list`는 `--json` 플래그를 지원하지 않아 `--format json`을 사용해야 한다.
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -11,19 +12,30 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST = REPO_ROOT / "scripts" / "mst.py"
+STATUSLINE_SCRIPT = REPO_ROOT / "scripts" / "mst-statusline.sh"
 
 
-def _run_mst_bg(workspace, *args):
+def _test_env(*, mst_state_ppid=None):
+    env = dict(os.environ)
+    if mst_state_ppid is None:
+        env.pop("MST_STATE_PPID", None)
+    else:
+        env["MST_STATE_PPID"] = str(mst_state_ppid)
+    return env
+
+
+def _run_mst_bg(workspace, *args, env=None):
     """wrapper를 백그라운드로 실행. Popen 반환."""
     return subprocess.Popen(
         [sys.executable, str(MST), *args],
         cwd=str(workspace),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
 
 
-def _run_mst(workspace, *args, timeout=30):
+def _run_mst(workspace, *args, timeout=30, env=None):
     return subprocess.run(
         [sys.executable, str(MST), *args],
         cwd=str(workspace),
@@ -31,7 +43,43 @@ def _run_mst(workspace, *args, timeout=30):
         text=True,
         check=False,
         timeout=timeout,
+        env=env,
     )
+
+
+def _run_statusline(workspace, *, mst_state_ppid):
+    env = _test_env(mst_state_ppid=mst_state_ppid)
+    home_dir = workspace / "home"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    env["HOME"] = str(home_dir)
+    env["CLAUDE_CONFIG_DIR"] = str(home_dir / ".claude")
+
+    return subprocess.run(
+        ["bash", str(STATUSLINE_SCRIPT)],
+        cwd=str(workspace),
+        input="{}",
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
+def _read_run_state(workspace, task_id):
+    state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    return json.loads(state_file.read_text(encoding="utf-8"))
+
+
+def _wait_for_run_phase(workspace, task_id, phase, *, timeout=5):
+    deadline = time.time() + timeout
+    state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    while time.time() < deadline:
+        if state_file.exists():
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            if state.get("phase") == phase:
+                return state
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for {task_id} phase={phase}")
 
 
 def test_wrapper_e2e_happy_path(tmp_path):
@@ -74,6 +122,133 @@ def test_wrapper_e2e_happy_path(tmp_path):
 
     traces = list((task_dir / "traces").glob("codex-integration-*.md"))
     assert len(traces) == 1, f"expected 1 trace file, got {len(traces)}"
+
+
+def test_run_records_started_by_pid_from_env(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+
+    result = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "RUN-TEST-ENV",
+        "--provider",
+        "codex",
+        "--model",
+        "test",
+        "--log-dir",
+        str(task_dir),
+        "--",
+        "bash",
+        "-c",
+        "sleep 0.1",
+        env=_test_env(mst_state_ppid="12345"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _read_run_state(workspace, "RUN-TEST-ENV")["started_by_pid"] == 12345
+
+
+def test_run_records_started_by_pid_from_parent_when_env_missing(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+
+    result = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "RUN-TEST-FALLBACK",
+        "--provider",
+        "codex",
+        "--model",
+        "test",
+        "--log-dir",
+        str(task_dir),
+        "--",
+        "bash",
+        "-c",
+        "sleep 0.1",
+        env=_test_env(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _read_run_state(workspace, "RUN-TEST-FALLBACK")["started_by_pid"] == os.getpid()
+
+
+def test_run_statusline_shows_live_wrapper_dispatch_for_current_ppid(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    current_ppid = str(os.getpid())
+
+    proc = _run_mst_bg(
+        workspace,
+        "run",
+        "--task-id",
+        "RUN-TEST-HUD",
+        "--provider",
+        "codex",
+        "--model",
+        "test",
+        "--log-dir",
+        str(task_dir),
+        "--",
+        "bash",
+        "-c",
+        "sleep 10",
+        env=_test_env(mst_state_ppid=current_ppid),
+    )
+    try:
+        state = _wait_for_run_phase(workspace, "RUN-TEST-HUD", "running")
+        assert state["started_by_pid"] == int(current_ppid)
+
+        statusline = _run_statusline(workspace, mst_state_ppid=current_ppid)
+        assert statusline.returncode == 0, statusline.stderr
+        last_line = [line for line in statusline.stdout.splitlines() if line.strip()][-1]
+        assert "RUN-TEST-HUD" in last_line
+        assert "MST idle" not in last_line
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+def test_run_started_by_pid_invalid_env_falls_back_to_parent(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+
+    result = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "RUN-TEST-INVALID",
+        "--provider",
+        "codex",
+        "--model",
+        "test",
+        "--log-dir",
+        str(task_dir),
+        "--",
+        "bash",
+        "-c",
+        "sleep 0.1",
+        env=_test_env(mst_state_ppid="not-a-number"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _read_run_state(workspace, "RUN-TEST-INVALID")["started_by_pid"] == os.getpid()
 
 
 def test_heartbeat_keeps_alive_during_run(tmp_path):

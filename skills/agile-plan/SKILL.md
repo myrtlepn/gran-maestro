@@ -15,7 +15,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/objective.md` (신규 생성)
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/details/*.md` (신규 생성)
-- `{PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json` (`mst.py state set`으로 기록되는 상태 파일)
+- `{PROJECT_ROOT}/.gran-maestro/state/${PPID}/snapshot.json` (`MST_STATE_PPID="${PPID}"`가 주입된 state 명령으로 기록되는 상태 파일; `state/default/snapshot.json`은 legacy fallback 전용)
 
 그 외 모든 경로에 대한 Write/Edit 사용은 금지합니다.
 
@@ -44,7 +44,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 - `templates/objective.md` 포맷으로 objective.md 저장 완료
 - `mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 완료
-- `mst.py state set --skill agile-plan --step 3 --total 3 [--return-to ...]` 기록 완료
+- `MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set --skill agile-plan --step 3 --total 3 [--return-to ...]` 기록 완료
 - `--return-to`가 있으면 stop-hook continuation guard로 상위 스킬 복귀(re-feed), 없으면 독립 실행을 종료하고 `--resume` 안내
 
 ### 금지 패턴
@@ -665,7 +665,7 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 objective 저장 후 반드시 상태 스냅샷을 기록한다:
 
 ```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py state set \
+MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set \
   --skill agile-plan \
   --step 3 \
   --total 3 \

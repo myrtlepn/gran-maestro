@@ -5,6 +5,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +53,7 @@ def _iso_ago(**kwargs) -> str:
 
 
 def _write_snapshot(workspace: Path, payload: dict) -> Path:
-    path = workspace / ".gran-maestro" / "state" / "default" / "snapshot.json"
+    path = workspace / ".gran-maestro" / "state" / str(os.getpid()) / "snapshot.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
@@ -64,19 +65,23 @@ def _write_run(
     provider: str,
     heartbeat: str,
     *,
+    phase: str = "running",
     skill: str = "",
+    started_by_pid: Optional[int] = os.getpid(),
 ) -> None:
     path = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "task_id": task_id,
         "pid": 12345,
-        "phase": "running",
+        "phase": phase,
         "provider": provider,
         "model": "test-model",
         "worktree_dir": str(workspace),
         "last_heartbeat": heartbeat,
     }
+    if started_by_pid is not None:
+        payload["started_by_pid"] = started_by_pid
     if skill:
         payload["skill"] = skill
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -184,6 +189,31 @@ def test_parallel_group_node(tmp_path):
         r"plan\(8m\) > request\(2m\) > \[codex:REQ-700-T01\(2m\), gemini:REQ-700-T02\(3m\)\]",
         last_line,
     ), last_line
+
+
+def test_dispatch_group_keeps_only_current_ppid_running_runs(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_run(workspace, "A", "codex", _iso_ago(seconds=30), started_by_pid=os.getpid())
+    _write_run(workspace, "B", "gemini", _iso_ago(seconds=30), started_by_pid=11111)
+    _write_run(workspace, "C", "claude", _iso_ago(seconds=30), phase="done", started_by_pid=os.getpid())
+
+    result = _run_statusline(workspace)
+    last_line = _last_line(result)
+
+    assert re.fullmatch(r"\[codex:A\(3[0-9]s\)\]", last_line), last_line
+    assert "B" not in last_line
+    assert "C" not in last_line
+
+
+def test_dispatch_group_silently_drops_legacy_run_without_started_by_pid(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_run(workspace, "legacy", "codex", _iso_ago(seconds=30), started_by_pid=None)
+
+    result = _run_statusline(workspace)
+    last_line = _last_line(result)
+
+    assert last_line == "MST idle"
+    assert "legacy" not in last_line
 
 
 def test_no_dispatch_no_group(tmp_path):

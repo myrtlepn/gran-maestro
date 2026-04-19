@@ -57,11 +57,22 @@ def _wrapper_timeout_sec(args) -> int | None:
     return value if value > 0 else None
 
 
+def _started_by_pid() -> int:
+    raw = os.environ.get("MST_STATE_PPID", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return int(os.getppid())
+
+
 def _register_state(args) -> str:
     now = _now_iso()
     payload = {
         "task_id": str(args.task_id).strip(),
         "pid": os.getpid(),
+        "started_by_pid": _started_by_pid(),
         "started_at": now,
         "phase": "running",
         "provider": str(args.provider).strip().lower(),
