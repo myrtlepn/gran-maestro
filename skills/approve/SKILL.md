@@ -238,19 +238,14 @@ REQ 리스트가 1건이거나 명시적 단건 인자 호출 시 이 프로토�
 
 **예외**: manual AC만 있는 spec은 Test Scenarios 섹션이 비어있어도 통과 허용
 
-preflight 검사가 통과된 경우에만 아래 Step 3(worktree 생성 및 구현 착수)로 진행.
+preflight 검사가 통과된 경우에만 아래 base 감지/protected 검사를 실행하고, 이 검사가 통과된 경우에만 Step 3(worktree 생성 및 구현 착수)로 진행.
 
-**base_branch 안내 (비차단, preflight 통과 이후 실행)**:
-- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch)`로 `worktree.base_branch` 값 읽기
-  - 파일 읽기 실패 또는 키 부재 시: 경고를 **silent suppress** — 출력 없이 Step 3 진행
-- `worktree.base_branch` 값이 정확히 `"main"`인 경우에만 아래 안내 출력:
-
-  ⚠️  base_branch가 "main"으로 설정되어 있습니다.
-      모든 워크트리가 main 브랜치 기준으로 분기됩니다.
-      다른 브랜치로 변경하려면: `/mst:on` 재실행 또는 대시보드 Settings → 설정 마법사 → Git 단계에서 변경.
-
-- 값이 `"main"` 이 아닌 경우: 출력 없이 진행. 이 안내는 실행을 **절대 차단하지 않음**.
-- **배치 승인 모드**: 배치 내 첫 REQ 처리 시에만 1회 출력.
+**HEAD base 자동 감지 + protected block (차단 검사, preflight 통과 이후 실행)**:
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py worktree resolve-base --req {REQ-ID})`를 실행한다.
+  - 성공 시 stdout의 브랜치명을 `DETECTED_BASE`로 사용한다.
+  - 성공 시 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json`의 `detected_base` 필드가 같은 값으로 저장되어야 한다.
+- `resolve-base`는 현재 `git HEAD` 브랜치를 base로 감지하고, `worktree.protected_branches` 패턴(`release/*` glob 포함)과 매칭되면 non-zero로 종료한다. 실패 시 stderr 안내("다른 브랜치로 이동" 포함)를 전달하고 approve를 차단한다.
+- 이 단계에서는 REQ 브랜치나 태스크 worktree를 생성하지 않는다. `worktree.base_branch`는 하위 호환 설정으로만 남기며 approve의 신규 base 결정에는 사용하지 않는다.
 
 3. 승인 실행:
    - **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 2 phase2_execution`; 실패 시 fallback으로 `request.json`의 `current_phase`=2, `status`=`phase2_execution` 직접 업데이트
@@ -516,11 +511,14 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 **REQ 브랜치 생성 (태스크 수와 무관한 공통 선행 단계)**:
 
 ```bash
-git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
-  || git checkout -b gran-maestro/REQ-NNN {config.worktree.base_branch}
+DETECTED_BASE="{Step 2.7에서 저장한 request.json.detected_base}"
+REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$DETECTED_BASE")
+git show-ref --verify --quiet "refs/heads/${REQ_BRANCH}" \
+  || git checkout -b "$REQ_BRANCH" "$DETECTED_BASE"
 ```
 
-이 브랜치는 모든 태스크 커밋의 집합점이 되며, accept 단계에서 master에 squash-merge된다.
+REQ 브랜치명은 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 감지된 base의 `/`만 `-`로 치환한다.
+이 브랜치는 모든 태스크 커밋의 집합점이 되며, accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash-merge한다(T04).
 단일 태스크 REQ에서도 반드시 이 단계를 실행해야 accept의 3단계 플로우가 정상 작동한다.
 
 **태스크가 1개인 경우**: 기존 순차 실행과 동일 처리.
@@ -540,7 +538,8 @@ git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
 독립 태스크들의 git worktree를 미리 생성합니다. 태스크 worktree는 REQ 중간 브랜치를 기준으로 생성:
 
 ```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path {worktree_path} --branch gran-maestro/REQ-NNN-T01 --base gran-maestro/REQ-NNN
+TASK_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE")
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path {worktree_path} --branch "$TASK_BRANCH" --base "$REQ_BRANCH"
 ```
 
 ##### 4b. Outsource Brief 파일 작성

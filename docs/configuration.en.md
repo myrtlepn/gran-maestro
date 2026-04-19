@@ -97,6 +97,7 @@ Settings for Git worktree creation and management.
 | `worktree.root_directory` | `.gran-maestro/worktrees` | root path for worktrees |
 | `worktree.max_active` | `10` | maximum active worktrees |
 | `worktree.base_branch` | `main` | base branch |
+| `worktree.protected_branches` | `["main","master","release/*"]` | protected branches that block starting REQs; glob patterns are allowed |
 | `worktree.stale_timeout_hours` | `24` | stale threshold (hours) |
 | `worktree.auto_cleanup_on_cancel` | `true` | auto cleanup on cancel |
 
