@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import fnmatch
 import glob
 import hashlib
 import json
@@ -23,6 +24,85 @@ from scripts.mst_cmds import _common
 from scripts.mst_cmds._common import (
     _project_root,
 )
+
+
+FALLBACK_PROTECTED_BRANCHES = ["main", "master", "release/*"]
+
+
+def base_slug(base: str) -> str:
+    return str(base).replace("/", "-")
+
+
+def req_branch_name(req_id: str, base: str) -> str:
+    return f"gran-maestro/{base_slug(base)}/{req_id}"
+
+
+def task_branch_name(req_id: str, task_id: str, base: str) -> str:
+    return f"{req_branch_name(req_id, base)}-{task_id}"
+
+
+def matching_protected_pattern(branch: str, protected_patterns: list[str]) -> str | None:
+    for pattern in protected_patterns:
+        if fnmatch.fnmatchcase(branch, pattern):
+            return pattern
+    return None
+
+
+def is_protected_branch(branch: str, protected_patterns: list[str]) -> bool:
+    return matching_protected_pattern(branch, protected_patterns) is not None
+
+
+def _load_protected_branches() -> list[str]:
+    for config_name in ("config.resolved.json", "config.json"):
+        data = _common.load_json(_common.BASE_DIR / config_name) or {}
+        worktree_config = data.get("worktree") if isinstance(data, dict) else None
+        patterns = worktree_config.get("protected_branches") if isinstance(worktree_config, dict) else None
+        if isinstance(patterns, list) and all(isinstance(item, str) for item in patterns):
+            return list(patterns)
+    return list(FALLBACK_PROTECTED_BRANCHES)
+
+
+def current_head_branch(project_root: Path | None = None) -> str:
+    if project_root is None:
+        project_root = _project_root()
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "detached HEAD 상태이거나 현재 브랜치를 확인할 수 없습니다"
+        )
+    branch = result.stdout.strip()
+    if not branch:
+        raise RuntimeError("현재 브랜치를 확인할 수 없습니다")
+    return branch
+
+
+def _persist_detected_base(req_id: str, detected_base: str) -> None:
+    request_path = _common.requests_dir() / req_id / "request.json"
+    request_data = _common.load_json(request_path)
+    if not isinstance(request_data, dict):
+        raise RuntimeError(f"request.json 읽기 실패: {request_path}")
+    request_data["detected_base"] = detected_base
+    _common.save_json(request_path, request_data)
+
+
+def _print_resolve_base_payload(detected_base: str, req_id: str | None, as_json: bool) -> None:
+    if not as_json:
+        print(detected_base)
+        return
+    payload = {
+        "base": detected_base,
+        "base_slug": base_slug(detected_base),
+    }
+    if req_id:
+        payload["req_branch"] = req_branch_name(req_id, detected_base)
+    print(json.dumps(payload, ensure_ascii=False))
 
 
 def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int:
@@ -273,6 +353,77 @@ def cmd_worktree_remove(args):
 
 
 
+def cmd_worktree_resolve_base(args):
+    try:
+        detected_base = current_head_branch()
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    protected_patterns = _load_protected_branches()
+    matched_pattern = matching_protected_pattern(detected_base, protected_patterns)
+    if matched_pattern is not None:
+        print(
+            "Error: 현재 브랜치가 보호 브랜치입니다. "
+            f"base={detected_base!r}, matched={matched_pattern!r}. "
+            "다른 브랜치로 이동한 뒤 /mst:approve를 다시 실행하세요.",
+            file=sys.stderr,
+        )
+        return 2
+
+    req_id = getattr(args, "req", None)
+    if req_id:
+        try:
+            _persist_detected_base(req_id, detected_base)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    _print_resolve_base_payload(detected_base, req_id, getattr(args, "json", False))
+    return 0
+
+
+def cmd_worktree_is_protected(args):
+    branch = getattr(args, "branch", None)
+    if not branch:
+        try:
+            branch = current_head_branch()
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    protected_patterns = _load_protected_branches()
+    matched_pattern = matching_protected_pattern(branch, protected_patterns)
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "branch": branch,
+                    "protected": matched_pattern is not None,
+                    "matched_pattern": matched_pattern,
+                },
+                ensure_ascii=False,
+            )
+        )
+    elif matched_pattern is not None:
+        print(matched_pattern)
+
+    return 0 if matched_pattern is not None else 1
+
+
+def cmd_worktree_slug(args):
+    print(base_slug(args.base))
+    return 0
+
+
+def cmd_worktree_branch_name(args):
+    if getattr(args, "task", None):
+        print(task_branch_name(args.req, args.task, args.base))
+    else:
+        print(req_branch_name(args.req, args.base))
+    return 0
+
+
 def register(subparsers):
     sub = subparsers
     worktree = sub.add_parser("worktree")
@@ -286,3 +437,19 @@ def register(subparsers):
     worktree_remove = worktree_sub.add_parser("remove")
     worktree_remove.add_argument("--path", required=True)
     worktree_remove.add_argument("--force", action="store_true")
+
+    worktree_resolve_base = worktree_sub.add_parser("resolve-base")
+    worktree_resolve_base.add_argument("--req")
+    worktree_resolve_base.add_argument("--json", action="store_true")
+
+    worktree_is_protected = worktree_sub.add_parser("is-protected")
+    worktree_is_protected.add_argument("--branch")
+    worktree_is_protected.add_argument("--json", action="store_true")
+
+    worktree_slug = worktree_sub.add_parser("slug")
+    worktree_slug.add_argument("base")
+
+    worktree_branch_name = worktree_sub.add_parser("branch-name")
+    worktree_branch_name.add_argument("--req", required=True)
+    worktree_branch_name.add_argument("--base", required=True)
+    worktree_branch_name.add_argument("--task")
