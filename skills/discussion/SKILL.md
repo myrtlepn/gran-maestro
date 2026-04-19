@@ -120,7 +120,52 @@ PM이 주제/포커스를 분석해 `participants` 수만큼 관점을 배정하
 **IDN-NNN 입력 시**: ideation 의견 파일들을 `rounds/00/{participant.key}.md`로 복사 → Step 4 진입
 
 **새 주제인 경우**:
-1. **단일 응답에서 동시 Write 후 split 실행**:
+
+1. **Dispatch 프롬프트 조립 — feature flag 분기**
+
+   config 확인:
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_builder.fallback_on_error
+   ```
+
+   #### (a) prompt_builder.enabled=true (하이브리드 JSON 경로, 권장)
+   1. `shared-context.md` 본문을 `.gran-maestro/tmp/ctx-{session_id}.md`로 Write (기존 shared-context.md와 동일 내용, tmp 복사본)
+   2. `dispatch-input.json`을 아래 스키마로 Write:
+      ```json
+      {
+        "format": "mst.dispatch",
+        "schema_version": 1,
+        "common": {
+          "topic": "{DSC-NNN 주제}",
+          "constraints": ["..."],
+          "reference_context_file": ".gran-maestro/tmp/ctx-{session_id}.md"
+        },
+        "tasks": [
+          {"role": "{participant.key}", "angle": "{perspective}", "ask": "핵심 질문 1~3개 ≤200자"},
+          {"role": "{participant.key}", "angle": "{perspective}", "ask_file": ".gran-maestro/tmp/task-{role}-ask.md"}
+        ]
+      }
+      ```
+      - `format: "mst.dispatch"`, `schema_version: 1`
+      - `common`: `topic`, `constraints[]`, `reference_context_file: ".gran-maestro/tmp/ctx-{session_id}.md"`
+      - `tasks[]`: 각 participant/critic마다 `{role: "{participant.key}", angle: "{perspective}", ask: "...≤200자"}` 또는 `ask_file: "..."}`
+      - 200자 초과 질문은 `.gran-maestro/tmp/task-{role}-ask.md`로 Write 후 `ask_file` 경로 참조
+   3. CLI 호출:
+      ```bash
+      python3 {PLUGIN_ROOT}/scripts/mst.py prompt build \
+        --input {absolute_path}/dispatch-input.json \
+        --out-dir {absolute_path}/rounds/00/prompts \
+        --sid {session_id}
+      ```
+   4. 성공 시 생성된 `rounds/00/prompts/combined-prompts.txt`를 기존대로 `session split-prompts`로 분할:
+      ```bash
+      python3 {PLUGIN_ROOT}/scripts/mst.py session split-prompts --dir {absolute_path}/rounds/00/prompts
+      ```
+      → `rounds/00/prompts/{participant.key}-prompt.md` × N, `rounds/00/prompts/critique-{criticKey}-prompt.md` × M 자동 생성
+   5. 실패 시 (exit != 0) → (b) fallback 경로로 자동 전환
+
+   #### (b) prompt_builder.enabled=false 또는 CLI fallback (기존 직접 조립 경로)
+   **단일 응답에서 동시 Write 후 split 실행**:
    - `rounds/00/shared-context.md` — 주제 배경 + 핵심 논점
    - `rounds/00/prompts/combined-prompts.txt` — N+M개 프롬프트를 `===SPLIT: {filename}===` 구분기호로 구분하여 1개 파일에 모두 포함
      (participant N개 + critic M개, 아래 포맷 그대로 적용)
@@ -130,6 +175,17 @@ PM이 주제/포커스를 분석해 `participants` 수만큼 관점을 배정하
    python3 {PLUGIN_ROOT}/scripts/mst.py session split-prompts --dir {absolute_path}/rounds/00/prompts
    ```
    → `rounds/00/prompts/{participant.key}-prompt.md` × N, `rounds/00/prompts/critique-{criticKey}-prompt.md` × M 자동 생성
+
+   #### fallback 규약 (MANDATORY)
+   (a) 경로 실행 중 `mst.py prompt build`가 exit 2/3 등 실패 반환 시:
+   - stderr 로그와 구조화 errors JSON을 Read
+   - PM이 지적된 오류를 기반으로 JSON을 1회 수정 후 재시도 (repair 1회)
+   - 재시도 실패 시 즉시 (b) 기존 직접 조립 경로로 전환 (workflow 차단 금지)
+   - `config.prompt_builder.fallback_on_error=false`이면 repair 실패 시 워크플로우를 중단하고 사용자 에스컬레이션
+
+   참고: `mst.py prompt build`는 오류 반환만 담당하며, repair 1회/fallback 전환은 본 스킬(discussion)의 책임이다.
+
+   이후 2번(participant Task 발송)부터는 기존 내용 그대로 진행.
 
 개별 프롬프트 포맷 (Round 0):
 ```markdown

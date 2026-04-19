@@ -150,7 +150,47 @@ PM이 이슈를 분석하여 `investigators` 수만큼 조사 역할을 배정�
 
 > **Claude 모델 결정**: config.resolved.json의 `models.providers.claude[debug.agents.claude.tier || default_tier]`로 resolve (미설정 시 `"sonnet"` 폴백).
 
-#### 2a. 프롬프트 파일 작성
+#### 2a. Dispatch 프롬프트 조립 — feature flag 분기
+
+config 확인:
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_builder.fallback_on_error
+```
+
+##### (a) prompt_builder.enabled=true (하이브리드 JSON 경로)
+1. 조사 공통 컨텍스트(이슈 설명, 집중 영역 등)를 `.gran-maestro/tmp/ctx-{session_id}.md`로 Write
+2. `dispatch-input.json` Write:
+   ```json
+   {
+     "format": "mst.dispatch",
+     "schema_version": 1,
+     "common": {
+       "topic": "{DBG-NNN 이슈 제목}",
+       "constraints": ["..."],
+       "reference_context_file": ".gran-maestro/tmp/ctx-{session_id}.md"
+     },
+     "tasks": [
+       {"role": "{investigatorKey}", "angle": "{role}", "ask": "조사 지침 ≤200자 또는 ask_file"}
+     ]
+   }
+   ```
+   - `tasks[]`는 `investigators` 키를 순회하여 작성
+   - 각 task의 `role` 값은 `"{investigatorKey}"` 그대로 설정 (split 결과 파일이 `{investigatorKey}-prompt.md`로 생성되어 기존 dispatch 경로 호환)
+   - 200자 초과 또는 줄바꿈 포함 시 `ask_file` 경로로 분리
+3. CLI 호출: `python3 {PLUGIN_ROOT}/scripts/mst.py prompt build --input {absolute_path}/dispatch-input.json --out-dir {absolute_path}/prompts --sid {session_id}`
+4. 성공 시: `python3 {PLUGIN_ROOT}/scripts/mst.py session split-prompts --dir {absolute_path}/prompts` 호출 → `prompts/{investigatorKey}-prompt.md` 개별 파일 생성 → 기존 dispatch (2b 단계) 그대로 실행
+5. 실패 시 repair 1회 재요청 → 그래도 실패면 (b) 경로로 자동 전환
+
+##### (b) prompt_builder.enabled=false 또는 CLI fallback
+- 기존 개별 파일 직접 Write 경로 **그대로 유지** (변경 금지)
+
+##### fallback 규약 (MANDATORY)
+- CLI 오류 시 stderr/stdout을 Read, PM이 구조화 errors JSON 기반으로 JSON 수정 후 1회 재시도 (repair 1회)
+- 재시도 실패 시 (b) 경로로 자동 전환 (`fallback_on_error=true`일 때)
+- `fallback_on_error=false`이면 워크플로우 중단 + 사용자 에스컬레이션
+- 참고: `mst.py prompt build`는 오류 반환만 담당, repair 1회/fallback 전환은 본 스킬(debug)의 책임이다
+
+#### 2b. 프롬프트 파일 작성
 
 `investigators` 키를 순회하여 `prompts/{investigatorKey}-prompt.md`를 **하나의 메시지에서 동시에 Write**합니다.
 
@@ -202,7 +242,7 @@ PM이 이슈를 분석하여 `investigators` 수만큼 조사 역할을 배정�
 글자 수 제한: {config.collaborative_debug.finding_char_limit}자 이내
 ```
 
-#### 2b. 병렬 호출
+#### 2c. 병렬 호출
 
 > 모든 호출은 `Task(run_in_background: true)`로 실행합니다.
 
