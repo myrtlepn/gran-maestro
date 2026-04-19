@@ -1,13 +1,13 @@
 ---
 name: accept
-description: "완료된 결과물을 최종 수락합니다 (Phase 3 → Phase 5). Worktree를 main에 머지하고 정리합니다. 사용자가 '수락', '머지', '최종 수락'을 말하거나 /mst:accept를 호출할 때 사용. 기본적으로 /mst:approve에서 자동 호출되며, workflow.auto_accept_result=false 시 수동 사용."
+description: "완료된 결과물을 최종 수락합니다 (Phase 3 → Phase 5). Worktree를 감지된 base 브랜치에 머지하고 정리합니다. 사용자가 '수락', '머지', '최종 수락'을 말하거나 /mst:accept를 호출할 때 사용. 기본적으로 /mst:approve에서 자동 호출되며, workflow.auto_accept_result=false 시 수동 사용."
 user-invocable: true
 argument-hint: "[REQ-ID]"
 ---
 
 # maestro:accept
 
-Phase 3 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 머지하고 정리합니다.
+Phase 3 리뷰를 통과한 결과물을 최종 수락하여 감지된 base 브랜치에 머지하고 정리합니다.
 
 ## 호출 방식
 
@@ -112,28 +112,46 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
    - `strategy = type_strategies[plan_type] || type_strategies["code"]`
    - `type-strategies.json` Read 실패/파싱 실패/키 누락 시 `strategy = {"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback해 기존 수락 경로를 유지한다.
-3. **Worktree → REQ 브랜치 → master squash-merge** (기본: `strategy.accept_mode != "file-placement"`)
+3. **Worktree → REQ 브랜치 → base squash-merge** (기본: `strategy.accept_mode != "file-placement"`)
    - `if strategy.accept_mode == "file-placement"`:
      - squash-merge를 실행하지 않고 문서 파일을 대상 경로로 배치(복사/이동)한다.
      - 배치 대상 경로는 각 태스크 spec/doc-spec에 정의된 문서 산출 경로를 따른다.
      - 아래 3-1~3-3 git merge 절차는 건너뛴다.
    - `else` (`strategy.accept_mode != "file-placement"`):
-     - 아래 3-1~3-3 기존 절차를 그대로 수행한다. (변경 금지)
-   - approve 단계(Step 4a)에서 생성된 `gran-maestro/REQ-NNN` 브랜치를 사용합니다.
+     - 아래 3-1~3-3 절차를 수행한다.
+   - approve 단계(Step 4a)에서 생성된 다계층 REQ 브랜치를 사용합니다.
    - 단일 태스크 REQ도 동일한 플로우를 적용합니다.
+   - **base/브랜치 변수 준비 (MANDATORY)**:
+     - `request.json.detected_base`가 있으면 해당 값을 최우선 base로 사용한다.
+     - `request.json.detected_base`가 없으면 fallback: `config.worktree.base_branch` → `master` 순서로 사용한다.
+     - `BASE_SLUG`는 base 이름의 `/`를 `-`로 치환한 값이다. (T03 helper가 있는 환경에서는 동일 규칙의 helper를 재사용한다.)
+     - `{BASE_BRANCH}` checkout 실패 시 감지 base와 실제 git 상태가 불일치한 것으로 보고 명시적 오류를 출력한 뒤 중단한다.
+     ```bash
+     REQUEST_JSON="{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/request.json"
+     DETECTED_BASE=$(python3 -c 'import json, sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(str(data.get("detected_base") or "").strip())' "$REQUEST_JSON")
+     CONFIG_BASE_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch 2>/dev/null || true)
+     CONFIG_BASE_BRANCH=$(printf "%s" "$CONFIG_BASE_BRANCH" | head -n 1 | xargs)
+     BASE_BRANCH="${DETECTED_BASE:-${CONFIG_BASE_BRANCH:-master}}"
+     BASE_SLUG=$(python3 -c 'import sys; print(sys.argv[1].replace("/", "-"))' "$BASE_BRANCH")
+     REQ_BRANCH="gran-maestro/${BASE_SLUG}/REQ-NNN"
+     TASK_BRANCH_PREFIX="gran-maestro/${BASE_SLUG}/REQ-NNN-T"
+     echo "[accept] squash base: ${BASE_BRANCH}"
+     echo "[accept] request branch: ${REQ_BRANCH}"
+     ```
    - **3-1. 각 태스크 worktree → REQ 브랜치 일반 머지 (태스크 커밋 이력 보존)**:
      ```bash
      # 각 태스크 브랜치를 REQ 브랜치에 머지 (커밋 이력 보존)
-     git -C {PROJECT_ROOT} checkout gran-maestro/REQ-NNN
-     git -C {PROJECT_ROOT} merge --no-ff gran-maestro/REQ-NNN-T01
-     git -C {PROJECT_ROOT} merge --no-ff gran-maestro/REQ-NNN-T02
+     git -C {PROJECT_ROOT} checkout "${REQ_BRANCH}"
+     git -C {PROJECT_ROOT} merge --no-ff "${TASK_BRANCH_PREFIX}01"
+     git -C {PROJECT_ROOT} merge --no-ff "${TASK_BRANCH_PREFIX}02"
      # ... (태스크 수만큼 반복)
      ```
-   - **3-2. REQ 브랜치 → master squash-merge (단일 커밋 생성)**:
+   - **3-2. REQ 브랜치 → base squash-merge (단일 커밋 생성)**:
      ```bash
-     git -C {PROJECT_ROOT} checkout master
-     git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN
+     git -C {PROJECT_ROOT} checkout "${BASE_BRANCH}"
+     git -C {PROJECT_ROOT} merge --squash "${REQ_BRANCH}"
      ```
+     예: `request.json.detected_base="feature/branch-rules"`이면 `git checkout feature/branch-rules` 후 `git merge --squash gran-maestro/feature-branch-rules/REQ-NNN`를 실행한다.
      [커밋 양식 감지]
      1. `git -C {PROJECT_ROOT} log --pretty=format:"%s" -10`을 실행해 최근 10개 커밋 subject를 수집한다.
      2. 수집된 subject에서 `[REQ-`로 시작하는 항목을 우선 분석 대상으로 사용하고, 없으면 전체 10개를 분석 대상으로 사용한다.
@@ -146,13 +164,15 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      ```bash
      git -C {PROJECT_ROOT} commit -m "{DETECTED_SUBJECT}
 
+     Base branch: ${BASE_BRANCH}
+
      태스크 요약:
      - T01: {태스크 1 제목}
      - T02: {태스크 2 제목}"
      ```
    - **3-3. REQ 브랜치 삭제** (squash merge 후 `-D` 강제 삭제):
      ```bash
-     git -C {PROJECT_ROOT} branch -D gran-maestro/REQ-NNN
+     git -C {PROJECT_ROOT} branch -D "${REQ_BRANCH}"
      ```
 3.5. **Implementation Decision 기록 (비차단)**:
    - `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`의 `linked_intent` 필드를 읽어 INTENT_ID 취득
@@ -164,13 +184,13 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - `linked_intent` 미존재 시 skip (비차단); 파일 Edit 실패 시 warn만 출력, 워크플로우 차단 금지
 
 4. **정리**: 각 태스크의 worktree 및 임시 브랜치 정리
-   > ⚠️ **squash merge 후 브랜치 삭제 규칙**: REQ 브랜치를 master에 squash merge하면 merge ancestor가
+   > ⚠️ **squash merge 후 브랜치 삭제 규칙**: REQ 브랜치를 `{BASE_BRANCH}`에 squash merge하면 merge ancestor가
    > 생성되지 않으므로 `git branch -d`(soft delete)는 "not fully merged" 오류로 실패합니다.
    > 브랜치 삭제는 `git branch -D`를 사용하세요.
    - `strategy.accept_mode == "file-placement"`이면 worktree가 없을 수 있으므로 worktree 제거 단계는 "없으면 skip"으로 처리한다 (graceful skip, 비차단).
    - `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path "{worktree_path}" --force || true` — 태스크 worktree 제거 (이미 제거된 경우 오류 무시)
-   - `git branch -D "gran-maestro/REQ-NNN-T01" || true` — 태스크 브랜치 강제 삭제 (`gran-maestro/REQ-NNN-T02` 등 반복)
-   - `git branch -D "gran-maestro/REQ-NNN" || true` — REQ 브랜치 강제 삭제 (기본은 Step 3-3에서 처리, 정리 단계에서는 중복 방지 확인용)
+   - `git -C {PROJECT_ROOT} branch -D "${TASK_BRANCH_PREFIX}01" || true` — 태스크 브랜치 강제 삭제 (`${TASK_BRANCH_PREFIX}02` 등 반복)
+   - `git -C {PROJECT_ROOT} branch -D "${REQ_BRANCH}" || true` — REQ 브랜치 강제 삭제 (기본은 Step 3-3에서 처리, 정리 단계에서는 중복 방지 확인용)
    - 각 태스크를 **독립적으로** 실행 (`&&` 연결 금지 — 하나 실패 시 나머지 미실행됨)
    - 순서: worktree 제거 먼저, 브랜치 삭제 나중
 4.5. **Pending Stitch 화면 재확인**:
