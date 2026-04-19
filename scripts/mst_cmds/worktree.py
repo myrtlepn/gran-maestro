@@ -427,6 +427,324 @@ def cmd_worktree_branch_name(args):
     return 0
 
 
+def _boundary_payload(
+    ok: bool,
+    violation: str | None,
+    retry_possible: bool,
+    detected_base: str | None,
+    reason: str,
+    owner_ppid: int | None,
+    current_ppid: int | None,
+) -> dict:
+    return {
+        "ok": ok,
+        "violation": violation,
+        "retry_possible": retry_possible,
+        "detected_base": detected_base,
+        "reason": reason,
+        "owner_ppid": owner_ppid,
+        "current_ppid": current_ppid,
+    }
+
+
+def _print_boundary_payload(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def _coerce_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_nonempty_str(value) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _load_boundary_json(path: Path) -> tuple[dict | None, str | None]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        return None, str(exc)
+    if not isinstance(data, dict):
+        return None, "JSON root is not an object"
+    return data, None
+
+
+def _boundary_request_path(req_id: str) -> Path:
+    return _common.requests_dir() / req_id / "request.json"
+
+
+def _boundary_meta_path(req_id: str, task_id: str) -> Path:
+    return _common.BASE_DIR / "worktrees" / f"{req_id}-{task_id}.meta.json"
+
+
+def _boundary_task_ids(request_data: dict, requested_task_id: str | None) -> list[str]:
+    if requested_task_id:
+        return [requested_task_id]
+
+    task_ids: list[str] = []
+    tasks = request_data.get("tasks")
+    if isinstance(tasks, list):
+        for task in tasks:
+            if isinstance(task, dict):
+                task_id = _coerce_nonempty_str(task.get("id"))
+                if task_id:
+                    task_ids.append(task_id)
+    return task_ids
+
+
+def _boundary_retry_possible(violation: str | None, detected_base: str | None, state: str | None) -> bool:
+    if violation == "worktree_missing":
+        return detected_base is not None
+    if violation == "not_cleaned":
+        return state in {"cleaning", "pre_merge", "clean_failed"}
+    return False
+
+
+def _phase_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _boundary_ok_payload(
+    detected_base: str | None,
+    owner_ppid: int | None,
+    current_ppid: int | None,
+    reason: str = "boundary ok",
+) -> dict:
+    return _boundary_payload(True, None, False, detected_base, reason, owner_ppid, current_ppid)
+
+
+def _check_entry_boundary(
+    req_id: str,
+    request_data: dict,
+    task_ids: list[str],
+    detected_base: str | None,
+    owner_ppid: int | None,
+    current_ppid: int | None,
+) -> tuple[dict, int]:
+    current_phase = _phase_int(request_data.get("current_phase"))
+    if current_phase is None or current_phase < 2:
+        return _boundary_ok_payload(
+            detected_base,
+            owner_ppid,
+            current_ppid,
+            "entry boundary not active before phase 2",
+        ), 0
+
+    for task_id in task_ids:
+        meta_path = _boundary_meta_path(req_id, task_id)
+        if not meta_path.exists():
+            violation = "worktree_missing"
+            return _boundary_payload(
+                False,
+                violation,
+                _boundary_retry_possible(violation, detected_base, None),
+                detected_base,
+                f"worktree meta missing: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 0
+
+        meta_data, error = _load_boundary_json(meta_path)
+        if error:
+            print(f"Warning: failed to read worktree meta {meta_path}: {error}", file=sys.stderr)
+            return _boundary_payload(
+                False,
+                None,
+                False,
+                detected_base,
+                f"failed to read worktree meta: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 3
+        if meta_data.get("state") == "conflict":
+            violation = "merge_conflict"
+            return _boundary_payload(
+                False,
+                violation,
+                _boundary_retry_possible(violation, detected_base, "conflict"),
+                detected_base,
+                f"worktree meta is in conflict state: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 0
+
+    return _boundary_ok_payload(detected_base, owner_ppid, current_ppid), 0
+
+
+def _check_exit_boundary(
+    req_id: str,
+    request_data: dict,
+    task_ids: list[str],
+    detected_base: str | None,
+    owner_ppid: int | None,
+    current_ppid: int | None,
+) -> tuple[dict, int]:
+    status = str(request_data.get("status", "")).strip().lower()
+    if status != "done":
+        violation = "not_cleaned"
+        return _boundary_payload(
+            False,
+            violation,
+            _boundary_retry_possible(violation, detected_base, None),
+            detected_base,
+            f"request status is not done: {status or '<empty>'}",
+            owner_ppid,
+            current_ppid,
+        ), 0
+
+    for task_id in task_ids:
+        meta_path = _boundary_meta_path(req_id, task_id)
+        if not meta_path.exists():
+            violation = "worktree_missing"
+            return _boundary_payload(
+                False,
+                violation,
+                _boundary_retry_possible(violation, detected_base, None),
+                detected_base,
+                f"worktree meta missing: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 0
+
+        meta_data, error = _load_boundary_json(meta_path)
+        if error:
+            print(f"Warning: failed to read worktree meta {meta_path}: {error}", file=sys.stderr)
+            return _boundary_payload(
+                False,
+                None,
+                False,
+                detected_base,
+                f"failed to read worktree meta: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 3
+
+        state = _coerce_nonempty_str(meta_data.get("state"))
+        if state == "conflict":
+            violation = "merge_conflict"
+            return _boundary_payload(
+                False,
+                violation,
+                _boundary_retry_possible(violation, detected_base, state),
+                detected_base,
+                f"worktree meta is in conflict state: {meta_path}",
+                owner_ppid,
+                current_ppid,
+            ), 0
+        if state != "cleaned":
+            violation = "not_cleaned"
+            return _boundary_payload(
+                False,
+                violation,
+                _boundary_retry_possible(violation, detected_base, state),
+                detected_base,
+                f"worktree meta state is not cleaned: {meta_path} state={state or '<missing>'}",
+                owner_ppid,
+                current_ppid,
+            ), 0
+
+    return _boundary_ok_payload(detected_base, owner_ppid, current_ppid), 0
+
+
+def cmd_worktree_check_boundary(args):
+    req_id = _coerce_nonempty_str(args.req)
+    current_ppid = getattr(args, "ppid", None)
+    if not req_id:
+        print("Warning: --req is required", file=sys.stderr)
+        return 2
+
+    request_path = _boundary_request_path(req_id)
+    if not request_path.exists():
+        payload = _boundary_payload(
+            False,
+            "unknown_req",
+            False,
+            None,
+            f"request.json not found: {request_path}",
+            None,
+            current_ppid,
+        )
+        _print_boundary_payload(payload)
+        return 0
+
+    request_data, error = _load_boundary_json(request_path)
+    if error:
+        print(f"Warning: failed to read request.json {request_path}: {error}", file=sys.stderr)
+        payload = _boundary_payload(
+            False,
+            None,
+            False,
+            None,
+            f"failed to read request.json: {request_path}",
+            None,
+            current_ppid,
+        )
+        _print_boundary_payload(payload)
+        return 3
+
+    detected_base = _coerce_nonempty_str(request_data.get("detected_base"))
+    owner_ppid = _coerce_int(request_data.get("owner_ppid"))
+    if current_ppid is not None and owner_ppid is not None and current_ppid != owner_ppid:
+        payload = _boundary_payload(
+            False,
+            "session_mismatch",
+            False,
+            detected_base,
+            f"owner_ppid={owner_ppid} does not match current_ppid={current_ppid}",
+            owner_ppid,
+            current_ppid,
+        )
+        _print_boundary_payload(payload)
+        return 0
+
+    task_ids = _boundary_task_ids(request_data, getattr(args, "task_id", None))
+    if not task_ids:
+        payload = _boundary_ok_payload(
+            detected_base,
+            owner_ppid,
+            current_ppid,
+            "no task ids available for boundary check",
+        )
+        _print_boundary_payload(payload)
+        return 0
+
+    if args.phase == "entry":
+        payload, exit_code = _check_entry_boundary(
+            req_id,
+            request_data,
+            task_ids,
+            detected_base,
+            owner_ppid,
+            current_ppid,
+        )
+    else:
+        payload, exit_code = _check_exit_boundary(
+            req_id,
+            request_data,
+            task_ids,
+            detected_base,
+            owner_ppid,
+            current_ppid,
+        )
+    _print_boundary_payload(payload)
+    return exit_code
+
+
+def _register_worktree_dispatch(subcommand: str, fn) -> None:
+    package = sys.modules.get("scripts.mst_cmds")
+    dispatch = getattr(package, "DISPATCH", None)
+    if isinstance(dispatch, dict):
+        dispatch[("worktree", subcommand)] = fn
+
+
 def register(subparsers):
     sub = subparsers
     worktree = sub.add_parser("worktree")
@@ -456,3 +774,11 @@ def register(subparsers):
     worktree_branch_name.add_argument("--req", required=True)
     worktree_branch_name.add_argument("--base", required=True)
     worktree_branch_name.add_argument("--task")
+
+    worktree_check_boundary = worktree_sub.add_parser("check-boundary")
+    worktree_check_boundary.add_argument("--req", required=True)
+    worktree_check_boundary.add_argument("--phase", choices=["entry", "exit"], required=True)
+    worktree_check_boundary.add_argument("--task-id")
+    worktree_check_boundary.add_argument("--ppid", type=int)
+
+    _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)

@@ -27,10 +27,33 @@ PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
+BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
 
+
+
+resolve_mst_script() {
+  local script_dir candidate
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  candidate="$(cd "$script_dir/.." && pwd)/scripts/mst.py"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  candidate="$(cd "$script_dir/../.." && pwd)/scripts/mst.py"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  printf '%s\n' "${PROJECT_ROOT}/scripts/mst.py"
+}
+
+MST_SCRIPT="$(resolve_mst_script)"
 
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
@@ -544,6 +567,230 @@ except Exception:
 print(block_count)
 PY
 }
+
+
+run_boundary_check() {
+  local req_id="$1" phase="$2"
+  local output status
+  set +e
+  output="$(cd "$PROJECT_ROOT" && python3 "$MST_SCRIPT" worktree check-boundary --req "$req_id" --phase "$phase" --ppid "$PPID")"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    debug_log "boundary_check_nonzero" "phase=$phase req=$req_id status=$status"
+  fi
+  printf '%s\n' "$output"
+}
+
+parse_boundary_info() {
+  local raw="$1"
+  python3 - "$raw" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1] or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+def text(value):
+    if value is None:
+        return ""
+    return str(value).replace("\t", " ").replace("\n", " ").strip()
+
+print(
+    "{}\t{}\t{}\t{}\t{}\t{}".format(
+        "true" if payload.get("ok") is True else "false",
+        text(payload.get("violation") or "unknown"),
+        "true" if payload.get("retry_possible") is True else "false",
+        text(payload.get("detected_base")),
+        text(payload.get("owner_ppid")),
+        text(payload.get("current_ppid")),
+    )
+)
+PY
+}
+
+exit_boundary_requests() {
+  python3 - "$PROJECT_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+requests_root = project_root / ".gran-maestro" / "requests"
+if not requests_root.is_dir():
+    raise SystemExit(0)
+
+for request_path in sorted(requests_root.glob("REQ-*/request.json")):
+    try:
+        data = json.loads(request_path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(data, dict):
+        continue
+    try:
+        phase = int(data.get("current_phase"))
+    except (TypeError, ValueError):
+        continue
+    status = str(data.get("status") or "").strip().lower()
+    owner_ppid = data.get("owner_ppid")
+    if owner_ppid is None:
+        continue
+    if phase == 5 and status == "done":
+        req_id = str(data.get("id") or request_path.parent.name).strip()
+        if req_id:
+            print(req_id)
+PY
+}
+
+exit_repair_targets() {
+  local req_id="$1"
+  python3 - "$PROJECT_ROOT" "$req_id" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+req_id = sys.argv[2]
+request_path = project_root / ".gran-maestro" / "requests" / req_id / "request.json"
+try:
+    data = json.loads(request_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+if not isinstance(data, dict):
+    raise SystemExit(0)
+
+tasks = data.get("tasks")
+if not isinstance(tasks, list):
+    raise SystemExit(0)
+
+retry_states = {"cleaning", "pre_merge", "clean_failed"}
+for task in tasks:
+    if not isinstance(task, dict):
+        continue
+    task_id = str(task.get("id") or "").strip()
+    if not task_id:
+        continue
+    meta_path = project_root / ".gran-maestro" / "worktrees" / f"{req_id}-{task_id}.meta.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(meta, dict):
+        continue
+    state = str(meta.get("state") or "").strip()
+    path = str(meta.get("path") or "").strip()
+    if state in retry_states and path:
+        print(f"{task_id}\t{path}")
+PY
+}
+
+mark_exit_meta_cleaned() {
+  local req_id="$1" task_id="$2"
+  python3 - "$PROJECT_ROOT" "$req_id" "$task_id" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+req_id = sys.argv[2]
+task_id = sys.argv[3]
+meta_path = project_root / ".gran-maestro" / "worktrees" / f"{req_id}-{task_id}.meta.json"
+try:
+    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+payload["state"] = "cleaned"
+payload["last_activity_at"] = now
+tmp_path = Path(str(meta_path) + ".tmp")
+tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp_path, meta_path)
+PY
+}
+
+repair_exit_once() {
+  local req_id="$1"
+  local task_id worktree_path remove_status
+
+  while IFS=$'\t' read -r task_id worktree_path; do
+    [ -n "${task_id:-}" ] || continue
+    [ -n "${worktree_path:-}" ] || continue
+
+    if [ -e "$worktree_path" ]; then
+      set +e
+      cd "$PROJECT_ROOT" && python3 "$MST_SCRIPT" worktree remove --path "$worktree_path" --force >/dev/null
+      remove_status=$?
+      set -e
+      if [ "$remove_status" -ne 0 ]; then
+        debug_log "boundary_exit_repair_failed" "req=$req_id task=$task_id status=$remove_status path=$worktree_path"
+        continue
+      fi
+    fi
+
+    if [ ! -e "$worktree_path" ]; then
+      mark_exit_meta_cleaned "$req_id" "$task_id"
+      debug_log "boundary_exit_repair_meta_cleaned" "req=$req_id task=$task_id path=$worktree_path"
+    fi
+  done <<EOF
+$(exit_repair_targets "$req_id")
+EOF
+}
+
+run_exit_boundary_guard() {
+  local req_id boundary_raw boundary_info boundary_ok boundary_violation boundary_retry owner_ppid current_ppid
+
+  while IFS= read -r req_id; do
+    [ -n "$req_id" ] || continue
+
+    boundary_raw="$(run_boundary_check "$req_id" "exit")"
+    boundary_info="$(parse_boundary_info "$boundary_raw")"
+    boundary_ok="$(printf '%s' "$boundary_info" | cut -f1)"
+    boundary_violation="$(printf '%s' "$boundary_info" | cut -f2)"
+    boundary_retry="$(printf '%s' "$boundary_info" | cut -f3)"
+    owner_ppid="$(printf '%s' "$boundary_info" | cut -f5)"
+    current_ppid="$(printf '%s' "$boundary_info" | cut -f6)"
+
+    if [ "$boundary_violation" = "session_mismatch" ]; then
+      printf '[boundary] session_mismatch ppid=%s owner=%s, skip enforcement\n' "${current_ppid:-$PPID}" "${owner_ppid:-unknown}" >&2
+      debug_log "boundary_session_mismatch" "phase=exit req=$req_id owner=$owner_ppid current=$current_ppid"
+      continue
+    fi
+
+    if [ "$boundary_ok" = "true" ]; then
+      debug_log "boundary_exit_pass" "req=$req_id"
+      continue
+    fi
+
+    if [ "$boundary_violation" = "not_cleaned" ] && [ "$boundary_retry" = "true" ]; then
+      repair_exit_once "$req_id"
+      boundary_raw="$(run_boundary_check "$req_id" "exit")"
+      boundary_info="$(parse_boundary_info "$boundary_raw")"
+      boundary_ok="$(printf '%s' "$boundary_info" | cut -f1)"
+      boundary_violation="$(printf '%s' "$boundary_info" | cut -f2)"
+      if [ "$boundary_ok" = "true" ]; then
+        debug_log "boundary_exit_repair_pass" "req=$req_id"
+        continue
+      fi
+    fi
+
+    [ -n "$boundary_violation" ] || boundary_violation="unknown"
+    debug_log "boundary_exit_block" "req=$req_id violation=$boundary_violation"
+    emit_block_json "boundary_violation:${boundary_violation}"
+    exit 0
+  done <<EOF
+$(exit_boundary_requests)
+EOF
+}
+
+run_exit_boundary_guard
 
 STATE_INFO="$(python3 - "$STATE_FILE" <<'PY'
 import json
