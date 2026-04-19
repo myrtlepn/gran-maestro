@@ -29,6 +29,7 @@ STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
 SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 mkdir -p "$MST_TMP"
+echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
 
@@ -551,6 +552,238 @@ EOF_SYNC_PLUGIN_CACHE
   return 0
 }
 
+sync_run_markers() {
+  local run_dir archive_base sync_output sync_kind sync_a sync_b sync_c sync_d
+  local failed_count
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    debug_log "run_marker_sync_skip" "reason=missing_python3"
+    return 0
+  fi
+
+  run_dir="${PROJECT_ROOT}/.gran-maestro/run"
+  archive_base="${PROJECT_ROOT}/.gran-maestro/archive/run"
+
+  if [ ! -d "$run_dir" ]; then
+    debug_log "run_marker_sync_skip" "reason=missing_run_dir path=$run_dir"
+    return 0
+  fi
+
+  failed_count=0
+  sync_output="$(python3 - "$PROJECT_ROOT" "$run_dir" "$archive_base" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+project_root = sys.argv[1]
+run_dir = sys.argv[2]
+archive_base = sys.argv[3]
+
+
+def emit(*parts):
+    print("\t".join(str(part) for part in parts))
+
+
+def parse_utc(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def coerce_positive_int(value, fallback):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def load_run_gc_config():
+    paths = [
+        os.path.join(project_root, ".gran-maestro", "config.resolved.json"),
+        os.path.join(project_root, "templates", "defaults", "config.json"),
+    ]
+    for path in paths:
+        payload = load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        cfg = payload.get("run_gc")
+        if isinstance(cfg, dict):
+            return {
+                "archive_after_days": coerce_positive_int(cfg.get("archive_after_days"), 7),
+                "heartbeat_stale_minutes": coerce_positive_int(cfg.get("heartbeat_stale_minutes"), 10),
+            }
+    return {"archive_after_days": 7, "heartbeat_stale_minutes": 10}
+
+
+def is_pid_alive(value):
+    try:
+        pid = int(value)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def atomic_write_json(path, payload):
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        raise
+
+
+cfg = load_run_gc_config()
+archive_after_seconds = cfg["archive_after_days"] * 86400
+stale_after_seconds = cfg["heartbeat_stale_minutes"] * 60
+now = datetime.now(timezone.utc)
+archived = 0
+terminated = 0
+skipped = 0
+failed = 0
+
+try:
+    filenames = sorted(os.listdir(run_dir))
+except Exception as exc:
+    emit("WARN", "run_dir_list_failed", run_dir, str(exc))
+    filenames = []
+    failed += 1
+
+for filename in filenames:
+    if not filename.endswith(".json"):
+        continue
+
+    path = os.path.join(run_dir, filename)
+    if not os.path.isfile(path):
+        continue
+
+    payload = load_json(path)
+    if not isinstance(payload, dict):
+        skipped += 1
+        emit("WARN", "parse_failed", path)
+        continue
+
+    phase = str(payload.get("phase", "")).strip().lower()
+    heartbeat = parse_utc(payload.get("last_heartbeat"))
+    if heartbeat is None:
+        skipped += 1
+        emit("SKIPPED", "legacy_or_invalid_heartbeat", path)
+        continue
+
+    age_seconds = max(0, int((now - heartbeat).total_seconds()))
+
+    if phase == "done":
+        if age_seconds < archive_after_seconds:
+            skipped += 1
+            continue
+
+        archive_dir = os.path.join(archive_base, f"{heartbeat.year:04d}-{heartbeat.month:02d}")
+        target = os.path.join(archive_dir, filename)
+        try:
+            os.makedirs(archive_dir, exist_ok=True)
+            os.replace(path, target)
+            archived += 1
+            emit("ARCHIVED", path, target)
+        except Exception as exc:
+            failed += 1
+            emit("WARN", "archive_failed", path, str(exc))
+        continue
+
+    if phase != "running":
+        skipped += 1
+        continue
+
+    reason = ""
+    if "started_by_pid" in payload and not is_pid_alive(payload.get("started_by_pid")):
+        reason = "pid_not_alive"
+    elif age_seconds > stale_after_seconds:
+        reason = "heartbeat_stale"
+
+    if not reason:
+        skipped += 1
+        continue
+
+    terminated_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    payload["phase"] = "terminated"
+    payload["terminated_at"] = terminated_at
+    try:
+        atomic_write_json(path, payload)
+        terminated += 1
+        emit("TERMINATED", path, reason)
+    except Exception as exc:
+        failed += 1
+        emit("WARN", "terminate_write_failed", path, str(exc))
+
+emit("SUMMARY", archived, terminated, skipped, failed)
+PY
+)"
+
+  if [ -z "$sync_output" ]; then
+    debug_log "run_marker_sync_skip" "reason=sync_helper_failed"
+    return 0
+  fi
+
+  while IFS=$'\t' read -r sync_kind sync_a sync_b sync_c sync_d; do
+    case "$sync_kind" in
+      ARCHIVED)
+        debug_log "run_marker_archived" "source=$sync_a target=$sync_b"
+        ;;
+      TERMINATED)
+        debug_log "run_marker_terminated" "path=$sync_a reason=$sync_b"
+        ;;
+      SKIPPED)
+        debug_log "run_marker_skipped" "reason=$sync_a path=$sync_b"
+        ;;
+      WARN)
+        failed_count=$((failed_count + 1))
+        debug_log "run_marker_sync_warning" "reason=$sync_a path=$sync_b detail=$sync_c $sync_d"
+        ;;
+      SUMMARY)
+        debug_log "run_marker_sync" "archived=$sync_a terminated=$sync_b skipped=$sync_c failed=$sync_d"
+        ;;
+    esac
+  done <<EOF_SYNC_RUN_MARKERS
+$sync_output
+EOF_SYNC_RUN_MARKERS
+
+  if [ "$failed_count" -gt 0 ]; then
+    echo "[mst-session-init] warning: run marker sync completed with $failed_count skipped operation(s)." >&2
+  fi
+
+  return 0
+}
+
 write_initial_state() {
   python3 - "$STATE_FILE" <<'PY'
 import json
@@ -645,6 +878,7 @@ PY
 
 cleanup_stale_markers
 sync_plugin_cache
+sync_run_markers
 clear_next_action_from_plan_json
 check_hook_version_mismatch
 if ! write_initial_state; then

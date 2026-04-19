@@ -273,6 +273,52 @@ def is_pid_alive(pid) -> bool:
     except (OSError, PermissionError):
         return False
 
+def _resolve_base_dir_for_session_anchor(base_dir: Path | None = None) -> Path | None:
+    if base_dir is not None:
+        return Path(base_dir)
+    if BASE_DIR is not None:
+        return BASE_DIR
+    current = Path.cwd().resolve()
+    while True:
+        candidate = current / ".gran-maestro"
+        if candidate.is_dir():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+def resolve_started_by_pid(base_dir: Path | None = None) -> int:
+    raw = os.environ.get("MST_STATE_PPID", "").strip()
+    if raw:
+        try:
+            pid = int(raw)
+        except ValueError:
+            pid = 0
+        if pid > 0:
+            return pid
+
+    resolved_base = _resolve_base_dir_for_session_anchor(base_dir)
+    if resolved_base is not None:
+        candidates = []
+        for anchor_path in (resolved_base / "tmp").glob("mst-session-anchor-*.pid"):
+            try:
+                anchor_pid = int(anchor_path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                continue
+            if not is_pid_alive(anchor_pid):
+                continue
+            try:
+                mtime = anchor_path.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, anchor_pid))
+        if candidates:
+            candidates.sort()
+            return candidates[-1][1]
+
+    return int(os.getppid())
+
 def read_workflow_state_auto_mode(
     skill_name: str,
     expected_source_id: Optional[str] = None,

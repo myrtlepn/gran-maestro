@@ -126,30 +126,42 @@ def test_wrapper_e2e_happy_path(tmp_path):
 
 def test_run_records_started_by_pid_from_env(tmp_path):
     workspace = tmp_path / "ws"
-    (workspace / ".gran-maestro").mkdir(parents=True)
+    gm_tmp = workspace / ".gran-maestro" / "tmp"
+    gm_tmp.mkdir(parents=True)
     task_dir = tmp_path / "task"
     task_dir.mkdir()
 
-    result = _run_mst(
-        workspace,
-        "run",
-        "--task-id",
-        "RUN-TEST-ENV",
-        "--provider",
-        "codex",
-        "--model",
-        "test",
-        "--log-dir",
-        str(task_dir),
-        "--",
-        "bash",
-        "-c",
-        "sleep 0.1",
-        env=_test_env(mst_state_ppid="12345"),
-    )
+    anchor_proc = subprocess.Popen(["sleep", "30"])
+    try:
+        (gm_tmp / f"mst-session-anchor-{anchor_proc.pid}.pid").write_text(
+            f"{anchor_proc.pid}\n",
+            encoding="utf-8",
+        )
 
-    assert result.returncode == 0, result.stderr
-    assert _read_run_state(workspace, "RUN-TEST-ENV")["started_by_pid"] == 12345
+        result = _run_mst(
+            workspace,
+            "run",
+            "--task-id",
+            "RUN-TEST-ENV",
+            "--provider",
+            "codex",
+            "--model",
+            "test",
+            "--log-dir",
+            str(task_dir),
+            "--",
+            "bash",
+            "-c",
+            "sleep 0.1",
+            env=_test_env(mst_state_ppid="12345"),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _read_run_state(workspace, "RUN-TEST-ENV")["started_by_pid"] == 12345
+    finally:
+        if anchor_proc.poll() is None:
+            anchor_proc.terminate()
+            anchor_proc.wait(timeout=5)
 
 
 def test_run_records_started_by_pid_from_parent_when_env_missing(tmp_path):
@@ -178,6 +190,44 @@ def test_run_records_started_by_pid_from_parent_when_env_missing(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert _read_run_state(workspace, "RUN-TEST-FALLBACK")["started_by_pid"] == os.getpid()
+
+
+def test_run_records_started_by_pid_from_session_anchor_when_env_missing(tmp_path):
+    workspace = tmp_path / "ws"
+    gm_tmp = workspace / ".gran-maestro" / "tmp"
+    gm_tmp.mkdir(parents=True)
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+
+    anchor_proc = subprocess.Popen(["sleep", "30"])
+    try:
+        anchor_path = gm_tmp / f"mst-session-anchor-{anchor_proc.pid}.pid"
+        anchor_path.write_text(f"{anchor_proc.pid}\n", encoding="utf-8")
+
+        result = _run_mst(
+            workspace,
+            "run",
+            "--task-id",
+            "RUN-TEST-ANCHOR",
+            "--provider",
+            "codex",
+            "--model",
+            "test",
+            "--log-dir",
+            str(task_dir),
+            "--",
+            "bash",
+            "-c",
+            "sleep 0.1",
+            env=_test_env(),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _read_run_state(workspace, "RUN-TEST-ANCHOR")["started_by_pid"] == anchor_proc.pid
+    finally:
+        if anchor_proc.poll() is None:
+            anchor_proc.terminate()
+            anchor_proc.wait(timeout=5)
 
 
 def test_run_statusline_shows_live_wrapper_dispatch_for_current_ppid(tmp_path):

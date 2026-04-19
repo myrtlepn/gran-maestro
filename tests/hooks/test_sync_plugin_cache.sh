@@ -190,16 +190,34 @@ assert_state_and_bridge_created() {
   local name="$1"
   local project_root="$2"
   local tmp_dir="$project_root/.gran-maestro/tmp"
-  local state_file bridge_file pid session_content
+  local state_file bridge_file anchor_file pid session_content
 
   state_file="$(require_single_file_match "$name state file" "$tmp_dir/mst-state-*.json")"
   pid="${state_file##*mst-state-}"
   pid="${pid%.json}"
   bridge_file="$tmp_dir/claude-session-${pid}.id"
+  anchor_file="$tmp_dir/mst-session-anchor-${pid}.pid"
 
   assert_file_exists "$name bridge file" "$bridge_file"
   session_content="$(tr -d '\n' < "$bridge_file")"
   assert_eq "$name bridge session id" "$SESSION_ID" "$session_content"
+  assert_file_exists "$name session anchor file" "$anchor_file"
+  assert_file_content "$name session anchor content" "$pid" "$anchor_file"
+}
+
+json_field() {
+  local path="$1"
+  local field="$2"
+  python3 - "$path" "$field" <<'PY'
+import json
+import sys
+
+path, field = sys.argv[1:]
+with open(path, "r", encoding="utf-8") as f:
+    payload = json.load(f)
+value = payload.get(field, "")
+print("" if value is None else value)
+PY
 }
 
 test_ac101_sync_end_to_end() {
@@ -427,20 +445,26 @@ test_ac203_invalid_version_skipped() {
 }
 
 test_ac204a_static_sync_contract() {
-  local todo_count function_count cleanup_call_line sync_call_line order_probe
+  local todo_count function_count run_function_count cleanup_call_line sync_call_line run_sync_call_line order_probe
 
   todo_count="$(grep -c 'PLUGIN-CACHE-SYNC' "$SESSION_INIT_SCRIPT" || true)"
   function_count="$(grep -c '^sync_plugin_cache()' "$SESSION_INIT_SCRIPT" || true)"
-  order_probe="$(grep -n 'cleanup_stale_markers\|sync_plugin_cache' "$SESSION_INIT_SCRIPT" || true)"
+  run_function_count="$(grep -c '^sync_run_markers()' "$SESSION_INIT_SCRIPT" || true)"
+  order_probe="$(grep -n 'cleanup_stale_markers\|sync_plugin_cache\|sync_run_markers' "$SESSION_INIT_SCRIPT" || true)"
   cleanup_call_line="$(printf '%s\n' "$order_probe" | awk -F: '$2 == "cleanup_stale_markers" {print $1; exit}')"
   sync_call_line="$(printf '%s\n' "$order_probe" | awk -F: '$2 == "sync_plugin_cache" {print $1; exit}')"
+  run_sync_call_line="$(printf '%s\n' "$order_probe" | awk -F: '$2 == "sync_run_markers" {print $1; exit}')"
 
   assert_eq "AC-204a no PLUGIN-CACHE-SYNC TODO marker" "0" "$todo_count"
   assert_eq "AC-204a single sync_plugin_cache definition" "1" "$function_count"
+  assert_eq "AC-204a single sync_run_markers definition" "1" "$run_function_count"
 
-  case "$cleanup_call_line:$sync_call_line" in
-    *[!0-9:]*|":"|":*"|*":")
-      fail "AC-204a could not locate cleanup/sync call lines"
+  if [ -z "$cleanup_call_line" ] || [ -z "$sync_call_line" ] || [ -z "$run_sync_call_line" ]; then
+    fail "AC-204a could not locate cleanup/sync call lines"
+  fi
+  case "$cleanup_call_line:$sync_call_line:$run_sync_call_line" in
+    *[!0-9:]*)
+      fail "AC-204a invalid cleanup/sync call line numbers"
       ;;
   esac
 
@@ -448,6 +472,108 @@ test_ac204a_static_sync_contract() {
     printf 'FAIL: AC-204a call order\n  cleanup_stale_markers line: %s\n  sync_plugin_cache line: %s\n' "$cleanup_call_line" "$sync_call_line" >&2
     exit 1
   fi
+  if [ "$sync_call_line" -ge "$run_sync_call_line" ]; then
+    printf 'FAIL: AC-204a run sync call order\n  sync_plugin_cache line: %s\n  sync_run_markers line: %s\n' "$sync_call_line" "$run_sync_call_line" >&2
+    exit 1
+  fi
+}
+
+test_ac301_run_marker_gc_archive_terminate_and_preserve() {
+  local case_dir project_root claude_home stdout_file stderr_file run_dir archive_file
+  local alive_marker alive_mtime_before alive_mtime_after terminated_phase terminated_at
+  local recent_done_phase legacy_phase
+
+  case_dir="$(new_case_dir)"
+  project_root="$case_dir/project"
+  claude_home="$case_dir/home"
+  stdout_file="$case_dir/stdout.log"
+  stderr_file="$case_dir/stderr.log"
+  run_dir="$project_root/.gran-maestro/run"
+
+  write_project_fixture "$project_root" "# run marker gc content"
+  create_fake_cache_targets "$claude_home"
+  mkdir -p "$run_dir"
+
+  python3 - "$run_dir" "$$" <<'PY'
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+alive_pid = int(sys.argv[2])
+now = datetime.now(timezone.utc).replace(microsecond=0)
+
+def write(name, payload):
+    (run_dir / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+write("old-done.json", {
+    "task_id": "old-done",
+    "phase": "done",
+    "last_heartbeat": "2020-01-02T00:00:00Z",
+})
+write("recent-done.json", {
+    "task_id": "recent-done",
+    "phase": "done",
+    "last_heartbeat": now.isoformat().replace("+00:00", "Z"),
+})
+write("dead-running.json", {
+    "task_id": "dead-running",
+    "phase": "running",
+    "started_by_pid": 999999999,
+    "last_heartbeat": now.isoformat().replace("+00:00", "Z"),
+})
+write("alive-running.json", {
+    "task_id": "alive-running",
+    "phase": "running",
+    "started_by_pid": alive_pid,
+    "last_heartbeat": now.isoformat().replace("+00:00", "Z"),
+})
+write("legacy-running.json", {
+    "task_id": "legacy-running",
+    "phase": "running",
+    "started_by_pid": 999999999,
+})
+write("stale-running.json", {
+    "task_id": "stale-running",
+    "phase": "running",
+    "started_by_pid": alive_pid,
+    "last_heartbeat": (now - timedelta(minutes=11)).isoformat().replace("+00:00", "Z"),
+})
+PY
+
+  alive_marker="$run_dir/alive-running.json"
+  alive_mtime_before="$(stat_mtime "$alive_marker")"
+
+  run_session_init "$project_root" "$claude_home" "$stdout_file" "$stderr_file"
+
+  archive_file="$project_root/.gran-maestro/archive/run/2020-01/old-done.json"
+  assert_file_missing "AC-301 old done removed from run dir" "$run_dir/old-done.json"
+  assert_file_exists "AC-301 old done archived" "$archive_file"
+
+  recent_done_phase="$(json_field "$run_dir/recent-done.json" "phase")"
+  assert_eq "AC-301 recent done preserved" "done" "$recent_done_phase"
+
+  terminated_phase="$(json_field "$run_dir/dead-running.json" "phase")"
+  terminated_at="$(json_field "$run_dir/dead-running.json" "terminated_at")"
+  assert_eq "AC-301 dead running terminated" "terminated" "$terminated_phase"
+  if [ -z "$terminated_at" ]; then
+    fail "AC-301 dead running terminated_at missing"
+  fi
+
+  terminated_phase="$(json_field "$run_dir/stale-running.json" "phase")"
+  terminated_at="$(json_field "$run_dir/stale-running.json" "terminated_at")"
+  assert_eq "AC-301 stale running terminated" "terminated" "$terminated_phase"
+  if [ -z "$terminated_at" ]; then
+    fail "AC-301 stale running terminated_at missing"
+  fi
+
+  legacy_phase="$(json_field "$run_dir/legacy-running.json" "phase")"
+  assert_eq "AC-301 legacy marker preserved" "running" "$legacy_phase"
+
+  alive_mtime_after="$(stat_mtime "$alive_marker")"
+  assert_eq "AC-301 alive running mtime unchanged" "$alive_mtime_before" "$alive_mtime_after"
+  assert_eq "AC-301 alive running phase unchanged" "running" "$(json_field "$alive_marker" "phase")"
 }
 
 test_ac204b_second_run_skip_log() {
@@ -558,6 +684,7 @@ run_case "AC-203 invalid version skipped" test_ac203_invalid_version_skipped
 run_case "AC-204a static sync contract" test_ac204a_static_sync_contract
 run_case "AC-204b second run skip log" test_ac204b_second_run_skip_log
 run_case "AC-204c session-init average under 500ms" test_ac204c_session_init_average_under_500ms
+run_case "AC-301 run marker GC" test_ac301_run_marker_gc_archive_terminate_and_preserve
 
 printf 'SUMMARY: passed=%s failed=%s total=%s\n' "$PASS_COUNT" "$FAIL_COUNT" "$((PASS_COUNT + FAIL_COUNT))"
 

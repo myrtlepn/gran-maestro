@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.mst_cmds._common import load_json
+from scripts.mst_cmds._common import load_json, resolve_started_by_pid
 from scripts.mst_cmds.dispatch import _coerce_positive_int, _dispatch_state_path, _load_dispatch_config, _now_iso
 
 
@@ -58,13 +58,7 @@ def _wrapper_timeout_sec(args) -> int | None:
 
 
 def _started_by_pid() -> int:
-    raw = os.environ.get("MST_STATE_PPID", "").strip()
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
-    return int(os.getppid())
+    return resolve_started_by_pid()
 
 
 def _register_state(args) -> str:

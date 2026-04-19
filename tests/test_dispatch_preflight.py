@@ -125,3 +125,44 @@ def test_dispatch_preflight_warns_on_stdin_pipe_but_returns_zero(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert "stdin" in proc.stderr.lower()
+
+
+def test_dispatch_register_resolves_started_by_pid_from_session_anchor(tmp_path):
+    workspace = tmp_path / "workspace"
+    gm_tmp = workspace / ".gran-maestro" / "tmp"
+    gm_tmp.mkdir(parents=True, exist_ok=True)
+
+    env = dict(os.environ)
+    env.pop("MST_STATE_PPID", None)
+
+    anchor_proc = subprocess.Popen(["sleep", "30"])
+    try:
+        (gm_tmp / f"mst-session-anchor-{anchor_proc.pid}.pid").write_text(
+            f"{anchor_proc.pid}\n",
+            encoding="utf-8",
+        )
+
+        proc = _run_mst(
+            workspace,
+            "dispatch",
+            "register",
+            "--task-id",
+            "dispatch-anchor",
+            "--pid",
+            str(os.getpid()),
+            "--provider",
+            "codex",
+            "--model",
+            "test-model",
+            "--worktree-dir",
+            str(workspace),
+            env=env,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["started_by_pid"] == anchor_proc.pid
+    finally:
+        if anchor_proc.poll() is None:
+            anchor_proc.terminate()
+            anchor_proc.wait(timeout=5)

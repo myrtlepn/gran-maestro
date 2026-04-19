@@ -17,6 +17,7 @@ from scripts.mst_cmds._common import (
     _parse_utc_datetime,
     _plugin_root,
     load_json,
+    resolve_started_by_pid,
     run_dir,
     save_json,
 )
@@ -277,6 +278,8 @@ def cmd_dispatch_register(args):
                 f"[dispatch] warning: invalid started_by_pid skipped: {args.started_by_pid}",
                 file=sys.stderr,
             )
+    else:
+        payload["started_by_pid"] = resolve_started_by_pid()
     save_json(_dispatch_state_path(task_id), payload)
     print(json.dumps(payload, ensure_ascii=False))
     return 0
