@@ -47,6 +47,7 @@ from scripts.mst_cmds import dispatch
 from scripts.mst_cmds import run as run_cmd
 from scripts.mst_cmds import prompt
 from scripts.mst_cmds import metrics
+from scripts.mst_cmds import status
 
 
 def set_base_dir(base_dir):
@@ -98,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.register(sub)
     prompt.register(sub)
     metrics.register(sub)
+    status.register(sub)
 
     return parser
 
@@ -235,4 +237,5 @@ DISPATCH = {
     ("prompt", "validate"): prompt.cmd_prompt_validate,
     ("prompt", "write-context"): prompt.cmd_prompt_write_context,
     ("metrics", "summary"): metrics.cmd_metrics_summary,
+    ("status", "context-usage"): status.cmd_status_context_usage,
 }

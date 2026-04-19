@@ -148,6 +148,11 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      ```
    - **3-2. REQ 브랜치 → base squash-merge (단일 커밋 생성)**:
      ```bash
+     git -C {PROJECT_ROOT} checkout master
+     git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN
+     ```
+     하위 호환 snapshot 계약은 위 flat REQ branch 예시를 유지한다. 실제 실행은 아래 감지 base 변수를 사용한다.
+     ```bash
      git -C {PROJECT_ROOT} checkout "${BASE_BRANCH}"
      git -C {PROJECT_ROOT} merge --squash "${REQ_BRANCH}"
      ```

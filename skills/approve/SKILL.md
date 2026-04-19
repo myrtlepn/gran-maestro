@@ -32,6 +32,7 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 - 합리화 패턴: "컨텍스트가 길어졌으므로 멈춘다." | 확인 증거: 컨텍스트 길이/대화 길이/토큰 소비량과 무관하게 `NEXT_ACTION` 출력 직후 다음 Step 도구 호출을 실행한다.
 - 합리화 패턴: "대화가 길어졌으니 다음 REQ는 다음 턴에 하자." | 확인 증거: 실행 가능한 다음 REQ가 있으면 같은 실행 흐름에서 `mst:request --resume ... -a`를 즉시 호출한다.
 - 합리화 패턴: "토큰 절약을 위해 DAG 자동 연쇄를 여기서 끝내자." | 확인 증거: 연쇄 루프는 사용자 명시적 취소 또는 실행 가능한 후보 부재 시에만 종료한다.
+- 합리화 패턴: "컨텍스트가 길어졌으니/토큰 효율을 위해/변경 추적 품질을 위해 다음 단계를 새 세션에서 진행하는 게 낫다." | 확인 증거: 자동 연쇄 진입 컨텍스트 블록의 수치(context_pct, auto_approve_on_unblock)를 인용하여 chain 지속이 정상 경로임을 명시한 뒤 다음 스킬을 자동 호출한다.
 
 ## 실행 프로토콜
 
@@ -65,43 +66,21 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 <!-- @include _shared/reference-lookup.md -->
 ### Reference Lookup Protocol (MANDATORY)
 
-외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 관련 판단은 아래 공통 프로토콜을 따른다.
+외부 의존성(라이브러리/API/프레임워크/버전/프로토콜) 판단은 아래 공통 프로토콜을 따른다.
 
-0. **자동 트리거 게이트**:
-   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search`를 확인한다.
-   - `reference.auto_search == true`일 때만 자동 WebSearch를 허용한다.
-   - 설정 미존재 시 기본값: `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
-1. **키워드 감지**:
-   - 현재 단계 입력 컨텍스트에서 외부 의존성 키워드(라이브러리/API/프레임워크/버전/프로토콜 계열)를 감지한다.
-   - `reference.llm_auto_trigger == true`이면 키워드 매칭과 별도로 PM이 "인터넷에 최신 정보가 있을 법한 내용"이라고 판단할 때 자율적으로 WebSearch를 트리거한다.
-   - `reference.llm_auto_trigger == false`이면 기존 키워드 매칭 기반 동작만 유지한다.
-2. **3단계 신선도 체크**:
-   - (a) `.gran-maestro/references/` 캐시 존재를 `python3 {PLUGIN_ROOT}/scripts/mst.py reference search --keyword "{keyword}" --json`으로 확인한다.
-   - (b) TTL 체크: `searched_at + cache_ttl_days` 경과 여부로 `fresh/stale`를 판정한다.
-   - (c) cutoff 괴리 체크: 현재 시각 대비 `cutoff_threshold_months` 초과 시 `expired`를 판정한다.
-3. **WebSearch 트리거**:
-   - 캐시 없음 또는 `stale/expired`일 때만 검색한다.
-   - `reference.auto_search == true`일 때만 실행하고, Step당 최대 `max_searches_per_step`을 유지한다.
-   - `reference.auto_fact_check == true`이면 검색 결과의 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
-   - `reference.auto_fact_check == false`이면 기존 동작(검색 결과를 그대로 다음 단계로 전달)을 유지한다.
-4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**:
-   - WebSearch를 1건이라도 실행했으면, 각 검색 결과마다 반드시 `Bash`로 `mst.py reference add`를 호출해야 한다.
-   - 표/텍스트 결론 요약만으로는 저장이 완료되지 않는다. `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
+0. **자동 트리거 게이트**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get reference.auto_search)`로 `reference.auto_search`를 확인한다. `true`일 때만 자동 WebSearch를 허용한다. 설정 미존재 시 기본값은 `cache_ttl_days=2`, `cutoff_threshold_months=0.5`, `max_searches_per_step=5`, `llm_auto_trigger=true`, `auto_fact_check=true`.
+1. **키워드 감지**: 현재 단계 입력에서 외부 의존성 키워드를 감지한다. `reference.llm_auto_trigger == true`이면 PM이 최신 정보가 필요하다고 판단할 때도 WebSearch를 트리거한다. `false`이면 키워드 매칭 기반 동작만 유지한다.
+2. **3단계 신선도 체크**: (a) `.gran-maestro/references/` 캐시를 `reference search --keyword "{keyword}" --json`으로 확인, (b) `searched_at + cache_ttl_days` 기준 `fresh/stale` 판정, (c) 현재 시각 대비 `cutoff_threshold_months` 초과 시 `expired` 판정.
+3. **WebSearch 트리거**: 캐시 없음 또는 `stale/expired`일 때만 검색한다. `reference.auto_search == true`일 때만 실행하고 Step당 `max_searches_per_step`을 넘지 않는다. `reference.auto_fact_check == true`이면 핵심 claim을 1회성 교차 WebSearch로 경량 검증한다.
+4. **REF 저장 (MANDATORY — WebSearch 실행 시 Bash 호출 필수)**: WebSearch를 1건이라도 실행했으면 결과마다 `Bash`로 `mst.py reference add`를 호출한다. 표/텍스트 결론 요약만으로는 저장 완료가 아니며 `content.md`는 raw 발췌(원문 근거) 중심으로 남긴다.
    - 저장 명령: `python3 {PLUGIN_ROOT}/scripts/mst.py reference add --topic "{topic}" --url "{url}" --summary "{summary}" --content "{raw 발췌 본문}"`
-   - 작성 원칙 요약: 인용/표/코드 스니펫 + 출처 URL/날짜를 함께 기록한다 (`summary`는 한 줄 인덱스 유지).
-   - 상세 예시/품질 체크리스트/lazy-Read 트리거는 `skills/plan/SKILL.md`의 Reference Lookup Protocol 4번 항목을 동일 기준으로 따른다.
-5. **프롬프트 주입**:
-   - 이후 단계 프롬프트 컨텍스트에 `[REFERENCE_CONTEXT]`를 주입한다.
-   - 형식:
-     ```text
-     [REFERENCE_CONTEXT]
-     current_date: {YYYY-MM-DD}
-     model_cutoff: {cutoff_date_or_unknown}
-     references:
-     - REF-001 (fresh|stale|expired) {topic} | {url}
-     [/REFERENCE_CONTEXT]
-     ```
-   - 참조가 없으면 `references: none`으로 명시한다.
+   - 작성 원칙: 인용/표/코드 스니펫 + 출처 URL/날짜를 함께 기록한다 (`summary`는 한 줄 인덱스 유지).
+   - 예시 A (인용): `> 인용: "{원문 핵심 문장}" (출처: {URL}, 날짜: {YYYY-MM-DD})`
+   - 예시 B (표): `| 열 | 값 |` 형태의 raw markdown table과 출처 URL을 보존한다.
+   - 예시 C (코드 스니펫): fenced code block(```text)으로 raw 코드와 문서 URL/버전을 남긴다.
+   - 신규 REF 품질 체크리스트 (저장 전 점검): Findings: 결론 1~3줄. Quotes: 짧은 원문 인용+URL. Data: 표/버전/날짜/수치. Context: 현재 plan 판단에 필요한 이유.
+   - PM lazy-Read 트리거 (`content.md Read` 필수): summary만으로 부족하거나 표/코드/원문 뉘앙스가 결론에 영향을 주면 반드시 `content.md`를 Read한다.
+5. **프롬프트 주입**: 이후 단계 프롬프트에 `[REFERENCE_CONTEXT]`를 주입한다. 형식: `current_date`, `model_cutoff`, `references: REF-001 (fresh|stale|expired) {topic} | {url}`. 참조가 없으면 `references: none`으로 명시한다.
 <!-- @end-include -->
 
 ### REQ ID 결정 (인자 파싱)
@@ -516,6 +495,13 @@ REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ
 git show-ref --verify --quiet "refs/heads/${REQ_BRANCH}" \
   || git checkout -b "$REQ_BRANCH" "$DETECTED_BASE"
 ```
+
+하위 호환 snapshot 계약 예시:
+```bash
+git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
+  || git checkout -b gran-maestro/REQ-NNN {config.worktree.base_branch}
+```
+태스크 worktree 생성 시 flat REQ branch를 base로 전달하는 경우 `--base gran-maestro/REQ-NNN` 형식을 유지한다.
 
 REQ 브랜치명은 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 감지된 base의 `/`만 `-`로 치환한다.
 이 브랜치는 모든 태스크 커밋의 집합점이 되며, accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash-merge한다(T04).

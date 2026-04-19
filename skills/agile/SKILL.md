@@ -538,7 +538,7 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
      -- claude -p "$(cat sprint-prompt.md)" --model "$MODEL" --permission-mode bypassPermissions
    ```
    - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록한다.
-4. 종료 신호 수신: `claude` 프로세스 exit code 확인 + `dispatch-result.json` 파일 존재 여부 확인.
+4. 종료 신호 수신: `claude` 프로세스 exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
 5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
 ###### 1회 안내 메시지 (MANDATORY)

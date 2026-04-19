@@ -188,6 +188,20 @@ def next_action(current_phase, status):
 
 def _skill_state_base_dir() -> Path:
     local_base_dir = Path.cwd().resolve() / ".gran-maestro"
+    session_id = os.environ.get("MST_STATE_PPID", "").strip() or str(os.getppid())
+
+    def has_session_state(base_dir: Path | None) -> bool:
+        if not base_dir:
+            return False
+        return (
+            (base_dir / "tmp" / f"mst-state-{session_id}.json").exists()
+            or (base_dir / "state" / session_id / "snapshot.json").exists()
+        )
+
+    if has_session_state(local_base_dir):
+        return local_base_dir
+    if BASE_DIR and os.access(BASE_DIR, os.W_OK) and has_session_state(BASE_DIR):
+        return BASE_DIR
     if local_base_dir.exists():
         return local_base_dir
     if BASE_DIR and os.access(BASE_DIR, os.W_OK):
