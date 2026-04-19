@@ -112,11 +112,14 @@ def _list_worktree_roots(project_root: Path) -> list[Path]:
     return worktree_roots
 
 
-def _find_nested_worktree_root(target_path, worktree_roots) -> Path | None:
+def _find_nested_worktree_root(target_path, worktree_roots, master_root=None) -> Path | None:
     normalized_target = _normalize_target_path(target_path)
+    normalized_master = _normalize_target_path(master_root) if master_root else None
     matches: list[Path] = []
     for worktree_root in worktree_roots:
         normalized_root = _normalize_target_path(worktree_root)
+        if normalized_master is not None and normalized_root == normalized_master:
+            continue
         if normalized_target == normalized_root or normalized_root in normalized_target.parents:
             matches.append(normalized_root)
     if not matches:
@@ -161,7 +164,7 @@ def cmd_worktree_create(args):
     try:
         project_root = _resolve_master_project_root()
         source_root = _resolve_worktree_source_root()
-        nested_root = _find_nested_worktree_root(worktree_path, _list_worktree_roots(project_root))
+        nested_root = _find_nested_worktree_root(worktree_path, _list_worktree_roots(project_root), master_root=project_root)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
