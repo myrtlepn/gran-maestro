@@ -465,9 +465,50 @@ objective 저장 전에 수집된 모든 상세 내용을 도메인 단위로 �
 4. `AUTO_MODE`에서는 사용자 확인 대신 PM이 자율 확정하고 근거를 함께 기록한다.
 5. 확정된 클러스터 맵은 Step 1A.10 저장 입력으로 사용한다.
 
+##### 1A.9.6 완성된 모습 미리보기 + 정제 (MANDATORY, PM skip 가능)
+
+Step 1A.9.5의 도메인 클러스터링 결과와 누적 `detail_content_buffer`를 입력으로, Step 1A.9.7 적대적 검토 전에 사용자가 "완성된 모습"을 검증할 수 있도록 자연어 미리보기와 정제 라운드를 수행한다. PM이 미리보기가 불필요하거나 오히려 흐름을 방해한다고 판단하면 사용자 질문 없이 skip할 수 있다.
+
+###### PM skip
+
+1. PM이 skip을 선택하면 `AskUserQuestion`을 사용하지 않는다.
+2. 아래 로그 1줄만 출력하고 Step 1A.9.7로 진행한다.
+   - `[완성 모습 미리보기 skip] {사유}`
+
+###### 권장 3종 세션
+
+진행 시 아래 3종을 자연어로 제시한다. PM은 프로젝트 성격상 필요하다고 판단하면 추가 시각화나 표를 자유롭게 더할 수 있다.
+
+1. 사용자 동선: happy path와 edge 시나리오에서 사용자가 어떤 순서로 결과를 확인하는지 보여준다.
+2. 시스템 지도 Before·After: 현재 구조와 완료 후 구조를 나란히 설명하고, 도메인별 책임과 연결 관계를 드러낸다.
+3. 누락 확인 체크리스트: DoD/JTBD/도메인/리스크/운영 흐름에서 빠진 항목이 없는지 확인한다.
+
+###### 정제 루프
+
+1. 미리보기 라운드마다 사용자 피드백 또는 PM 판단으로 누락 보강 항목을 식별한다.
+2. 각 라운드 종료 시 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/round-history.md`에 라운드 요약을 append한다.
+3. 누락 보강 항목은 `detail_content_buffer`에 축적하고, Step 1A.10에서 `details/*.md`에 흡수한다.
+4. `completion-preview.md` 같은 별도 산출물 파일은 생성하지 않는다.
+
+**`AUTO_MODE` 분기:**
+- `AUTO_MODE=false`: 사용자 확정 시까지 라운드 횟수 제한 없이 반복 가능
+- `AUTO_MODE=true`: 최대 2회 반복한다. 설정값 `agile.completion_preview.max_rounds_auto`가 있으면 해당 값을 상한으로 사용한다.
+  - 상한 도달 시 현재까지의 누락 보강 항목을 `detail_content_buffer`에 반영하고 Step 1A.9.7로 진행한다.
+
+###### 회귀 처리
+
+1. 정제 중 DoD 변경이 필요하면 Step 1A.6으로 회귀한다.
+2. JTBD 변경이 필요하면 Step 1A.8로 회귀해 저장 전 준비도와 JTBD 정합성을 재확인한다.
+3. 도메인 클러스터 변경이 필요하면 Step 1A.9.5로 회귀한다.
+4. 회귀 카운팅 단위는 다음으로 고정한다.
+   - `완성된 모습 미리보기에서 DoD/JTBD/도메인 정제로 회귀하는 방향 전환 1건 = 1회`
+5. `AUTO_MODE=true`에서는 `agile.completion_preview.regression_max`(기본 2) 상한을 적용한다.
+   - 상한 도달 시 로그를 출력하고 `auto-decisions.md`에 기록한 뒤 Step 1A.9.7로 진행한다.
+6. `AUTO_MODE=false`에서는 사용자 확정 시까지 회귀 횟수 제한 없이 반복 가능하다.
+
 ### Step 1A.9.7 적대적 검토 게이트
 
-Step 1A.9.5 도메인 클러스터링 직후, objective 저장 직전에 완전성 보강 목적의 적대적 검토를 수행한다. 이 게이트는 D3의 명료도 검증이 아니라 엣지케이스, 누락 흐름, 통합 경계, persona/NFR gap을 찾아 Step 1A.4 재귀 정제 루프에 "적대적 검토 라운드" 1회로 주입하는 절차다.
+Step 1A.9.5 도메인 클러스터링 (및 Step 1A.9.6 완성된 모습 미리보기/정제 — 통과 또는 PM skip) 직후, objective 저장 직전에 완전성 보강 목적의 적대적 검토를 수행한다. 이 게이트는 D3의 명료도 검증이 아니라 엣지케이스, 누락 흐름, 통합 경계, persona/NFR gap을 찾아 Step 1A.4 재귀 정제 루프에 "적대적 검토 라운드" 1회로 주입하는 절차다.
 
 1. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.adversarial_review)`로 설정을 읽는다.
    - `agile.adversarial_review.enabled != true`이면 graceful skip 후 Step 1A.10으로 진행한다.

@@ -76,6 +76,11 @@
     "soft_limit_large": 12,
     "round_history_max_summary_lines": 50,
     "coverage_threshold": 0.85,
+    "completion_preview": {
+      "enabled": true,
+      "max_rounds_auto": 2,
+      "regression_max": 2
+    },
     "evidence_gate": {
       "enabled": true,
       "required_globs": []
