@@ -52,6 +52,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 
 - Step 1에서 `agile-plan` 서브스킬 반환 마커 확인 후 Step 2로 진입한다.
 - Step 2/3 루프는 단일 스프린트 모델로 반복 실행한다.
+- Step 2.2.4.5 sprint-close 호출 완료 (`{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprint-log.json`에 현재 Sprint 레코드 존재)를 확인한다.
 
 ### 금지 패턴
 
@@ -541,6 +542,48 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
 4. 종료 신호 수신: `claude` 프로세스 exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
 5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
+###### Pre-dispatch HEAD 가드 (MANDATORY)
+
+Dispatch 시작 전 primary worktree가 base 브랜치에 있는지 확인한다. 이 가드는 Sprint worktree dispatch가 primary worktree의 hijack 상태에서 출발하는 것을 막기 위한 필수 절차다.
+
+절차:
+1. `git -C {PROJECT_ROOT} rev-parse --abbrev-ref HEAD`로 현재 HEAD를 확인한다.
+2. base 브랜치는 `config.worktree.base_branch`를 우선 사용하고, 값이 비어 있으면 `master`로 fallback 한다.
+3. `HEAD == base`이면 dispatch를 계속 진행한다.
+4. `HEAD != base`이면 `git -C {PROJECT_ROOT} status --porcelain`로 미커밋 변경을 확인한다.
+   - 미커밋 변경이 없으면 `git -C {PROJECT_ROOT} checkout {base}`를 시도한다. 성공하면 dispatch를 계속 진행한다.
+   - checkout 실패 또는 미커밋 변경 존재 시 dispatch를 중단하고 known issue를 자동 등록한다.
+
+```bash
+CURRENT_HEAD=$(git -C {PROJECT_ROOT} rev-parse --abbrev-ref HEAD)
+BASE_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch 2>/dev/null || true)
+BASE_BRANCH=${BASE_BRANCH:-master}
+
+if [ "$CURRENT_HEAD" != "$BASE_BRANCH" ]; then
+  UNCOMMITTED=$(git -C {PROJECT_ROOT} status --porcelain)
+
+  if [ -z "$UNCOMMITTED" ]; then
+    if git -C {PROJECT_ROOT} checkout "$BASE_BRANCH"; then
+      echo "[Sprint Dispatch 가드] primary worktree를 base=${BASE_BRANCH}로 복귀했습니다."
+    else
+      echo "[Sprint Dispatch 차단] primary worktree HEAD=${CURRENT_HEAD}. base=${BASE_BRANCH} checkout 실패. base=${BASE_BRANCH}로 이동 후 재시도"
+      python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+        --description "primary worktree hijack: HEAD=${CURRENT_HEAD}, base checkout 실패" \
+        --severity MAJOR \
+        --sprint {CURRENT_SPRINT}
+      exit 1
+    fi
+  else
+    echo "[Sprint Dispatch 차단] primary worktree에 미커밋 변경 + HEAD=${CURRENT_HEAD}. base=${BASE_BRANCH}로 이동 후 재시도"
+    python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+      --description "primary worktree hijack: HEAD=${CURRENT_HEAD}, uncommitted 변경 존재" \
+      --severity MAJOR \
+      --sprint {CURRENT_SPRINT}
+    exit 1
+  fi
+fi
+```
+
 ###### 1회 안내 메시지 (MANDATORY)
 
 Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력한다:
@@ -658,6 +701,39 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues list {AGI_ID} --status o
 python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues resolve {AGI_ID} --issue-id {KI_ID} --json
 ```
 4. DoD 갱신 제안 생성: `{dod_id, suggested_status, evidence_ref, reason}` 형태로 구성. `evidence_ref`는 `result.md`, 테스트/빌드 로그, `source-verify.md` 경로를 포함한다. authoritative 상태 확정(`done`)은 Step 3 승인 절차(3.3)에서만 수행한다.
+
+##### 2.2.4.5 Sprint 종료 정리 (MANDATORY)
+
+Sprint 결과와 회고 기록이 끝나면 브랜치·워크트리 정리를 반드시 수행한다. 이 단계는 Sprint 산출물 기록 이후, Sprint Review Gate 진입 전에 실행한다.
+
+기본 호출:
+```bash
+CLOSE_JSON=$(python3 {PLUGIN_ROOT}/scripts/mst.py agile sprint-close {AGI_ID} --sprint {CURRENT_SPRINT} --json)
+CLOSE_EXIT=$?
+CLOSE_STATUS=$(echo "$CLOSE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "parse_error")
+```
+
+판정:
+- `CLOSE_EXIT == 0`이고 `CLOSE_STATUS`가 `closed` 또는 `already_closed`이면 성공으로 간주한다. `[Sprint Close 완료] status=${CLOSE_STATUS}` 메시지를 출력하고 다음 단계로 진행한다.
+- `CLOSE_EXIT != 0`, `CLOSE_STATUS == aborted_tree_mismatch`, `CLOSE_STATUS == partial`, 또는 위 성공 조건 외의 모든 값은 실패로 간주한다.
+
+실패 처리:
+```bash
+if [ "$CLOSE_EXIT" -eq 0 ] && { [ "$CLOSE_STATUS" = "closed" ] || [ "$CLOSE_STATUS" = "already_closed" ]; }; then
+  echo "[Sprint Close 완료] status=${CLOSE_STATUS}"
+else
+  echo "[Sprint Close 실패] status=${CLOSE_STATUS}. 다음 Sprint의 Step 2.2.1 health check에서 재시도한다."
+  python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+    --description "sprint-close 실패 (status=${CLOSE_STATUS})" \
+    --severity MAJOR \
+    --sprint {CURRENT_SPRINT}
+fi
+```
+
+규칙:
+- `agile sprint-close` 호출은 생략할 수 없다. 호출 누락은 Sprint Exit Gate 실패로 본다.
+- 실패 시 `|| true`로 숨기지 않는다. known issue 등록 후 다음 Sprint의 Step `2.2.1 프로젝트 건강 점검`에서 재시도 안내를 확인한다.
+- 정리 성공 여부는 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprint-log.json`의 현재 Sprint 레코드로 검증한다.
 
 ##### Step 2.2.5 Sprint Review Gate (Step 2.2.4 직후 MANDATORY)
 
@@ -1029,3 +1105,4 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "컨텍스트가 길어졌으니/자연스러운 단락이니 여기서 끊자." | 확인 증거: `mst-stop-hook.sh`가 해당 턴을 block으로 판정해야 하며, LLM은 block 수신 시 즉시 다음 tool call을 emit한다(정지·요약·확인 질문 금지).
 - 합리화 패턴: "Sprint 경계에서 WIP/stash/squash 부담을 이유로 agile update --status paused를 호출해 루프를 종료한다." | 확인 증거: `MST_AGILE_PAUSE_AUTHORIZED=1` 또는 `--user-requested` 플래그 없이 active→paused 전이를 시도하면 mst.py가 exit≠0으로 차단한다. 해당 호출 0건 또는 차단 로그 존재.
 - 합리화 패턴: "Sprint 간 '자연스러운 단락'이라며 paused 상태 전이 명령으로 정지를 달성한다." | 확인 증거: stop-hook이 `[CRITICAL][SELF-PAUSE-DETECTED]` 마커로 block을 재-emit하고, LLM은 block 수신 즉시 다음 tool call을 emit한다 (상태 전이 명령 재호출 금지).
+- 합리화 패턴: "Sprint 종료 시 cleanup을 '시간 절약'을 이유로 생략한다." | 확인 증거: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprint-log.json`에 현재 Sprint 레코드 존재.

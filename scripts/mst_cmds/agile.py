@@ -259,6 +259,403 @@ def _next_known_issue_id(issues: List[dict]) -> str:
         max_number = max(max_number, int(match.group(1)))
     return f"KI-{max_number + 1:03d}"
 
+def _run_sprint_close_git(project_root: Path, git_args: List[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *git_args],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+
+def _sprint_close_error_text(result: subprocess.CompletedProcess, fallback: str) -> str:
+    return result.stderr.strip() or result.stdout.strip() or fallback
+
+def _resolve_sprint_close_base(explicit_base: Optional[str]) -> str:
+    base = str(explicit_base or "").strip()
+    if base:
+        return base
+
+    for config_name in ("config.resolved.json", "config.json"):
+        data = load_json(_common.BASE_DIR / config_name) or {}
+        worktree_config = data.get("worktree") if isinstance(data, dict) else None
+        configured = worktree_config.get("base_branch") if isinstance(worktree_config, dict) else None
+        configured = str(configured or "").strip()
+        if configured:
+            return configured
+    return "master"
+
+def _validate_sprint_close_base(project_root: Path, base: str) -> Optional[str]:
+    result = _run_sprint_close_git(project_root, ["rev-parse", "--verify", f"{base}^{{commit}}"])
+    if result.returncode != 0:
+        return _sprint_close_error_text(result, f"base branch not found: {base}")
+    return None
+
+def _branch_exists(project_root: Path, branch: Optional[str]) -> bool:
+    if not branch:
+        return False
+    result = _run_sprint_close_git(
+        project_root,
+        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+    )
+    return result.returncode == 0
+
+def _list_sprint_close_branches(project_root: Path, pattern: str) -> List[str]:
+    result = _run_sprint_close_git(project_root, ["branch", "--list", pattern])
+    if result.returncode != 0:
+        raise RuntimeError(_sprint_close_error_text(result, "git branch --list failed"))
+    branches = []
+    for line in result.stdout.splitlines():
+        branch = line.strip()
+        if branch.startswith(("* ", "+ ")):
+            branch = branch[2:].strip()
+        if branch:
+            branches.append(branch)
+    return branches
+
+def _detect_sprint_close_branch(project_root: Path, agi_id: str, sprint: int) -> Optional[str]:
+    patterns = [
+        f"gran-maestro/{agi_id}/sprint-{sprint}*",
+        f"gran-maestro/*{agi_id}*sprint*{sprint}*",
+        f"gran-maestro/*/{agi_id}-sprint-{sprint}*",
+    ]
+    candidates = []
+    seen = set()
+    for pattern in patterns:
+        for branch in _list_sprint_close_branches(project_root, pattern):
+            if branch not in seen:
+                seen.add(branch)
+                candidates.append(branch)
+
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        joined = ", ".join(sorted(candidates))
+        raise RuntimeError(f"multiple sprint branches matched; pass --branch explicitly: {joined}")
+    return candidates[0]
+
+def _default_sprint_worktree_path(project_root: Path, agi_id: str, sprint: int) -> Path:
+    return project_root / ".gran-maestro" / "worktrees" / agi_id / f"sprint-{sprint}"
+
+def _detect_sprint_worktree_path(
+    project_root: Path,
+    agi_id: str,
+    sprint: int,
+    explicit_path: Optional[str],
+) -> Optional[Path]:
+    if explicit_path:
+        return Path(explicit_path).expanduser().resolve(strict=False)
+    candidate = _default_sprint_worktree_path(project_root, agi_id, sprint)
+    if candidate.exists():
+        return candidate.resolve(strict=False)
+    return None
+
+def _git_rev_parse(project_root: Path, rev: str) -> str:
+    result = _run_sprint_close_git(project_root, ["rev-parse", rev])
+    if result.returncode != 0:
+        raise RuntimeError(_sprint_close_error_text(result, f"git rev-parse failed: {rev}"))
+    return result.stdout.strip()
+
+def _find_existing_sprint_squash_commit(
+    project_root: Path,
+    base: str,
+    agi_id: str,
+    sprint: int,
+    branch_tree: str,
+) -> tuple[Optional[str], Optional[str]]:
+    marker = f"[{agi_id} Sprint {sprint}] squash-merged:"
+    result = _run_sprint_close_git(project_root, ["log", "--format=%H%x00%T%x00%s", base])
+    if result.returncode != 0:
+        raise RuntimeError(_sprint_close_error_text(result, "git log failed"))
+
+    matching_tree_sha = None
+    for line in result.stdout.splitlines():
+        parts = line.split("\0", 2)
+        if len(parts) != 3:
+            continue
+        sha, tree, subject = parts
+        if marker in subject:
+            if tree != branch_tree:
+                return None, f"tree mismatch: {branch_tree} != {tree} ({sha})"
+            return sha, None
+        if tree == branch_tree and matching_tree_sha is None:
+            matching_tree_sha = sha
+    return matching_tree_sha, None
+
+def _current_git_branch(project_root: Path) -> Optional[str]:
+    result = _run_sprint_close_git(project_root, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+def _checkout_sprint_close_base(project_root: Path, base: str) -> Optional[str]:
+    if _current_git_branch(project_root) == base:
+        return None
+    result = _run_sprint_close_git(project_root, ["checkout", base])
+    if result.returncode != 0:
+        return _sprint_close_error_text(result, f"git checkout {base} failed")
+    return None
+
+def _abort_sprint_close_merge(project_root: Path) -> None:
+    _run_sprint_close_git(project_root, ["merge", "--abort"])
+
+def _perform_sprint_close_squash_merge(
+    project_root: Path,
+    branch: str,
+    message: str,
+) -> str:
+    merge_result = _run_sprint_close_git(project_root, ["merge", "--squash", branch])
+    if merge_result.returncode != 0:
+        _abort_sprint_close_merge(project_root)
+        raise RuntimeError(_sprint_close_error_text(merge_result, "git merge --squash failed"))
+
+    commit_result = _run_sprint_close_git(project_root, ["commit", "-m", message])
+    if commit_result.returncode != 0:
+        _abort_sprint_close_merge(project_root)
+        raise RuntimeError(_sprint_close_error_text(commit_result, "git commit failed"))
+    return _git_rev_parse(project_root, "HEAD")
+
+def _append_sprint_close_log(agi_id: str, record: dict) -> None:
+    log_path = _common.BASE_DIR / "agile" / agi_id / "sprint-log.json"
+    existing = load_json(log_path)
+    entries = existing if isinstance(existing, list) else []
+    entries.append(record)
+    save_json(log_path, entries)
+
+def _print_sprint_close_result(payload: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    status = payload.get("status")
+    print(f"sprint-close status: {status}")
+    print(f"agi_id: {payload.get('agi_id')}")
+    print(f"sprint: {payload.get('sprint')}")
+    print(f"base: {payload.get('base')}")
+    if payload.get("branch"):
+        print(f"branch: {payload.get('branch')}")
+    if payload.get("worktree_path"):
+        print(f"worktree_path: {payload.get('worktree_path')}")
+    if payload.get("squash_commit_sha"):
+        print(f"squash_commit_sha: {payload.get('squash_commit_sha')}")
+    actions = payload.get("actions")
+    if actions:
+        print("actions:")
+        for action in actions:
+            print(f"- {action}")
+
+def cmd_agile_sprint_close(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    sprint = int(args.sprint)
+    if sprint < 0:
+        print("Error: --sprint must be >= 0", file=sys.stderr)
+        return 1
+
+    project_root = Path(_common.BASE_DIR).parent.resolve(strict=False)
+    base = _resolve_sprint_close_base(args.base)
+    dry_run = bool(getattr(args, "dry_run", False))
+    actions = []
+    warnings = []
+
+    payload = {
+        "agi_id": agi_id,
+        "sprint": sprint,
+        "base": base,
+        "branch": None,
+        "worktree_path": None,
+        "dry_run": dry_run,
+        "actions": actions,
+        "branch_deleted": False,
+        "worktree_removed": False,
+        "squash_commit_sha": None,
+        "status": None,
+        "warnings": warnings,
+    }
+
+    base_error = _validate_sprint_close_base(project_root, base)
+    if base_error:
+        print(f"Error: {base_error}", file=sys.stderr)
+        payload["status"] = "partial"
+        _print_sprint_close_result(payload, args.json)
+        return 1
+
+    try:
+        branch = str(args.branch).strip() if args.branch else _detect_sprint_close_branch(project_root, agi_id, sprint)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        payload["status"] = "partial"
+        _print_sprint_close_result(payload, args.json)
+        return 1
+
+    worktree_path = _detect_sprint_worktree_path(project_root, agi_id, sprint, args.worktree_path)
+    branch_exists = _branch_exists(project_root, branch)
+    worktree_exists = bool(worktree_path and worktree_path.exists())
+    payload["branch"] = branch
+    payload["worktree_path"] = str(worktree_path) if worktree_path else None
+    payload["branch_exists"] = branch_exists
+    payload["worktree_exists"] = worktree_exists
+
+    if branch_exists:
+        actions.append(f"checkout {base}")
+        branch_tree = _git_rev_parse(project_root, f"{branch}^{{tree}}")
+        try:
+            existing_sha, tree_error = _find_existing_sprint_squash_commit(
+                project_root,
+                base,
+                agi_id,
+                sprint,
+                branch_tree,
+            )
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            payload["status"] = "partial"
+            _print_sprint_close_result(payload, args.json)
+            return 1
+
+        if tree_error:
+            payload["status"] = "aborted_tree_mismatch"
+            print(f"Error: {tree_error}", file=sys.stderr)
+            if not dry_run:
+                _append_sprint_close_log(
+                    agi_id,
+                    {
+                        "sprint": sprint,
+                        "closed_at": _now_iso(),
+                        "branch_deleted": False,
+                        "worktree_removed": False,
+                        "squash_commit_sha": None,
+                        "status": "aborted_tree_mismatch",
+                    },
+                )
+            _print_sprint_close_result(payload, args.json)
+            return 1
+
+        if existing_sha:
+            payload["squash_commit_sha"] = existing_sha
+            actions.append(f"skip squash merge; tree already present in {base} ({existing_sha})")
+        else:
+            message = (
+                str(args.message)
+                if args.message is not None
+                else f"[{agi_id} Sprint {sprint}] squash-merged: (자동 생성)"
+            )
+            actions.append(f"git merge --squash {branch}")
+            actions.append("git commit squash merge")
+            if not dry_run:
+                checkout_error = _checkout_sprint_close_base(project_root, base)
+                if checkout_error:
+                    print(f"Error: {checkout_error}", file=sys.stderr)
+                    payload["status"] = "partial"
+                    _print_sprint_close_result(payload, args.json)
+                    return 1
+                try:
+                    payload["squash_commit_sha"] = _perform_sprint_close_squash_merge(
+                        project_root,
+                        branch,
+                        message,
+                    )
+                except RuntimeError as exc:
+                    print(f"Error: {exc}", file=sys.stderr)
+                    payload["status"] = "partial"
+                    _append_sprint_close_log(
+                        agi_id,
+                        {
+                            "sprint": sprint,
+                            "closed_at": _now_iso(),
+                            "branch_deleted": False,
+                            "worktree_removed": False,
+                            "squash_commit_sha": None,
+                            "status": "partial",
+                        },
+                    )
+                    _print_sprint_close_result(payload, args.json)
+                    return 1
+    elif branch:
+        actions.append(f"skip missing branch {branch}")
+
+    if worktree_exists:
+        actions.append(f"remove worktree {worktree_path}")
+    if branch_exists:
+        actions.append(f"delete branch {branch}")
+
+    if dry_run:
+        payload["status"] = "dry_run"
+        _print_sprint_close_result(payload, args.json)
+        return 0
+
+    checkout_error = _checkout_sprint_close_base(project_root, base)
+    if checkout_error:
+        print(f"Error: {checkout_error}", file=sys.stderr)
+        payload["status"] = "partial"
+        _print_sprint_close_result(payload, args.json)
+        return 1
+
+    partial_failure = False
+    if worktree_exists and worktree_path is not None:
+        remove_result = subprocess.run(
+            [
+                sys.executable,
+                str(_common._mst_script_path()),
+                "worktree",
+                "remove",
+                "--path",
+                str(worktree_path),
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(project_root),
+        )
+        if remove_result.returncode != 0:
+            partial_failure = True
+            warning = _sprint_close_error_text(remove_result, "worktree remove failed")
+            warnings.append(warning)
+            print(f"Warning: {warning}", file=sys.stderr)
+        else:
+            payload["worktree_removed"] = True
+
+    if branch_exists and branch:
+        delete_result = _run_sprint_close_git(project_root, ["branch", "-D", branch])
+        if delete_result.returncode != 0:
+            partial_failure = True
+            warning = _sprint_close_error_text(delete_result, "git branch -D failed")
+            warnings.append(warning)
+            print(f"Warning: {warning}", file=sys.stderr)
+        else:
+            payload["branch_deleted"] = True
+
+    final_checkout_error = _checkout_sprint_close_base(project_root, base)
+    if final_checkout_error:
+        partial_failure = True
+        warnings.append(final_checkout_error)
+        print(f"Warning: {final_checkout_error}", file=sys.stderr)
+
+    if partial_failure:
+        payload["status"] = "partial"
+    elif not branch_exists and not worktree_exists:
+        payload["status"] = "already_closed"
+    else:
+        payload["status"] = "closed"
+
+    _append_sprint_close_log(
+        agi_id,
+        {
+            "sprint": sprint,
+            "closed_at": _now_iso(),
+            "branch_deleted": bool(payload["branch_deleted"]),
+            "worktree_removed": bool(payload["worktree_removed"]),
+            "squash_commit_sha": payload["squash_commit_sha"],
+            "status": payload["status"],
+        },
+    )
+    _print_sprint_close_result(payload, args.json)
+    return 1 if partial_failure else 0
+
 def _next_agile_id() -> str:
     counter_path = get_counter_path("agi")
     scan_root = _common.BASE_DIR / TYPE_DIRS["agi"][0]
@@ -1021,6 +1418,16 @@ def register(subparsers):
         dest="retrospective_recorded",
     )
     agile_dispatch_result.add_argument("--json", action="store_true")
+
+    agile_sprint_close = agile_sub.add_parser("sprint-close")
+    agile_sprint_close.add_argument("agi_id")
+    agile_sprint_close.add_argument("--sprint", type=int, required=True)
+    agile_sprint_close.add_argument("--base")
+    agile_sprint_close.add_argument("--branch")
+    agile_sprint_close.add_argument("--worktree-path", dest="worktree_path")
+    agile_sprint_close.add_argument("--dry-run", action="store_true", dest="dry_run")
+    agile_sprint_close.add_argument("--json", action="store_true")
+    agile_sprint_close.add_argument("--message")
 
     agile_retrospective = agile_sub.add_parser("retrospective")
     agile_retrospective.add_argument("agi_id")

@@ -168,6 +168,7 @@ DISPATCH = {
     ("agile", "update"): agile.cmd_agile_update,
     ("agile", "result"): agile.cmd_agile_result,
     ("agile", "dispatch-result"): agile.cmd_agile_dispatch_result,
+    ("agile", "sprint-close"): agile.cmd_agile_sprint_close,
     ("agile", "retrospective"): agile.cmd_agile_retrospective,
     ("agile", "known-issues"): agile.cmd_agile_known_issues,
     ("agile", "review"): agile.cmd_agile_review,
