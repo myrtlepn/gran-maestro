@@ -232,6 +232,7 @@ DISPATCH = {
     ("dispatch", "heartbeat"): dispatch.cmd_dispatch_heartbeat,
     ("dispatch", "list"): dispatch.cmd_dispatch_list,
     ("dispatch", "kill"): dispatch.cmd_dispatch_kill,
+    ("dispatch", "cleanup"): dispatch.cmd_dispatch_cleanup,
     ("run", None): run_cmd.cmd_run,
     ("prompt", "build"): prompt.cmd_prompt_build,
     ("prompt", "validate"): prompt.cmd_prompt_validate,

@@ -395,6 +395,104 @@ def cmd_dispatch_kill(args):
     return 0
 
 
+def _dispatch_run_dir_no_create() -> Path:
+    if _common.BASE_DIR is not None:
+        return _common.BASE_DIR / "run"
+    return Path.cwd().resolve() / ".gran-maestro" / "run"
+
+
+def _cleanup_archive_dir(now: datetime) -> Path:
+    base_dir = _common.BASE_DIR if _common.BASE_DIR is not None else Path.cwd().resolve() / ".gran-maestro"
+    return base_dir / "archive" / "run" / f"{now.year:04d}-{now.month:02d}"
+
+
+def _has_valid_started_by_pid(payload: dict) -> bool:
+    if "started_by_pid" not in payload:
+        return False
+    try:
+        int(payload.get("started_by_pid"))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _cleanup_marker_reason(payload: dict, archive_after_seconds: int, now: datetime, include_legacy: bool) -> str | None:
+    if include_legacy and not _has_valid_started_by_pid(payload):
+        return "legacy"
+
+    phase = str(payload.get("phase", "")).strip().lower()
+    if phase != "done":
+        return None
+
+    heartbeat = _parse_utc_datetime(payload.get("last_heartbeat"))
+    if heartbeat is None:
+        return None
+
+    age_seconds = max(0, int((now - heartbeat).total_seconds()))
+    if age_seconds > archive_after_seconds:
+        return "stale_done"
+    return None
+
+
+def cmd_dispatch_cleanup(args):
+    run_directory = _dispatch_run_dir_no_create()
+    if not run_directory.is_dir():
+        print("SUMMARY: archived=0 legacy=0 stale_done=0 preserved=0")
+        return 0
+
+    now = datetime.now(timezone.utc)
+    archive_after_seconds = max(0, int(args.archive_after_days)) * 86400
+    include_legacy = bool(getattr(args, "legacy", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    archived = 0
+    legacy = 0
+    stale_done = 0
+    preserved = 0
+
+    for path in sorted(run_directory.glob("*.json")):
+        if not path.is_file():
+            continue
+
+        payload = load_json(path)
+        if not isinstance(payload, dict):
+            preserved += 1
+            print(f"[dispatch] debug: failed to parse cleanup marker preserved: {path}", file=sys.stderr)
+            continue
+
+        reason = _cleanup_marker_reason(payload, archive_after_seconds, now, include_legacy)
+        if reason is None:
+            preserved += 1
+            continue
+
+        if dry_run:
+            print(f"[dry-run] would archive: {path} (reason: {reason})")
+            archived += 1
+            if reason == "legacy":
+                legacy += 1
+            else:
+                stale_done += 1
+            continue
+
+        archive_dir = _cleanup_archive_dir(now)
+        target = archive_dir / path.name
+        try:
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            os.replace(path, target)
+        except Exception as exc:
+            preserved += 1
+            print(f"[dispatch] warning: failed to archive marker '{path}' ({exc})", file=sys.stderr)
+            continue
+
+        archived += 1
+        if reason == "legacy":
+            legacy += 1
+        else:
+            stale_done += 1
+
+    print(f"SUMMARY: archived={archived} legacy={legacy} stale_done={stale_done} preserved={preserved}")
+    return 0
+
+
 def register(subparsers):
     sub = subparsers
     dispatch = sub.add_parser("dispatch")
@@ -437,3 +535,9 @@ def register(subparsers):
     group.add_argument("--stale", action="store_true")
     kill.add_argument("--signal", choices=["TERM", "KILL"], default="TERM")
     kill.add_argument("--stale-threshold")
+
+    cleanup = dispatch_sub.add_parser("cleanup")
+    cleanup.add_argument("--legacy", action="store_true")
+    cleanup.add_argument("--dry-run", action="store_true")
+    cleanup.add_argument("--archive-after-days", type=int, default=7)
+    cleanup.set_defaults(func=cmd_dispatch_cleanup)
