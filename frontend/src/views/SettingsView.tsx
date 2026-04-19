@@ -2019,9 +2019,19 @@ export function SettingsView() {
                           <AccordionContent className="p-3 pt-0 border-t">
                             <div className="grid grid-cols-1 gap-2 mt-3">
                               {isObject(sectionData) ? (
-                                Object.entries(sectionData as object).map(([key, value]) =>
-                                  renderField([sectionKey], key, value)
-                                )
+                                (() => {
+                                  let keys = Object.keys(sectionData as object);
+                                  if (sectionKey === 'worktree') {
+                                    const order = ['root_directory', 'max_active', 'base_branch', 'protected_branches', 'stale_timeout_hours', 'auto_cleanup_on_cancel'];
+                                    keys = [
+                                      ...order,
+                                      ...keys.filter(k => !order.includes(k))
+                                    ].filter(k => k in (sectionData as object));
+                                  }
+                                  return keys.map((key) =>
+                                    renderField([sectionKey], key, (sectionData as any)[key])
+                                  );
+                                })()
                               ) : (
                                 renderField([], sectionKey, sectionData)
                               )}

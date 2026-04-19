@@ -70,6 +70,7 @@ export const SETTING_DESCRIPTIONS: Record<string, string | SettingMeta> = {
   'worktree.root_directory': 'worktree 루트 경로',
   'worktree.max_active': '최대 활성 worktree 수',
   'worktree.base_branch': 'worktree 기준 브랜치',
+  'worktree.protected_branches': '보호할 브랜치 태그 목록 (배열)',
   'worktree.stale_timeout_hours': 'stale 판정 시간',
   'worktree.auto_cleanup_on_cancel': '취소 시 자동 정리',
   'retry.max_cli_retries': 'CLI 최대 재시도 횟수',
