@@ -191,6 +191,7 @@
     "root_directory": ".gran-maestro/worktrees",
     "max_active": 10,
     "base_branch": "main",
+    "protected_branches": ["main", "master", "release/*"],
     "stale_timeout_hours": 24,
     "auto_cleanup_on_cancel": true
   },

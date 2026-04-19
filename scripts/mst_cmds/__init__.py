@@ -207,6 +207,7 @@ DISPATCH = {
     ("extension", "ensure-copy"): extension.cmd_extension_ensure_copy,
     ("config", "resolve"): config.cmd_config_resolve,
     ("config", "get"): config.cmd_config_get,
+    ("config", "set"): config.cmd_config_set,
     ("config", "migrate"): config.cmd_config_migrate,
     ("preset", "list"): preset.cmd_preset_list,
     ("preset", "apply"): preset.cmd_preset_apply,

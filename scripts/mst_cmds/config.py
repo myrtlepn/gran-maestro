@@ -34,11 +34,68 @@ LEGACY_AGENT_SECTIONS = ["debug", "explore", "discussion", "ideation", "prerevie
 
 LEGACY_MODEL_KEYS = ["claude", "codex", "gemini", "developer", "reviewer"]
 
+PROTECTED_BRANCHES_KEY = "worktree.protected_branches"
+FALLBACK_PROTECTED_BRANCHES = ["main", "master", "release/*"]
+
 CLAUDE_MODEL_TO_TIER = {
     "opus": "premium",
     "sonnet": "economy",
     "haiku": "economy",
 }
+
+def _is_string_list(value):
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+def _default_protected_branches(defaults):
+    worktree_defaults = defaults.get("worktree") if isinstance(defaults, dict) else None
+    if isinstance(worktree_defaults, dict):
+        value = worktree_defaults.get("protected_branches")
+        if _is_string_list(value):
+            return list(value)
+    return list(FALLBACK_PROTECTED_BRANCHES)
+
+def _validate_resolved_worktree_config(resolved, defaults):
+    warnings = []
+    if not isinstance(resolved, dict):
+        return warnings
+
+    worktree = resolved.get("worktree")
+    if not isinstance(worktree, dict):
+        worktree = {}
+        resolved["worktree"] = worktree
+
+    protected_branches = worktree.get("protected_branches")
+    if _is_string_list(protected_branches):
+        return warnings
+
+    default_value = _default_protected_branches(defaults)
+    worktree["protected_branches"] = default_value
+    warnings.append(
+        "Warning: worktree.protected_branches must be a JSON array of strings; "
+        f"using default {_compact_json(default_value)}"
+    )
+    return warnings
+
+def _parse_config_set_value(raw_value):
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        return raw_value
+
+def _set_dotted_path(data, dotted_path, value):
+    parts = [part for part in dotted_path.split(".") if part]
+    if not parts:
+        return False
+
+    current = data
+    for part in parts[:-1]:
+        next_value = current.get(part)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            current[part] = next_value
+        current = next_value
+    current[parts[-1]] = value
+    return True
 
 def _load_json_strict(path: Path, required=True):
     try:
@@ -518,6 +575,8 @@ def cmd_config_resolve(args):
             file=sys.stderr,
         )
     resolved = deep_merge(defaults, overrides)
+    for warning in _validate_resolved_worktree_config(resolved, defaults):
+        print(warning, file=sys.stderr)
     save_json(_common.BASE_DIR / "config.resolved.json", resolved)
     print(f"config.resolved.json updated ({len(resolved)} top-level keys)")
     return 0
@@ -532,9 +591,46 @@ def _get_dotted_path(data, dotted_path):
 
 def _print_config_get_value(value):
     if isinstance(value, (dict, list)):
-        print(json.dumps(value, ensure_ascii=False))
+        print(_compact_json(value))
     else:
         print(value)
+
+def cmd_config_set(args):
+    key_path = args.key_path.strip()
+    if not key_path:
+        print("Error: key.path is required", file=sys.stderr)
+        return 1
+
+    value = _parse_config_set_value(args.value)
+    if key_path == PROTECTED_BRANCHES_KEY and not _is_string_list(value):
+        print(
+            "Error: worktree.protected_branches must be a JSON array of strings",
+            file=sys.stderr,
+        )
+        return 1
+
+    plugin_root = _plugin_root()
+    defaults = load_json(plugin_root / "templates" / "defaults" / "config.json") or {}
+    config_path = _common.BASE_DIR / "config.json"
+    overrides = _load_json_strict(config_path, required=False)
+    if overrides is None:
+        overrides = {}
+    if not isinstance(overrides, dict):
+        print(f"Error: invalid config format: {config_path}", file=sys.stderr)
+        return 1
+
+    if not _set_dotted_path(overrides, key_path, value):
+        print("Error: key.path is required", file=sys.stderr)
+        return 1
+
+    resolved = deep_merge(defaults, overrides)
+    for warning in _validate_resolved_worktree_config(resolved, defaults):
+        print(warning, file=sys.stderr)
+
+    save_json(config_path, overrides)
+    save_json(_common.BASE_DIR / "config.resolved.json", resolved)
+    print(f"{key_path} updated")
+    return 0
 
 def cmd_config_get(args):
     raw_key_paths = args.key_path
@@ -604,6 +700,10 @@ def register(subparsers):
     cfg_get.add_argument("key_path", nargs="+")
     cfg_get.add_argument("--default", dest="default_value")
     cfg_get.add_argument("--json", action="store_true")
+    cfg_set = cfg_sub.add_parser("set", help="write config value by dot-path")
+    cfg_set.add_argument("key_path")
+    cfg_set.add_argument("value")
+    cfg_set.set_defaults(func=cmd_config_set)
     cfg_migrate = cfg_sub.add_parser("migrate", help="구 포맷 config를 신 포맷으로 마이그레이션")
     cfg_migrate.add_argument("--apply", action="store_true", help="실제 적용 (기본: dry-run)")
     cfg_migrate.set_defaults(func=cmd_config_migrate)
