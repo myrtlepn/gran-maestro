@@ -188,7 +188,7 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 `AUTO_MODE=true`이면 단건 프로토콜 진입 직후 workflow state를 기록한다 (non-blocking):
 
 ```bash
-# TODO(PLN-469 SHOULD): agile_loop_active 보존 검토
+# RESOLVED(PLN-509): agile_loop_active 보존 — plan/agile 맥락은 Step 4b 브리프 변수(PLAN_JSON_META/PAC_LIST/OBJECTIVE_SECTION)로 주입됨 (PLN-469 → PLN-509)
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:approve \
@@ -559,6 +559,9 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 - `{{SPEC_PATH}}`, `{{WORKTREE_PATH}}`, `{{REQ_ID}}`, `{{TASK_ID}}`: 자동 주입
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
 - `{{PREV_FEEDBACK_PATH}}`: 첫 실행 시 "N/A", 재실행 시 feedback 파일 경로
+- `{{PLAN_JSON_META}}`: resolve 순서 `request.json` → `plan.json` → `plan.ids.json` → `objective.md`. `request.json.source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하여 `cynefin_domain`, `linked_objective`, `linked_intent`, `linked_captures` 필드와 경로를 3~5줄 요약으로 주입. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
+- `{{PAC_LIST}}`: `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`을 Read하여 각 항목의 `id`, `grade`, `tags`, `text` 필드를 목록으로 주입. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
+- `{{OBJECTIVE_SECTION}}`: `plan.json.linked_objective`가 존재하면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.md`를 Read하여 JTBD 요약 + 프로젝트 DoD 항목 + 성공 지표를 3~5줄 요약으로 주입. linked_objective/linked_intent/plan.ids.json 각각 미존재 시 warn 로그 + "N/A" 치환 (graceful skip, 워크플로우 차단 금지).
 
 ##### 4c. 독립 태스크 동시 실행
 

@@ -5,6 +5,24 @@
 - Spec: {{SPEC_PATH}}
 - Plan: {{PLAN_PATH}}
 
+## Plan JSON 메타 컨텍스트
+
+반드시 Read 하세요: 아래 경로의 `plan.json`을 Read하여 plan 메타(cynefin_domain, linked_objective, linked_intent, linked_captures)를 확인하세요. 미존재 시 이 섹션을 skip합니다.
+
+{{PLAN_JSON_META}}
+
+## PAC 수락 기준 목록
+
+반드시 Read 하세요: 아래 경로의 `plan.ids.json`을 Read하여 PAC 등급(id/grade/tags/text)을 확인하세요. 미존재 시 이 섹션을 skip합니다.
+
+{{PAC_LIST}}
+
+## Agile Objective 컨텍스트
+
+반드시 Read 하세요: 아래 경로의 `objective.md`를 Read하여 JTBD 요약·프로젝트 DoD·성공 지표를 확인하세요. 미존재 시 이 섹션을 skip합니다.
+
+{{OBJECTIVE_SECTION}}
+
 ## 구현 컨텍스트 (PM 작성)
 
 {{IMPL_CONTEXT}}
