@@ -8,6 +8,10 @@
  * - OAuth: STITCH_ACCESS_TOKEN + GOOGLE_CLOUD_PROJECT
  */
 
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 const COMMANDS = [
   "generate",
   "edit",
@@ -38,6 +42,10 @@ function printHelp() {
     "",
     "Global options:",
     "  -h, --help     Show this help",
+    "",
+    "Generate options:",
+    "  --save-dir <dir>       Save generated html/meta/image artifacts atomically",
+    "  --screen-name <slug>   Filename slug required when --save-dir is provided",
     "",
     "Auth (env):",
     "  STITCH_API_KEY",
@@ -83,6 +91,27 @@ function value(args, key, fallback = undefined) {
   return args[key] ?? fallback;
 }
 
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const PLUGIN_ROOT = path.dirname(path.dirname(SCRIPT_PATH));
+
+class SdkMissingError extends Error {
+  constructor(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    super(message);
+    this.name = "SdkMissingError";
+    this.code = "MODULE_NOT_FOUND";
+    this.install_required = true;
+  }
+}
+
+class ArtifactSaveError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "ArtifactSaveError";
+    this.cause = cause;
+  }
+}
+
 function toInt(input, fallback) {
   if (input === undefined || input === null || input === "") {
     return fallback;
@@ -125,17 +154,34 @@ function ensureAuthConfigured() {
   };
 }
 
-async function loadSdk() {
+async function importSdkModule() {
   try {
-    const mod = await import("@google/stitch-sdk");
-    if (!mod || !mod.stitch) {
-      throw new Error("@google/stitch-sdk 모듈에서 stitch export를 찾지 못했습니다.");
-    }
-    return mod.stitch;
+    return await import("@google/stitch-sdk");
   } catch (error) {
+    if (isSdkModuleNotFound(error)) {
+      throw new SdkMissingError(error);
+    }
     const cause = error instanceof Error ? error.message : String(error);
     throw new Error(`@google/stitch-sdk 로드 실패: ${cause}`);
   }
+}
+
+async function assertSdkInstalled() {
+  await importSdkModule();
+}
+
+async function loadSdk() {
+  const mod = await importSdkModule();
+  if (!mod || !Object.prototype.hasOwnProperty.call(mod, "stitch")) {
+    throw new Error("@google/stitch-sdk 모듈에서 stitch export를 찾지 못했습니다.");
+  }
+  return mod.stitch;
+}
+
+function isSdkModuleNotFound(error) {
+  const code = error?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") && message.includes("@google/stitch-sdk");
 }
 
 function safeError(error) {
@@ -287,6 +333,67 @@ function extractDownloadUrl(value) {
   return normalized;
 }
 
+function findDownloadUrlDeep(value, seen = new WeakSet()) {
+  const direct = extractDownloadUrl(value);
+  if (direct) {
+    return direct;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findDownloadUrlDeep(item, seen);
+      if (nested) {
+        return nested;
+      }
+    }
+    return null;
+  }
+
+  if (!isObject(value) || seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  for (const nested of Object.values(value)) {
+    const nestedUrl = findDownloadUrlDeep(nested, seen);
+    if (nestedUrl) {
+      return nestedUrl;
+    }
+  }
+
+  return null;
+}
+
+function extractImageDownloadUrl(screen) {
+  const raw = isObject(screen?.raw) ? screen.raw : {};
+  return (
+    findDownloadUrlDeep(screen?.image) ||
+    findDownloadUrlDeep(raw.image) ||
+    findDownloadUrlDeep(raw.imageUrl) ||
+    findDownloadUrlDeep(raw.previewImage) ||
+    findDownloadUrlDeep(raw.screenshot) ||
+    findDownloadUrlDeep(raw.thumbnail) ||
+    findDownloadUrlDeep(raw.downloadUrl)
+  );
+}
+
+async function downloadImageBuffer(screen) {
+  const downloadUrl = extractImageDownloadUrl(screen);
+  if (!downloadUrl) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      return null;
+    }
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 async function resolveScreenHtml(value, screenId) {
   const downloadUrl = extractDownloadUrl(value);
   if (!downloadUrl) {
@@ -350,6 +457,106 @@ async function collectScreenArtifacts(screen) {
   });
 }
 
+async function normalizeGeneratedScreen(raw) {
+  const payload = isObject(raw) && isObject(raw.screen) ? raw.screen : raw;
+  if (!isObject(payload)) {
+    return cleanObject({ raw: payload });
+  }
+
+  const name = payload.name;
+  const id = payload.id || extractIdFromName(name);
+  const htmlSource = payload.html ?? payload.htmlContent;
+
+  return cleanObject({
+    id,
+    name,
+    image: payload.image ?? payload.imageUrl ?? payload.previewImage ?? payload.screenshot,
+    html: await resolveScreenHtml(htmlSource, id),
+    raw: payload,
+  });
+}
+
+function screenMeta(screen, prompt, source) {
+  const raw = isObject(screen?.raw) ? screen.raw : {};
+  const name = screen?.name ?? raw.name ?? null;
+  return {
+    id: screen?.id ?? raw.id ?? extractIdFromName(name) ?? null,
+    name,
+    created_at: new Date().toISOString(),
+    prompt,
+    source,
+  };
+}
+
+async function unlinkIfExists(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+async function saveScreenArtifacts(screen, { saveDir, slug, prompt, source }) {
+  const targetDir = path.resolve(String(saveDir));
+  const htmlFinal = path.join(targetDir, `${slug}.html`);
+  const imageFinal = path.join(targetDir, `${slug}.png`);
+  const metaFinal = path.join(targetDir, `${slug}.meta.json`);
+  const pendingTmpFiles = [];
+  const renamedFinalFiles = [];
+
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+    const imageBuffer = await downloadImageBuffer(screen);
+    const files = [
+      {
+        key: "html",
+        tmp: path.join(targetDir, `${slug}.html.tmp`),
+        final: htmlFinal,
+        data: typeof screen?.html === "string" ? screen.html : "",
+      },
+      {
+        key: "meta",
+        tmp: path.join(targetDir, `${slug}.meta.json.tmp`),
+        final: metaFinal,
+        data: `${JSON.stringify(screenMeta(screen, prompt, source), null, 2)}\n`,
+      },
+    ];
+
+    if (imageBuffer) {
+      files.splice(1, 0, {
+        key: "image",
+        tmp: path.join(targetDir, `${slug}.png.tmp`),
+        final: imageFinal,
+        data: imageBuffer,
+      });
+    }
+
+    for (const file of files) {
+      await fs.writeFile(file.tmp, file.data);
+      pendingTmpFiles.push(file.tmp);
+    }
+
+    for (const file of files) {
+      await fs.rename(file.tmp, file.final);
+      pendingTmpFiles.splice(pendingTmpFiles.indexOf(file.tmp), 1);
+      renamedFinalFiles.push(file.final);
+    }
+
+    return {
+      html: htmlFinal,
+      image: imageBuffer ? imageFinal : null,
+      meta: metaFinal,
+    };
+  } catch (error) {
+    const cleanupTargets = [...pendingTmpFiles, ...renamedFinalFiles];
+    await Promise.allSettled(cleanupTargets.map((filePath) => unlinkIfExists(filePath)));
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ArtifactSaveError(`Failed to save generated screen artifacts: ${message}`, error);
+  }
+}
+
 function asJsonResponse(command, data, ok = true) {
   return {
     ok,
@@ -364,6 +571,21 @@ function asJsonError(command, error) {
     ok: false,
     command,
     error: safeError(error),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function asInstallRequiredError(command, error) {
+  return {
+    ok: false,
+    command,
+    install_required: true,
+    suggested_command: "npm install --omit=dev",
+    cwd: PLUGIN_ROOT,
+    error: {
+      code: "MODULE_NOT_FOUND",
+      message: maskSecrets(error instanceof Error ? error.message : String(error)),
+    },
     timestamp: new Date().toISOString(),
   };
 }
@@ -449,26 +671,35 @@ async function runListScreens(stitch, args) {
     throw new Error("--project-id is required");
   }
 
+  let sdkScreens = [];
+  let triedSdkScreens = false;
   const project = typeof stitch.project === "function" ? stitch.project(projectId) : null;
   if (project && typeof project.screens === "function") {
+    triedSdkScreens = true;
     try {
       const screens = await project.screens();
-      const normalized = normalizeMaybeArray(screens, "screens").map(normalizeSdkObject);
-      return {
-        projectId,
-        screens: normalized,
-        source: "sdk.project.screens",
-      };
+      sdkScreens = normalizeMaybeArray(screens, "screens").map(normalizeSdkObject);
     } catch {
-      // fall through to callTool
+      sdkScreens = [];
     }
   }
 
+  if (triedSdkScreens && sdkScreens.length > 0) {
+    return {
+      projectId,
+      screens: sdkScreens,
+      source: "sdk.project.screens",
+    };
+  }
+
   const raw = await callTool(stitch, "list_screens", { projectId });
+  const mcpScreens = normalizeMaybeArray(raw, "screens").map(normalizeSdkObject);
+  const useMcpScreens = mcpScreens.length > sdkScreens.length;
+
   return {
     projectId,
-    screens: raw,
-    source: "sdk.callTool:list_screens",
+    screens: useMcpScreens ? mcpScreens : sdkScreens,
+    source: triedSdkScreens ? "sdk.project.screens+callTool" : "sdk.callTool:list_screens",
   };
 }
 
@@ -494,6 +725,8 @@ async function runGenerate(stitch, args) {
   const prompt = value(args, "prompt");
   const deviceType = value(args, "device-type", "DESKTOP");
   const modelId = value(args, "model-id");
+  const saveDir = value(args, "save-dir");
+  const screenSlug = value(args, "screen-name");
 
   if (!projectId) {
     throw new Error("--project-id is required");
@@ -501,19 +734,41 @@ async function runGenerate(stitch, args) {
   if (!prompt) {
     throw new Error("--prompt is required");
   }
+  if (saveDir === true) {
+    throw new Error("--save-dir requires a directory");
+  }
+  if (saveDir && (!screenSlug || screenSlug === true)) {
+    throw new Error("--screen-name is required when --save-dir is provided");
+  }
 
   const project = typeof stitch.project === "function" ? stitch.project(projectId) : null;
   if (project && typeof project.generate === "function") {
     try {
       const generated = await project.generate(prompt, cleanObject({ deviceType, modelId }));
-      const screen = await collectScreenArtifacts(generated);
+      let screen = await collectScreenArtifacts(generated);
+      const source = "sdk.project.generate";
+      if (saveDir) {
+        const savedFiles = await saveScreenArtifacts(screen, {
+          saveDir,
+          slug: screenSlug,
+          prompt,
+          source,
+        });
+        screen = {
+          ...screen,
+          saved_files: savedFiles,
+        };
+      }
       return {
         projectId,
         prompt,
         screen,
-        source: "sdk.project.generate",
+        source,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof ArtifactSaveError) {
+        throw error;
+      }
       // fall through to callTool
     }
   }
@@ -528,6 +783,26 @@ async function runGenerate(stitch, args) {
       modelId,
     }),
   );
+
+  if (saveDir) {
+    const source = "sdk.callTool:generate_screen_from_text";
+    const screen = await normalizeGeneratedScreen(raw);
+    const savedFiles = await saveScreenArtifacts(screen, {
+      saveDir,
+      slug: screenSlug,
+      prompt,
+      source,
+    });
+    return {
+      projectId,
+      prompt,
+      screen: {
+        ...screen,
+        saved_files: savedFiles,
+      },
+      source,
+    };
+  }
 
   return {
     projectId,
@@ -841,6 +1116,7 @@ async function main() {
   }
 
   try {
+    await assertSdkInstalled();
     const authStatus = ensureAuthConfigured();
     if (authStatus?.auth_required) {
       const response = asJsonResponse(command, authStatus, false);
@@ -887,6 +1163,11 @@ async function main() {
     const payload = asJsonResponse(command, data, true);
     console.log(safeStringify(payload));
   } catch (error) {
+    if (error instanceof SdkMissingError || error?.install_required) {
+      const payload = asInstallRequiredError(command, error);
+      console.log(safeStringify(payload));
+      process.exit(2);
+    }
     const payload = asJsonError(command, error);
     console.error(safeStringify(payload));
     process.exit(1);
