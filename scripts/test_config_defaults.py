@@ -25,7 +25,7 @@ def test_config_defaults_prompt_builder():
     pb = config["prompt_builder"]
 
     assert "enabled" in pb, "prompt_builder.enabled 키가 없습니다"
-    assert pb["enabled"] is False, f"prompt_builder.enabled 기본값이 False여야 합니다 (실제: {pb['enabled']})"
+    assert pb["enabled"] is True, f"prompt_builder.enabled 기본값이 True여야 합니다 (실제: {pb['enabled']})"
     assert isinstance(pb["enabled"], bool), f"prompt_builder.enabled 타입이 bool이어야 합니다 (실제: {type(pb['enabled'])})"
 
     assert "fallback_on_error" in pb, "prompt_builder.fallback_on_error 키가 없습니다"
@@ -48,7 +48,7 @@ def test_config_defaults_prompt_builder():
 
 
 def test_mst_py_config_get_prompt_builder(tmp_path):
-    """AC-005: mst.py config get prompt_builder.enabled → stdout='False', exit 0."""
+    """AC-005: mst.py config get prompt_builder.enabled → stdout='True', exit 0."""
     workspace = _workspace(tmp_path)
     result = subprocess.run(
         [sys.executable, str(MST), "config", "get", "prompt_builder.enabled"],
@@ -61,6 +61,6 @@ def test_mst_py_config_get_prompt_builder(tmp_path):
         f"stderr: {result.stderr}"
     )
     stdout = result.stdout.strip()
-    assert stdout == "False", (
-        f"stdout이 'False'여야 합니다 (실제: '{stdout}')"
+    assert stdout == "True", (
+        f"stdout이 'True'여야 합니다 (실제: '{stdout}')"
     )
