@@ -7,6 +7,28 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 
 # maestro:stitch
 
+## Gate
+
+### Entry
+
+- `mst:stitch`는 반드시 `Skill(skill: "mst:stitch", args: ...)`로만 호출한다. `scripts/stitch-sdk.mjs`를 Bash로 직접 orchestration하는 것은 금지한다 (Bash 직접 orchestration 금지).
+- SDK require 실패 신호(`install_required:true`)를 수신하면 즉시 설치 동의 플로우(아래 `### SDK 누락 감지 → 설치 동의 플로우`)로 분기한다.
+
+### Exit
+
+- 모든 화면 생성/저장 산출물이 `.gran-maestro/designs/DES-NNN/` 하위에 persist된 것을 확인한 뒤 종료한다.
+
+### 금지 패턴
+
+- `mst:stitch` 우회: PM이 속도를 이유로 `scripts/stitch-sdk.mjs`를 Bash로 직접 호출한다.
+- persist 생략: generate 응답에서 html/image를 읽고도 파일로 저장하지 않는다.
+- `mcp__stitch__*` 도구를 직접 호출한다.
+
+## Anti-Rationalization Checklist
+
+- 합리화 패턴: "CLI를 직접 쓰는 편이 더 빠르다." | 확인 증거: 스킬 호출 로그에 `Skill(mst:stitch, ...)` 엔트리가 존재해야 하며, `Bash(node scripts/stitch-sdk.mjs ...)` 직접 호출은 예외(진단 목적 확인) 외에는 금지.
+- 합리화 패턴: "generate 응답은 나중에 파싱하자." | 확인 증거: generate 호출 직후 동일 flow 내에서 html/image/meta가 `.gran-maestro/designs/DES-NNN/**`에 파일로 남는다.
+
 ## 선행 조건 확인
 
 1. `config.stitch.enabled` 확인 → false면 즉시 종료 (안내 메시지 출력)
@@ -39,6 +61,22 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
              - `echo 'export STITCH_API_KEY="{USER_INPUT_API_KEY}"' >> ~/.zshrc`
              - `source ~/.zshrc`
         - 실패/타임아웃(또는 재시도 실패): `[Stitch] 연결 불가 — 건너뜀. /mst:stitch로 수동 실행 가능.` 출력 후 종료
+
+### SDK 누락 감지 → 설치 동의 플로우 (MANDATORY)
+
+1. 스킬 초입에서 `stitch-sdk.mjs`를 `list-projects` 등으로 먼저 호출한다.
+2. stdout JSON을 파싱하여 `install_required === true`를 감지.
+3. 감지 시 `AskUserQuestion`으로 아래와 같이 질문한다:
+   - question: "Stitch SDK가 설치되어 있지 않습니다. 설치할까요?"
+   - header: "SDK 설치"
+   - options:
+     - label: "설치 후 재시도"
+       description: "[장점] `{suggested_command}`를 `{cwd}`에서 실행해 SDK를 설치하고 원래 호출을 1회 재시도\n[단점] 네트워크/권한 부족 시 실패 가능\n[적합] 플러그인 첫 실행 또는 업그레이드 직후 SDK 미설치 상태"
+     - label: "취소"
+       description: "[장점] 네트워크를 사용하지 않고 즉시 종료\n[단점] 디자인 생성 불가\n[적합] 오프라인 또는 수동 설치를 선호할 때"
+4. "설치 후 재시도" 선택 시: `Bash(command: "cd {cwd} && {suggested_command}", description: "Install @google/stitch-sdk")` 실행 → 원래 `stitch-sdk.mjs` 호출을 1회 재시도 → 성공 시 정상 진행, 실패 시 사용자에게 로그 보고 후 종료.
+5. "취소" 선택 시: "Stitch SDK 설치가 취소되었습니다. 스킬을 종료합니다." 메시지 후 즉시 종료.
+6. 재시도는 1회만 허용 (무한 재시도 금지).
 
 
 <!-- @include _shared/skill-execution-marker.md -->
