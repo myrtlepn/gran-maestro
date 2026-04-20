@@ -345,7 +345,7 @@ contains_agile_text_question() {
 
 contains_self_pause_rationalization() {
   local text="$1"
-  if printf '%s' "$text" | grep -E -i -q 'stash[^[:cntrl:]]{0,20}squash[^[:cntrl:]]{0,20}부담|반복[[:space:]]*stash|paused로[[:space:]]*전환|명시적으로[[:space:]]*paused|Sprint[^[:cntrl:]]{0,40}paused[^[:cntrl:]]{0,20}boundary|sprint[[:space:]]*[0-9]+[[:space:]]*boundary'; then
+  if printf '%s' "$text" | grep -E -i -q 'stash[^[:cntrl:]]{0,20}squash[^[:cntrl:]]{0,20}부담|반복[[:space:]]*stash|paused로[[:space:]]*전환|명시적으로[[:space:]]*paused|Sprint[^[:cntrl:]]{0,40}paused[^[:cntrl:]]{0,20}boundary|sprint[[:space:]]*[0-9]+[[:space:]]*boundary|새[[:space:]]*세션에서[^\n]*재개|--resume[^\n]{0,30}재개[[:space:]]*권장|추천[[:space:]]*경로[^\n]{0,30}재개[[:space:]]*시점|사용자[[:space:]]*검토에[[:space:]]*자연스러운[[:space:]]*지점|자연스러운[[:space:]]*검토[[:space:]]*지점'; then
     return 0
   fi
   return 1

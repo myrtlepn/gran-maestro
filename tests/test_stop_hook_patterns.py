@@ -5,6 +5,7 @@ hooks/mst-stop-hook.sh를 실제 bash 서브프로세스로 호출하여
 """
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -41,8 +42,16 @@ EXISTING_PATTERNS = [
 
 def _run_hook(tmp_path: Path, last_msg: str, agile_auto_mode: bool = True,
               workflow_active: bool = True, agile_loop_active: bool = True,
-              current_skill: str = "mst:agile", extra_state: Optional[dict] = None):
+              current_skill: str = "mst:agile", extra_state: Optional[dict] = None,
+              active_agile_session: bool = False):
     """hook을 별도 프로세스로 실행. 임시 PROJECT_ROOT를 사용해 격리."""
+    if not HOOK.is_file():
+        pytest.skip(f"hook not found: {HOOK}")
+    if shutil.which("bash") is None:
+        pytest.skip("bash is required for stop-hook subprocess tests")
+    if shutil.which("python3") is None:
+        pytest.skip("python3 is required by mst-stop-hook.sh")
+
     project_root = tmp_path
     (project_root / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
     (project_root / ".gran-maestro" / "agile").mkdir(parents=True, exist_ok=True)
@@ -53,6 +62,17 @@ def _run_hook(tmp_path: Path, last_msg: str, agile_auto_mode: bool = True,
     )
     # .git 파일 생성 (hook의 resolve_project_root가 git 저장소로 인식)
     (project_root / ".git").write_text("gitdir: .\n")
+
+    if active_agile_session:
+        session_dir = project_root / ".gran-maestro" / "agile" / "AGI-TEST"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "session.json").write_text(
+            json.dumps({
+                "status": "active",
+                "updated_at": "2026-04-20T00:00:00Z",
+            }),
+            encoding="utf-8",
+        )
 
     ppid = "99999"
     state = {
@@ -113,6 +133,30 @@ def test_existing_patterns_still_blocked(tmp_path, msg):
     )
 
 
+def test_self_pause_rationalization_regression(tmp_path):
+    msg = "Sprint 3 boundary에서 stash/squash 부담이 크니 paused로 전환하겠습니다"
+    result = _run_hook(tmp_path, msg)
+    assert result.returncode == 0, f"hook crashed: {result.stderr}"
+
+    payload = json.loads(result.stdout)
+    assert payload["decision"] == "block"
+    assert "SELF-PAUSE-DETECTED" in payload["reason"]
+
+
+def test_handoff_framing_blocked(tmp_path):
+    """REQ-686 AC-006/AC-T05: Step 3 handoff framing 차단."""
+    msg = (
+        "스티어링 체크포인트는 사용자 검토에 자연스러운 지점이며 "
+        "이후 Sprint 4는 새 세션에서 --resume으로 재개하는 것이 권장됩니다"
+    )
+    result = _run_hook(tmp_path, msg)
+    assert result.returncode == 0, f"hook crashed: {result.stderr}"
+
+    payload = json.loads(result.stdout)
+    assert payload["decision"] == "block"
+    assert "SELF-PAUSE-DETECTED" in payload["reason"]
+
+
 def test_legitimate_stop_reason_unrecoverable_allowed(tmp_path):
     msg = ("[MST stop_intent reason=unrecoverable_external_failure] "
            "API retry 3회 실패로 중단합니다.")
@@ -129,6 +173,25 @@ def test_legitimate_stop_reason_user_judgment_allowed(tmp_path):
     assert '"block"' not in result.stdout, (
         f"False positive: legitimate fatal_user_judgment_required got blocked. stdout={result.stdout!r}"
     )
+
+
+def test_agile_allow_marker_whitelist_regression(tmp_path):
+    msg = (
+        "[스티어링 체크포인트]\n"
+        '{"tool_name":"AskUserQuestion","question":"Objective 방향 선택","options":["approve","adjust"]}'
+    )
+    result = _run_hook(tmp_path, msg, active_agile_session=True)
+    assert result.returncode == 0, f"hook crashed: {result.stderr}"
+    assert '"block"' not in result.stdout, (
+        f"Regression: whitelisted agile marker got blocked. stdout={result.stdout!r}"
+    )
+
+    audit_path = tmp_path / ".gran-maestro" / "agile" / "AGI-TEST" / "stop-audit.ndjson"
+    assert audit_path.is_file(), "Expected allowed whitelist decision to be audited"
+    audit_entry = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert audit_entry["classification"] == "allowed"
+    assert audit_entry["outcome"] == "allow"
+    assert audit_entry["block_reason"] == "agile_allow_pattern_whitelisted"
 
 
 def test_stop_hook_active_pass_through(tmp_path):

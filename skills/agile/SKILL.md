@@ -866,6 +866,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 `[MST skill=agile step=3/4 return_to=null]`
 
 **목표**: 정기 또는 비상 트리거 시 현재 진행 상황과 DoD 제안을 사용자에게 보고하고, approve/reject 및 objective 변경 여부를 반영한 뒤 루프를 계속 진행한다.
+**AUTO_MODE=true에서는 이 보고가 사용자 검토를 요청하는 handoff가 아니라 진행 로그 산출물이며, 출력 직후 Step 2.2.1로 즉시 복귀하여 다음 Sprint를 시작한다.** AUTO_MODE=false 경로의 사용자 검토 흐름은 그대로 유지한다.
 
 #### 3.1 트리거 조건
 
@@ -922,7 +923,11 @@ DoD 체크 갱신 제안 (pending)
 2. {RISK_2} — 영향도: {high|medium|low}
 3. {RISK_3} — 영향도: {high|medium|low}
 
-다음 추천 경로
+다음 Sprint 진행 예정 (AUTO_MODE=true 시)
+- 다음 Sprint 초점: {NEXT_SPRINT_FOCUS}
+- 즉시 Step 2.2.1로 복귀 (세션 종료/재개 안내 금지)
+
+다음 추천 경로 (AUTO_MODE=false 시, 사용자 검토 요청)
 - 추천: {RECOMMENDED_PATH}
 - 근거: {RATIONALE}
 - 대안: {ALTERNATIVE_PATH}
@@ -934,6 +939,8 @@ DoD 체크 갱신 제안 (pending)
 진행 보고서 출력 후 아래 분기를 적용한다.
 
 - `AUTO_MODE=true`: AskUserQuestion 없이 PM이 `evidence_ref`/테스트 결과/`source-verify.md` 근거로 자율 판단 → `[스티어링 체크포인트] AUTO_MODE 자율 판단` 로그 기록 후 즉시 상태 전이.
+  `[CRITICAL][IMMEDIATE-LOOP-RETURN]` 상태 전이 완료 즉시 Step 2.2.1로 복귀하여 다음 Sprint를 시작한다. 요약, 퇴장 인사, `--resume` 재개 안내, "자연스러운 검토 지점" 같은 handoff 어휘 생성을 절대 금지한다.
+  참고: 이 마커는 Step 3 내부 경로 전용. 스프린트 경계 일반 복귀는 Step 2.2 CONTINUATION GUARD의 `[CRITICAL][NO-SELF-MOTIVATED-PAUSE]` 마커(line 748)를 계속 사용한다.
 - `AUTO_MODE=false`: `AskUserQuestion`으로 사용자에게 확인한다.
 
 > "DoD 제안 목록을 승인/반려해주세요. (예: approve DOD-001,DOD-002 / reject DOD-003)"
@@ -1105,4 +1112,5 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "컨텍스트가 길어졌으니/자연스러운 단락이니 여기서 끊자." | 확인 증거: `mst-stop-hook.sh`가 해당 턴을 block으로 판정해야 하며, LLM은 block 수신 시 즉시 다음 tool call을 emit한다(정지·요약·확인 질문 금지).
 - 합리화 패턴: "Sprint 경계에서 WIP/stash/squash 부담을 이유로 agile update --status paused를 호출해 루프를 종료한다." | 확인 증거: `MST_AGILE_PAUSE_AUTHORIZED=1` 또는 `--user-requested` 플래그 없이 active→paused 전이를 시도하면 mst.py가 exit≠0으로 차단한다. 해당 호출 0건 또는 차단 로그 존재.
 - 합리화 패턴: "Sprint 간 '자연스러운 단락'이라며 paused 상태 전이 명령으로 정지를 달성한다." | 확인 증거: stop-hook이 `[CRITICAL][SELF-PAUSE-DETECTED]` 마커로 block을 재-emit하고, LLM은 block 수신 즉시 다음 tool call을 emit한다 (상태 전이 명령 재호출 금지).
+- 합리화 패턴: "Step 3 스티어링 보고를 출력했으니 이 지점은 사용자 검토에 자연스러운 단락이다. 다음 Sprint는 `--resume`으로 새 세션에서 재개하도록 안내하자." | 확인 증거: `contains_self_pause_rationalization`이 'handoff framing' 정규식으로 해당 문장을 block으로 재-emit하고, LLM은 block 수신 즉시 Step 2.2.1로 복귀하는 tool call을 emit한다.
 - 합리화 패턴: "Sprint 종료 시 cleanup을 '시간 절약'을 이유로 생략한다." | 확인 증거: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprint-log.json`에 현재 Sprint 레코드 존재.
