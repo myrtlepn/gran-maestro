@@ -1281,11 +1281,11 @@ def _resolve_archive_max_active(max_active_cfg, type_key: Optional[str]) -> int:
     if isinstance(max_active_cfg, dict):
         value = max_active_cfg.get(type_key) if type_key else None
         if value is None:
-            value = max_active_cfg.get("default", 20)
+            value = max_active_cfg.get("default", 200)
     try:
         return int(value)
     except (TypeError, ValueError):
-        return 20
+        return 200
 
 def _archive_run_type(type_key: str, max_active: int, emit_output: bool) -> int:
     subdir, prefix = TYPE_DIRS.get(type_key, ("requests", "REQ"))

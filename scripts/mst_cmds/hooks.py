@@ -66,7 +66,7 @@ def cmd_hooks_post_skill(args):
         if not archive_cfg.get("auto_archive_on_complete", True):
             return 0
 
-        max_active_cfg = archive_cfg.get("max_active_sessions", 20)
+        max_active_cfg = archive_cfg.get("max_active_sessions", 200)
 
         for type_key in TYPE_DIRS:
             try:

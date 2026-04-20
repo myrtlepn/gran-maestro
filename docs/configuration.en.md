@@ -123,7 +123,7 @@ Settings for request history retention and session archive.
 |----|--------|------|
 | `history.retention_days` | `30` | history retention period (days) |
 | `history.auto_archive` | `true` | auto archive |
-| `archive.max_active_sessions` | `20` | maximum active sessions |
+| `archive.max_active_sessions` | `200` | maximum active sessions |
 | `archive.archive_retention_days` | `null` | archive retention period (null = indefinite) |
 | `archive.auto_archive_on_create` | `true` | auto-archive when sessions exceed limits at creation |
 | `archive.auto_archive_on_complete` | `true` | auto-archive on completion |

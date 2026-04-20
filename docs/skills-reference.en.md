@@ -772,7 +772,7 @@ Cleans all session types in one command. Ideation and discussion keep only recen
 
 #### Purpose
 
-Archives session directories under each type's `archived/` using tar.gz. Keeps up to `max_active_sessions` (default 20), archives excess entries, and supports restore (`--restore`) or permanent purge (`--purge`).
+Archives session directories under each type's `archived/` using tar.gz. Keeps up to `max_active_sessions` (default 200), archives excess entries, and supports restore (`--restore`) or permanent purge (`--purge`).
 
 #### When to use
 

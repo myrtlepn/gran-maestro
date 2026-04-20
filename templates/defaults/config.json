@@ -217,11 +217,11 @@
   },
   "archive": {
     "max_active_sessions": {
-      "default": 20,
-      "req": 100,
+      "default": 200,
+      "req": 200,
       "idn": 200,
-      "pln": 100,
-      "des": 100
+      "pln": 200,
+      "des": 200
     },
     "archive_retention_days": null,
     "auto_archive_on_create": true,

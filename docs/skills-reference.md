@@ -866,7 +866,7 @@ Maestro 오케스트레이션 스킬을 활성화하고 `.gran-maestro/mode.json
 
 #### 목적
 
-각 타입 디렉토리 하위의 `archived/`에 tar.gz 압축 보관합니다. `max_active_sessions`(기본 20) 기준으로 초과분을 아카이브하고, 필요 시 복원(`--restore`)이나 영구 삭제(`--purge`)도 지원합니다.
+각 타입 디렉토리 하위의 `archived/`에 tar.gz 압축 보관합니다. `max_active_sessions`(기본 200) 기준으로 초과분을 아카이브하고, 필요 시 복원(`--restore`)이나 영구 삭제(`--purge`)도 지원합니다.
 
 #### 사용 시점
 

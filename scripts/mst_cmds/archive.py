@@ -49,9 +49,9 @@ def _load_archive_max_active(cli_max: Optional[int], type_key: Optional[str] = N
             cfg = loaded
             break
 
-    max_active_cfg = 20
+    max_active_cfg = 200
     if isinstance(cfg, dict):
-        max_active_cfg = cfg.get("archive", {}).get("max_active_sessions", 20)
+        max_active_cfg = cfg.get("archive", {}).get("max_active_sessions", 200)
     return _resolve_archive_max_active(max_active_cfg, type_key)
 
 def cmd_archive_run_all(args):

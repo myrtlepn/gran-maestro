@@ -15,7 +15,7 @@ argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
-| `max_active_sessions` | 20 | 타입별 활성 유지 갯수 |
+| `max_active_sessions` | 200 | 타입별 활성 유지 갯수 |
 | `archive_retention_days` | null | null=영구 보존, 숫자=N일 후 아카이브 자동 삭제 |
 | `auto_archive_on_create` | true | 새 세션 생성 시 자동 아카이브 체크 |
 | `archive_directory` | `{type_dir}/archived` | 타입별 아카이브 저장 경로 (자동) |
