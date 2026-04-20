@@ -854,20 +854,15 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 
 > 이 Gate가 통과되기 전에는 아래 2.3.1의 state clear를 실행하지 않는다. Gate 실패 시 [비상 스티어링] 진입.
 
-1. 전체 Sprint 결과 순회:
-   - `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S*/result.json` 목록에서 각 `req_id` 추출.
-2. 각 REQ의 상태 확인 및 미수락 accept:
-   - `python3 {PLUGIN_ROOT}/scripts/mst.py request inspect {REQ_ID} --json`으로 `status` 확인.
-   - `status`가 `done`, `completed`, `accepted` 중 하나가 **아니면** `Skill(skill: "mst:accept", args: "-a {REQ_ID}")`를 호출한다.
-   - accept 실패 시 즉시 Step 3(비상 스티어링)으로 진입하고, 2.3 이후 단계를 중단한다.
-3. Worktree orphan 정리:
+1. Finalization CLI를 단일 호출한다:
    ```bash
-   python3 {PLUGIN_ROOT}/scripts/mst.py worktree detect-orphans --clean --json
+   python3 {PLUGIN_ROOT}/scripts/mst.py agile finalize {AGI_ID} --json
    ```
-4. 잔존 AGI sprint worktree 제거:
-   - `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-*/` 디렉토리가 남아있으면 각각에 대해
-     `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {해당 경로}`를 호출한다.
-5. 모든 단계 성공 후에만 2.3.1로 진행한다.
+2. exit code 분기:
+   - `0`: Finalization Gate 통과. 즉시 2.3.1로 진행한다.
+   - `2`: stdout JSON의 `pending_accept_reqs` 각 항목에 대해 `Skill(skill: "mst:accept", args: "-a {REQ_ID}")`를 호출한 뒤, 위 finalize CLI를 재실행한다.
+   - 기타 non-zero: 즉시 Step 3(비상 스티어링)으로 진입하고, 2.3 이후 단계를 중단한다.
+3. legacy inline 흐름(REQ 상태 확인, worktree cleanup, orphan cleanup, boundary check)은 finalize CLI가 결정론적으로 수행한다.
 
 ##### 2.3.1 완료 마킹 및 state clear
 

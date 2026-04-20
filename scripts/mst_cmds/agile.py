@@ -764,6 +764,7 @@ def cmd_agile_update(args):
         return 1
 
     changed_fields = {}
+    completion_forced_payload = None
     if args.status is not None:
         new_status = str(args.status)
         current_status = session.get("status")
@@ -782,6 +783,64 @@ def cmd_agile_update(args):
                     file=sys.stderr,
                 )
                 return 1
+        if new_status == "completed":
+            pending_reqs = []
+            seen_req_ids = set()
+            sprints_dir = _common.BASE_DIR / "agile" / agi_id / "sprints"
+            for result_path in sorted(sprints_dir.glob("S*/result.json")):
+                result_data = load_json(result_path) or {}
+                req_id = result_data.get("req_id") if isinstance(result_data, dict) else None
+                if not req_id or req_id in seen_req_ids:
+                    continue
+                seen_req_ids.add(req_id)
+                request_data = load_json(_common.BASE_DIR / "requests" / req_id / "request.json") or {}
+                status = str(request_data.get("status", "")).lower() if isinstance(request_data, dict) else ""
+                if status not in {"done", "completed", "accepted"}:
+                    pending_reqs.append(req_id)
+
+            active_worktrees = []
+            worktrees_dir = _common.BASE_DIR / "worktrees"
+            for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
+                meta_data = load_json(meta_path) or {}
+                if not isinstance(meta_data, dict) or meta_data.get("state") == "cleaned":
+                    continue
+                raw_path = meta_data.get("path")
+                if not raw_path:
+                    continue
+                worktree_path = Path(str(raw_path)).expanduser()
+                if not worktree_path.is_absolute():
+                    worktree_path = (_common.BASE_DIR.parent / worktree_path).resolve(strict=False)
+                worktree_text = str(worktree_path)
+                agi_match = meta_data.get("agi_id") == agi_id
+                try:
+                    relative_text = str(worktree_path.relative_to(_common.BASE_DIR))
+                except ValueError:
+                    relative_text = ""
+                path_match = relative_text.startswith(f"worktrees/{agi_id}/sprint-")
+                if agi_match or path_match:
+                    active_worktrees.append(worktree_text)
+
+            if getattr(args, "force", False):
+                completion_forced_payload = {
+                    "pending_reqs": pending_reqs,
+                    "active_worktrees": active_worktrees,
+                }
+            elif pending_reqs or active_worktrees:
+                _append_agile_event(
+                    agi_id,
+                    "agile.update.blocked",
+                    {
+                        "pending_reqs": pending_reqs,
+                        "active_worktrees": active_worktrees,
+                    },
+                )
+                print(
+                    "[agile update] blocked: "
+                    f"pending_reqs={json.dumps(pending_reqs, ensure_ascii=False)} "
+                    f"active_worktrees={json.dumps(active_worktrees, ensure_ascii=False)}",
+                    file=sys.stderr,
+                )
+                return 2
         session["status"] = new_status
         changed_fields["status"] = new_status
     if args.current_sprint is not None:
@@ -809,6 +868,8 @@ def cmd_agile_update(args):
         return 1
 
     saved = _save_agile_session(agi_id, session)
+    if completion_forced_payload is not None:
+        _append_agile_event(agi_id, "agile.update.forced", completion_forced_payload)
     _append_agile_event(agi_id, "agile.update", {"fields": changed_fields})
 
     if args.json:
@@ -816,6 +877,236 @@ def cmd_agile_update(args):
     else:
         print(agi_id)
     return 0
+
+
+FINALIZE_ACCEPTED_STATUSES = {"done", "completed", "accepted"}
+
+
+def _load_first_json_object(raw: str):
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError:
+        return None
+    return value
+
+
+def _run_finalize_mst_command(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _finalize_mst_command(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, str(_common._mst_script_path()), *args]
+    return _run_finalize_mst_command(command, cwd=project_root)
+
+
+def _collect_finalize_req_ids(agi_id: str) -> list[str]:
+    req_ids: list[str] = []
+    seen: set[str] = set()
+    sprints_dir = _agi_session_dir(agi_id) / "sprints"
+    for result_path in sorted(sprints_dir.glob("S*/result.json")):
+        result = load_json(result_path)
+        if not isinstance(result, dict):
+            continue
+        raw_req_ids: list[str] = []
+        req_id = result.get("req_id")
+        if isinstance(req_id, str):
+            raw_req_ids.append(req_id)
+        generated = result.get("generated")
+        generated_reqs = generated.get("req") if isinstance(generated, dict) else None
+        if isinstance(generated_reqs, list):
+            raw_req_ids.extend(value for value in generated_reqs if isinstance(value, str))
+        for raw_req_id in raw_req_ids:
+            normalized = _normalize_link_id(raw_req_id, "REQ")
+            if normalized not in seen:
+                seen.add(normalized)
+                req_ids.append(normalized)
+    return req_ids
+
+
+def _inspect_request_status(project_root: Path, req_id: str) -> str:
+    result = _finalize_mst_command(project_root, "request", "inspect", req_id, "--json")
+    if result.returncode != 0 and "unrecognized arguments: --json" in result.stderr:
+        result = _finalize_mst_command(project_root, "request", "inspect", req_id)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or f"request inspect failed: {req_id}"
+        raise RuntimeError(message)
+
+    payload = _load_first_json_object(result.stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"request inspect returned invalid JSON: {req_id}")
+    return str(payload.get("status") or "")
+
+
+def _remove_finalize_worktrees(project_root: Path, agi_id: str) -> list[str]:
+    removed: list[str] = []
+    worktrees_root = _common.BASE_DIR / "worktrees" / agi_id
+    if not worktrees_root.is_dir():
+        return removed
+
+    for worktree_path in sorted(worktrees_root.glob("sprint-*")):
+        if not worktree_path.exists():
+            continue
+        if not worktree_path.is_dir():
+            continue
+        normalized_path = str(worktree_path.resolve(strict=False))
+        result = _finalize_mst_command(
+            project_root,
+            "worktree",
+            "remove",
+            "--path",
+            normalized_path,
+            "--force",
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or f"worktree remove failed: {normalized_path}"
+            raise RuntimeError(message)
+        removed.append(normalized_path)
+    return removed
+
+
+def _run_finalize_orphan_cleanup(project_root: Path) -> tuple[dict, bool]:
+    result = _finalize_mst_command(project_root, "worktree", "detect-orphans", "--clean", "--json")
+    payload = _load_first_json_object(result.stdout)
+    if not isinstance(payload, dict):
+        payload = {"cleaned": [], "failed": []}
+    payload.setdefault("cleaned", [])
+    payload.setdefault("failed", [])
+    if result.returncode != 0 and not payload.get("failed"):
+        message = result.stderr.strip() or result.stdout.strip() or "worktree detect-orphans failed"
+        raise RuntimeError(message)
+    return payload, result.returncode == 0 and not payload.get("failed")
+
+
+def _run_finalize_boundary_check(project_root: Path, agi_id: str) -> bool | None:
+    result = _finalize_mst_command(project_root, "worktree", "check-boundary", "--agi", agi_id)
+    if result.returncode == 0:
+        return True
+
+    stderr = result.stderr.strip()
+    if (
+        "invalid choice" in stderr
+        or "unrecognized arguments: --agi" in stderr
+        or "the following arguments are required" in stderr
+    ):
+        return None
+    return False
+
+
+def _print_finalize_payload(payload: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    print(f"agi_id: {payload['agi_id']}")
+    print(f"accepted_reqs: {', '.join(payload['accepted_reqs']) or '-'}")
+    print(f"skipped_reqs: {', '.join(payload['skipped_reqs']) or '-'}")
+    print(f"pending_accept_reqs: {', '.join(payload['pending_accept_reqs']) or '-'}")
+    print(f"removed_worktrees: {len(payload['removed_worktrees'])}")
+    print(f"orphan_cleanup.cleaned: {', '.join(payload['orphan_cleanup'].get('cleaned') or []) or '-'}")
+    print(f"orphan_cleanup.failed: {', '.join(payload['orphan_cleanup'].get('failed') or []) or '-'}")
+    print(f"boundary_ok: {payload['boundary_ok']}")
+
+
+def cmd_agile_finalize(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    project_root = _common.BASE_DIR.parent
+    payload = {
+        "agi_id": agi_id,
+        "accepted_reqs": [],
+        "skipped_reqs": [],
+        "pending_accept_reqs": [],
+        "removed_worktrees": [],
+        "orphan_cleanup": {"cleaned": [], "failed": []},
+        "boundary_ok": None,
+    }
+    _append_agile_event(agi_id, "agile.finalize.step.load_session", {"ok": True})
+
+    try:
+        req_ids = _collect_finalize_req_ids(agi_id)
+        _append_agile_event(agi_id, "agile.finalize.step.collect_reqs", {"ok": True, "req_ids": req_ids})
+
+        for req_id in req_ids:
+            status = _inspect_request_status(project_root, req_id)
+            if status in FINALIZE_ACCEPTED_STATUSES:
+                payload["skipped_reqs"].append(req_id)
+            else:
+                payload["pending_accept_reqs"].append(req_id)
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.step.inspect_reqs",
+            {
+                "ok": True,
+                "skipped_reqs": payload["skipped_reqs"],
+                "pending_accept_reqs": payload["pending_accept_reqs"],
+            },
+        )
+
+        payload["removed_worktrees"] = _remove_finalize_worktrees(project_root, agi_id)
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.step.remove_worktrees",
+            {"ok": True, "removed_worktrees": payload["removed_worktrees"]},
+        )
+
+        orphan_cleanup, orphan_ok = _run_finalize_orphan_cleanup(project_root)
+        payload["orphan_cleanup"] = orphan_cleanup
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.step.orphan_cleanup",
+            {"ok": orphan_ok, "orphan_cleanup": orphan_cleanup},
+        )
+
+        payload["boundary_ok"] = _run_finalize_boundary_check(project_root, agi_id)
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.step.boundary_check",
+            {"ok": payload["boundary_ok"] is not False, "boundary_ok": payload["boundary_ok"]},
+        )
+    except Exception as exc:
+        _append_agile_event(agi_id, "agile.finalize.step.failed", {"ok": False, "error": str(exc)})
+        print(f"Error: {exc}", file=sys.stderr)
+        _print_finalize_payload(payload, getattr(args, "json", False))
+        return 1
+
+    if payload["pending_accept_reqs"]:
+        pending = ", ".join(payload["pending_accept_reqs"])
+        print(f"[finalize] pending accept: {pending}", file=sys.stderr)
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.pending_accept",
+            {"pending_accept_reqs": payload["pending_accept_reqs"]},
+        )
+        _print_finalize_payload(payload, getattr(args, "json", False))
+        return 2
+
+    if payload["orphan_cleanup"].get("failed"):
+        _append_agile_event(
+            agi_id,
+            "agile.finalize.failed",
+            {"orphan_cleanup": payload["orphan_cleanup"]},
+        )
+        _print_finalize_payload(payload, getattr(args, "json", False))
+        return 1
+
+    _append_agile_event(agi_id, "agile.finalize.ok", payload)
+    _print_finalize_payload(payload, getattr(args, "json", False))
+    return 0
+
 
 def cmd_agile_result(args):
     try:
@@ -1363,6 +1654,7 @@ def register(subparsers):
     agile_update.add_argument("--objective-version", type=int)
     agile_update.add_argument("--user-requested", action="store_true",
         help="사용자가 직접 요청한 pause 전환임을 표시 (LLM 자발 정지 방지 게이트 우회)")
+    agile_update.add_argument("--force", action="store_true", help="completion guard 우회")
     agile_update.add_argument("--json", action="store_true")
 
     agile_result = agile_sub.add_parser("result")
@@ -1418,6 +1710,15 @@ def register(subparsers):
         dest="retrospective_recorded",
     )
     agile_dispatch_result.add_argument("--json", action="store_true")
+
+    agile_finalize = agile_sub.add_parser("finalize")
+    agile_finalize.add_argument("agi_id")
+    agile_finalize.add_argument("--json", action="store_true")
+
+    parent_module = sys.modules.get("scripts.mst_cmds")
+    dispatch = getattr(parent_module, "DISPATCH", None)
+    if isinstance(dispatch, dict):
+        dispatch.setdefault(("agile", "finalize"), cmd_agile_finalize)
 
     agile_sprint_close = agile_sub.add_parser("sprint-close")
     agile_sprint_close.add_argument("agi_id")
