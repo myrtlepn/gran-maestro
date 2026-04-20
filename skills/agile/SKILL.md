@@ -850,6 +850,31 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} \
 ========================================
 ```
 
+##### 2.3.0 Finalization Gate (MANDATORY)
+
+> 이 Gate가 통과되기 전에는 아래 2.3.1의 state clear를 실행하지 않는다. Gate 실패 시 [비상 스티어링] 진입.
+
+1. 전체 Sprint 결과 순회:
+   - `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S*/result.json` 목록에서 각 `req_id` 추출.
+2. 각 REQ의 상태 확인 및 미수락 accept:
+   - `python3 {PLUGIN_ROOT}/scripts/mst.py request inspect {REQ_ID} --json`으로 `status` 확인.
+   - `status`가 `done`, `completed`, `accepted` 중 하나가 **아니면** `Skill(skill: "mst:accept", args: "-a {REQ_ID}")`를 호출한다.
+   - accept 실패 시 즉시 Step 3(비상 스티어링)으로 진입하고, 2.3 이후 단계를 중단한다.
+3. Worktree orphan 정리:
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py worktree detect-orphans --clean --json
+   ```
+4. 잔존 AGI sprint worktree 제거:
+   - `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-*/` 디렉토리가 남아있으면 각각에 대해
+     `python3 {PLUGIN_ROOT}/scripts/mst.py worktree remove --path {해당 경로}`를 호출한다.
+5. 모든 단계 성공 후에만 2.3.1로 진행한다.
+
+##### 2.3.1 완료 마킹 및 state clear
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --json
+```
+
 ```bash
 MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --agile-loop-active false \
@@ -857,7 +882,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 || echo "[mst:agile] warning: failed to update workflow state" >&2
 ```
 
-`python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --json` 실행 후 종료.
+Finalization Gate 통과 및 worktree 정리 완료 확인 후 종료.
 
 ---
 
