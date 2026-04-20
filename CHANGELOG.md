@@ -4,6 +4,19 @@
 
 ---
 
+## [0.59.4] — 2026-04-21
+
+### 새 기능
+- **Agile 종료 자동화**: `agile finalize` CLI가 추가되어 Sprint 전체 완료 시 `final-report.md`를 자동 생성하고, 프로젝트 DoD 달성 여부를 검증하는 Finalization Gate가 신설되었습니다. `update` 커맨드에 완료 가드도 추가되었습니다. (REQ-687, REQ-688)
+- **Sprint 종료 자동화**: `sprint-close` CLI가 신설되어 Sprint 종료 시 hijack 가드·cukestill 정리까지 일괄 처리합니다. (REQ-685)
+- **worktree detect-orphans 옵션**: `--scope`·`--prefix` 옵션으로 orphan 탐지 범위를 세밀하게 지정할 수 있습니다. (REQ-689)
+
+### 개선
+- **archive 기본 보존량 상향**: `archive.max_active_sessions` 기본값이 20 → 200으로 상향되어, 활성 세션이 자주 누적되는 실사용 패턴에서 과도한 아카이브를 줄입니다.
+- **AUTO_MODE 자발적 중단 방지 강화**: `/mst:agile` Step 3에서 자율 루프가 컨텍스트 길이 등을 이유로 스스로 중단하지 않도록 가드를 강화했습니다. (REQ-686)
+
+---
+
 ## [0.59.3] — 2026-04-19
 
 ### 개선

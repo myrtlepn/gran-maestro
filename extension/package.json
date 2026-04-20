@@ -1,7 +1,7 @@
 {
   "name": "gran-maestro-extension",
   "private": true,
-  "version": "0.59.3",
+  "version": "0.59.4",
   "description": "Chrome Extension MV3 scaffold for REQ-260",
   "scripts": {
     "build": "node esbuild.config.mjs",
