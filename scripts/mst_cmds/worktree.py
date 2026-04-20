@@ -494,11 +494,117 @@ def _iter_cleaned_meta_entries(project_root: Path) -> list[dict]:
     return entries
 
 
-def _detect_cleaned_orphans(project_root: Path) -> list[dict]:
+def _normalize_meta_relative_path(raw_path: str | None) -> str | None:
+    if not raw_path:
+        return None
+    relative_path = raw_path.replace("\\", "/")
+    while relative_path.startswith("./"):
+        relative_path = relative_path[2:]
+    base_name = _common.BASE_DIR.name if _common.BASE_DIR else ".gran-maestro"
+    for prefix in (f"{base_name}/", ".gran-maestro/"):
+        if relative_path.startswith(prefix):
+            return relative_path[len(prefix):]
+    return relative_path
+
+
+def _meta_relative_path(meta_data: dict, project_root: Path) -> str | None:
+    worktree_path = _meta_worktree_path(meta_data, project_root)
+    if worktree_path:
+        for base_path in (_common.BASE_DIR, project_root):
+            if base_path is None:
+                continue
+            try:
+                return worktree_path.relative_to(base_path.resolve(strict=False)).as_posix()
+            except ValueError:
+                continue
+    return _normalize_meta_relative_path(_coerce_nonempty_str(meta_data.get("path")))
+
+
+def _normalize_scope_prefix(prefix: str | None) -> str | None:
+    normalized = _normalize_meta_relative_path(_coerce_nonempty_str(prefix))
+    if not normalized:
+        return None
+    return normalized
+
+
+def _iter_scoped_meta_entries(
+    project_root: Path,
+    scope: str | None = None,
+    prefix: str | None = None,
+) -> list[dict]:
+    entries: list[dict] = []
+    scope_value = _coerce_nonempty_str(scope)
+    prefix_value = _normalize_scope_prefix(prefix)
+    if not scope_value and not prefix_value:
+        return entries
+
+    worktrees_dir = _common.BASE_DIR / "worktrees"
+    if not worktrees_dir.is_dir():
+        return entries
+
+    for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
+        meta_data = _common.load_json(meta_path)
+        if not isinstance(meta_data, dict):
+            print(f"Warning: failed to read worktree meta {meta_path}", file=sys.stderr)
+            continue
+
+        relative_path = _meta_relative_path(meta_data, project_root)
+        scope_matches = bool(
+            scope_value
+            and (
+                _coerce_nonempty_str(meta_data.get("agi_id")) == scope_value
+                or (relative_path or "").startswith(f"worktrees/{scope_value}/sprint-")
+            )
+        )
+        prefix_matches = bool(prefix_value and (relative_path or "").startswith(prefix_value))
+        if not (scope_matches or prefix_matches):
+            continue
+
+        task_id = _coerce_nonempty_str(meta_data.get("taskId")) or meta_path.name.removesuffix(".meta.json")
+        worktree_path = _meta_worktree_path(meta_data, project_root)
+        entries.append(
+            {
+                "taskId": task_id,
+                "path": str(worktree_path) if worktree_path else None,
+                "branch": _coerce_nonempty_str(meta_data.get("branch")),
+                "meta_path": str(meta_path.resolve(strict=False)),
+            }
+        )
+    return entries
+
+
+def _iter_scope_fs_orphan_entries(project_root: Path, scope: str | None, known_paths: set[Path]) -> list[dict]:
+    scope_value = _coerce_nonempty_str(scope)
+    if not scope_value:
+        return []
+
+    scope_dir = _common.BASE_DIR / "worktrees" / scope_value
+    if not scope_dir.is_dir():
+        return []
+
+    entries: list[dict] = []
+    for sprint_dir in sorted(scope_dir.glob("sprint-*")):
+        if not sprint_dir.is_dir():
+            continue
+        worktree_path = sprint_dir.resolve(strict=False)
+        if worktree_path in known_paths:
+            continue
+        entries.append(
+            {
+                "taskId": f"<fs-orphan:{sprint_dir.name}>",
+                "path": str(worktree_path),
+                "branch": None,
+                "meta_path": None,
+            }
+        )
+    return entries
+
+
+def _detect_orphans_from_entries(project_root: Path, entries: list[dict]) -> list[dict]:
     worktree_roots = set(_list_worktree_roots(project_root))
     orphans: list[dict] = []
 
-    for entry in _iter_cleaned_meta_entries(project_root):
+    for entry in entries:
         worktree_path = Path(entry["path"]) if entry.get("path") else None
         worktree_listed = worktree_path in worktree_roots if worktree_path else False
         path_exists = worktree_path.exists() if worktree_path else False
@@ -516,6 +622,25 @@ def _detect_cleaned_orphans(project_root: Path) -> list[dict]:
             }
         )
     return orphans
+
+
+def _detect_cleaned_orphans(project_root: Path) -> list[dict]:
+    return _detect_orphans_from_entries(project_root, _iter_cleaned_meta_entries(project_root))
+
+
+def _detect_scoped_orphans(
+    project_root: Path,
+    scope: str | None = None,
+    prefix: str | None = None,
+) -> list[dict]:
+    entries = _iter_scoped_meta_entries(project_root, scope=scope, prefix=prefix)
+    known_paths = {
+        Path(entry["path"]).resolve(strict=False)
+        for entry in entries
+        if entry.get("path")
+    }
+    entries.extend(_iter_scope_fs_orphan_entries(project_root, scope, known_paths))
+    return _detect_orphans_from_entries(project_root, entries)
 
 
 def _run_orphan_cleanup_command(project_root: Path, command: list[str]) -> tuple[bool, str]:
@@ -557,13 +682,15 @@ def _clean_detected_orphan(project_root: Path, orphan: dict) -> tuple[bool, list
         if not ok:
             return False, steps
 
-    meta_path = Path(str(orphan["meta_path"]))
-    try:
-        meta_path.unlink(missing_ok=True)
-        steps.append({"command": f"remove meta {meta_path}", "ok": True, "message": str(meta_path)})
-    except OSError as exc:
-        steps.append({"command": f"remove meta {meta_path}", "ok": False, "message": str(exc)})
-        return False, steps
+    raw_meta_path = orphan.get("meta_path")
+    if raw_meta_path:
+        meta_path = Path(str(raw_meta_path))
+        try:
+            meta_path.unlink(missing_ok=True)
+            steps.append({"command": f"remove meta {meta_path}", "ok": True, "message": str(meta_path)})
+        except OSError as exc:
+            steps.append({"command": f"remove meta {meta_path}", "ok": False, "message": str(exc)})
+            return False, steps
 
     return True, steps
 
@@ -598,8 +725,14 @@ def _print_detect_orphans_payload(payload: dict, as_json: bool) -> None:
 def cmd_worktree_detect_orphans(args):
     project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
 
+    scope = _coerce_nonempty_str(getattr(args, "scope", None))
+    prefix = _coerce_nonempty_str(getattr(args, "prefix", None))
+
     try:
-        orphans = _detect_cleaned_orphans(project_root)
+        if scope or prefix:
+            orphans = _detect_scoped_orphans(project_root, scope=scope, prefix=prefix)
+        else:
+            orphans = _detect_cleaned_orphans(project_root)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -1093,6 +1226,8 @@ def register(subparsers):
     worktree_detect_orphans = worktree_sub.add_parser("detect-orphans")
     worktree_detect_orphans.add_argument("--clean", action="store_true")
     worktree_detect_orphans.add_argument("--json", action="store_true")
+    worktree_detect_orphans.add_argument("--scope", default=None)
+    worktree_detect_orphans.add_argument("--prefix", default=None)
 
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
     _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)

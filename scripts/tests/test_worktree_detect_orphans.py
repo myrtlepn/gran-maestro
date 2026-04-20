@@ -66,11 +66,19 @@ def master_repo(tmp_path: Path) -> Path:
     return repo_root
 
 
-def _run_detect_orphans(*, clean: bool, as_json: bool) -> int:
+def _run_detect_orphans(
+    *,
+    clean: bool,
+    as_json: bool,
+    scope: str | None = None,
+    prefix: str | None = None,
+) -> int:
     return cmd_worktree_detect_orphans(
         argparse.Namespace(
             clean=clean,
             json=as_json,
+            scope=scope,
+            prefix=prefix,
         )
     )
 
@@ -186,3 +194,224 @@ def test_detect_orphans_cleans_branch_only_orphan(
     assert payload["orphans"][0]["path_exists"] is False
     assert not meta_path.exists()
     assert not _branch_exists(master_repo, branch)
+
+
+def test_detect_orphans_empty_state(master_repo: Path, monkeypatch, capsys) -> None:
+    """AC-001 (REQ-689/T01): meta 없음 + `--json` 기본 실행 → orphans/cleaned/failed 모두 빈 배열."""
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=False, as_json=True)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert payload["orphans"] == []
+    assert payload["cleaned"] == []
+    assert payload["failed"] == []
+
+
+def test_detect_orphans_ignores_active_meta_by_default(
+    master_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """AC-004 (REQ-689/T01): state="active" meta는 기본 옵션(--scope 미지정) 하에서 제외.
+    T02 `--scope`/`--prefix` 옵션 도입 후에도 이 기본 동작이 회귀 없이 유지되어야 한다.
+    """
+    task_id = "REQ-689-T02-ACTIVE"
+    branch = "gran-maestro/main/REQ-689-T02-ACTIVE"
+    worktree_path = tmp_path / task_id
+    create_branch = _run_git(master_repo, "branch", branch, "master")
+    assert create_branch.returncode == 0, create_branch.stderr
+
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    _write_json(
+        meta_path,
+        {
+            "taskId": task_id,
+            "path": str(worktree_path),
+            "branch": branch,
+            "state": "active",
+        },
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=False, as_json=True)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert payload["orphans"] == []
+    assert payload["cleaned"] == []
+    assert meta_path.exists()
+
+
+def test_detect_orphans_scope_includes_active_agi_meta(
+    master_repo: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """AC-001 (REQ-689/T02): --scope includes matching active AGI meta."""
+    task_id = "REQ-689-T02-SCOPE"
+    agi_id = "AGI-123"
+    branch = "gran-maestro/AGI-123/sprint-01"
+    worktree_path = master_repo / ".gran-maestro" / "worktrees" / agi_id / "sprint-01"
+    add_worktree = _run_git(master_repo, "worktree", "add", "-b", branch, str(worktree_path), "master")
+    assert add_worktree.returncode == 0, add_worktree.stderr
+
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    _write_json(
+        meta_path,
+        {
+            "taskId": task_id,
+            "agi_id": agi_id,
+            "path": ".gran-maestro/worktrees/AGI-123/sprint-01",
+            "branch": branch,
+            "state": "active",
+        },
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=False, as_json=True, scope=agi_id)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert [orphan["taskId"] for orphan in payload["orphans"]] == [task_id]
+    assert payload["orphans"][0]["worktree_listed"] is True
+    assert payload["orphans"][0]["path_exists"] is True
+    assert meta_path.exists()
+
+
+def test_detect_orphans_scope_clean_removes_active_worktree(
+    master_repo: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """AC-002 (REQ-689/T02): --scope --clean cleans matching active AGI meta."""
+    task_id = "REQ-689-T02-SCOPE-CLEAN"
+    agi_id = "AGI-123"
+    branch = "gran-maestro/AGI-123/sprint-clean"
+    worktree_path = master_repo / ".gran-maestro" / "worktrees" / agi_id / "sprint-clean"
+    add_worktree = _run_git(master_repo, "worktree", "add", "-b", branch, str(worktree_path), "master")
+    assert add_worktree.returncode == 0, add_worktree.stderr
+
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    _write_json(
+        meta_path,
+        {
+            "taskId": task_id,
+            "agi_id": agi_id,
+            "path": ".gran-maestro/worktrees/AGI-123/sprint-clean",
+            "branch": branch,
+            "state": "active",
+        },
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=True, as_json=True, scope=agi_id)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert payload["cleaned"] == [task_id]
+    assert not worktree_path.exists()
+    assert not meta_path.exists()
+    assert worktree_path.resolve(strict=False) not in _worktree_roots(master_repo)
+
+
+def test_detect_orphans_scope_includes_fs_only_sprint_worktree(
+    master_repo: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """AC-003 (REQ-689/T02): --scope includes sprint-* worktrees without meta."""
+    agi_id = "AGI-456"
+    branch = "gran-maestro/AGI-456/sprint-02"
+    worktree_path = master_repo / ".gran-maestro" / "worktrees" / agi_id / "sprint-02"
+    add_worktree = _run_git(master_repo, "worktree", "add", "-b", branch, str(worktree_path), "master")
+    assert add_worktree.returncode == 0, add_worktree.stderr
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=False, as_json=True, scope=agi_id)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert len(payload["orphans"]) == 1
+    assert payload["orphans"][0]["taskId"] == "<fs-orphan:sprint-02>"
+    assert payload["orphans"][0]["meta_path"] is None
+    assert payload["orphans"][0]["worktree_listed"] is True
+    assert payload["orphans"][0]["path_exists"] is True
+
+
+def test_detect_orphans_prefix_includes_matching_active_meta(
+    master_repo: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """AC-004 (REQ-689/T02): --prefix includes active meta by relative path."""
+    task_id = "REQ-689-T02-PREFIX"
+    agi_id = "AGI-123"
+    branch = "gran-maestro/AGI-123/sprint-prefix"
+    worktree_path = master_repo / ".gran-maestro" / "worktrees" / agi_id / "sprint-prefix"
+    add_worktree = _run_git(master_repo, "worktree", "add", "-b", branch, str(worktree_path), "master")
+    assert add_worktree.returncode == 0, add_worktree.stderr
+
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    _write_json(
+        meta_path,
+        {
+            "taskId": task_id,
+            "agi_id": agi_id,
+            "path": ".gran-maestro/worktrees/AGI-123/sprint-prefix",
+            "branch": branch,
+            "state": "active",
+        },
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = _run_detect_orphans(clean=False, as_json=True, prefix="worktrees/AGI-123/")
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert [orphan["taskId"] for orphan in payload["orphans"]] == [task_id]
+    assert payload["orphans"][0]["worktree_listed"] is True
+    assert payload["orphans"][0]["path_exists"] is True
+    assert meta_path.exists()
+
+
+def test_detect_orphans_help_lists_scope_and_prefix() -> None:
+    """AC-007 (REQ-689/T02): CLI help exposes --scope and --prefix."""
+    result = subprocess.run(
+        ["python3", "scripts/mst.py", "worktree", "detect-orphans", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--scope" in result.stdout
+    assert "--prefix" in result.stdout
+
+
+def test_worktree_module_import_smoke() -> None:
+    """AC-005 (REQ-689/T01): worktree 모듈 import 기본 smoke."""
+    import importlib
+
+    module = importlib.import_module("scripts.mst_cmds.worktree")
+    assert hasattr(module, "cmd_worktree_detect_orphans")
+    assert callable(module.cmd_worktree_detect_orphans)

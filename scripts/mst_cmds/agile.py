@@ -1016,6 +1016,47 @@ def _print_finalize_payload(payload: dict, as_json: bool) -> None:
     print(f"boundary_ok: {payload['boundary_ok']}")
 
 
+def _finalize_report_value(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, (list, dict, bool)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _write_finalize_final_report(agi_id: str, payload: dict, status: str) -> None:
+    orphan_cleanup = payload.get("orphan_cleanup")
+    if not isinstance(orphan_cleanup, dict):
+        orphan_cleanup = {}
+    removed_worktrees = payload.get("removed_worktrees")
+    if not isinstance(removed_worktrees, list):
+        removed_worktrees = []
+
+    lines = [
+        f"# {agi_id} Finalization Report",
+        f"- generated_at: {_now_iso()}",
+        f"- status: {status}",
+        "",
+        "## Accepted/Skipped REQs",
+        f"- skipped_reqs: {_finalize_report_value(payload.get('skipped_reqs') or [])}",
+        f"- pending_accept_reqs: {_finalize_report_value(payload.get('pending_accept_reqs') or [])}",
+        "",
+        "## Worktree Cleanup",
+        f"- removed_worktrees: {len(removed_worktrees)}건 ({_finalize_report_value(removed_worktrees)})",
+        "",
+        "## Orphan Cleanup",
+        f"- cleaned: {_finalize_report_value(orphan_cleanup.get('cleaned') or [])}",
+        f"- failed: {_finalize_report_value(orphan_cleanup.get('failed') or [])}",
+        "",
+        "## Boundary Check",
+        f"- boundary_ok: {_finalize_report_value(payload.get('boundary_ok'))}",
+        "",
+    ]
+    report_path = _agi_session_dir(agi_id) / "final-report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def cmd_agile_finalize(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
@@ -1080,6 +1121,7 @@ def cmd_agile_finalize(args):
     except Exception as exc:
         _append_agile_event(agi_id, "agile.finalize.step.failed", {"ok": False, "error": str(exc)})
         print(f"Error: {exc}", file=sys.stderr)
+        _write_finalize_final_report(agi_id, payload, "failed")
         _print_finalize_payload(payload, getattr(args, "json", False))
         return 1
 
@@ -1091,6 +1133,7 @@ def cmd_agile_finalize(args):
             "agile.finalize.pending_accept",
             {"pending_accept_reqs": payload["pending_accept_reqs"]},
         )
+        _write_finalize_final_report(agi_id, payload, "pending_accept")
         _print_finalize_payload(payload, getattr(args, "json", False))
         return 2
 
@@ -1100,10 +1143,12 @@ def cmd_agile_finalize(args):
             "agile.finalize.failed",
             {"orphan_cleanup": payload["orphan_cleanup"]},
         )
+        _write_finalize_final_report(agi_id, payload, "failed")
         _print_finalize_payload(payload, getattr(args, "json", False))
         return 1
 
     _append_agile_event(agi_id, "agile.finalize.ok", payload)
+    _write_finalize_final_report(agi_id, payload, "ok")
     _print_finalize_payload(payload, getattr(args, "json", False))
     return 0
 
