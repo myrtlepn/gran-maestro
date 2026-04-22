@@ -1,6 +1,6 @@
 ---
 name: debug
-description: "설정된 AI 에이전트들이 병렬로 버그를 조사하고 종합 리포트를 생성합니다. 사용자가 '디버그', '버그 찾아줘', '문제 분석'을 말하거나 /mst:debug를 호출할 때 사용. 1회성 의견 수집은 /mst:ideation을, 합의 토론은 /mst:discussion을 사용."
+description: "설정된 AI 에이전트들이 병렬로 버그를 조사하고 종합 리포트를 생성합니다. 로그 분석, 스택 트레이스 추적, 코드 경로 검사를 수행합니다. Use when: '디버그', '버그 찾아줘', '문제 분석', bug investigation, error trace, 에러 추적을 말하거나 /mst:debug를 호출할 때. 1회성 의견 수집은 /mst:ideation을, 합의 토론은 /mst:discussion을 사용."
 user-invocable: true
 argument-hint: "{버그/이슈 설명} [--focus {파일패턴}]"
 ---

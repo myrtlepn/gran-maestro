@@ -1,6 +1,6 @@
 ---
 name: review
-description: "구현 완성도를 반복 검토합니다. AC 충족 여부 검증 + 병렬 코드/아키텍처/UI 리뷰 수행. 갭 발견 시 태스크 자동 추가 후 재실행. approve 루프 내에서 자동 호출되거나 /mst:review REQ-NNN으로 직접 실행 가능."
+description: "구현 완성도를 반복 검토합니다. AC 충족 여부 검증 + 병렬 코드/아키텍처/UI 리뷰 수행. 갭 발견 시 태스크 자동 추가 후 재실행. Use when: code review, implementation check, verify acceptance criteria, 리뷰 요청, 구현 검증, 코드 리뷰가 필요할 때. approve 루프 내에서 자동 호출되거나 /mst:review REQ-NNN으로 직접 실행 가능."
 user-invocable: true
 argument-hint: "[REQ-ID] [--auto]"
 ---

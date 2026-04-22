@@ -1,6 +1,6 @@
 ---
 name: explore
-description: "에이전트들이 코드베이스를 백그라운드로 자율 탐색해 원하는 정보를 찾아옵니다. 사용자가 '탐색', '코드 찾아줘', '어디 있어'를 말하거나 /mst:explore를 호출할 때 사용."
+description: "에이전트들이 코드베이스를 백그라운드로 자율 탐색해 원하는 정보를 찾아옵니다. 함수 정의 위치 찾기, 호출 관계 추적, 특정 패턴 검색을 수행합니다. Use when: '탐색', '코드 찾아줘', '어디 있어', find code, trace dependencies, 코드 검색을 말하거나 /mst:explore를 호출할 때."
 user-invocable: true
 argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] [--from EXP-NNN]"
 ---

@@ -1,6 +1,6 @@
 ---
 name: agile-plan
-description: "프로젝트 목표 + 설계 문서(objective.md)를 JTBD 기반 Q&A로 생성하고, 실행 전 검토 가능한 플래닝 세션을 초기화합니다."
+description: "프로젝트 목표 + 설계 문서(objective.md)를 JTBD 기반 Q&A로 생성하고, 실행 전 검토 가능한 플래닝 세션을 초기화합니다. JTBD 질문을 통해 프로젝트 목표를 정의하고, objective.md를 생성하며, DoD 체크리스트를 구성합니다. Use when: 프로젝트 시작, 목표 설정, 킥오프 플래닝, project kickoff, design doc 작성, 프로젝트 목표 정의, objective 생성이 필요할 때."
 user-invocable: true
 argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/step]"
 ---

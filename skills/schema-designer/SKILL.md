@@ -1,13 +1,12 @@
 ---
 name: schema-designer
-description: "DB 스키마, 데이터 모델, ERD, 마이그레이션 계획을 설계하는 Design Wing 템플릿 스킬. PM Conductor가 변수를 치환하여 /mst:codex로 실행."
+description: "DB 스키마, 데이터 모델, ERD, 마이그레이션 계획을 설계합니다. 엔티티 관계를 정의하고, 필드 타입·제약조건을 명시하며, 인덱스 전략과 마이그레이션 단계를 제안합니다. Use when: database design, schema creation, ERD diagram, data modeling, migration planning, DB 설계, 테이블 설계, 데이터 모델링이 필요할 때."
 user-invocable: false
 ---
 
 # mst:schema-designer
 
-DB 스키마, 데이터 모델, ERD, 마이그레이션 계획을 설계하는 Design Wing 템플릿 스킬입니다.
-PM Conductor가 변수를 치환하여 `/mst:codex`로 실행합니다.
+Design Wing 템플릿 스킬. PM Conductor가 변수를 치환하여 `/mst:codex`로 실행합니다.
 
 ## 실행 프로토콜
 
@@ -84,6 +83,15 @@ Write the design document in the following format:
 - Query patterns: ...
 - Index strategy: ...
 </output_format>
+
+<verification>
+Before finalizing the design document, verify:
+- All entities from requirements are represented in the ERD
+- Every relationship has explicit cardinality and cascade rules
+- Indexes cover all documented query patterns
+- Migration steps are ordered non-breaking → data migration → cleanup
+- No implementation code is present — design document only
+</verification>
 </schema_designer>
 
 ## 변수 목록
