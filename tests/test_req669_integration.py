@@ -244,6 +244,9 @@ def test_frontend_settings_spec_is_reRunnable_when_present() -> None:
         pytest.skip("frontend/e2e/settings.spec.ts is absent in this worktree")
 
     frontend_dir = REPO_ROOT / "frontend"
+    if not (frontend_dir / "node_modules" / "@playwright" / "test").exists():
+        pytest.skip("frontend/@playwright/test is not installed — run `npm install` in frontend/")
+
     result = subprocess.run(
         ["npx", "playwright", "test", "e2e/settings.spec.ts"],
         cwd=str(frontend_dir),
