@@ -40,11 +40,28 @@ def load_snapshot(base_dir: Path, session_id: str = "default") -> Optional[Dict[
 
 
 def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
-    """Write JSON atomically via temp file and os.replace."""
+    """Write JSON atomically via temp file, fsync, and os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        if hasattr(os, "O_DIRECTORY"):
+            dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
 
 
 def _base_snapshot(session_id: str) -> Dict[str, Any]:
@@ -254,6 +271,49 @@ def get_snapshot(base_dir: Path, session_id: str = "default") -> Optional[Dict[s
     if snapshot is not None or session_id == "default":
         return snapshot
     return load_snapshot(base_dir, "default")
+
+
+def mark_paused(base_dir: Path, session_id: str = "default") -> Optional[Dict[str, Any]]:
+    """Mark an existing active snapshot as paused."""
+    snapshot = load_snapshot(base_dir, session_id)
+    if snapshot is None:
+        return None
+    if snapshot.get("status") in ("committed", "failed"):
+        return snapshot
+
+    event_time = timestamp_now()
+    updated = dict(snapshot)
+    updated["sessionId"] = session_id
+    updated["paused"] = True
+    updated["paused_at"] = event_time
+    updated.pop("resumed_at", None)
+    updated["updatedAt"] = event_time
+    _atomic_write_json(snapshot_path(base_dir, session_id), updated)
+    return updated
+
+
+def resume_paused(base_dir: Path, session_id: str = "default") -> Optional[Dict[str, Any]]:
+    """Clear a paused marker from an existing snapshot."""
+    snapshot = load_snapshot(base_dir, session_id)
+    if snapshot is None:
+        return None
+
+    event_time = timestamp_now()
+    updated = dict(snapshot)
+    updated["sessionId"] = session_id
+    updated["paused"] = False
+    updated["resumed_at"] = event_time
+    updated["updatedAt"] = event_time
+    _atomic_write_json(snapshot_path(base_dir, session_id), updated)
+    return updated
+
+
+def paused_count(base_dir: Path, session_id: str = "default") -> int:
+    """Return 1 when the session snapshot is marked paused, otherwise 0."""
+    snapshot = load_snapshot(base_dir, session_id)
+    if isinstance(snapshot, dict) and snapshot.get("paused") is True:
+        return 1
+    return 0
 
 
 def clear_snapshot(base_dir: Path, session_id: str = "default") -> None:

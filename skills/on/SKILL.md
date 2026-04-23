@@ -50,6 +50,28 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
 <!-- @end-include -->
 
+<!-- paused-resume:start -->
+### Paused Snapshot Resume 안내 (MANDATORY)
+
+모드 활성화 시작 시, Step 1 전에 현재 세션의 paused snapshot을 확인한다. 이 단계에서는 사용자에게 질문하지 않고 안내만 출력한다.
+
+```bash
+SESSION_OWNER_PPID="${MST_STATE_PPID:-$PPID}"
+SESSION_ID="$(cat "{PROJECT_ROOT}/.gran-maestro/tmp/claude-session-${SESSION_OWNER_PPID}.id" 2>/dev/null || printf '%s' "$SESSION_OWNER_PPID")"
+PAUSED_COUNT="$(python3 {PLUGIN_ROOT}/scripts/mst.py state paused-count --session-id "$SESSION_ID" 2>/dev/null || printf '0')"
+case "$PAUSED_COUNT" in ''|*[!0-9]*) PAUSED_COUNT=0 ;; esac
+if [ "$PAUSED_COUNT" -gt 0 ]; then
+  echo "paused 체인 ${PAUSED_COUNT}건 발견. /mst:resume 또는 다음 mst skill 호출로 재개됩니다."
+  if [ "${AUTO_MODE:-false}" = "true" ]; then
+    python3 {PLUGIN_ROOT}/scripts/mst.py state resume-paused --session-id "$SESSION_ID" >/dev/null 2>&1 || true
+    echo "AUTO_MODE=true: paused 체인 ${PAUSED_COUNT}건 자동 resume 처리 완료"
+  fi
+fi
+```
+
+`AUTO_MODE=false`에서는 추가 확인 없이 안내만 출력한다. 다음 skill 호출 시 기존 continuation/resume 경로가 자연스럽게 이어진다.
+<!-- paused-resume:end -->
+
 
 1. `{PROJECT_ROOT}/.gran-maestro/` 디렉토리 생성, `.gitignore`에 `.gran-maestro/` 등록 (미존재 시)
 2. 플러그인 루트 경로 확인 (스킬 베이스 디렉토리 2단계 상위)

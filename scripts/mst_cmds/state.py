@@ -260,6 +260,35 @@ def cmd_state_clear(args):
     return 0
 
 
+def cmd_state_mark_paused(args):
+    from scripts._skill_state import mark_paused
+
+    data = mark_paused(_skill_state_base_dir(), session_id=args.session_id)
+    if data is None:
+        print("스냅샷 없음")
+        return 0
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_state_resume_paused(args):
+    from scripts._skill_state import resume_paused
+
+    data = resume_paused(_skill_state_base_dir(), session_id=args.session_id)
+    if data is None:
+        print("스냅샷 없음")
+        return 0
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_state_paused_count(args):
+    from scripts._skill_state import paused_count
+
+    print(paused_count(_skill_state_base_dir(), session_id=args.session_id))
+    return 0
+
+
 def register(subparsers):
     sub = subparsers
     state = sub.add_parser("state")
@@ -285,3 +314,12 @@ def register(subparsers):
 
     state_sub.add_parser("get")
     state_sub.add_parser("clear")
+
+    state_mark_paused = state_sub.add_parser("mark-paused")
+    state_mark_paused.add_argument("--session-id", required=True)
+
+    state_resume_paused = state_sub.add_parser("resume-paused")
+    state_resume_paused.add_argument("--session-id", required=True)
+
+    state_paused_count = state_sub.add_parser("paused-count")
+    state_paused_count.add_argument("--session-id", required=True)
