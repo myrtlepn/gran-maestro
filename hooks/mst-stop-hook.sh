@@ -56,6 +56,29 @@ resolve_mst_script() {
 
 MST_SCRIPT="$(resolve_mst_script)"
 
+resolve_repo_script() {
+  local script_name="$1"
+  local script_dir candidate
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  candidate="$(cd "$script_dir/.." && pwd)/scripts/$script_name"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  candidate="$(cd "$script_dir/../.." && pwd)/scripts/$script_name"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  printf '%s\n' "${PROJECT_ROOT}/scripts/$script_name"
+}
+
+SNAPSHOT_PROBE_SCRIPT="$(resolve_repo_script "_snapshot_probe.py")"
+FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
+
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
   local event="${1:-event}"
@@ -145,6 +168,112 @@ print(f"{stop_active}\t{agile_auto_mode}\t{last_msg}")
 STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INFO" | cut -f1)"
 AGILE_AUTO_MODE_HINT="$(printf '%s' "$HOOK_INFO" | cut -f2)"
 LAST_ASSISTANT_MESSAGE="$(printf '%s' "$HOOK_INFO" | cut -f3-)"
+
+DECISION_EMITTED="false"
+SESSION_ID="unknown"
+SESSION_ID_SOURCE=""
+SESSION_ID_RESOLUTION_FAILED="true"
+HOOK_EVENT_NAME=""
+TRANSCRIPT_PATH=""
+SNAPSHOT_PRESENT="false"
+SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/unknown/snapshot.json"
+SNAPSHOT_DIGEST=""
+STDIN_DIGEST=""
+SNAPSHOT_CURRENT_SKILL=""
+SNAPSHOT_CURRENT_STEP=""
+SNAPSHOT_TOTAL_STEPS=""
+SNAPSHOT_STATUS=""
+SNAPSHOT_RETURN_TO_SKILL=""
+SNAPSHOT_RETURN_TO_STEP=""
+
+emit_allow_json() {
+  local reason="$1"
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1]
+print(json.dumps({"decision": "allow", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+reason_with_snapshot_meta() {
+  local reason="$1"
+  case "$reason" in
+    *snapshot_present=*)
+      printf '%s\n' "$reason"
+      ;;
+    *)
+      printf '%s snapshot_present=%s\n' "$reason" "${SNAPSHOT_PRESENT:-unknown}"
+      ;;
+  esac
+}
+
+emit_allow_decision() {
+  local reason
+  reason="$(reason_with_snapshot_meta "$1")"
+  DECISION_EMITTED="true"
+  emit_allow_json "$reason"
+}
+
+append_flow_event() {
+  local event_type="$1"
+  local data="$2"
+  [ -f "$FLOW_LOGGER_SCRIPT" ] || return 0
+  python3 "$FLOW_LOGGER_SCRIPT" append \
+    --project-root "$PROJECT_ROOT" \
+    --session-id "${SESSION_ID:-unknown}" \
+    --event-type "$event_type" \
+    --data "$data" \
+    --snapshot-path "${SNAPSHOT_PATH:-}" \
+    --stdin-digest "${STDIN_DIGEST:-}" \
+    --ppid "$PPID" >/dev/null 2>&1 || true
+}
+
+emit_unhandled_path_fallback() {
+  local exit_code="${1:-0}"
+  local data
+  data="$(python3 - "$exit_code" "${SNAPSHOT_DIGEST:-}" "${SNAPSHOT_CURRENT_SKILL:-}" "${SNAPSHOT_CURRENT_STEP:-}" "${SNAPSHOT_TOTAL_STEPS:-}" "${SNAPSHOT_STATUS:-}" <<'PY'
+import json
+import sys
+
+payload = {
+    "exit_code": sys.argv[1],
+    "snapshot_digest": sys.argv[2],
+    "current_skill": sys.argv[3],
+    "current_step": sys.argv[4],
+    "total_steps": sys.argv[5],
+    "status": sys.argv[6],
+}
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+PY
+)"
+  append_flow_event "unhandled_path" "$data"
+  emit_allow_decision "unhandled_path fallback"
+}
+
+on_stop_hook_exit() {
+  local exit_code="$?"
+  trap - EXIT
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    emit_unhandled_path_fallback "$exit_code"
+    exit 0
+  fi
+  exit "$exit_code"
+}
+
+trap on_stop_hook_exit EXIT
+
+SNAPSHOT_PROBE_EXPORTS=""
+if [ -f "$SNAPSHOT_PROBE_SCRIPT" ]; then
+  if SNAPSHOT_PROBE_EXPORTS="$(printf '%s' "$STDIN_RAW" | python3 "$SNAPSHOT_PROBE_SCRIPT" --project-root "$PROJECT_ROOT" --format shell 2>/dev/null)"; then
+    eval "$SNAPSHOT_PROBE_EXPORTS"
+  else
+    debug_log "warn" "reason=snapshot_probe_failed"
+  fi
+else
+  debug_log "warn" "reason=snapshot_probe_missing path=$SNAPSHOT_PROBE_SCRIPT"
+fi
 
 append_audit_entry() {
   local classification="${1:-}"
@@ -317,6 +446,7 @@ append_block_audit_entry() {
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   append_audit_entry "pass_through" "" "stop_hook_active_true"
   debug_log "allow" "reason=stop_hook_active_true"
+  emit_allow_decision "stop_hook_active_true"
   exit 0
 fi
 
@@ -548,6 +678,13 @@ print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
 PY
 }
 
+emit_block_decision() {
+  local reason
+  reason="$(reason_with_snapshot_meta "$1")"
+  DECISION_EMITTED="true"
+  emit_block_json "$reason"
+}
+
 persist_block_state() {
   local reason="$1"
   python3 - "$STATE_FILE" "$reason" <<'PY'
@@ -591,6 +728,74 @@ except Exception:
 
 print(block_count)
 PY
+}
+
+is_int_value() {
+  printf '%s' "$1" | grep -Eq '^-?[0-9]+$'
+}
+
+is_mst_snapshot_skill() {
+  local skill="$1"
+  case "$skill" in
+    mst:*|agile|request|resume|recover|review|approve|accept|feedback|cancel|intent|list|inspect|priority|explore|debug|discussion|ideation|plan|agile-plan)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+run_snapshot_guard() {
+  local reason persisted_block_count
+
+  if [ "${SESSION_ID_RESOLUTION_FAILED:-false}" = "true" ]; then
+    if [ "${HOOK_EVENT_NAME:-}" = "Stop" ]; then
+      debug_log "allow" "reason=session_id_resolution_failed"
+      emit_allow_decision "session_id_resolution_failed"
+      exit 0
+    fi
+    return 0
+  fi
+
+  if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
+    debug_log "allow" "reason=no-mst-session session_id=${SESSION_ID:-unknown}"
+    emit_allow_decision "no-mst-session"
+    exit 0
+  fi
+
+  if ! is_mst_snapshot_skill "${SNAPSHOT_CURRENT_SKILL:-}"; then
+    debug_log "allow" "reason=non_mst_skill skill=${SNAPSHOT_CURRENT_SKILL:-}"
+    emit_allow_decision "non-mst-skill"
+    exit 0
+  fi
+
+  if [ -n "${SNAPSHOT_RETURN_TO_SKILL:-}" ]; then
+    reason="[RETURN-TO] snapshot return_to=${SNAPSHOT_RETURN_TO_SKILL}/${SNAPSHOT_RETURN_TO_STEP}. Do NOT stop or pause."
+    reason="$reason You MUST immediately return to mst:${SNAPSHOT_RETURN_TO_SKILL} and continue from step ${SNAPSHOT_RETURN_TO_STEP}."
+    persisted_block_count="$(persist_block_state "$reason" 2>/dev/null || printf '%s' "$(( ${BLOCK_COUNT:-0} + 1 ))")"
+    debug_log "block" "reason=snapshot_return_to skill=$SNAPSHOT_RETURN_TO_SKILL step=$SNAPSHOT_RETURN_TO_STEP block_count=$persisted_block_count"
+    emit_block_decision "$reason"
+    exit 0
+  fi
+
+  if is_int_value "${SNAPSHOT_CURRENT_STEP:-}" && is_int_value "${SNAPSHOT_TOTAL_STEPS:-}" && [ "$SNAPSHOT_CURRENT_STEP" -lt "$SNAPSHOT_TOTAL_STEPS" ]; then
+    reason="[SNAPSHOT][step_progress] skill ${SNAPSHOT_CURRENT_SKILL:-unknown} step $((SNAPSHOT_CURRENT_STEP + 1))/${SNAPSHOT_TOTAL_STEPS} 계속 진행."
+    reason="$reason Do not stop; emit the next tool call now."
+    persisted_block_count="$(persist_block_state "$reason" 2>/dev/null || printf '%s' "$(( ${BLOCK_COUNT:-0} + 1 ))")"
+    debug_log "block" "reason=snapshot_step_progress skill=${SNAPSHOT_CURRENT_SKILL:-} step=${SNAPSHOT_CURRENT_STEP:-} total=${SNAPSHOT_TOTAL_STEPS:-} block_count=$persisted_block_count"
+    emit_block_decision "$reason"
+    exit 0
+  fi
+
+  case "${SNAPSHOT_STATUS:-}" in
+    committed|completed|done)
+      debug_log "allow" "reason=snapshot_completion skill=${SNAPSHOT_CURRENT_SKILL:-}"
+      emit_allow_decision "completion"
+      exit 0
+      ;;
+  esac
+
+  emit_unhandled_path_fallback "0"
+  exit 0
 }
 
 
@@ -817,12 +1022,14 @@ run_exit_boundary_guard() {
     [ -n "$boundary_violation" ] || boundary_violation="unknown"
     debug_log "boundary_exit_block" "req=$req_id violation=$boundary_violation"
     log_boundary_event "blocked" "$req_id" "$boundary_violation" "boundary_violation:${boundary_violation}"
-    emit_block_json "boundary_violation:${boundary_violation}"
+    emit_block_decision "boundary_violation:${boundary_violation}"
     exit 0
   done <<EOF
 $(exit_boundary_requests)
 EOF
 }
+
+run_snapshot_guard
 
 run_exit_boundary_guard
 
@@ -991,12 +1198,13 @@ if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
   if has_active_workflow_session; then
     REASON="active workflow session detected but PPID state missing; continue workflow"
     append_block_audit_entry "$REASON"
-    emit_block_json "$REASON"
+    emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected"
     exit 0
   fi
   append_audit_entry "pass_through" "" "workflow_inactive"
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
+  emit_allow_decision "workflow_inactive"
   exit 0
 fi
 
@@ -1009,6 +1217,7 @@ STOP_INTENT_FORCE_BLOCK="false"
 if [ "$STOP_INTENT_CLASSIFICATION" = "allowed" ]; then
   append_audit_entry "allowed" "$STOP_INTENT_DECLARED_REASON" ""
   debug_log "allow" "reason=sentinel_allowed declared=$STOP_INTENT_DECLARED_REASON"
+  emit_allow_decision "sentinel_allowed"
   exit 0
 fi
 
@@ -1069,7 +1278,7 @@ ${STDIN_RAW}"
     fi
     PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
     append_block_audit_entry "$REASON"
-    emit_block_json "$REASON"
+    emit_block_decision "$REASON"
     debug_log "block" "reason=self_pause_rationalization_detected current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
     exit 0
   fi
@@ -1085,7 +1294,7 @@ if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ]
   fi
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
   append_block_audit_entry "$REASON"
-  emit_block_json "$REASON"
+  emit_block_decision "$REASON"
   debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
@@ -1093,6 +1302,7 @@ fi
 if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
   append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
   debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
+  emit_allow_decision "agile_allow_pattern_whitelisted"
   exit 0
 fi
 
@@ -1121,7 +1331,7 @@ if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true"
 
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
   append_block_audit_entry "$REASON"
-  emit_block_json "$REASON"
+  emit_block_decision "$REASON"
   debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
@@ -1130,6 +1340,7 @@ if [ "$HAS_NEXT_ACTION" != "true" ]; then
   if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
     append_audit_entry "allowed" "" "explicit_allow_pattern_no_next_action"
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
+    emit_allow_decision "explicit_allow_pattern_no_next_action"
     exit 0
   fi
 else
@@ -1147,7 +1358,7 @@ if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
   append_block_audit_entry "$REASON"
-  emit_block_json "$REASON"
+  emit_block_decision "$REASON"
   debug_log "block" "reason=return_to_detected return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
@@ -1159,7 +1370,7 @@ if [ "$AGILE_GUARD_ACTIVE" = "true" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
   append_block_audit_entry "$REASON"
-  emit_block_json "$REASON"
+  emit_block_decision "$REASON"
   debug_log "block" "reason=agile_loop_no_next_action_continue current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
   exit 0
 fi
@@ -1195,6 +1406,6 @@ REASON="$REASON Do not stop; emit the next tool call now."
 
 PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
 append_block_audit_entry "$REASON"
-emit_block_json "$REASON"
+emit_block_decision "$REASON"
 debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"
 exit 0
