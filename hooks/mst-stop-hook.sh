@@ -78,6 +78,7 @@ resolve_repo_script() {
 
 SNAPSHOT_PROBE_SCRIPT="$(resolve_repo_script "_snapshot_probe.py")"
 FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
+HOOK_PATTERNS_SCRIPT="$(resolve_repo_script "_hook_patterns.py")"
 
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
@@ -455,30 +456,9 @@ contains_allow_pattern() {
   printf '%s' "$text" | grep -Eiq -- '"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|"name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|workflow complete|final answer delivered|user requested stop'
 }
 
-contains_agile_allow_marker() {
-  local text="$1"
-  printf '%s' "$text" | grep -Fq "[스티어링 체크포인트]" \
-    || printf '%s' "$text" | grep -Fq "[비상 스티어링]" \
-    || printf '%s' "$text" | grep -Fq "[Sprint 0]" \
-    || printf '%s' "$text" | grep -Fq "[자동 중단]"
-}
-
 extract_return_to() {
   local text="$1"
   printf '%s' "$text" | grep -oE 'return_to=[a-zA-Z0-9_:/-]+' | tail -1 | sed 's/return_to=//' || true
-}
-
-contains_agile_text_question() {
-  local text="$1"
-  printf '%s' "$text" | grep -Eiq -- '계속할까요|진행할까요|계속[[:space:]]*진행하시겠습니까|멈추고|중단할까요|요약하고[[:space:]]*계속|정리하고[[:space:]]*계속|컨텍스트.*길|자연스러운[[:space:]]*단락|여기서[[:space:]]*(단락|끊|마무리|정지)|수동[[:space:]]*재호출|다시[[:space:]]*호출|세션[[:space:]]*교체|자연스럽게[[:space:]]*(멈|쉬|끊)'
-}
-
-contains_self_pause_rationalization() {
-  local text="$1"
-  if printf '%s' "$text" | grep -E -i -q 'stash[^[:cntrl:]]{0,20}squash[^[:cntrl:]]{0,20}부담|반복[[:space:]]*stash|paused로[[:space:]]*전환|명시적으로[[:space:]]*paused|Sprint[^[:cntrl:]]{0,40}paused[^[:cntrl:]]{0,20}boundary|sprint[[:space:]]*[0-9]+[[:space:]]*boundary|새[[:space:]]*세션에서[^\n]*재개|--resume[^\n]{0,30}재개[[:space:]]*권장|추천[[:space:]]*경로[^\n]{0,30}재개[[:space:]]*시점|사용자[[:space:]]*검토에[[:space:]]*자연스러운[[:space:]]*지점|자연스러운[[:space:]]*검토[[:space:]]*지점'; then
-    return 0
-  fi
-  return 1
 }
 
 read_status_field() {
@@ -539,28 +519,36 @@ except (TypeError, ValueError):
 PY
 }
 
-# Exit 0: file mtime is within window; Exit 1: outside window or error
-_file_age_within_window() {
-  local status_file="$1" window_sec="$2"
-  python3 - "$status_file" "$window_sec" <<'PY'
-import os
+# Exit 0 + print value: owner_session_id present
+# Exit 2: owner_session_id field absent/null/empty
+# Exit 1: parse error or invalid type
+read_owner_session_id_field() {
+  local status_file="$1"
+  python3 - "$status_file" <<'PY'
+import json
 import sys
-import time
 
 path = sys.argv[1]
 try:
-    window = int(sys.argv[2])
-except (ValueError, IndexError):
-    window = 900
-try:
-    age = time.time() - os.path.getmtime(path)
-    sys.exit(0 if age <= window else 1)
-except OSError:
-    sys.exit(1)
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+except Exception:
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+owner_session_id = payload.get("owner_session_id")
+if owner_session_id is None:
+    raise SystemExit(2)
+if not isinstance(owner_session_id, str):
+    raise SystemExit(1)
+owner_session_id = owner_session_id.strip()
+if not owner_session_id:
+    raise SystemExit(2)
+print(owner_session_id)
 PY
 }
-
-MST_STOP_STATE_GUARD_WINDOW_SEC="${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}"
 
 is_request_terminal_status() {
   local status="$1"
@@ -583,7 +571,7 @@ is_plan_terminal_status() {
 }
 
 has_active_workflow_session() {
-  local requests_root plans_root status_file status owner_ppid_value owner_ppid_exit
+  local requests_root plans_root status_file status owner_session_id_value owner_session_id_exit owner_ppid_value owner_ppid_exit
   requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
   plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
 
@@ -598,28 +586,39 @@ has_active_workflow_session() {
       if is_request_terminal_status "$status"; then
         continue
       fi
-      # Non-terminal: check owner_ppid for session isolation
+      # Non-terminal: owner_session_id is authoritative for session isolation.
+      owner_session_id_exit=0
+      owner_session_id_value="$(read_owner_session_id_field "$status_file")" || owner_session_id_exit=$?
+      if [ "$owner_session_id_exit" -eq 0 ]; then
+        if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
+          debug_log "info" "active_request_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
+          return 0
+        else
+          debug_log "info" "skipping_foreign_session_request status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
+          continue
+        fi
+      elif [ "$owner_session_id_exit" -ne 2 ]; then
+        printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
+        continue
+      fi
+
+      # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
       owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
       if [ "$owner_ppid_exit" -eq 0 ]; then
-        # owner_ppid present — check if it matches current session
+        printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
-          debug_log "info" "active_request_session_detected status=$status file=$status_file"
+          debug_log "warn" "active_request_legacy_owner_ppid_fallback status=$status file=$status_file owner_ppid=$owner_ppid_value"
           return 0
         else
-          debug_log "info" "skipping_foreign_session_request status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          debug_log "info" "skipping_foreign_session_request_legacy_owner_ppid status=$status file=$status_file owner_ppid=$owner_ppid_value"
           continue
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
-        # Legacy file: no owner_ppid — stale prevention path only, never authoritative active for current session
-        if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
-          debug_log "info" "skipping_recent_legacy_request_without_owner status=$status file=$status_file"
-        else
-          debug_log "info" "skipping_stale_legacy_request status=$status file=$status_file"
-        fi
+        debug_log "info" "skipping_legacy_request_without_owner status=$status file=$status_file"
         continue
       else
-        # JSON parse error — skip gracefully, do not block
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
         debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"
         continue
@@ -638,23 +637,37 @@ has_active_workflow_session() {
       if is_plan_terminal_status "$status"; then
         continue
       fi
-      # Non-terminal: check owner_ppid for session isolation
+      # Non-terminal: owner_session_id is authoritative for session isolation.
+      owner_session_id_exit=0
+      owner_session_id_value="$(read_owner_session_id_field "$status_file")" || owner_session_id_exit=$?
+      if [ "$owner_session_id_exit" -eq 0 ]; then
+        if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
+          debug_log "info" "active_plan_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
+          return 0
+        else
+          debug_log "info" "skipping_foreign_session_plan status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
+          continue
+        fi
+      elif [ "$owner_session_id_exit" -ne 2 ]; then
+        printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
+        continue
+      fi
+
+      # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
       owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
       if [ "$owner_ppid_exit" -eq 0 ]; then
+        printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
-          debug_log "info" "active_plan_session_detected status=$status file=$status_file"
+          debug_log "warn" "active_plan_legacy_owner_ppid_fallback status=$status file=$status_file owner_ppid=$owner_ppid_value"
           return 0
         else
-          debug_log "info" "skipping_foreign_session_plan status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          debug_log "info" "skipping_foreign_session_plan_legacy_owner_ppid status=$status file=$status_file owner_ppid=$owner_ppid_value"
           continue
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
-        if _file_age_within_window "$status_file" "$MST_STOP_STATE_GUARD_WINDOW_SEC"; then
-          debug_log "info" "skipping_recent_legacy_plan_without_owner status=$status file=$status_file"
-        else
-          debug_log "info" "skipping_stale_legacy_plan status=$status file=$status_file"
-        fi
+        debug_log "info" "skipping_legacy_plan_without_owner status=$status file=$status_file"
         continue
       else
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
@@ -757,6 +770,10 @@ run_snapshot_guard() {
   fi
 
   if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
+    if [ "${HOOK_EVENT_NAME:-}" != "Stop" ]; then
+      debug_log "info" "reason=no_mst_session_fallthrough session_id=${SESSION_ID:-unknown}"
+      return 0
+    fi
     debug_log "allow" "reason=no-mst-session session_id=${SESSION_ID:-unknown}"
     emit_allow_decision "no-mst-session"
     exit 0
@@ -1261,79 +1278,83 @@ if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$
   ALLOW_PATTERN_FOUND="true"
 fi
 
-AGILE_ALLOW_CONTEXT="${LAST_ASSISTANT_MESSAGE}
-${STDIN_RAW}"
+if [ -f "$HOOK_PATTERNS_SCRIPT" ]; then
+  HOOK_PATTERNS_JSON=""
+  HOOK_PATTERNS_STATUS=0
+  set +e
+  HOOK_PATTERNS_JSON="$(printf '%s' "$STDIN_RAW" | python3 "$HOOK_PATTERNS_SCRIPT" detect --stdin \
+    --last-message "$LAST_ASSISTANT_MESSAGE" \
+    --agile-loop-active "$AGILE_LOOP_ACTIVE" \
+    --agile-auto-mode-active "$AGILE_AUTO_MODE_ACTIVE" \
+    --steering-disabled "$STEERING_DISABLED" \
+    --agile-guard-active "$AGILE_GUARD_ACTIVE" \
+    --stop-intent-force-block "$STOP_INTENT_FORCE_BLOCK" \
+    --allow-pattern-found "$ALLOW_PATTERN_FOUND" \
+    --block-count "$BLOCK_COUNT" \
+    --next-source "$NEXT_SOURCE" \
+    --active-req "$ACTIVE_REQ" \
+    --current-skill "$CURRENT_SKILL" \
+    --route-allow-whitelist)"
+  HOOK_PATTERNS_STATUS=$?
+  set -e
+  if [ "$HOOK_PATTERNS_STATUS" -eq 0 ] && [ -n "$HOOK_PATTERNS_JSON" ]; then
+    HOOK_PATTERNS_INFO="$(python3 - "$HOOK_PATTERNS_JSON" <<'PY'
+import json
+import sys
 
-if [ "$AGILE_LOOP_ACTIVE" = "true" ] && [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ]; then
-  SELF_PAUSE_CONTEXT="${LAST_ASSISTANT_MESSAGE}
-${STDIN_RAW}"
-  if contains_self_pause_rationalization "$SELF_PAUSE_CONTEXT"; then
-    NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
-    REASON="[CRITICAL][SELF-PAUSE-DETECTED] 자발 정지 시도 감지: 합리화 텍스트(stash/squash 부담, paused 전환, Sprint boundary 등)가 발견됨."
-    REASON="$REASON Sprint loop가 active인 상태에서 자발적 상태 전이 명령(예: 'mst.py agile update --status paused')을 호출해 루프를 종료하려는 행위는 금지된다."
-    REASON="$REASON 상태 전이 명령을 호출하지 말고 즉시 다음 sprint step의 tool call을 emit하라."
-    REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
-    if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
-      REASON="[자동 중단] $REASON Escalate to user for steering."
+try:
+    payload = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+def field(name):
+    value = payload.get(name)
+    if value is None:
+        return ""
+    return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+print(f"{field('decision')}\t{field('pattern_id')}\t{field('reason')}")
+PY
+)" || HOOK_PATTERNS_INFO=""
+    HOOK_PATTERN_DECISION="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f1)"
+    HOOK_PATTERN_ID="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f2)"
+    HOOK_PATTERN_REASON="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f3-)"
+
+    if [ "$HOOK_PATTERN_DECISION" = "allow" ] && [ "$HOOK_PATTERN_ID" = "agile_allow_pattern_whitelisted" ]; then
+      append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
+      debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
+      emit_allow_decision "agile_allow_pattern_whitelisted"
+      exit 0
     fi
-    PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
-    append_block_audit_entry "$REASON"
-    emit_block_decision "$REASON"
-    debug_log "block" "reason=self_pause_rationalization_detected current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
-    exit 0
-  fi
-fi
 
-if [ "$AGILE_LOOP_ACTIVE" = "true" ] && { [ "$AGILE_AUTO_MODE_ACTIVE" = "true" ] || [ "$STEERING_DISABLED" = "true" ]; } && contains_agile_text_question "$AGILE_ALLOW_CONTEXT"; then
-  NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
-  REASON="Sprint loop active in AUTO_MODE=true or STEERING_DISABLED=true; text-based question patterns are blocked."
-  REASON="$REASON Remove phrases like '계속할까요?', '진행할까요?', '멈추고' and continue autonomously."
-  REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
-  if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
-    REASON="[자동 중단] $REASON Escalate to user for steering."
+    if [ "$HOOK_PATTERN_DECISION" = "block" ]; then
+      REASON="$HOOK_PATTERN_REASON"
+      PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+      append_block_audit_entry "$REASON"
+      emit_block_decision "$REASON"
+      case "$HOOK_PATTERN_ID" in
+        self_pause_rationalization)
+          debug_log "block" "reason=self_pause_rationalization_detected current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
+          ;;
+        agile_text_question_in_auto_mode)
+          debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
+          ;;
+        agile_allow_pattern_missing_marker)
+          debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
+          ;;
+        *)
+          debug_log "block" "reason=hook_pattern_detected pattern_id=$HOOK_PATTERN_ID block_count=$PERSISTED_BLOCK_COUNT"
+          ;;
+      esac
+      exit 0
+    fi
+  else
+    debug_log "warn" "reason=hook_patterns_helper_failed status=$HOOK_PATTERNS_STATUS"
   fi
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
-  exit 0
-fi
-
-if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ] && contains_agile_allow_marker "$AGILE_ALLOW_CONTEXT"; then
-  append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
-  debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
-  emit_allow_decision "agile_allow_pattern_whitelisted"
-  exit 0
-fi
-
-if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ] && [ "$AGILE_GUARD_ACTIVE" = "true" ]; then
-  NEXT_BLOCK_COUNT=$((BLOCK_COUNT + 1))
-  REMAINING_DODS="continue current sprint backlog"
-  if [ -n "$NEXT_SOURCE" ]; then
-    REMAINING_DODS="$NEXT_SOURCE"
-  elif [ -n "$ACTIVE_REQ" ]; then
-    REMAINING_DODS="$ACTIVE_REQ"
-  fi
-
-  REASON="Sprint loop active; remaining DoDs: $REMAINING_DODS."
-  REASON="$REASON AskUserQuestion is allowed only with agile whitelist markers."
-  if [ -n "$CURRENT_SKILL" ]; then
-    REASON="$REASON Current skill: $CURRENT_SKILL."
-  fi
-  if [ -n "$ACTIVE_REQ" ]; then
-    REASON="$REASON Active request: $ACTIVE_REQ."
-  fi
-  REASON="$REASON Consecutive block count: $NEXT_BLOCK_COUNT."
-
-  if [ "$NEXT_BLOCK_COUNT" -ge 3 ]; then
-    REASON="[자동 중단] $REASON Escalate to user for steering."
-  fi
-
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$NEXT_BLOCK_COUNT")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
-  exit 0
+else
+  debug_log "warn" "reason=hook_patterns_helper_missing path=$HOOK_PATTERNS_SCRIPT"
 fi
 
 if [ "$HAS_NEXT_ACTION" != "true" ]; then
