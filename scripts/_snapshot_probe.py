@@ -78,8 +78,10 @@ def _extract_return_to(snapshot: Dict[str, Any]) -> Tuple[str, str]:
 def probe(project_root: Path, raw_stdin: str) -> Dict[str, Any]:
     payload = _parse_stdin(raw_stdin)
     session_id, session_id_source = resolve_session_id(payload)
+    hook_event_name = str(payload.get("hook_event_name") or "")
+    transcript_path = str(payload.get("transcript_path") or "")
     resolution_failed = not bool(session_id)
-    if resolution_failed and (result["hook_event_name"] or result["transcript_path"]):
+    if resolution_failed and (hook_event_name or transcript_path):
         session_id = "unknown"
 
     snapshot_path = project_root / ".gran-maestro" / "state" / safe_session_id(session_id) / "snapshot.json"
@@ -100,8 +102,8 @@ def probe(project_root: Path, raw_stdin: str) -> Dict[str, Any]:
         "session_id": session_id,
         "session_id_source": session_id_source,
         "session_id_resolution_failed": resolution_failed,
-        "hook_event_name": str(payload.get("hook_event_name") or ""),
-        "transcript_path": str(payload.get("transcript_path") or ""),
+        "hook_event_name": hook_event_name,
+        "transcript_path": transcript_path,
         "snapshot_present": snapshot_present,
         "snapshot_path": str(snapshot_path),
         "snapshot_digest": snapshot_digest,

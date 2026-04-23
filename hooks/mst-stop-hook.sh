@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 resolve_project_root() {
   local git_top candidate parent
@@ -88,6 +88,29 @@ debug_log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
   printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+}
+
+sanitize_log_value() {
+  local value="${1:-}"
+  value="${value//$'\n'/ }"
+  value="${value//$'\r'/ }"
+  value="${value//$'\t'/ }"
+  printf '%s' "$value"
+}
+
+warn_helper_failed() {
+  local helper="$1"
+  local status="${2:-1}"
+  local detail="${3:-}"
+
+  helper="$(sanitize_log_value "$helper")"
+  status="$(sanitize_log_value "$status")"
+  detail="$(sanitize_log_value "$detail")"
+  if [ -n "$detail" ]; then
+    printf '[mst-stop-hook] helper_failed helper=%s exit=%s %s\n' "$helper" "$status" "$detail" >&2
+  else
+    printf '[mst-stop-hook] helper_failed helper=%s exit=%s\n' "$helper" "$status" >&2
+  fi
 }
 
 log_boundary_event() {
@@ -220,15 +243,27 @@ emit_allow_decision() {
 append_flow_event() {
   local event_type="$1"
   local data="$2"
-  [ -f "$FLOW_LOGGER_SCRIPT" ] || return 0
-  python3 "$FLOW_LOGGER_SCRIPT" append \
+  local status
+
+  if [ ! -f "$FLOW_LOGGER_SCRIPT" ]; then
+    warn_helper_failed "flow_logger" "127" "missing path=$(sanitize_log_value "$FLOW_LOGGER_SCRIPT")"
+    return 0
+  fi
+
+  if python3 "$FLOW_LOGGER_SCRIPT" append \
     --project-root "$PROJECT_ROOT" \
     --session-id "${SESSION_ID:-unknown}" \
     --event-type "$event_type" \
     --data "$data" \
     --snapshot-path "${SNAPSHOT_PATH:-}" \
     --stdin-digest "${STDIN_DIGEST:-}" \
-    --ppid "$PPID" >/dev/null 2>&1 || true
+    --ppid "$PPID" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  status=$?
+  warn_helper_failed "flow_logger" "$status" "event_type=$(sanitize_log_value "$event_type")"
+  return 0
 }
 
 emit_unhandled_path_fallback() {
@@ -253,6 +288,57 @@ PY
   emit_allow_decision "unhandled_path fallback"
 }
 
+on_stop_hook_err() {
+  local exit_code="${1:-$?}"
+  local line="${2:-${BASH_LINENO[0]:-}}"
+  local command="${3:-${BASH_COMMAND:-unknown}}"
+  local funcname="${FUNCNAME[*]:-}"
+  local source="${BASH_SOURCE[*]:-}"
+  local signal=""
+  local data safe_command
+
+  trap - ERR
+  set +e
+
+  if [ "${DECISION_EMITTED:-false}" = "true" ]; then
+    exit 0
+  fi
+
+  if printf '%s' "$exit_code" | grep -Eq '^[0-9]+$' && [ "$exit_code" -ge 128 ]; then
+    signal="$((exit_code - 128))"
+  fi
+
+  data="$(python3 - "$exit_code" "$line" "$command" "$funcname" "$source" "$signal" "$PPID" "${SESSION_ID:-unknown}" <<'PY'
+import json
+import sys
+
+payload = {
+    "exit_code": sys.argv[1],
+    "line": sys.argv[2],
+    "command": sys.argv[3],
+    "funcname": sys.argv[4],
+    "source": sys.argv[5],
+    "signal": sys.argv[6],
+    "ppid": sys.argv[7],
+    "session_id": sys.argv[8],
+}
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+PY
+)"
+
+  append_flow_event "hook_failure" "$data"
+  safe_command="$(sanitize_log_value "$command")"
+  printf '[mst-stop-hook] hook_failure event_type=hook_failure exit_code=%s line=%s cmd=%s signal=%s ppid=%s session_id=%s\n' \
+    "$(sanitize_log_value "$exit_code")" \
+    "$(sanitize_log_value "$line")" \
+    "$safe_command" \
+    "$(sanitize_log_value "$signal")" \
+    "$(sanitize_log_value "$PPID")" \
+    "$(sanitize_log_value "${SESSION_ID:-unknown}")" >&2
+  emit_allow_decision "hook_failure: line=$line cmd=$safe_command"
+  exit 0
+}
+
 on_stop_hook_exit() {
   local exit_code="$?"
   trap - EXIT
@@ -264,16 +350,37 @@ on_stop_hook_exit() {
 }
 
 trap on_stop_hook_exit EXIT
+trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 SNAPSHOT_PROBE_EXPORTS=""
 if [ -f "$SNAPSHOT_PROBE_SCRIPT" ]; then
-  if SNAPSHOT_PROBE_EXPORTS="$(printf '%s' "$STDIN_RAW" | python3 "$SNAPSHOT_PROBE_SCRIPT" --project-root "$PROJECT_ROOT" --format shell 2>/dev/null)"; then
-    eval "$SNAPSHOT_PROBE_EXPORTS"
+  SNAPSHOT_PROBE_STATUS=0
+  trap - ERR
+  set +e
+  SNAPSHOT_PROBE_EXPORTS="$(printf '%s' "$STDIN_RAW" | python3 "$SNAPSHOT_PROBE_SCRIPT" --project-root "$PROJECT_ROOT" --format shell 2>/dev/null)"
+  SNAPSHOT_PROBE_STATUS=$?
+  set -e
+  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+  if [ "$SNAPSHOT_PROBE_STATUS" -eq 0 ]; then
+    SNAPSHOT_PROBE_EVAL_STATUS=0
+    if eval "$SNAPSHOT_PROBE_EXPORTS"; then
+      :
+    else
+      SNAPSHOT_PROBE_EVAL_STATUS=$?
+      warn_helper_failed "snapshot_probe" "$SNAPSHOT_PROBE_EVAL_STATUS" "invalid_exports"
+      debug_log "warn" "reason=snapshot_probe_invalid_exports"
+    fi
   else
+    warn_helper_failed "snapshot_probe" "$SNAPSHOT_PROBE_STATUS" "path=$(sanitize_log_value "$SNAPSHOT_PROBE_SCRIPT")"
     debug_log "warn" "reason=snapshot_probe_failed"
   fi
 else
+  warn_helper_failed "snapshot_probe" "127" "missing path=$(sanitize_log_value "$SNAPSHOT_PROBE_SCRIPT")"
   debug_log "warn" "reason=snapshot_probe_missing path=$SNAPSHOT_PROBE_SCRIPT"
+fi
+
+if [ "${MST_STOP_HOOK_TEST_INJECT_FAILURE:-}" = "after_snapshot_probe" ]; then
+  python3 -c 'raise SystemExit("REQ-692 injected failure after_snapshot_probe")'
 fi
 
 append_audit_entry() {
@@ -463,6 +570,9 @@ extract_return_to() {
 
 read_status_field() {
   local status_file="$1"
+  local status
+  trap - ERR
+  set +e
   python3 - "$status_file" <<'PY'
 import json
 import sys
@@ -485,6 +595,8 @@ elif not isinstance(status, str):
 
 print(status.strip().lower())
 PY
+  status=$?
+  return "$status"
 }
 
 # Exit 0 + print value: owner_ppid present
@@ -492,6 +604,9 @@ PY
 # Exit 1: parse error
 read_owner_ppid_field() {
   local status_file="$1"
+  local status
+  trap - ERR
+  set +e
   python3 - "$status_file" <<'PY'
 import json
 import sys
@@ -517,6 +632,8 @@ try:
 except (TypeError, ValueError):
     raise SystemExit(1)
 PY
+  status=$?
+  return "$status"
 }
 
 # Exit 0 + print value: owner_session_id present
@@ -524,6 +641,9 @@ PY
 # Exit 1: parse error or invalid type
 read_owner_session_id_field() {
   local status_file="$1"
+  local status
+  trap - ERR
+  set +e
   python3 - "$status_file" <<'PY'
 import json
 import sys
@@ -548,6 +668,8 @@ if not owner_session_id:
     raise SystemExit(2)
 print(owner_session_id)
 PY
+  status=$?
+  return "$status"
 }
 
 is_request_terminal_status() {
@@ -588,7 +710,12 @@ has_active_workflow_session() {
       fi
       # Non-terminal: owner_session_id is authoritative for session isolation.
       owner_session_id_exit=0
-      owner_session_id_value="$(read_owner_session_id_field "$status_file")" || owner_session_id_exit=$?
+      trap - ERR
+      set +e
+      owner_session_id_value="$(read_owner_session_id_field "$status_file")"
+      owner_session_id_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_session_id_exit" -eq 0 ]; then
         if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
           debug_log "info" "active_request_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
@@ -605,7 +732,12 @@ has_active_workflow_session() {
 
       # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
-      owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
+      trap - ERR
+      set +e
+      owner_ppid_value="$(read_owner_ppid_field "$status_file")"
+      owner_ppid_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
         printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
@@ -639,7 +771,12 @@ has_active_workflow_session() {
       fi
       # Non-terminal: owner_session_id is authoritative for session isolation.
       owner_session_id_exit=0
-      owner_session_id_value="$(read_owner_session_id_field "$status_file")" || owner_session_id_exit=$?
+      trap - ERR
+      set +e
+      owner_session_id_value="$(read_owner_session_id_field "$status_file")"
+      owner_session_id_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_session_id_exit" -eq 0 ]; then
         if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
           debug_log "info" "active_plan_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
@@ -656,7 +793,12 @@ has_active_workflow_session() {
 
       # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
-      owner_ppid_value="$(read_owner_ppid_field "$status_file")" || owner_ppid_exit=$?
+      trap - ERR
+      set +e
+      owner_ppid_value="$(read_owner_ppid_field "$status_file")"
+      owner_ppid_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
         printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
@@ -1298,6 +1440,9 @@ if [ -f "$HOOK_PATTERNS_SCRIPT" ]; then
   HOOK_PATTERNS_STATUS=$?
   set -e
   if [ "$HOOK_PATTERNS_STATUS" -eq 0 ] && [ -n "$HOOK_PATTERNS_JSON" ]; then
+    HOOK_PATTERNS_INFO=""
+    HOOK_PATTERNS_PARSE_STATUS=0
+    set +e
     HOOK_PATTERNS_INFO="$(python3 - "$HOOK_PATTERNS_JSON" <<'PY'
 import json
 import sys
@@ -1317,7 +1462,15 @@ def field(name):
 
 print(f"{field('decision')}\t{field('pattern_id')}\t{field('reason')}")
 PY
-)" || HOOK_PATTERNS_INFO=""
+    )"
+    HOOK_PATTERNS_PARSE_STATUS=$?
+    set -e
+    if [ "$HOOK_PATTERNS_PARSE_STATUS" -ne 0 ]; then
+      warn_helper_failed "hook_patterns" "$HOOK_PATTERNS_PARSE_STATUS" "invalid_json"
+      debug_log "warn" "reason=hook_patterns_json_parse_failed status=$HOOK_PATTERNS_PARSE_STATUS"
+      emit_unhandled_path_fallback "$HOOK_PATTERNS_PARSE_STATUS"
+      exit 0
+    fi
     HOOK_PATTERN_DECISION="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f1)"
     HOOK_PATTERN_ID="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f2)"
     HOOK_PATTERN_REASON="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f3-)"
@@ -1351,10 +1504,16 @@ PY
       exit 0
     fi
   else
+    warn_helper_failed "hook_patterns" "$HOOK_PATTERNS_STATUS" "path=$(sanitize_log_value "$HOOK_PATTERNS_SCRIPT")"
     debug_log "warn" "reason=hook_patterns_helper_failed status=$HOOK_PATTERNS_STATUS"
+    emit_unhandled_path_fallback "$HOOK_PATTERNS_STATUS"
+    exit 0
   fi
 else
+  warn_helper_failed "hook_patterns" "127" "missing path=$(sanitize_log_value "$HOOK_PATTERNS_SCRIPT")"
   debug_log "warn" "reason=hook_patterns_helper_missing path=$HOOK_PATTERNS_SCRIPT"
+  emit_unhandled_path_fallback "127"
+  exit 0
 fi
 
 if [ "$HAS_NEXT_ACTION" != "true" ]; then
