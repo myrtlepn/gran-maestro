@@ -292,7 +292,7 @@ def cmd_state_set(args):
     )
     try:
         parent_skill, parent_step = _parse_return_to_parent(args.return_to)
-        flow_path = flow_log_path(project_root)
+        flow_path = flow_log_path(project_root, rotate=True)
         log_session_id = safe_session_id(session_id)
         duration_ms = _previous_enter_duration_ms(flow_path, log_session_id, args.skill)
         append_skill_event(
@@ -305,6 +305,7 @@ def cmd_state_set(args):
             parent_skill=parent_skill,
             parent_step=parent_step,
             duration_ms=duration_ms,
+            rotate=True,
         )
         if args.step == args.total:
             append_skill_event(
@@ -317,6 +318,7 @@ def cmd_state_set(args):
                 parent_skill=parent_skill,
                 parent_step=parent_step,
                 duration_ms=0,
+                rotate=True,
             )
     except Exception as exc:
         print(f"[flow-logger] append failed: {exc}", file=sys.stderr)

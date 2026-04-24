@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any, Dict, Optional
 
 
 FLOW_LOG_FILENAME = "flow.ndjson"
+FLOW_DETAIL_FILENAME = "flow-detail.ndjson"
+MONTH_ENV_RE = re.compile(r"^\d{6}$")
 
 
 def timestamp_now() -> str:
@@ -29,15 +32,27 @@ def safe_session_id(value: str) -> str:
     return "".join(cleaned) or "unknown"
 
 
-def flow_detail_path(project_root: Path, session_id: str) -> Path:
-    return project_root / ".gran-maestro" / "state" / safe_session_id(session_id) / "flow-detail.ndjson"
+def _rotated_filename(basename: str) -> str:
+    month = os.environ.get("MST_FLOW_LOG_MONTH", "").strip()
+    if not MONTH_ENV_RE.match(month):
+        month = datetime.now(timezone.utc).strftime("%Y%m")
+    if "." in basename:
+        name, _, ext = basename.rpartition(".")
+        return f"{name}-{month}.{ext}"
+    return f"{basename}-{month}"
 
 
-def flow_log_path(project_root: Path, *, override: Optional[str] = None) -> Path:
+def flow_detail_path(project_root: Path, session_id: str, *, rotate: bool = False) -> Path:
+    filename = _rotated_filename(FLOW_DETAIL_FILENAME) if rotate else FLOW_DETAIL_FILENAME
+    return project_root / ".gran-maestro" / "state" / safe_session_id(session_id) / filename
+
+
+def flow_log_path(project_root: Path, *, override: Optional[str] = None, rotate: bool = False) -> Path:
     log_dir = os.environ.get("MST_FLOW_LOG_DIR") or override
+    filename = _rotated_filename(FLOW_LOG_FILENAME) if rotate else FLOW_LOG_FILENAME
     if log_dir:
-        return Path(log_dir) / FLOW_LOG_FILENAME
-    return project_root / ".gran-maestro" / "logs" / FLOW_LOG_FILENAME
+        return Path(log_dir) / filename
+    return project_root / ".gran-maestro" / "logs" / filename
 
 
 def _load_json_object(raw: str) -> Dict[str, Any]:
@@ -58,6 +73,13 @@ def _load_snapshot(snapshot_path: Optional[str]) -> Optional[Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _append_json_line(path: Path, entry: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", buffering=1) as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
 
 
 def append_event(
@@ -87,10 +109,7 @@ def append_event(
     }
 
     path = flow_detail_path(project_root, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8", buffering=1) as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
-        handle.write("\n")
+    _append_json_line(path, entry)
     return path
 
 
@@ -107,6 +126,7 @@ def append_skill_event(
     duration_ms: Optional[float] = None,
     extras: Optional[Dict[str, Any]] = None,
     schema_version: int = 1,
+    rotate: bool = False,
 ) -> Optional[Path]:
     try:
         entry = {
@@ -122,11 +142,60 @@ def append_skill_event(
             "extras": extras if isinstance(extras, dict) else {},
             "schema_version": schema_version,
         }
-        path = flow_log_path(project_root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8", buffering=1) as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
-            handle.write("\n")
+        path = flow_log_path(project_root, rotate=rotate)
+        _append_json_line(path, entry)
+        if rotate and os.environ.get("MST_FLOW_LOG_DIR") and "MST_FLOW_LOG_MONTH" not in os.environ:
+            _append_json_line(Path(os.environ["MST_FLOW_LOG_DIR"]) / FLOW_LOG_FILENAME, entry)
+        return path
+    except Exception as exc:
+        print(f"[flow-logger] append failed: {exc}", file=sys.stderr)
+        return None
+
+
+def append_hook_event(
+    project_root: Path,
+    session_id: str,
+    *,
+    hook_event: str,
+    decision: str,
+    layer: str,
+    reason: Optional[str] = None,
+    anchor: Optional[str] = None,
+    return_to: Optional[Dict[str, Any]] = None,
+    duration_ms: Optional[float] = None,
+    snapshot_digest: Optional[str] = None,
+    snapshot_diff: Optional[str] = None,
+    stdin_json_digest: Optional[str] = None,
+    error: Optional[str] = None,
+    ppid: Optional[str] = None,
+    extras: Optional[Dict[str, Any]] = None,
+    schema_version: int = 1,
+    rotate: bool = False,
+) -> Optional[Path]:
+    del extras
+    try:
+        entry = {
+            "timestamp": timestamp_now(),
+            "session_id": safe_session_id(session_id),
+            "ppid": ppid,
+            "hook_event": str(hook_event),
+            "decision": str(decision),
+            "layer": str(layer),
+            "reason": reason,
+            "anchor": anchor,
+            "return_to": return_to if isinstance(return_to, dict) else return_to,
+            "duration_ms": duration_ms,
+            "snapshot_digest": snapshot_digest,
+            "snapshot_diff": snapshot_diff,
+            "stdin_json_digest": stdin_json_digest,
+            "error": error,
+            "schema_version": schema_version,
+        }
+        path = flow_detail_path(project_root, session_id, rotate=rotate)
+        log_dir = os.environ.get("MST_FLOW_LOG_DIR")
+        if log_dir:
+            path = Path(log_dir) / safe_session_id(session_id) / path.name
+        _append_json_line(path, entry)
         return path
     except Exception as exc:
         print(f"[flow-logger] append failed: {exc}", file=sys.stderr)
