@@ -123,6 +123,17 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 - [용어 사전](docs/glossary.md) — 공식 용어 및 ID 체계
 - [변경 이력](CHANGELOG.md) — 버전별 변경사항
 
+## 보안 및 민감정보 주의
+
+**Dashboard 서빙**: 기본값으로 `127.0.0.1`(localhost-only)에 바인딩됩니다. 외부 네트워크로부터의 접근은 기본적으로 차단됩니다.
+
+**flow-detail.ndjson 민감정보 경고**: `.gran-maestro/state/<session_id>/flow-detail.ndjson` 파일은 hook 자율 기록 로그로, **다음과 같은 민감정보를 포함할 수 있습니다**:
+- 내부 파일/디렉토리 경로 (워크트리, 프로젝트 구조)
+- 사용자 프롬프트 일부 및 `last_assistant_message` 발췌
+- session_id, PPID 등 프로세스 식별자
+
+의도치 않은 공유(gist, PR 첨부, 스크린샷, Slack 파일 업로드 등)를 피하고, 공유가 필요한 경우 해당 파일을 검토 후 필요한 부분만 발췌하십시오. `flow.ndjson`(스킬 레벨)은 상대적으로 민감도가 낮지만 동일 원칙 적용을 권장합니다.
+
 ## 라이선스
 
 MIT License — 자세한 내용은 [LICENSE](LICENSE)를 참조하세요.
