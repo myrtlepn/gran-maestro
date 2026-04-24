@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+
+FLOW_LOG_FILENAME = "flow.ndjson"
 
 
 def timestamp_now() -> str:
@@ -27,6 +31,13 @@ def safe_session_id(value: str) -> str:
 
 def flow_detail_path(project_root: Path, session_id: str) -> Path:
     return project_root / ".gran-maestro" / "state" / safe_session_id(session_id) / "flow-detail.ndjson"
+
+
+def flow_log_path(project_root: Path, *, override: Optional[str] = None) -> Path:
+    log_dir = os.environ.get("MST_FLOW_LOG_DIR") or override
+    if log_dir:
+        return Path(log_dir) / FLOW_LOG_FILENAME
+    return project_root / ".gran-maestro" / "logs" / FLOW_LOG_FILENAME
 
 
 def _load_json_object(raw: str) -> Dict[str, Any]:
@@ -81,6 +92,45 @@ def append_event(
         handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
         handle.write("\n")
     return path
+
+
+def append_skill_event(
+    project_root: Path,
+    session_id: str,
+    *,
+    skill: str,
+    step: int,
+    total_steps: int,
+    event_type: str,
+    parent_skill: Optional[str] = None,
+    parent_step: Optional[int] = None,
+    duration_ms: Optional[float] = None,
+    extras: Optional[Dict[str, Any]] = None,
+    schema_version: int = 1,
+) -> Optional[Path]:
+    try:
+        entry = {
+            "timestamp": timestamp_now(),
+            "session_id": safe_session_id(session_id),
+            "skill": str(skill),
+            "step": step,
+            "total_steps": total_steps,
+            "event_type": str(event_type),
+            "parent_skill": parent_skill,
+            "parent_step": parent_step,
+            "duration_ms": duration_ms,
+            "extras": extras if isinstance(extras, dict) else {},
+            "schema_version": schema_version,
+        }
+        path = flow_log_path(project_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8", buffering=1) as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+        return path
+    except Exception as exc:
+        print(f"[flow-logger] append failed: {exc}", file=sys.stderr)
+        return None
 
 
 def append_command(args: argparse.Namespace) -> int:

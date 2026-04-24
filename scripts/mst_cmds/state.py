@@ -40,10 +40,59 @@ def _resolve_owner_ppid() -> int:
 
 
 def _snapshot_session_id() -> str:
+    session_env = os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip()
+    if session_env:
+        return session_env
     ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
     if ppid_env:
         return ppid_env
     return str(os.getppid())
+
+
+def _parse_return_to_parent(value: Optional[str]) -> tuple[Optional[str], Optional[int]]:
+    if not value:
+        return None, None
+    skill, sep, step_text = value.partition("/")
+    if not skill or not sep or not step_text:
+        return None, None
+    try:
+        return skill, int(step_text)
+    except ValueError:
+        return None, None
+
+
+def _parse_flow_timestamp(value: object) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
+    try:
+        if not flow_path.exists():
+            return None
+        previous_at = None
+        for raw_line in flow_path.read_text(encoding="utf-8").splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                entry = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                entry.get("session_id") == session_id
+                and entry.get("skill") == skill
+                and entry.get("event_type") == "enter"
+            ):
+                previous_at = _parse_flow_timestamp(entry.get("timestamp"))
+        if previous_at is None:
+            return None
+        return max(0.0, (datetime.now(timezone.utc) - previous_at).total_seconds() * 1000)
+    except Exception:
+        return None
 
 
 def _resolve_owner_session_id(ppid: int) -> Optional[str]:
@@ -228,8 +277,10 @@ def cmd_state_set_workflow(args):
 
 def cmd_state_set(args):
     from scripts._skill_state import set_snapshot
+    from scripts._flow_logger import append_skill_event, flow_log_path, safe_session_id
 
     state_base_dir = _skill_state_base_dir()
+    project_root = state_base_dir.parent
     session_id = _snapshot_session_id()
     data = set_snapshot(
         state_base_dir,
@@ -239,6 +290,36 @@ def cmd_state_set(args):
         return_to=args.return_to,
         session_id=session_id,
     )
+    try:
+        parent_skill, parent_step = _parse_return_to_parent(args.return_to)
+        flow_path = flow_log_path(project_root)
+        log_session_id = safe_session_id(session_id)
+        duration_ms = _previous_enter_duration_ms(flow_path, log_session_id, args.skill)
+        append_skill_event(
+            project_root,
+            session_id,
+            skill=args.skill,
+            step=args.step,
+            total_steps=args.total,
+            event_type="enter",
+            parent_skill=parent_skill,
+            parent_step=parent_step,
+            duration_ms=duration_ms,
+        )
+        if args.step == args.total:
+            append_skill_event(
+                project_root,
+                session_id,
+                skill=args.skill,
+                step=args.step,
+                total_steps=args.total,
+                event_type="commit",
+                parent_skill=parent_skill,
+                parent_step=parent_step,
+                duration_ms=0,
+            )
+    except Exception as exc:
+        print(f"[flow-logger] append failed: {exc}", file=sys.stderr)
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
