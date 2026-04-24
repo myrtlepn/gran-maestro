@@ -79,6 +79,17 @@ resolve_repo_script() {
 SNAPSHOT_PROBE_SCRIPT="$(resolve_repo_script "_snapshot_probe.py")"
 FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
 HOOK_PATTERNS_SCRIPT="$(resolve_repo_script "_hook_patterns.py")"
+HOOK_JUDGE_START_MS="$(python3 - <<'PY'
+import time
+
+print(int(time.time() * 1000))
+PY
+)"
+HOOK_WATCHDOG_PID=""
+HOOK_JUDGE_TIMEOUT_RUNTIME_DIR="${TMPDIR:-/tmp}"
+HOOK_JUDGE_TIMEOUT_MARKER="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.emitted"
+HOOK_JUDGE_TIMEOUT_DONE="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.done"
+rm -rf "$HOOK_JUDGE_TIMEOUT_MARKER" "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
 
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
@@ -266,6 +277,335 @@ append_flow_event() {
   return 0
 }
 
+epoch_ms() {
+  python3 - <<'PY'
+import time
+
+print(int(time.time() * 1000))
+PY
+}
+
+resolve_hook_judge_timeout_ms() {
+  python3 - "$PROJECT_ROOT" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+
+
+def coerce_positive_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            value = int(text)
+            return value if value > 0 else None
+    return None
+
+
+def dotted(data, path):
+    current = data
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+env_value = coerce_positive_int(os.environ.get("MST_HOOK_JUDGE_TIMEOUT_MS"))
+if env_value is not None:
+    print(env_value)
+    raise SystemExit(0)
+
+for path in (
+    project_root / ".gran-maestro" / "config.resolved.json",
+    project_root / ".gran-maestro" / "config.json",
+    project_root / "templates" / "defaults" / "config.json",
+):
+    try:
+        value = coerce_positive_int(dotted(json.loads(path.read_text(encoding="utf-8")), "hook.judge_timeout_ms"))
+    except Exception:
+        value = None
+    if value is not None:
+        print(value)
+        raise SystemExit(0)
+
+print(500)
+PY
+}
+
+HOOK_JUDGE_TIMEOUT_MS="$(resolve_hook_judge_timeout_ms)"
+
+judge_timeout_already_emitted() {
+  [ -d "$HOOK_JUDGE_TIMEOUT_MARKER" ]
+}
+
+claim_judge_timeout_emit() {
+  mkdir "$HOOK_JUDGE_TIMEOUT_MARKER" 2>/dev/null
+}
+
+wait_for_judge_timeout_emit_done() {
+  local attempts=0
+  while [ "$attempts" -lt 20 ]; do
+    [ -f "$HOOK_JUDGE_TIMEOUT_DONE" ] && return 0
+    sleep 0.01
+    attempts="$((attempts + 1))"
+  done
+  return 1
+}
+
+resolve_timeout_session_id() {
+  if [ -n "${SESSION_ID:-}" ] && [ "${SESSION_ID:-unknown}" != "unknown" ]; then
+    printf '%s\n' "$SESSION_ID"
+    return 0
+  fi
+
+  MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+
+
+def safe_session_id(value):
+    cleaned = []
+    for char in str(value or ""):
+        if char.isalnum() or char in ("-", "_"):
+            cleaned.append(char)
+        else:
+            cleaned.append("_")
+    return "".join(cleaned) or "unknown"
+
+
+try:
+    payload = json.loads(os.environ.get("MST_TIMEOUT_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+
+if not isinstance(payload, dict):
+    payload = {}
+
+direct = payload.get("session_id")
+if isinstance(direct, str) and direct.strip():
+    print(safe_session_id(direct.strip()))
+    raise SystemExit(0)
+
+transcript_path = payload.get("transcript_path")
+if isinstance(transcript_path, str) and transcript_path.strip():
+    basename = Path(transcript_path).name
+    stem = basename[:-6] if basename.endswith(".jsonl") else Path(basename).stem
+    if UUID_RE.match(stem):
+        print(stem)
+        raise SystemExit(0)
+
+print("unknown")
+PY
+}
+
+ensure_timeout_stdin_digest() {
+  if [ -n "${STDIN_DIGEST:-}" ]; then
+    return 0
+  fi
+  STDIN_DIGEST="$(MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
+import hashlib
+import os
+import sys
+
+print(hashlib.sha256(os.environ.get("MST_TIMEOUT_STDIN_RAW", "").encode("utf-8", errors="replace")).hexdigest())
+PY
+)"
+}
+
+emit_allow_json() {
+  local reason="$1"
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+print(json.dumps({"decision": "allow", "reason": sys.argv[1]}, ensure_ascii=False))
+PY
+}
+
+emit_judge_timeout_payload() {
+  local observed_ms_approx data
+  DECISION_EMITTED="true"
+  SESSION_ID="$(resolve_timeout_session_id)"
+  SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${SESSION_ID:-unknown}/snapshot.json"
+  observed_ms_approx="$(( $(epoch_ms) - HOOK_JUDGE_START_MS ))"
+  ensure_timeout_stdin_digest
+
+  emit_allow_json "hook judge timeout (>${HOOK_JUDGE_TIMEOUT_MS}ms) fail-open"
+
+  data="$(python3 - "$HOOK_JUDGE_TIMEOUT_MS" "$observed_ms_approx" <<'PY'
+import json
+import sys
+
+payload = {
+    "budget_ms": int(sys.argv[1]),
+    "fail_open": True,
+    "hook": "stop-hook",
+    "observed_ms_approx": int(sys.argv[2]),
+}
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+PY
+)"
+  append_flow_event "judge_timeout" "$data"
+  printf '[mst-stop-hook] judge_timeout budget_ms=%s observed_ms_approx=%s fail_open=true\n' \
+    "$(sanitize_log_value "$HOOK_JUDGE_TIMEOUT_MS")" \
+    "$(sanitize_log_value "$observed_ms_approx")" >&2
+  : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
+}
+
+emit_judge_timeout_and_exit() {
+  trap - TERM
+  trap - ERR
+  trap - EXIT
+  set +e
+
+  if claim_judge_timeout_emit; then
+    emit_judge_timeout_payload
+  else
+    if ! wait_for_judge_timeout_emit_done; then
+      emit_judge_timeout_payload
+    fi
+  fi
+
+  DECISION_EMITTED="true"
+
+  exit 0
+}
+
+kill_hook_children() {
+  local parent_pid="$1"
+  local child_pids=""
+
+  child_pids="$(pgrep -P "$parent_pid" 2>/dev/null || true)"
+  [ -n "$child_pids" ] || return 0
+  kill -TERM $child_pids 2>/dev/null || true
+}
+
+cleanup_hook_watchdog() {
+  local watchdog_pid="${HOOK_WATCHDOG_PID:-}"
+  [ -n "$watchdog_pid" ] || return 0
+
+  set +e
+  kill -KILL "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  HOOK_WATCHDOG_PID=""
+  set -e
+}
+
+start_hook_judge_watchdog() {
+  local hook_pid="$1"
+  local budget_ms="$2"
+  local elapsed_ms remaining_ms sleep_seconds margin_ms
+
+  elapsed_ms="$(( $(epoch_ms) - HOOK_JUDGE_START_MS ))"
+  margin_ms=75
+  if [ "$budget_ms" -lt 150 ]; then
+    margin_ms="$((budget_ms / 2))"
+    if [ "$margin_ms" -lt 1 ]; then
+      margin_ms=1
+    fi
+  fi
+  remaining_ms="$((budget_ms - elapsed_ms - margin_ms))"
+  if [ "$remaining_ms" -lt 1 ]; then
+    remaining_ms=1
+  fi
+
+  sleep_seconds="$(python3 - "$remaining_ms" <<'PY'
+import sys
+
+remaining_ms = int(sys.argv[1])
+print(f"{remaining_ms / 1000.0:.3f}")
+PY
+)"
+
+  (
+    trap - EXIT
+    trap - ERR
+    trap - TERM
+    sleep "$sleep_seconds"
+    kill -TERM "$hook_pid" 2>/dev/null || exit 0
+    kill_hook_children "$hook_pid"
+    sleep 0.05
+    if claim_judge_timeout_emit; then
+      emit_judge_timeout_payload
+      kill_hook_children "$hook_pid"
+      kill -TERM "$hook_pid" 2>/dev/null || true
+    fi
+  ) &
+  HOOK_WATCHDOG_PID="$!"
+}
+
+run_hook_judge_timeout_test_sleep() {
+  local raw_ms="${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}"
+  local remaining_ms chunk_ms sleep_seconds
+  [ -n "$raw_ms" ] || return 0
+
+  remaining_ms="$(python3 - "$raw_ms" <<'PY'
+import sys
+
+try:
+    value = int(str(sys.argv[1]).strip())
+except Exception:
+    value = 0
+if value < 0:
+    value = 0
+print(value)
+PY
+)"
+
+  while [ "$remaining_ms" -gt 0 ]; do
+    chunk_ms="$remaining_ms"
+    if [ "$chunk_ms" -gt 20 ]; then
+      chunk_ms=20
+    fi
+    sleep_seconds="$(printf '0.%03d' "$chunk_ms")"
+    sleep "$sleep_seconds"
+    remaining_ms="$((remaining_ms - chunk_ms))"
+  done
+}
+
+should_arm_hook_judge_watchdog() {
+  if [ -n "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ]; then
+    return 0
+  fi
+
+  MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("MST_TIMEOUT_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+for key in ("session_id", "transcript_path"):
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
 emit_unhandled_path_fallback() {
   local exit_code="${1:-0}"
   local data
@@ -299,6 +639,11 @@ on_stop_hook_err() {
 
   trap - ERR
   set +e
+
+  if judge_timeout_already_emitted; then
+    DECISION_EMITTED="true"
+    exit 0
+  fi
 
   if [ "${DECISION_EMITTED:-false}" = "true" ]; then
     exit 0
@@ -342,6 +687,10 @@ PY
 on_stop_hook_exit() {
   local exit_code="$?"
   trap - EXIT
+  cleanup_hook_watchdog
+  if judge_timeout_already_emitted; then
+    exit 0
+  fi
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     emit_unhandled_path_fallback "$exit_code"
     exit 0
@@ -351,6 +700,12 @@ on_stop_hook_exit() {
 
 trap on_stop_hook_exit EXIT
 trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+trap emit_judge_timeout_and_exit TERM
+
+if should_arm_hook_judge_watchdog; then
+  start_hook_judge_watchdog "$$" "$HOOK_JUDGE_TIMEOUT_MS"
+  run_hook_judge_timeout_test_sleep
+fi
 
 SNAPSHOT_PROBE_EXPORTS=""
 if [ -f "$SNAPSHOT_PROBE_SCRIPT" ]; then

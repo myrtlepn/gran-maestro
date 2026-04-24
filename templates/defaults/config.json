@@ -215,6 +215,9 @@
     "retention_days": 30,
     "auto_archive": true
   },
+  "hook": {
+    "judge_timeout_ms": 500
+  },
   "archive": {
     "max_active_sessions": {
       "default": 200,

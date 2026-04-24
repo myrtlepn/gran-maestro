@@ -22,6 +22,7 @@
 - [server](#server)
 - [concurrency](#concurrency)
 - [timeouts](#timeouts)
+- [hook](#hook)
 - [worktree](#worktree)
 - [retry](#retry)
 - [history / archive](#history--archive)
@@ -121,6 +122,16 @@
 | `timeouts.pre_check_ms` | `120000` | 사전 검증 타임아웃 (2분) |
 | `timeouts.merge_ms` | `60000` | Merge 타임아웃 (1분) |
 | `timeouts.dashboard_health_check_ms` | `10000` | 대시보드 헬스체크 (10초) |
+
+---
+
+## hook
+
+Claude hook 판정 경로의 보호 설정입니다.
+
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `hook.judge_timeout_ms` | `500` | stop hook 판정 전체 hard timeout(ms). 초과 시 fail-open으로 `{"decision":"allow"}`를 반환하고 `flow-detail.ndjson`에 `judge_timeout` 이벤트를 기록합니다. |
 
 ---
 

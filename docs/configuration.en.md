@@ -21,6 +21,7 @@ You can also edit it through the dashboard **Settings** tab with a web UI.
 - [server](#server)
 - [concurrency](#concurrency)
 - [timeouts](#timeouts)
+- [hook](#hook)
 - [worktree](#worktree)
 - [retry](#retry)
 - [history / archive](#history--archive)
@@ -85,6 +86,16 @@ Timeout settings for each stage (ms).
 | `timeouts.pre_check_ms` | `120000` | pre-check timeout (2 min) |
 | `timeouts.merge_ms` | `60000` | merge timeout (1 min) |
 | `timeouts.dashboard_health_check_ms` | `10000` | dashboard health check (10 sec) |
+
+---
+
+## hook
+
+Protective settings for Claude hook judgment paths.
+
+| Key | Default | Description |
+|----|--------|------|
+| `hook.judge_timeout_ms` | `500` | Hard timeout for the full stop hook judgment path (ms). When exceeded, the hook fails open with `{"decision":"allow"}` and appends a `judge_timeout` event to `flow-detail.ndjson`. |
 
 ---
 

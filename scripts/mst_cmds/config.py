@@ -595,6 +595,16 @@ def _print_config_get_value(value):
     else:
         print(value)
 
+def _get_default_backfilled_value(config, key_path):
+    defaults = load_json(_plugin_root() / "templates" / "defaults" / "config.json")
+    if not isinstance(defaults, dict):
+        return False, None
+    if isinstance(config, dict):
+        backfilled = deep_merge(defaults, config)
+    else:
+        backfilled = defaults
+    return _get_dotted_path(backfilled, key_path)
+
 def cmd_config_set(args):
     key_path = args.key_path.strip()
     if not key_path:
@@ -649,6 +659,8 @@ def cmd_config_get(args):
         key_path = key_paths[0]
         found, value = _get_dotted_path(config, key_path)
         if not found:
+            found, value = _get_default_backfilled_value(config, key_path)
+        if not found:
             if args.default_value is None:
                 print(f"Error: key not found: {key_path}", file=sys.stderr)
                 return 1
@@ -669,6 +681,8 @@ def cmd_config_get(args):
     missing_keys = []
     for key_path in key_paths:
         found, value = _get_dotted_path(config, key_path)
+        if not found:
+            found, value = _get_default_backfilled_value(config, key_path)
         if not found:
             missing_keys.append(key_path)
             continue
