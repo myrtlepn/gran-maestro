@@ -121,26 +121,65 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _resolve_plugin_root() -> Path:
+    mst_script = _common._mst_script_path().resolve()
+    return mst_script.parent.parent
+
+
+def _resolve_hooks_paths() -> tuple[Path, Path, Path]:
+    plugin_root = _resolve_plugin_root()
+    project_root = Path(os.getcwd()).resolve()
+    return project_root / ".claude" / "hooks", plugin_root / "hooks", plugin_root
+
+
+def _read_text_file(path: Path, default: str = "unknown") -> str:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return default
+    return value or default
+
+
+def _read_plugin_version(plugin_root: Path) -> str:
+    plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+    plugin_json = load_json(plugin_json_path)
+    if isinstance(plugin_json, dict):
+        version_value = plugin_json.get("version")
+        if isinstance(version_value, str):
+            return version_value.strip()
+    return ""
+
+
+def _read_source_version(source_hooks_dir: Path, plugin_root: Path) -> str:
+    version = _read_text_file(source_hooks_dir / "VERSION", default="")
+    if version:
+        return version
+    return _read_plugin_version(plugin_root) or "unknown"
+
+
+def _is_hook_file(path: Path) -> bool:
+    if not path.is_file() or path.name.startswith(".") or path.name == "VERSION":
+        return False
+    return path.suffix == ".sh" or path.name.startswith("mst-") or path.name.startswith("stop-")
+
+
+def _hook_files_by_name(path: Path) -> dict[str, Path]:
+    if not path.is_dir():
+        return {}
+    return {hook_path.name: hook_path for hook_path in sorted(path.iterdir()) if _is_hook_file(hook_path)}
+
+
 def cmd_hooks_sync(args):
     silent = bool(getattr(args, "silent", False))
     plugin_root = None
     try:
-        mst_script = _common._mst_script_path().resolve()
-        plugin_root = mst_script.parent.parent
+        project_hooks_dir, source_hooks_dir, plugin_root = _resolve_hooks_paths()
         plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
-        plugin_json = load_json(plugin_json_path)
-        plugin_version = ""
-        if isinstance(plugin_json, dict):
-            version_value = plugin_json.get("version")
-            if isinstance(version_value, str):
-                plugin_version = version_value.strip()
+        plugin_version = _read_plugin_version(plugin_root)
         if not plugin_version:
             raise RuntimeError(f"invalid plugin version: {plugin_json_path}")
 
-        project_root = Path(os.getcwd()).resolve()
-        project_hooks_dir = project_root / ".claude" / "hooks"
         version_stamp_path = project_hooks_dir / ".mst-hook-version"
-        source_hooks_dir = plugin_root / "hooks"
         if not source_hooks_dir.is_dir():
             raise RuntimeError(f"hooks source not found: {source_hooks_dir}")
         source_files = sorted(path for path in source_hooks_dir.iterdir() if path.is_file())
@@ -190,6 +229,55 @@ def cmd_hooks_sync(args):
     return 0
 
 
+def doctor(args: argparse.Namespace) -> int:
+    installed_path, source_path, plugin_root = _resolve_hooks_paths()
+    installed_version = _read_text_file(installed_path / ".mst-hook-version")
+    source_version = _read_source_version(source_path, plugin_root)
+    checked_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    status_message = ""
+    mismatched: list[str] = []
+    total_hooks = 0
+    return_code = 0
+
+    if not source_path.is_dir():
+        status_message = "SOURCE_NOT_FOUND"
+        print(f"[hooks] warning: source hooks not found: {source_path}", file=sys.stderr)
+    else:
+        installed_hooks = _hook_files_by_name(installed_path)
+        source_hooks = _hook_files_by_name(source_path)
+        total_hooks = len(source_hooks)
+
+        for name, source_file in source_hooks.items():
+            installed_file = installed_hooks.get(name)
+            if not installed_file or _sha256_file(source_file) != _sha256_file(installed_file):
+                mismatched.append(name)
+
+        if mismatched:
+            status_message = f"MISMATCH ({len(mismatched)} out of {total_hooks} hooks differ)"
+            return_code = 1
+        else:
+            status_message = f"OK (all {total_hooks} hooks in sync)"
+
+    print("Gran Maestro Hooks Doctor")
+    print("---")
+    print(f"Installed hooks: {installed_path}")
+    print(f"Source hooks:    {source_path}")
+    print()
+    print(f"Status: {status_message}")
+    if mismatched:
+        print()
+        print("Mismatched hooks:")
+        for name in mismatched:
+            print(f"- {name}")
+    print()
+    print(f"Installed version: {installed_version}")
+    print(f"Expected version:  {source_version}")
+    print()
+    print(f"Checked at: {checked_at}")
+    return return_code
+
+
 def _hooks_post_skill_continuation(completed_skill: str) -> None:
     """If the snapshot has returnTo, emit a mandatory continuation message."""
     try:
@@ -236,3 +324,5 @@ def register(subparsers):
     hooks_sync = hooks_sub.add_parser("sync")
     hooks_sync.add_argument("--silent", action="store_true")
     hooks_sync.set_defaults(func=cmd_hooks_sync)
+    hooks_doctor = hooks_sub.add_parser("doctor")
+    hooks_doctor.set_defaults(func=doctor)

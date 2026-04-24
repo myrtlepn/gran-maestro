@@ -230,6 +230,7 @@ DISPATCH = {
     ("preset", "save"): preset.cmd_preset_save,
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
     ("hooks", "sync"): hooks.cmd_hooks_sync,
+    ("hooks", "doctor"): hooks.doctor,
     ("skill", "build"): skill.cmd_skill_build,
     ("skill", "scaffold"): skill.cmd_skill_scaffold,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
