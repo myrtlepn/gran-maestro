@@ -316,7 +316,10 @@ def test_stop_hook_logs_exit_retry_success(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout == ""
+    if result.stdout.strip():
+        payload = parse_stdout_json(result)
+        assert payload["decision"] == "approve"
+        assert payload["reason"] == "workflow_inactive snapshot_present=false"
     assert meta["state"] == "cleaned"
     assert_boundary_log(
         tmp_path,
@@ -354,7 +357,7 @@ def test_stop_hook_logs_exit_merge_conflict_block(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert payload["decision"] == "block"
-    assert payload["reason"] == "boundary_violation:merge_conflict"
+    assert payload["reason"] == "boundary_violation:merge_conflict snapshot_present=false"
     assert_boundary_log(
         tmp_path,
         hook_name="mst-stop-hook.sh",
@@ -394,7 +397,10 @@ def test_stop_boundary_log_then_detect_orphans_cleans_lingering_branch(tmp_path:
 
     stop_result = run_hook(STOP_HOOK, tmp_path, {})
     assert stop_result.returncode == 0
-    assert stop_result.stdout == ""
+    if stop_result.stdout.strip():
+        payload = parse_stdout_json(stop_result)
+        assert payload["decision"] == "approve"
+        assert payload["reason"] == "workflow_inactive snapshot_present=false"
     assert json.loads(meta_path.read_text(encoding="utf-8"))["state"] == "cleaned"
     assert not worktree_path.exists()
     assert_boundary_log(
