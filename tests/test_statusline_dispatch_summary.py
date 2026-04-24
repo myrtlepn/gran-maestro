@@ -19,6 +19,8 @@ def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.Complete
     home_dir.mkdir(parents=True, exist_ok=True)
     env["HOME"] = str(home_dir)
     env["CLAUDE_CONFIG_DIR"] = str(home_dir / ".claude")
+    env["LANG"] = "C"
+    env["LC_ALL"] = "C"
 
     return subprocess.run(
         ["bash", str(STATUSLINE_SCRIPT)],

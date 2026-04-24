@@ -242,19 +242,30 @@ def extract_context_id(args):
     return ""
 
 
-def render_line(labels, context_id):
+def render_line(labels, context_id, separator=None):
     if not labels:
         return "MST idle"
-    line = " > ".join(labels)
+    if separator is None:
+        separator = " > "
+    line = separator.join(labels)
     if context_id:
         line += f" ({context_id})"
     return line
 
 
-def render_snapshot_label(skill_name, entered_at):
+def snapshot_separator():
+    locale_text = os.environ.get("LANG", "") + os.environ.get("LC_ALL", "")
+    if "utf" in locale_text.lower():
+        return " › "
+    return " > "
+
+
+def render_snapshot_label(skill_name, entered_at, step=None, total=None):
     skill = clean_skill(skill_name)
     if not skill:
         return ""
+    if type(step) is int and type(total) is int:
+        return f"{skill}[{step}/{total}]"
     if isinstance(entered_at, str) and entered_at.strip():
         return f"{skill}({format_elapsed(entered_at.strip())})"
     return skill
@@ -277,19 +288,31 @@ def render_from_snapshot(path):
         for frame in stack:
             if not isinstance(frame, dict):
                 continue
-            label = render_snapshot_label(frame.get("skill"), frame.get("enteredAt"))
+            label = render_snapshot_label(
+                frame.get("skill"),
+                frame.get("enteredAt"),
+                frame.get("step"),
+                frame.get("total"),
+            )
             if label:
                 labels.append(label)
 
-    current_label = render_snapshot_label(data.get("currentSkill"), data.get("enteredAt"))
+    current_step = data.get("step", data.get("currentStep"))
+    current_total = data.get("total", data.get("totalSteps"))
+    current_label = render_snapshot_label(
+        data.get("currentSkill"),
+        data.get("enteredAt"),
+        current_step,
+        current_total,
+    )
     if current_label:
         labels.append(current_label)
 
     if not labels:
         return None
-    if len(labels) > 4:
+    if len(labels) >= 4:
         labels = [labels[0], "...", labels[-1]]
-    return render_line(labels, "")
+    return render_line(labels, "", snapshot_separator())
 
 
 def load_state_payload(path):

@@ -19,6 +19,8 @@ def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.Complete
     home_dir.mkdir(parents=True, exist_ok=True)
     env["HOME"] = str(home_dir)
     env["CLAUDE_CONFIG_DIR"] = str(home_dir / ".claude")
+    env["LANG"] = "C"
+    env["LC_ALL"] = "C"
 
     return subprocess.run(
         ["bash", str(STATUSLINE_SCRIPT)],
@@ -174,7 +176,7 @@ def test_snapshot_chain_truncate_after_four_nodes(tmp_path, depth):
     result = _run_statusline(workspace)
     last_line = _last_line(result)
 
-    if depth <= 4:
+    if depth <= 3:
         expected = " > ".join(f"{skill}(8m)" for skill in nodes)
     else:
         expected = f"{nodes[0]}(8m) > ... > {nodes[-1]}(8m)"

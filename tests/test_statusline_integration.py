@@ -26,6 +26,8 @@ def _run_statusline(
     home_dir.mkdir(parents=True, exist_ok=True)
     env["HOME"] = str(home_dir)
     env["CLAUDE_CONFIG_DIR"] = str(home_dir / ".claude")
+    env["LANG"] = "C"
+    env["LC_ALL"] = "C"
     if ppid is None:
         env.pop("MST_STATE_PPID", None)
     else:
