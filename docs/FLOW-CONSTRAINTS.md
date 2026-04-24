@@ -189,9 +189,9 @@ Durable 리소스(AGI/REQ/PLN)의 `owner_session_id`는 **advisory 필드**입�
 
 ## {#구현-상태} 구현 상태
 
-본 문서(`docs/FLOW-CONSTRAINTS.md`)는 DOD-007 증분 #1로 작성되었습니다. 아래 증분은 **후속 sprint 범위**이며 본 문서 작성만으로는 자동 연결되지 않습니다.
+본 문서(`docs/FLOW-CONSTRAINTS.md`)는 DOD-007 증분 #1로 작성되었고, 증분 #2에서 Stop-hook stdout JSON의 `details_anchor` 선택 필드가 연결되었습니다.
 
-- **증분 #2 (후속 sprint)**: `hooks/mst-stop-hook.sh`의 block/allow 메시지에 해당 섹션 앵커 링크 자동 포함. 예: `Details: docs/FLOW-CONSTRAINTS.md#return-to`. CI 링크 무결성 검증 추가 예정.
+- **증분 #2 (완료)**: `hooks/mst-stop-hook.sh`의 최종 stdout JSON에 `details_anchor`를 추가했습니다. 값은 `docs/FLOW-CONSTRAINTS.md#<slug>` 또는 `null`이며, 기존 `decision`/`reason` 필드는 호환성을 위해 그대로 유지됩니다.
 - **증분 #3 (후속 sprint)**: 대시보드 Event Detail Drawer에 in-app markdown viewer로 해당 앵커 섹션 즉시 표시. `frontend/` 신규 컴포넌트 필요.
 
-따라서 현재 시점에서 hook block 메시지는 이 문서의 특정 섹션으로 자동 링크되지 않으며, 수동 참조가 필요합니다. 증분 #2/#3이 완료되면 본 섹션은 "완료"로 갱신됩니다.
+증분 #3이 완료되면 대시보드에서 이 앵커를 직접 렌더링하도록 본 섹션을 추가 갱신합니다.

@@ -12,10 +12,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
 SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
-VALID_STOP_DECISIONS = {"approve", "block"}
+VALID_STOP_DECISIONS = {"allow", "approve", "block"}
 STOP_HOOK_SCHEMA_FIELDS = {
     "decision",
     "reason",
+    "details_anchor",
     "continue",
     "suppressOutput",
     "stopReason",
@@ -78,6 +79,8 @@ def _assert_stop_hook_schema(payload: dict) -> None:
     _assert_valid_stop_decision(payload)
     if "reason" in payload:
         assert isinstance(payload["reason"], str)
+    if "details_anchor" in payload:
+        assert payload["details_anchor"] is None or isinstance(payload["details_anchor"], str)
     if "continue" in payload:
         assert isinstance(payload["continue"], bool)
     if "suppressOutput" in payload:

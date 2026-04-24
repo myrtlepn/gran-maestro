@@ -223,13 +223,48 @@ SNAPSHOT_RETURN_TO_STEP=""
 
 emit_approve_json() {
   local reason="$1"
-  python3 - "$reason" <<'PY'
+  local details_anchor="$2"
+  python3 - "$reason" "$details_anchor" <<'PY'
 import json
 import sys
 
 reason = sys.argv[1]
-print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
+details_anchor = sys.argv[2] or None
+print(json.dumps({"decision": "approve", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
 PY
+}
+
+details_anchor_for_reason() {
+  local reason="${1:-}"
+  case "$reason" in
+    *"mst-off mode pass-through"*|*"stop_hook_active_true"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-1-mode-gate"
+      ;;
+    *"no-mst-session"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-2-snapshot-gate"
+      ;;
+    *"non-mst-skill"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-3-namespace-gate"
+      ;;
+    *"[RETURN-TO]"*|*"return_to"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#return-to"
+      ;;
+    *"step_progress"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#step-progress"
+      ;;
+    *"completion"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#completion"
+      ;;
+    *"unhandled_path"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#unhandled-path"
+      ;;
+    "hook_failure:"*|*"hook judge timeout"*|*"judge_timeout"*)
+      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#hook-failure"
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
 }
 
 reason_with_snapshot_meta() {
@@ -245,10 +280,11 @@ reason_with_snapshot_meta() {
 }
 
 emit_approve_decision() {
-  local reason
+  local reason details_anchor
   reason="$(reason_with_snapshot_meta "$1")"
+  details_anchor="$(details_anchor_for_reason "$reason")"
   DECISION_EMITTED="true"
-  emit_approve_json "$reason"
+  emit_approve_json "$reason" "$details_anchor"
 }
 
 append_flow_event() {
@@ -431,11 +467,14 @@ PY
 
 emit_allow_json() {
   local reason="$1"
-  python3 - "$reason" <<'PY'
+  local details_anchor
+  details_anchor="$(details_anchor_for_reason "$reason")"
+  python3 - "$reason" "$details_anchor" <<'PY'
 import json
 import sys
 
-print(json.dumps({"decision": "allow", "reason": sys.argv[1]}, ensure_ascii=False))
+details_anchor = sys.argv[2] or None
+print(json.dumps({"decision": "allow", "reason": sys.argv[1], "details_anchor": details_anchor}, ensure_ascii=False))
 PY
 }
 
@@ -1179,20 +1218,23 @@ has_active_workflow_session() {
 
 emit_block_json() {
   local reason="$1"
-  python3 - "$reason" <<'PY'
+  local details_anchor="$2"
+  python3 - "$reason" "$details_anchor" <<'PY'
 import json
 import sys
 
 reason = sys.argv[1]
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+details_anchor = sys.argv[2] or None
+print(json.dumps({"decision": "block", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
 PY
 }
 
 emit_block_decision() {
-  local reason
+  local reason details_anchor
   reason="$(reason_with_snapshot_meta "$1")"
+  details_anchor="$(details_anchor_for_reason "$reason")"
   DECISION_EMITTED="true"
-  emit_block_json "$reason"
+  emit_block_json "$reason" "$details_anchor"
 }
 
 persist_block_state() {
