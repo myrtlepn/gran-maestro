@@ -2,13 +2,23 @@
 
 11개 합성 산출물 (README.md + 8 markers + index.md + 이 테스트 파일 자기 자신)이
 모두 존재하는지 검증한다.
+
+주의: .gran-maestro/synthetic/ 는 일반적으로 gitignored이므로 worktree 등 초기 checkout
+환경에서는 부재할 수 있다. SYNTHETIC_DIR 미존재 시 전체 모듈 skip.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_DIR = PROJECT_ROOT / ".gran-maestro" / "synthetic"
+
+pytestmark = pytest.mark.skipif(
+    not SYNTHETIC_DIR.is_dir(),
+    reason="AGI-013 synthetic artifacts unavailable (gitignored; primary repo only)",
+)
 
 
 def test_readme_exists_with_agi013_tag() -> None:

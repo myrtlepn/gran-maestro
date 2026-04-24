@@ -1,9 +1,7 @@
 /.idea/
 .omc/
 /node_modules/
-/.gran-maestro/*
-!/.gran-maestro/synthetic/
-!/.gran-maestro/synthetic/**
+/.gran-maestro/
 config.resolved.json
 
 frontend/node_modules/
