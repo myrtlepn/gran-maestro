@@ -4,6 +4,14 @@
 
 ---
 
+## [0.59.5] — 2026-04-23
+
+### 버그 수정
+
+- Stop hook의 `decision: allow` schema 위반으로 발생하던 "Hook JSON output validation failed" 경고를 제거했습니다. Claude Code 세션 종료 시 더 이상 경고가 출력되지 않습니다.
+
+---
+
 ## [0.59.4] — 2026-04-21
 
 ### 새 기능

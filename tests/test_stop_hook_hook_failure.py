@@ -69,7 +69,7 @@ def test_err_trap_returns_allow(tmp_path):
     )
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert payload["reason"].startswith("hook_failure:")
     assert "snapshot_present=" in payload["reason"]
     hook_failure_lines = [
@@ -124,7 +124,7 @@ def test_helper_missing_graceful_fallback(tmp_path):
     )
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "unhandled_path fallback" in payload["reason"]
     assert "[mst-stop-hook] helper_failed helper=hook_patterns" in result.stderr
 

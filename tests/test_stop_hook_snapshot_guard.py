@@ -110,7 +110,7 @@ def test_snapshot_present_committed_allows(tmp_path):
     result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "completion" in payload["reason"]
     assert "snapshot_present=true" in payload["reason"]
 
@@ -121,7 +121,7 @@ def test_snapshot_absent_allows(tmp_path):
     result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "no-mst-session" in payload["reason"]
     assert "snapshot_present=false" in payload["reason"]
 
@@ -143,7 +143,7 @@ def test_unhandled_path_fail_open_logs(tmp_path):
     result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "unhandled_path fallback" in payload["reason"]
 
     flow_path = project_root / ".gran-maestro" / "state" / SESSION_ID / "flow-detail.ndjson"

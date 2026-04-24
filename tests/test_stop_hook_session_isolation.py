@@ -98,7 +98,7 @@ def test_owner_session_id_foreign_session_allows(tmp_path):
     result = _run_hook(project_root, SID_B)
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "workflow_inactive" in payload["reason"]
 
 

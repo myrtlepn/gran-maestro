@@ -210,14 +210,14 @@ SNAPSHOT_STATUS=""
 SNAPSHOT_RETURN_TO_SKILL=""
 SNAPSHOT_RETURN_TO_STEP=""
 
-emit_allow_json() {
+emit_approve_json() {
   local reason="$1"
   python3 - "$reason" <<'PY'
 import json
 import sys
 
 reason = sys.argv[1]
-print(json.dumps({"decision": "allow", "reason": reason}, ensure_ascii=False))
+print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
 PY
 }
 
@@ -233,11 +233,11 @@ reason_with_snapshot_meta() {
   esac
 }
 
-emit_allow_decision() {
+emit_approve_decision() {
   local reason
   reason="$(reason_with_snapshot_meta "$1")"
   DECISION_EMITTED="true"
-  emit_allow_json "$reason"
+  emit_approve_json "$reason"
 }
 
 append_flow_event() {
@@ -285,7 +285,7 @@ print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 PY
 )"
   append_flow_event "unhandled_path" "$data"
-  emit_allow_decision "unhandled_path fallback"
+  emit_approve_decision "unhandled_path fallback"
 }
 
 on_stop_hook_err() {
@@ -335,7 +335,7 @@ PY
     "$(sanitize_log_value "$signal")" \
     "$(sanitize_log_value "$PPID")" \
     "$(sanitize_log_value "${SESSION_ID:-unknown}")" >&2
-  emit_allow_decision "hook_failure: line=$line cmd=$safe_command"
+  emit_approve_decision "hook_failure: line=$line cmd=$safe_command"
   exit 0
 }
 
@@ -554,7 +554,7 @@ append_block_audit_entry() {
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   append_audit_entry "pass_through" "" "stop_hook_active_true"
   debug_log "allow" "reason=stop_hook_active_true"
-  emit_allow_decision "stop_hook_active_true"
+  emit_approve_decision "stop_hook_active_true"
   exit 0
 fi
 
@@ -905,7 +905,7 @@ run_snapshot_guard() {
   if [ "${SESSION_ID_RESOLUTION_FAILED:-false}" = "true" ]; then
     if [ "${HOOK_EVENT_NAME:-}" = "Stop" ]; then
       debug_log "allow" "reason=session_id_resolution_failed"
-      emit_allow_decision "session_id_resolution_failed"
+      emit_approve_decision "session_id_resolution_failed"
       exit 0
     fi
     return 0
@@ -917,13 +917,13 @@ run_snapshot_guard() {
       return 0
     fi
     debug_log "allow" "reason=no-mst-session session_id=${SESSION_ID:-unknown}"
-    emit_allow_decision "no-mst-session"
+    emit_approve_decision "no-mst-session"
     exit 0
   fi
 
   if ! is_mst_snapshot_skill "${SNAPSHOT_CURRENT_SKILL:-}"; then
     debug_log "allow" "reason=non_mst_skill skill=${SNAPSHOT_CURRENT_SKILL:-}"
-    emit_allow_decision "non-mst-skill"
+    emit_approve_decision "non-mst-skill"
     exit 0
   fi
 
@@ -948,7 +948,7 @@ run_snapshot_guard() {
   case "${SNAPSHOT_STATUS:-}" in
     committed|completed|done)
       debug_log "allow" "reason=snapshot_completion skill=${SNAPSHOT_CURRENT_SKILL:-}"
-      emit_allow_decision "completion"
+      emit_approve_decision "completion"
       exit 0
       ;;
   esac
@@ -1363,7 +1363,7 @@ if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
   fi
   append_audit_entry "pass_through" "" "workflow_inactive"
   debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
-  emit_allow_decision "workflow_inactive"
+  emit_approve_decision "workflow_inactive"
   exit 0
 fi
 
@@ -1376,7 +1376,7 @@ STOP_INTENT_FORCE_BLOCK="false"
 if [ "$STOP_INTENT_CLASSIFICATION" = "allowed" ]; then
   append_audit_entry "allowed" "$STOP_INTENT_DECLARED_REASON" ""
   debug_log "allow" "reason=sentinel_allowed declared=$STOP_INTENT_DECLARED_REASON"
-  emit_allow_decision "sentinel_allowed"
+  emit_approve_decision "sentinel_allowed"
   exit 0
 fi
 
@@ -1478,7 +1478,7 @@ PY
     if [ "$HOOK_PATTERN_DECISION" = "allow" ] && [ "$HOOK_PATTERN_ID" = "agile_allow_pattern_whitelisted" ]; then
       append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
       debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
-      emit_allow_decision "agile_allow_pattern_whitelisted"
+      emit_approve_decision "agile_allow_pattern_whitelisted"
       exit 0
     fi
 
@@ -1520,7 +1520,7 @@ if [ "$HAS_NEXT_ACTION" != "true" ]; then
   if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
     append_audit_entry "allowed" "" "explicit_allow_pattern_no_next_action"
     debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
-    emit_allow_decision "explicit_allow_pattern_no_next_action"
+    emit_approve_decision "explicit_allow_pattern_no_next_action"
     exit 0
   fi
 else
