@@ -948,4 +948,9 @@ except Exception:
 }
 _gardening_trigger_auto_archive || true
 
+# Auto-sync hooks to plugin version on session start (non-blocking)
+if [ -n "${PROJECT_ROOT:-}" ] && [ -f "${PROJECT_ROOT}/scripts/mst.py" ]; then
+  python3 "${PROJECT_ROOT}/scripts/mst.py" hooks sync --silent 2>/dev/null || true # mst.py hooks sync || true
+fi
+
 exit 0
