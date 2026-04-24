@@ -1,8 +1,18 @@
 from datetime import datetime, timezone
+import contextlib
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Dict, Optional
+import warnings
+
+try:
+    import fcntl
+
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 
 def timestamp_now() -> str:
@@ -28,6 +38,38 @@ def snapshot_path(base_dir: Path, session_id: str = "default") -> Path:
 def snapshots_dir(base_dir: Path) -> Path:
     """Return session-end snapshots directory."""
     return base_dir / "state" / "snapshots"
+
+
+@contextlib.contextmanager
+def _acquire_session_lock(base_dir: Path, session_id: str):
+    lock_dir = base_dir / "state" / _safe_session_id(session_id)
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / ".snapshot.lock"
+    if not HAS_FCNTL:
+        warnings.warn("fcntl not available; running without RMW serialization")
+        yield None
+        return
+
+    timeout_sec = float(os.environ.get("AGILE_STATE_LOCK_TIMEOUT_SEC", "5"))
+    deadline = time.monotonic() + timeout_sec
+    fd = open(lock_path, "a+")
+    try:
+        while True:
+            try:
+                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (BlockingIOError, OSError):
+                if time.monotonic() >= deadline:
+                    warnings.warn(f"lock timeout after {timeout_sec}s; continuing without lock")
+                    break
+                time.sleep(0.05)
+        yield fd
+    finally:
+        try:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        fd.close()
 
 
 def load_snapshot(base_dir: Path, session_id: str = "default") -> Optional[Dict[str, Any]]:
@@ -208,42 +250,45 @@ def enter(
     session_id: str = "default",
     return_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    snapshot = load_snapshot(base_dir, session_id)
-    updated = apply_event(
-        snapshot,
-        "enter",
-        session_id=session_id,
-        skill=skill,
-        step=step,
-        total=total,
-        return_to=return_to,
-    )
-    _atomic_write_json(snapshot_path(base_dir, session_id), updated)
-    return updated
+    with _acquire_session_lock(base_dir, session_id):
+        snapshot = load_snapshot(base_dir, session_id)
+        updated = apply_event(
+            snapshot,
+            "enter",
+            session_id=session_id,
+            skill=skill,
+            step=step,
+            total=total,
+            return_to=return_to,
+        )
+        _atomic_write_json(snapshot_path(base_dir, session_id), updated)
+        return updated
 
 
 def commit(base_dir: Path, session_id: str = "default") -> Dict[str, Any]:
-    snapshot = load_snapshot(base_dir, session_id)
-    if snapshot is None:
-        raise FileNotFoundError("snapshot not found")
-    stack_before = _normalize_stack(snapshot.get("skillStack"))
-    updated = apply_event(snapshot, "commit", session_id=session_id)
-    _atomic_write_json(snapshot_path(base_dir, session_id), updated)
-    if not stack_before:
-        _write_session_snapshot(base_dir, updated, session_id=session_id, reason="commit")
-    return updated
+    with _acquire_session_lock(base_dir, session_id):
+        snapshot = load_snapshot(base_dir, session_id)
+        if snapshot is None:
+            raise FileNotFoundError("snapshot not found")
+        stack_before = _normalize_stack(snapshot.get("skillStack"))
+        updated = apply_event(snapshot, "commit", session_id=session_id)
+        _atomic_write_json(snapshot_path(base_dir, session_id), updated)
+        if not stack_before:
+            _write_session_snapshot(base_dir, updated, session_id=session_id, reason="commit")
+        return updated
 
 
 def fail(base_dir: Path, session_id: str = "default") -> Dict[str, Any]:
-    snapshot = load_snapshot(base_dir, session_id)
-    if snapshot is None:
-        raise FileNotFoundError("snapshot not found")
-    stack_before = _normalize_stack(snapshot.get("skillStack"))
-    updated = apply_event(snapshot, "fail", session_id=session_id)
-    _atomic_write_json(snapshot_path(base_dir, session_id), updated)
-    if not stack_before:
-        _write_session_snapshot(base_dir, updated, session_id=session_id, reason="fail")
-    return updated
+    with _acquire_session_lock(base_dir, session_id):
+        snapshot = load_snapshot(base_dir, session_id)
+        if snapshot is None:
+            raise FileNotFoundError("snapshot not found")
+        stack_before = _normalize_stack(snapshot.get("skillStack"))
+        updated = apply_event(snapshot, "fail", session_id=session_id)
+        _atomic_write_json(snapshot_path(base_dir, session_id), updated)
+        if not stack_before:
+            _write_session_snapshot(base_dir, updated, session_id=session_id, reason="fail")
+        return updated
 
 
 def set_snapshot(
