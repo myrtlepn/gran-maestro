@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -18,6 +19,7 @@ FLOW_DETAIL_FILENAME = "flow-detail.ndjson"
 MONTH_ENV_RE = re.compile(r"^\d{6}$")
 _FLUSH_ENV_RE = re.compile(r"^\d+$")
 _fsync_counters: Dict[str, int] = {}
+_ATEXIT_REGISTERED = False
 
 
 def _get_dotted_path(data: Dict[str, Any], dotted_path: str) -> Optional[Any]:
@@ -102,6 +104,89 @@ def flow_log_path(project_root: Path, *, override: Optional[str] = None, rotate:
     if log_dir:
         return Path(log_dir) / filename
     return project_root / ".gran-maestro" / "logs" / filename
+
+
+def _extract_session_id_from_path(path_str: str) -> Optional[str]:
+    match = re.search(r"state/([^/]+)/", path_str)
+    return match.group(1) if match else None
+
+
+def _find_project_root(path_str: str) -> Path:
+    path = Path(path_str).resolve()
+    for ancestor in [path, *path.parents]:
+        if (ancestor / ".gran-maestro").is_dir():
+            return ancestor
+    return Path.cwd()
+
+
+def _register_session_end_flush() -> None:
+    global _ATEXIT_REGISTERED
+    if _ATEXIT_REGISTERED:
+        return
+    if os.environ.get("MST_FLOW_DISABLE_ATEXIT", "").strip() == "1":
+        return
+    atexit.register(_session_end_flush)
+    _ATEXIT_REGISTERED = True
+
+
+def _session_end_flush() -> None:
+    try:
+        import json as json_module
+        import os as os_module
+        import sys as sys_module
+        from pathlib import Path as PathClass
+    except Exception:
+        return
+
+    try:
+        snapshot = list(_fsync_counters.keys())
+    except Exception:
+        snapshot = []
+
+    for path_str in snapshot:
+        try:
+            path = PathClass(path_str)
+            if path.exists():
+                fd = os_module.open(str(path), os_module.O_WRONLY | os_module.O_APPEND)
+                try:
+                    os_module.fsync(fd)
+                finally:
+                    os_module.close(fd)
+
+            session_id = (
+                _extract_session_id_from_path(path_str)
+                or os_module.environ.get("MST_SNAPSHOT_SESSION_ID")
+                or "unknown"
+            )
+            project_root = _find_project_root(path_str)
+            flow_path = flow_log_path(project_root, rotate=True)
+            flow_path.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "timestamp": timestamp_now(),
+                "session_id": safe_session_id(session_id),
+                "skill": "_session",
+                "step": 0,
+                "total_steps": 0,
+                "event_type": "flow_session_end",
+                "parent_skill": None,
+                "parent_step": None,
+                "duration_ms": None,
+                "extras": {},
+                "schema_version": 1,
+            }
+            with open(flow_path, "a", encoding="utf-8", buffering=1) as handle:
+                handle.write(json_module.dumps(entry, ensure_ascii=False, sort_keys=True))
+                handle.write("\n")
+        except Exception as exc:
+            try:
+                print(f"[flow-logger] session end flush failed: {exc}", file=sys_module.stderr)
+            except Exception:
+                pass
+        finally:
+            try:
+                _fsync_counters.pop(path_str, None)
+            except Exception:
+                pass
 
 
 def _load_json_object(raw: str) -> Dict[str, Any]:
@@ -290,6 +375,9 @@ def main() -> int:
     except Exception as exc:
         print(f"[flow-logger] append failed: {exc}", file=os.sys.stderr)
         return 1
+
+
+_register_session_end_flush()
 
 
 if __name__ == "__main__":

@@ -124,6 +124,7 @@ def test_cmd_state_set_uses_rotation(tmp_path, monkeypatch):
     monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
     env = dict(os.environ)
     env["MST_SNAPSHOT_SESSION_ID"] = "test-s-1"
+    env["MST_FLOW_DISABLE_ATEXIT"] = "1"
     env.pop("MST_STATE_PPID", None)
     env.pop("MST_FLOW_LOG_DIR", None)
 
