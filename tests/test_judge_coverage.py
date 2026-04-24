@@ -59,8 +59,8 @@ def _build_snapshot_from_kwargs(snapshot_kwargs: dict) -> dict:
         "expected_decision",
     ),
     [
-        ("mode_on_no_snapshot", "Stop", None, None, False, "allow"),
-        ("mode_off_no_snapshot", "Other", None, None, False, "allow"),
+        ("mode_on_no_snapshot", "Stop", None, None, False, "approve"),
+        ("mode_off_no_snapshot", "Other", None, None, False, "approve"),
         ("mst_step_progress", "Stop", {"skill": "agile-plan", "step": 1, "total": 3}, None, False, "block"),
         (
             "mst_return_to",
@@ -70,9 +70,9 @@ def _build_snapshot_from_kwargs(snapshot_kwargs: dict) -> dict:
             False,
             "block",
         ),
-        ("mst_committed", "Stop", {"skill": "agile-plan", "step": 3, "total": 3}, None, True, "allow"),
-        ("namespace_out", "Stop", {"skill": "external-tool", "step": 1, "total": 2}, None, False, "allow"),
-        ("unhandled_active_at_total", "Stop", {"skill": "agile-plan", "step": 3, "total": 3}, None, False, "allow"),
+        ("mst_committed", "Stop", {"skill": "agile-plan", "step": 3, "total": 3}, None, True, "approve"),
+        ("namespace_out", "Stop", {"skill": "external-tool", "step": 1, "total": 2}, None, False, "approve"),
+        ("unhandled_active_at_total", "Stop", {"skill": "agile-plan", "step": 3, "total": 3}, None, False, "approve"),
         ("mst_string_return_to", "Stop", {"skill": "mst:request", "step": 2, "total": 2}, "agile/4", False, "block"),
         (
             "mode_off_with_snapshot",
@@ -85,9 +85,9 @@ def _build_snapshot_from_kwargs(snapshot_kwargs: dict) -> dict:
             },
             None,
             False,
-            "allow",
+            "approve",
         ),
-        ("failed_status", "Stop", {"skill": "agile-plan", "step": 3, "total": 3, "status": "failed"}, None, False, "allow"),
+        ("failed_status", "Stop", {"skill": "agile-plan", "step": 3, "total": 3, "status": "failed"}, None, False, "approve"),
         (
             "committed_with_return_to",
             "Stop",
@@ -102,7 +102,7 @@ def _build_snapshot_from_kwargs(snapshot_kwargs: dict) -> dict:
             {"skill": "external-tool", "step": 1, "total": 2},
             {"skill": "agile-plan", "step": 3},
             False,
-            "allow",
+            "approve",
         ),
     ],
 )
@@ -136,7 +136,7 @@ def test_judge_branch_matrix(
     result = run_hook(project_root, hook_payload)
 
     payload = stdout_json(result)
-    assert payload["decision"] in {"allow", "block"}
+    assert payload["decision"] in {"approve", "block"}
     assert payload["decision"] == expected_decision
     assert _infer_layer(payload["reason"])
 

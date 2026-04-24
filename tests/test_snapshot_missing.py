@@ -20,7 +20,7 @@ def test_snapshot_absent_allows_pass_through(tmp_path):
     result = run_hook(project_root, _hook_payload(session_id))
 
     payload = stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     assert "no-mst-session" in payload["reason"]
     assert "snapshot_present=false" in payload["reason"]
 
@@ -38,7 +38,7 @@ def test_snapshot_corrupt_fail_open_logs_hook_failure(tmp_path):
     result = run_hook(project_root, _hook_payload(session_id))
 
     payload = stdout_json(result)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
     events = read_flow_detail(project_root, session_id)
     hook_failure_events = [event for event in events if event.get("event_type") == "hook_failure"]
     if hook_failure_events:
