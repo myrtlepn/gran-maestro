@@ -61,7 +61,11 @@ def cmd_workflow_run(args):
     return _cmd_workflow_run(args)
 
 
-BASE_DIR_OPTIONAL_COMMANDS = {("hooks", "sync"), ("skill", "build")}
+BASE_DIR_OPTIONAL_COMMANDS = {
+    ("hooks", "sync"),
+    ("skill", "build"),
+    ("skill", "scaffold"),
+}
 
 
 def main():

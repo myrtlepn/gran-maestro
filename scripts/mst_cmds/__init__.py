@@ -231,6 +231,7 @@ DISPATCH = {
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
     ("hooks", "sync"): hooks.cmd_hooks_sync,
     ("skill", "build"): skill.cmd_skill_build,
+    ("skill", "scaffold"): skill.cmd_skill_scaffold,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
     ("dispatch", "preflight"): dispatch.cmd_dispatch_preflight,
     ("dispatch", "register"): dispatch.cmd_dispatch_register,
