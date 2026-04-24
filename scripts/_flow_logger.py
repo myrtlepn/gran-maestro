@@ -16,6 +16,55 @@ from typing import Any, Dict, Optional
 FLOW_LOG_FILENAME = "flow.ndjson"
 FLOW_DETAIL_FILENAME = "flow-detail.ndjson"
 MONTH_ENV_RE = re.compile(r"^\d{6}$")
+_FLUSH_ENV_RE = re.compile(r"^\d+$")
+_fsync_counters: Dict[str, int] = {}
+
+
+def _get_dotted_path(data: Dict[str, Any], dotted_path: str) -> Optional[Any]:
+    current: Any = data
+    for part in dotted_path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _resolve_flush_every_n() -> int:
+    env_value = os.environ.get("MST_FLOW_LOG_FLUSH_EVERY_N", "").strip()
+    if _FLUSH_ENV_RE.match(env_value):
+        return int(env_value)
+
+    for config_path in (
+        Path.cwd() / ".gran-maestro" / "config.resolved.json",
+        Path.cwd() / ".gran-maestro" / "config.json",
+    ):
+        try:
+            value = _get_dotted_path(json.loads(config_path.read_text(encoding="utf-8")), "logs.flush_every_n")
+        except Exception:
+            continue
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and _FLUSH_ENV_RE.match(value.strip()):
+            return int(value.strip())
+
+    return 100
+
+
+def _maybe_fsync(path: Path, handle) -> None:
+    try:
+        flush_every_n = _resolve_flush_every_n()
+        if flush_every_n <= 0:
+            return
+
+        path_str = str(path)
+        current = _fsync_counters.get(path_str, 0) + 1
+        if current >= flush_every_n:
+            os.fsync(handle.fileno())
+            _fsync_counters[path_str] = 0
+        else:
+            _fsync_counters[path_str] = current
+    except Exception as exc:
+        print(f"[flow-logger] fsync failed: {exc}", file=sys.stderr)
 
 
 def timestamp_now() -> str:
@@ -80,6 +129,7 @@ def _append_json_line(path: Path, entry: Dict[str, Any]) -> None:
     with open(path, "a", encoding="utf-8", buffering=1) as handle:
         handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
         handle.write("\n")
+        _maybe_fsync(path, handle)
 
 
 def append_event(
