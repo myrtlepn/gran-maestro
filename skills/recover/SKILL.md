@@ -124,23 +124,6 @@ Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 
 4. `feedback` 상태: feedback-RN.md 수정 요청을 프롬프트에 포함
 5. 완료 후 사전 검증 (테스트+타입 체크) → Phase 3
 
-
-<!-- @include _shared/skill-execution-marker.md -->
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
-- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
-- 필드 규칙:
-  - `skill`: 현재 실행 중인 스킬 이름
-  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
-  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
-- 예시:
-  - `[MST skill={name} step=1/3 return_to=null]`
-  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
-<!-- @end-include -->
-
 ## 복구 판단 매트릭스
 
 | 마지막 상태 | 복구 동작 | Phase |

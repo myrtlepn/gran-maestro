@@ -4,6 +4,14 @@
 
 ---
 
+## [0.59.6] — 2026-04-25
+
+### 개선
+
+- 스킬 본문 boilerplate 제거 (DOD-009, PLN-553, REQ-724): 40개 SKILL.md에서 `## 스킬 실행 마커 (MANDATORY)` 섹션과 `@include _shared/skill-execution-marker.md`, `@include _shared/hooks-sync.md` 블록을 일괄 제거했습니다. `skills/_shared/` 원본은 유지하면서 스킬 실행 컨텍스트의 중복 boilerplate 토큰 부담을 줄였습니다.
+
+---
+
 ## [0.59.5] — 2026-04-23
 
 ### 버그 수정

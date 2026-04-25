@@ -72,16 +72,6 @@ Maestro 모드 비활성 시 자동 활성화:
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 <!-- @end-include -->
 
-<!-- @include _shared/hooks-sync.md -->
-### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
-```
-
-플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
-<!-- @end-include -->
-
 <!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
@@ -618,23 +608,6 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
      - 실패 시 warn만 출력하고 승인 안내 흐름을 계속 진행한다
    - `auto_approve=true` 상태에서는 승인 단계를 스킵하고 `Skill(skill: "mst:approve", args: "-a REQ-NNN")`로 자동 진입한다 (`-a` 생략 금지)
    - **세션 중 자율 모드 전환**: spec 요약 표시 후 대기 중 사용자가 "auto로", "자율 모드로", "-a로" 등을 입력하면 `/mst:approve -a REQ-NNN`으로 자동 진입한다
-
-
-<!-- @include _shared/skill-execution-marker.md -->
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
-- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
-- 필드 규칙:
-  - `skill`: 현재 실행 중인 스킬 이름
-  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
-  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
-- 예시:
-  - `[MST skill={name} step=1/3 return_to=null]`
-  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
-<!-- @end-include -->
 
 ## 옵션
 

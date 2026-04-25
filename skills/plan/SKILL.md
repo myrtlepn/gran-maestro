@@ -27,22 +27,6 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 - Stitch 관련 작업은 반드시 `Skill(skill: "mst:stitch", args: "...")`를 통해 실행한다.
 - 허용 경로 외 수정 요청 시: 즉시 중단 → "plan.md에 기록합니다" 알림 → 의도를 plan.md 요구사항 섹션에 흡수
 
-<!-- @include _shared/skill-execution-marker.md -->
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
-- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
-- 필드 규칙:
-  - `skill`: 현재 실행 중인 스킬 이름
-  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
-  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
-- 예시:
-  - `[MST skill={name} step=1/3 return_to=null]`
-  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
-<!-- @end-include -->
-
 ## Gate
 
 ### Entry
@@ -83,16 +67,6 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 > ```
 >
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
-<!-- @end-include -->
-
-<!-- @include _shared/hooks-sync.md -->
-### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true
-```
-
-플러그인 버전이 `.claude/hooks/.mst-hook-version`과 다르면 hook 파일을 자동 동기화합니다. 동일 버전이면 no-op(수 ms). 실패해도 워크플로우를 차단하지 않습니다.
 <!-- @end-include -->
 
 <!-- @include _shared/user-profile-read.md -->

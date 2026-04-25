@@ -78,23 +78,6 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
 5. "취소" 선택 시: "Stitch SDK 설치가 취소되었습니다. 스킬을 종료합니다." 메시지 후 즉시 종료.
 6. 재시도는 1회만 허용 (무한 재시도 금지).
 
-
-<!-- @include _shared/skill-execution-marker.md -->
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
-- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
-- 필드 규칙:
-  - `skill`: 현재 실행 중인 스킬 이름
-  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
-  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
-- 예시:
-  - `[MST skill={name} step=1/3 return_to=null]`
-  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
-<!-- @end-include -->
-
 ## 시안 제시 금지 행위 (CRITICAL)
 
 > ⚠️ **시안 제시 금지 행위 (CRITICAL)**: 시안 생성 완료 후 결과를 사용자에게 보여줄 때, 아래 행위는 **절대 금지**합니다:
@@ -135,7 +118,6 @@ argument-hint: "[--auto] [--variants] [--init] [--req REQ-NNN] [--model pro|flas
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
 <!-- @end-include -->
-
 
 > ⚠️ **DES 채번 스킵 조건**: `--edit`, `--alt`, `--redesign`, `--list`, `--init` 플래그가 있으면
 > 이 섹션(Step A~C-2)을 건너뛰고 해당 프로토콜로 직접 진행한다.

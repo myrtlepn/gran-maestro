@@ -49,7 +49,6 @@ argument-hint: "{버그/이슈 설명} [--focus {파일패턴}]"
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
 <!-- @end-include -->
 
-
 ### Step 1: 초기화
 
 1. `{PROJECT_ROOT}/.gran-maestro/debug/` 디렉토리 존재 확인, 없으면 생성
@@ -198,23 +197,6 @@ python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_bu
 
 ```markdown
 # 버그 조사 요청
-
-
-<!-- @include _shared/skill-execution-marker.md -->
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
-- 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`
-- 필드 규칙:
-  - `skill`: 현재 실행 중인 스킬 이름
-  - `step`: 현재 단계(`N/M`) 또는 서브스킬 종료 시 `returned`
-  - `return_to`: 최상위 스킬이면 `null`, 서브스킬이면 `{parent_skill}/{step_number}`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-- C/D 분리 마커 규칙을 추가로 사용하지 않는다. 반드시 단일 MST 마커만 사용한다.
-- 예시:
-  - `[MST skill={name} step=1/3 return_to=null]`
-  - `[MST skill={subskill} step=returned return_to={parent_skill}/{step_number}]`
-<!-- @end-include -->
 
 ## 이슈
 {사용자가 보고한 이슈 전체 내용}

@@ -39,13 +39,6 @@ resume 경로는 **queue entry를 SSoT**로 사용합니다. plan.json 또는 tm
 - 합리화 패턴: "auto 필드가 true인데 args에 -a가 없어 보여 내가 붙이자." | 확인 증거: args를 원본 그대로 전달한다. enqueue 시점에 -a 포함이 호출측 책임.
 - 합리화 패턴: "complete가 귀찮으니 pop만 하고 끝내자." | 확인 증거: 각 iteration의 실행 로그에 complete 또는 fail 명령 호출이 존재.
 
-## 스킬 실행 마커 (MANDATORY)
-
-모든 응답의 첫 줄에 아래 마커를 출력한다.
-
-- 기본 포맷: `[MST skill=resume step={N}/5 return_to=null]`
-- 예시: `[MST skill=resume step=1/5 return_to=null]`
-
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->

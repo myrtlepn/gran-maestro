@@ -1,4 +1,4 @@
-## 스킬 실행 마커 (MANDATORY)
+## MST 스킬 실행 마커
 
 - 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력한다.
 - 기본 마커 포맷: `[MST skill={name} step={N}/{M} return_to={parent_skill/step | null}]`

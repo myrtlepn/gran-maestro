@@ -1,4 +1,4 @@
-### Step -1: Hooks 자동 동기화 (MANDATORY, 비차단)
+### Hooks 자동 동기화
 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/mst.py hooks sync --silent || true

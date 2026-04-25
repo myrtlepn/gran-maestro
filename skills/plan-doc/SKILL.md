@@ -28,13 +28,6 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
 > 위 Write/Edit 제한의 적용을 받지 않습니다. 스크립트가 갱신하는 파일(counter.json, intent 저장소 등)은
 > Bash 실행의 부수 효과로 허용됩니다.
 
-## 스킬 실행 마커 (MANDATORY)
-
-- 모든 응답의 첫 줄 또는 각 Step 시작 줄에 아래 마커를 출력합니다.
-- 마커 포맷: `[MST skill=plan-doc step={N}/{M} return_to={parent_skill/step | null}]`
-- 최상위 호출이면 `return_to=null`
-- 서브스킬 종료 마커: `[MST skill={subskill} step=returned return_to={parent/step}]`
-
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->
@@ -63,7 +56,6 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
 <!-- @end-include -->
-
 
 ### 세션 중 자율 모드 전환 (공통)
 
