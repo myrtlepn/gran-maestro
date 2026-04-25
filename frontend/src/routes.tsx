@@ -13,6 +13,7 @@ import { FactCheckView } from './views/FactCheckView';
 import { ReferenceView } from './views/ReferenceView';
 import { SettingsView } from './views/SettingsView';
 import { ArchivesView } from './views/ArchivesView';
+import { FlowView } from './views/FlowView';
 
 function IntentLegacyRedirect() {
   const { intentId } = useParams();
@@ -27,6 +28,7 @@ export function AppRoutes() {
       <Route path="/agile" element={<AgileView />} />
       <Route path="/agile/:agiId" element={<AgileView />} />
       <Route path="/agile/:agiId/objective" element={<AgileView />} />
+      <Route path="/agile/:agiId/flow" element={<FlowView />} />
       <Route path="/plans" element={<PlansView />} />
       <Route path="/plans/:planId" element={<PlansView />} />
       <Route path="/plans/:planId/tasks" element={<PlansView />} />

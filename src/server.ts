@@ -38,6 +38,7 @@ import { projectPresetsApi } from "./routes/presets.ts";
 import { projectIntentsApi } from "./routes/intents.ts";
 import { projectFactChecksApi } from "./routes/fact-checks.ts";
 import { projectReferencesApi } from "./routes/references.ts";
+import { flowApi, initFlowWatcher } from "./routes/flowApi.ts";
 
 import {
   BASE_DIR,
@@ -80,6 +81,7 @@ projectApi.route("/", projectDiscussionApi);
 projectApi.route("/", projectDispatchApi);
 projectApi.route("/", projectTreeApi);
 projectApi.route("/", projectWorktreesApi);
+projectApi.route("/", flowApi);
 
 app.route("/api/projects", projectRegistryApi);
 app.route("/api/projects/:projectId", projectApi);
@@ -145,6 +147,9 @@ async function main() {
   if (HUB_MODE) {
     await Deno.mkdir(HUB_DIR, { recursive: true });
     setRegistry(await loadRegistry());
+    for (const project of registry.projects) {
+      void initFlowWatcher(project.path);
+    }
     const hubPidPath = `${HUB_DIR}/hub.pid`;
     await Deno.writeTextFile(hubPidPath, `${Deno.pid}`);
 
@@ -185,6 +190,9 @@ async function main() {
   // Ensure base directory exists
   try {
     await Deno.mkdir(BASE_DIR, { recursive: true });
+    if (!HUB_MODE) {
+      void initFlowWatcher(BASE_DIR);
+    }
   } catch {
     // already exists
   }
