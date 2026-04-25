@@ -199,6 +199,12 @@ def cmd_request_set_phase(args):
     return 0
 
 
+def cmd_request_takeover(args):
+    from scripts.mst_cmds.state import cmd_takeover_request
+
+    return cmd_takeover_request(args)
+
+
 def cmd_request_review(args):
     perspective = str(args.perspective).strip()
     enabled_status = _validate_adversarial_review_enabled(perspective)
@@ -248,6 +254,9 @@ def register(subparsers):
 
     req_cancel = req_sub.add_parser("cancel")
     req_cancel.add_argument("req_id")
+
+    req_takeover = req_sub.add_parser("takeover")
+    req_takeover.add_argument("--id", required=True)
 
     req_set_phase = req_sub.add_parser("set-phase")
     req_set_phase.add_argument("req_id")

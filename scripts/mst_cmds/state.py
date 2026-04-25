@@ -4,6 +4,7 @@ import argparse
 import copy
 import glob
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -31,6 +32,13 @@ from scripts.mst_cmds._common import (
     next_action,
     queue_enqueue,
 )
+
+_ATOMIC_WRITE_COUNTER = itertools.count(1)
+
+
+class TakeoverStormError(RuntimeError):
+    pass
+
 
 def _resolve_owner_ppid() -> int:
     ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
@@ -96,6 +104,10 @@ def _request_json_path(req_id: str) -> Path:
     return _common.BASE_DIR / "requests" / req_id / "request.json"
 
 
+def _plan_json_path(pln_id: str) -> Path:
+    return _common.BASE_DIR / "plans" / pln_id / "plan.json"
+
+
 def _load_json_object(path: Path) -> Optional[dict]:
     data = _common.load_json(path)
     return data if isinstance(data, dict) else None
@@ -108,10 +120,78 @@ def _normalize_agi_id_for_recover(value: str) -> str:
     return agi_id
 
 
-def _with_locked_json_update(path: Path, mutator) -> dict:
+def _normalize_takeover_resource_id(value: str, prefix: str) -> str:
+    resource_id = (value or "").strip().upper()
+    if not re.fullmatch(rf"{re.escape(prefix)}-\d+", resource_id):
+        raise ValueError(f"Invalid {prefix} id: {value}")
+    return resource_id
+
+
+def _takeover_config() -> dict:
+    config = _common._load_config_for_get()
+    takeover = config.get("takeover") if isinstance(config, dict) else {}
+    return takeover if isinstance(takeover, dict) else {}
+
+
+def _takeover_float_config(key: str, default: float) -> float:
+    value = _takeover_config().get(key)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _takeover_int_config(key: str, default: int) -> int:
+    value = _takeover_config().get(key)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _takeover_flock_timeout_sec() -> float:
+    return _takeover_float_config("flock_timeout_sec", 5.0)
+
+
+def _fsync_parent_dir(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _atomic_json_write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp.{os.getpid()}.{next(_ATOMIC_WRITE_COUNTER)}")
+    try:
+        with open(tmp_path, "x", encoding="utf-8") as tmp:
+            json.dump(payload, tmp, ensure_ascii=False, indent=2)
+            tmp.write("\n")
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _with_locked_json_update(path: Path, mutator, *, lock_timeout_sec: Optional[float] = None) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a+", encoding="utf-8") as f:
-        _common._lock_exclusive(f)
+        timeout_sec = _takeover_flock_timeout_sec() if lock_timeout_sec is None else lock_timeout_sec
+        _common._lock_exclusive_with_timeout(f, timeout_sec=timeout_sec)
         try:
             f.seek(0)
             raw = f.read()
@@ -122,15 +202,115 @@ def _with_locked_json_update(path: Path, mutator) -> dict:
             if not isinstance(payload, dict):
                 payload = {}
             updated = mutator(dict(payload))
-            f.seek(0)
-            f.truncate()
-            json.dump(updated, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
+            if not isinstance(updated, dict):
+                raise TypeError("locked JSON mutator must return a dict")
+            _atomic_json_write(path, updated)
             return updated
         finally:
             _common._unlock(f)
+
+
+def _takeover_storm_path(resource_id: str) -> Path:
+    return _common.BASE_DIR / "state" / "_takeover_storm" / f"{resource_id}.json"
+
+
+def _check_takeover_storm(resource_id: str) -> None:
+    window_sec = _takeover_float_config("storm_window_sec", 5.0)
+    max_attempts = _takeover_int_config("storm_max_attempts", 3)
+    now = time.time()
+    path = _takeover_storm_path(resource_id)
+
+    def _mutate(payload: dict) -> dict:
+        raw_attempts = payload.get("attempts")
+        attempts = [
+            float(value)
+            for value in raw_attempts
+            if isinstance(value, (int, float)) and now - float(value) <= window_sec
+        ] if isinstance(raw_attempts, list) else []
+        if len(attempts) >= max_attempts - 1:
+            raise TakeoverStormError(
+                f"[storm detected] {window_sec:g}초 내 {max_attempts}회 takeover 시도 - 잠시 후 재시도"
+            )
+        attempts.append(now)
+        return {"attempts": attempts}
+
+    try:
+        _with_locked_json_update(path, _mutate)
+    except TakeoverStormError:
+        raise
+    except Exception as exc:
+        print(f"[storm detected] warning: failed to update storm counter for {resource_id}: {exc}", file=sys.stderr)
+
+
+def _takeover_json_owner(resource_id: str, json_path: Path) -> int:
+    session_id = _current_uuid_session_id()
+    if not session_id:
+        print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)
+        return 1
+
+    payload = _load_json_object(json_path)
+    if payload is None:
+        print(f"Error: durable state not found: {json_path}", file=sys.stderr)
+        return 1
+
+    previous_owner = payload.get("owner_session_id")
+    previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
+    if previous_owner == session_id:
+        print(f"[takeover] no-op: {resource_id} already owned by current session")
+        return 0
+
+    try:
+        _check_takeover_storm(resource_id)
+    except TakeoverStormError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    def _mutate_owner(current: dict) -> dict:
+        current["owner_session_id"] = session_id
+        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return current
+
+    try:
+        updated = _with_locked_json_update(json_path, _mutate_owner)
+    except TimeoutError as exc:
+        print(f"[takeover] error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"[takeover] error: failed to takeover owner for {resource_id}: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"[takeover] {resource_id}: owner_session_id "
+        f"{previous_owner or '<none>'} -> {updated.get('owner_session_id')}"
+    )
+    return 0
+
+
+def cmd_takeover_agile(args) -> int:
+    try:
+        agi_id = _normalize_takeover_resource_id(args.agi, "AGI")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return _takeover_json_owner(agi_id, _agile_session_path(agi_id))
+
+
+def cmd_takeover_request(args) -> int:
+    try:
+        req_id = _normalize_takeover_resource_id(args.id, "REQ")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return _takeover_json_owner(req_id, _request_json_path(req_id))
+
+
+def cmd_takeover_plan(args) -> int:
+    try:
+        pln_id = _normalize_takeover_resource_id(args.id, "PLN")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return _takeover_json_owner(pln_id, _plan_json_path(pln_id))
 
 
 def _read_snapshot_read_only(session_id: str) -> bool:
@@ -545,10 +725,17 @@ def cmd_state_recover(args):
             return payload
 
         try:
+            _check_takeover_storm(agi_id)
             _with_locked_json_update(session_path, _mutate_owner)
+        except TakeoverStormError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        except TimeoutError as exc:
+            print(f"[cross-session recover] error: {exc}", file=sys.stderr)
+            return 1
         except Exception as exc:
-            print(f"[cross-session recover] warning: failed to takeover owner: {exc}", file=sys.stderr)
-            read_only = True
+            print(f"[cross-session recover] error: failed to takeover owner: {exc}", file=sys.stderr)
+            return 1
 
     try:
         snapshot = recover_agile_snapshot_from_durable_state(

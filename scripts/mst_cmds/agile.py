@@ -760,6 +760,11 @@ def cmd_agile_status(args):
     print(f"objective.version: {objective.get('version', 0)}")
     return 0
 
+def cmd_agile_takeover(args):
+    from scripts.mst_cmds.state import cmd_takeover_agile
+
+    return cmd_takeover_agile(args)
+
 def cmd_agile_update(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
@@ -1700,6 +1705,9 @@ def register(subparsers):
     agile_status = agile_sub.add_parser("status")
     agile_status.add_argument("agi_id")
     agile_status.add_argument("--json", action="store_true")
+
+    agile_takeover = agile_sub.add_parser("takeover")
+    agile_takeover.add_argument("--agi", required=True)
 
     agile_update = agile_sub.add_parser("update")
     agile_update.add_argument("agi_id")

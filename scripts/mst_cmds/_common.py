@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import glob
 import hashlib
 import json
@@ -474,6 +475,30 @@ def _lock_exclusive(file_obj):
         msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, _WINDOWS_LOCK_BYTES)
         return
     fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+
+def _lock_exclusive_with_timeout(file_obj, timeout_sec: float = 5.0, poll_interval: float = 0.05):
+    deadline = time.monotonic() + max(0.0, float(timeout_sec))
+    if os.name == "nt":
+        while True:
+            try:
+                file_obj.seek(0)
+                msvcrt.locking(file_obj.fileno(), msvcrt.LK_NBLCK, _WINDOWS_LOCK_BYTES)
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"lock timeout ({timeout_sec}s) - another session is writing")
+                time.sleep(poll_interval)
+
+    while True:
+        try:
+            fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except (BlockingIOError, OSError) as exc:
+            if isinstance(exc, OSError) and exc.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"lock timeout ({timeout_sec}s) - another session is writing")
+            time.sleep(poll_interval)
 
 def _unlock(file_obj):
     if os.name == "nt":

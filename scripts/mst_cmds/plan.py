@@ -171,6 +171,11 @@ def cmd_plan_complete(args):
     print(f"Error: {pln_id} not found.", file=sys.stderr)
     return 1
 
+def cmd_plan_takeover(args):
+    from scripts.mst_cmds.state import cmd_takeover_plan
+
+    return cmd_takeover_plan(args)
+
 def cmd_plan_render_review(args):
     """plan-review 템플릿을 치환해 prompts/review-{role}.md 파일로 생성한다."""
     pln_id = args.pln_id.upper()
@@ -261,6 +266,9 @@ def register(subparsers):
 
     plan_complete = plan_sub.add_parser("complete")
     plan_complete.add_argument("pln_id")
+
+    plan_takeover = plan_sub.add_parser("takeover")
+    plan_takeover.add_argument("--id", required=True)
 
     p_plan_sync = plan_sub.add_parser("sync", help="Plan 완료 여부 동기화")
     p_plan_sync.add_argument("plan_id", help="Plan ID (예: PLN-068)")
