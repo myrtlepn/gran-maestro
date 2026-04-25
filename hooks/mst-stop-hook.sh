@@ -412,7 +412,7 @@ import sys
 from pathlib import Path
 
 UUID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 
 
@@ -1066,6 +1066,170 @@ PY
   return "$status"
 }
 
+resolve_durable_owner_session_id() {
+  python3 - "$PROJECT_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+base_dir = project_root / ".gran-maestro"
+request_terminal = {"done", "completed", "accepted", "cancelled"}
+plan_terminal = {"done", "completed", "cancelled"}
+values = []
+
+
+def add_owner(path, terminal_statuses=None, require_active=False):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+
+    status = str(payload.get("status") or "").strip().lower()
+    if terminal_statuses is not None and status in terminal_statuses:
+        return
+    if require_active and status != "active":
+        return
+
+    owner_session_id = payload.get("owner_session_id")
+    if isinstance(owner_session_id, str) and owner_session_id.strip():
+        values.append(owner_session_id.strip())
+
+
+for path in sorted((base_dir / "requests").glob("REQ-*/request.json")):
+    add_owner(path, request_terminal)
+
+for path in sorted((base_dir / "plans").glob("PLN-*/plan.json")):
+    add_owner(path, plan_terminal)
+
+for path in sorted((base_dir / "agile").glob("AGI-*/session.json")):
+    add_owner(path, require_active=True)
+
+unique = []
+for value in values:
+    if value not in unique:
+        unique.append(value)
+
+if len(unique) == 1:
+    print(unique[0])
+    raise SystemExit(0)
+if not unique:
+    raise SystemExit(2)
+raise SystemExit(3)
+PY
+}
+
+warn_session_id_mismatch_if_any() {
+  local durable_session_id durable_exit check_output check_status verdict stdin_sid snapshot_sid durable_sid data
+
+  durable_exit=0
+  trap - ERR
+  set +e
+  durable_session_id="$(resolve_durable_owner_session_id)"
+  durable_exit=$?
+  set -e
+  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+  if [ "$durable_exit" -ne 0 ]; then
+    return 0
+  fi
+
+  check_status=0
+  trap - ERR
+  set +e
+  check_output="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - "${SNAPSHOT_PATH:-}" "$durable_session_id" "mst-stop-hook" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+snapshot_path = Path(sys.argv[1]) if sys.argv[1] else None
+durable_sid = str(sys.argv[2] or "").strip()
+hook_name = str(sys.argv[3] or "").strip()
+
+
+def emit_skip():
+    print("SKIP")
+
+
+try:
+    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+stdin_sid = payload.get("session_id")
+stdin_sid = stdin_sid.strip() if isinstance(stdin_sid, str) else ""
+if not stdin_sid or not durable_sid or snapshot_path is None or not snapshot_path.is_file():
+    emit_skip()
+    raise SystemExit(0)
+
+snapshot_sid = ""
+try:
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+except Exception:
+    snapshot = {}
+if isinstance(snapshot, dict):
+    for key in ("session_id", "sessionId"):
+        value = snapshot.get(key)
+        if isinstance(value, str) and value.strip():
+            snapshot_sid = value.strip()
+            break
+if not snapshot_sid:
+    snapshot_sid = snapshot_path.parent.name.strip()
+
+if not snapshot_sid:
+    emit_skip()
+    raise SystemExit(0)
+
+if len({stdin_sid, snapshot_sid, durable_sid}) == 1:
+    emit_skip()
+    raise SystemExit(0)
+
+data = {
+    "stdin_sid": stdin_sid,
+    "snapshot_sid": snapshot_sid,
+    "durable_sid": durable_sid,
+    "hook": hook_name,
+}
+print(
+    "MISMATCH\t{}\t{}\t{}\t{}".format(
+        stdin_sid,
+        snapshot_sid,
+        durable_sid,
+        json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+    )
+)
+PY
+)"
+  check_status=$?
+  set -e
+  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+  if [ "$check_status" -ne 0 ]; then
+    printf '[mst-stop-hook] warn: session_id_mismatch_check_failed exit=%s\n' "$(sanitize_log_value "$check_status")" >&2
+    return 0
+  fi
+
+  verdict="$(printf '%s' "$check_output" | cut -f1)"
+  if [ "$verdict" != "MISMATCH" ]; then
+    return 0
+  fi
+
+  stdin_sid="$(printf '%s' "$check_output" | cut -f2)"
+  snapshot_sid="$(printf '%s' "$check_output" | cut -f3)"
+  durable_sid="$(printf '%s' "$check_output" | cut -f4)"
+  data="$(printf '%s' "$check_output" | cut -f5-)"
+
+  printf '[session-id mismatch] stdin=%s snapshot=%s durable=%s hook=mst-stop-hook\n' \
+    "$(sanitize_log_value "$stdin_sid")" \
+    "$(sanitize_log_value "$snapshot_sid")" \
+    "$(sanitize_log_value "$durable_sid")" >&2
+  append_flow_event "session_id_mismatch" "$data"
+}
+
 is_request_terminal_status() {
   local status="$1"
   case "$status" in
@@ -1584,6 +1748,8 @@ run_exit_boundary_guard() {
 $(exit_boundary_requests)
 EOF
 }
+
+warn_session_id_mismatch_if_any
 
 run_snapshot_guard
 

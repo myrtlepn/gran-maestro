@@ -54,6 +54,28 @@ resolve_mst_script() {
 
 MST_SCRIPT="$(resolve_mst_script)"
 
+resolve_repo_script() {
+  local script_name="$1"
+  local script_dir candidate
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  candidate="$(cd "$script_dir/.." && pwd)/scripts/$script_name"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  candidate="$(cd "$script_dir/../.." && pwd)/scripts/$script_name"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  printf '%s\n' "${PROJECT_ROOT}/scripts/$script_name"
+}
+
+FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
+
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
   local event="${1:-event}"
@@ -62,6 +84,253 @@ debug_log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
   printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+}
+
+sanitize_log_value() {
+  local value="${1:-}"
+  value="${value//$'\n'/ }"
+  value="${value//$'\r'/ }"
+  value="${value//$'\t'/ }"
+  printf '%s' "$value"
+}
+
+warn_helper_failed() {
+  local helper="$1"
+  local status="${2:-1}"
+  local detail="${3:-}"
+
+  helper="$(sanitize_log_value "$helper")"
+  status="$(sanitize_log_value "$status")"
+  detail="$(sanitize_log_value "$detail")"
+  if [ -n "$detail" ]; then
+    printf '[mst-pre-tool-use] helper_failed helper=%s exit=%s %s\n' "$helper" "$status" "$detail" >&2
+  else
+    printf '[mst-pre-tool-use] helper_failed helper=%s exit=%s\n' "$helper" "$status" >&2
+  fi
+}
+
+stdin_session_id() {
+  MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+session_id = payload.get("session_id")
+if isinstance(session_id, str) and session_id.strip():
+    print(session_id.strip())
+PY
+}
+
+SESSION_ID="$(stdin_session_id)"
+SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${SESSION_ID:-unknown}/snapshot.json"
+STDIN_DIGEST="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
+import hashlib
+import os
+
+print(hashlib.sha256(os.environ.get("MST_HOOK_STDIN_RAW", "").encode("utf-8", errors="replace")).hexdigest())
+PY
+)"
+
+append_flow_event() {
+  local event_type="$1"
+  local data="$2"
+  local status
+
+  if [ ! -f "$FLOW_LOGGER_SCRIPT" ]; then
+    warn_helper_failed "flow_logger" "127" "missing path=$(sanitize_log_value "$FLOW_LOGGER_SCRIPT")"
+    return 0
+  fi
+
+  if python3 "$FLOW_LOGGER_SCRIPT" append \
+    --project-root "$PROJECT_ROOT" \
+    --session-id "${SESSION_ID:-unknown}" \
+    --event-type "$event_type" \
+    --data "$data" \
+    --snapshot-path "${SNAPSHOT_PATH:-}" \
+    --stdin-digest "${STDIN_DIGEST:-}" \
+    --ppid "$PPID" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  status=$?
+  warn_helper_failed "flow_logger" "$status" "event_type=$(sanitize_log_value "$event_type")"
+  return 0
+}
+
+resolve_durable_owner_session_id() {
+  python3 - "$PROJECT_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+base_dir = project_root / ".gran-maestro"
+request_terminal = {"done", "completed", "accepted", "cancelled"}
+plan_terminal = {"done", "completed", "cancelled"}
+values = []
+
+
+def add_owner(path, terminal_statuses=None, require_active=False):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+
+    status = str(payload.get("status") or "").strip().lower()
+    if terminal_statuses is not None and status in terminal_statuses:
+        return
+    if require_active and status != "active":
+        return
+
+    owner_session_id = payload.get("owner_session_id")
+    if isinstance(owner_session_id, str) and owner_session_id.strip():
+        values.append(owner_session_id.strip())
+
+
+for path in sorted((base_dir / "requests").glob("REQ-*/request.json")):
+    add_owner(path, request_terminal)
+
+for path in sorted((base_dir / "plans").glob("PLN-*/plan.json")):
+    add_owner(path, plan_terminal)
+
+for path in sorted((base_dir / "agile").glob("AGI-*/session.json")):
+    add_owner(path, require_active=True)
+
+unique = []
+for value in values:
+    if value not in unique:
+        unique.append(value)
+
+if len(unique) == 1:
+    print(unique[0])
+    raise SystemExit(0)
+if not unique:
+    raise SystemExit(2)
+raise SystemExit(3)
+PY
+}
+
+warn_session_id_mismatch_once_if_any() {
+  local durable_session_id durable_exit sentinel check_output check_status verdict stdin_sid snapshot_sid durable_sid data
+
+  [ -n "${SESSION_ID:-}" ] || return 0
+  sentinel="${MST_TMP}/mst-mismatch-warn-${PPID}-${SESSION_ID}.flag"
+  if [ -f "$sentinel" ]; then
+    return 0
+  fi
+
+  durable_exit=0
+  set +e
+  durable_session_id="$(resolve_durable_owner_session_id)"
+  durable_exit=$?
+  set -e
+  if [ "$durable_exit" -ne 0 ]; then
+    return 0
+  fi
+
+  check_status=0
+  set +e
+  check_output="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - "${SNAPSHOT_PATH:-}" "$durable_session_id" "mst-pre-tool-use" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+snapshot_path = Path(sys.argv[1]) if sys.argv[1] else None
+durable_sid = str(sys.argv[2] or "").strip()
+hook_name = str(sys.argv[3] or "").strip()
+
+
+def emit_skip():
+    print("SKIP")
+
+
+try:
+    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+stdin_sid = payload.get("session_id")
+stdin_sid = stdin_sid.strip() if isinstance(stdin_sid, str) else ""
+if not stdin_sid or not durable_sid or snapshot_path is None or not snapshot_path.is_file():
+    emit_skip()
+    raise SystemExit(0)
+
+snapshot_sid = ""
+try:
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+except Exception:
+    snapshot = {}
+if isinstance(snapshot, dict):
+    for key in ("session_id", "sessionId"):
+        value = snapshot.get(key)
+        if isinstance(value, str) and value.strip():
+            snapshot_sid = value.strip()
+            break
+if not snapshot_sid:
+    snapshot_sid = snapshot_path.parent.name.strip()
+
+if not snapshot_sid:
+    emit_skip()
+    raise SystemExit(0)
+
+if len({stdin_sid, snapshot_sid, durable_sid}) == 1:
+    emit_skip()
+    raise SystemExit(0)
+
+data = {
+    "stdin_sid": stdin_sid,
+    "snapshot_sid": snapshot_sid,
+    "durable_sid": durable_sid,
+    "hook": hook_name,
+}
+print(
+    "MISMATCH\t{}\t{}\t{}\t{}".format(
+        stdin_sid,
+        snapshot_sid,
+        durable_sid,
+        json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+    )
+)
+PY
+)"
+  check_status=$?
+  set -e
+
+  if [ "$check_status" -ne 0 ]; then
+    printf '[mst-pre-tool-use] warn: session_id_mismatch_check_failed exit=%s\n' "$(sanitize_log_value "$check_status")" >&2
+    return 0
+  fi
+
+  verdict="$(printf '%s' "$check_output" | cut -f1)"
+  if [ "$verdict" != "MISMATCH" ]; then
+    return 0
+  fi
+
+  if ! ( set -C; : > "$sentinel" ) 2>/dev/null; then
+    return 0
+  fi
+
+  stdin_sid="$(printf '%s' "$check_output" | cut -f2)"
+  snapshot_sid="$(printf '%s' "$check_output" | cut -f3)"
+  durable_sid="$(printf '%s' "$check_output" | cut -f4)"
+  data="$(printf '%s' "$check_output" | cut -f5-)"
+
+  printf '[session-id mismatch] stdin=%s snapshot=%s durable=%s hook=mst-pre-tool-use\n' \
+    "$(sanitize_log_value "$stdin_sid")" \
+    "$(sanitize_log_value "$snapshot_sid")" \
+    "$(sanitize_log_value "$durable_sid")" >&2
+  append_flow_event "session_id_mismatch" "$data"
 }
 
 log_boundary_event() {
@@ -280,6 +549,8 @@ repair_entry_once() {
 $(entry_missing_tasks "$req_id")
 EOF
 }
+
+warn_session_id_mismatch_once_if_any
 
 HOOK_INFO="$(parse_hook_info)"
 SHOULD_CHECK="$(printf '%s' "$HOOK_INFO" | cut -f1)"
