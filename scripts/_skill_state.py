@@ -107,8 +107,13 @@ def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def _base_snapshot(session_id: str) -> Dict[str, Any]:
+    from scripts.mst_cmds.state import _resolve_owner_ppid, _resolve_owner_session_id
+
+    owner_ppid = _resolve_owner_ppid()
     return {
         "sessionId": session_id,
+        "owner_ppid": owner_ppid,
+        "owner_session_id": _resolve_owner_session_id(owner_ppid),
         "currentSkill": "",
         "currentStep": 0,
         "totalSteps": 0,

@@ -110,7 +110,7 @@ def _resolve_owner_session_id(ppid: int) -> Optional[str]:
     except ValueError:
         return None
     canonical = str(session_id)
-    if session_id.variant != uuid.RFC_4122 or canonical != raw_value:
+    if session_id.variant != uuid.RFC_4122 or session_id.version != 4 or canonical != raw_value:
         return None
     return canonical
 

@@ -24,6 +24,7 @@ from scripts.mst_cmds.agile_governance import (
     _generate_drift_report_skeleton,
     _generate_recall_patch_manifest_skeleton,
 )
+from scripts.mst_cmds.state import _resolve_owner_ppid, _resolve_owner_session_id
 from scripts.mst_cmds._common import (
     TYPE_DIRS,
     _agi_events_path,
@@ -711,12 +712,16 @@ def cmd_agile_init(args):
     _agi_events_path(agi_id).touch()
 
     now = _now_iso()
+    owner_ppid = _resolve_owner_ppid()
+    owner_session_id = _resolve_owner_session_id(owner_ppid)
     payload = {
         "id": agi_id,
         "agi_id": agi_id,
         "status": "active",
         "current_sprint": 0,
         "steering_every": args.steering_every,
+        "owner_ppid": owner_ppid,
+        "owner_session_id": owner_session_id,
         "objective": {
             "path": "objective/objective.md",
             "version": 1,
