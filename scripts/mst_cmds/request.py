@@ -188,7 +188,12 @@ def cmd_request_cancel(args):
 
 def cmd_request_set_phase(args):
     """REQ의 current_phase와 status를 원자적으로 변경."""
+    from scripts.mst_cmds.state import _check_read_only
     from scripts._state_manager import set_phase
+
+    read_only_status = _check_read_only(args.req_id)
+    if read_only_status:
+        return read_only_status
     set_phase(_common.BASE_DIR, args.req_id, args.phase, args.status)
     print(f"{args.req_id}: phase={args.phase}, status={args.status}")
     return 0

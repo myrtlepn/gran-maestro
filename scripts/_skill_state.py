@@ -3,6 +3,7 @@ import contextlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any, Dict, Optional
 import warnings
@@ -18,6 +19,11 @@ except ImportError:
 def timestamp_now() -> str:
     """Return current UTC ISO-8601 timestamp."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 
 def _safe_session_id(value: str) -> str:
@@ -133,7 +139,7 @@ def _normalize_stack(value: Any) -> list:
             continue
         skill = item.get("skill")
         step = item.get("step")
-        if isinstance(skill, str) and isinstance(step, int):
+        if isinstance(skill, str) and isinstance(step, (int, float, str)) and not isinstance(step, bool):
             frame = {"skill": skill, "step": step}
             entered_at = item.get("enteredAt")
             if isinstance(entered_at, str):
@@ -321,6 +327,131 @@ def get_snapshot(base_dir: Path, session_id: str = "default") -> Optional[Dict[s
     if snapshot is not None or session_id == "default":
         return snapshot
     return load_snapshot(base_dir, "default")
+
+
+def _load_json_object(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _parse_sprint_number(value: Any) -> Optional[int]:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        raw = value.strip().upper()
+        if raw.startswith("S"):
+            raw = raw[1:]
+        if raw.isdigit():
+            return int(raw)
+    return None
+
+
+def _latest_sprint_result(agi_dir: Path, current_sprint: Any) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    sprint_root = agi_dir / "sprints"
+    if not sprint_root.exists():
+        return None, None
+
+    candidates: list[tuple[int, Path]] = []
+    current_num = _parse_sprint_number(current_sprint)
+    for result_path in sprint_root.glob("S*/result.json"):
+        sprint_name = result_path.parent.name.upper()
+        if not re.fullmatch(r"S\d+", sprint_name):
+            continue
+        sprint_num = int(sprint_name[1:])
+        if current_num is not None and sprint_num > current_num:
+            continue
+        candidates.append((sprint_num, result_path))
+
+    for _, result_path in sorted(candidates, reverse=True):
+        payload = _load_json_object(result_path)
+        if payload is None:
+            continue
+        status = str(payload.get("status", "")).strip().lower()
+        if status in {"failed", "failure", "cancelled", "canceled", "error"}:
+            continue
+        return result_path.parent.name, payload
+    return None, None
+
+
+def _reconstruct_agile_skill_stack(
+    session_payload: Dict[str, Any],
+    sprint_id: Optional[str],
+    result_payload: Optional[Dict[str, Any]],
+) -> tuple[list[Dict[str, Any]], list[str]]:
+    warnings_out: list[str] = []
+    entered_at = timestamp_now()
+    frame: Dict[str, Any] = {"skill": "agile", "step": "2.2.x", "enteredAt": entered_at}
+    if sprint_id:
+        frame["sprint"] = sprint_id
+    if isinstance(result_payload, dict):
+        target_dod = result_payload.get("target_dod") or result_payload.get("dod_ref")
+        if isinstance(target_dod, str) and target_dod.strip():
+            frame["target_dod"] = target_dod.strip()
+        status = result_payload.get("status")
+        if isinstance(status, str) and status.strip():
+            frame["last_result_status"] = status.strip()
+    else:
+        warnings_out.append("recent sprint result not found; recovered agile top-level stack only")
+
+    if _parse_sprint_number(session_payload.get("current_sprint")) is None:
+        warnings_out.append("current_sprint unavailable; recovered agile top-level stack only")
+    return [frame], warnings_out
+
+
+def recover_agile_snapshot_from_durable_state(
+    base_dir: Path,
+    agi_id: str,
+    *,
+    session_id: str,
+    read_only: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Create current-session snapshot from durable AGI session state."""
+    safe_agi_id = str(agi_id or "").strip().upper()
+    if not re.fullmatch(r"AGI-\d+", safe_agi_id):
+        raise ValueError(f"Invalid AGI id: {agi_id}")
+    if not UUID_RE.match(str(session_id or "")):
+        raise ValueError(f"Invalid session id: {session_id}")
+
+    agi_dir = base_dir / "agile" / safe_agi_id
+    session_path = agi_dir / "session.json"
+    session_payload = _load_json_object(session_path)
+    if session_payload is None:
+        return None
+
+    sprint_id, result_payload = _latest_sprint_result(agi_dir, session_payload.get("current_sprint"))
+    stack, warnings_out = _reconstruct_agile_skill_stack(session_payload, sprint_id, result_payload)
+    now = timestamp_now()
+    owner_ppid = session_payload.get("owner_ppid")
+    snapshot = {
+        "sessionId": session_id,
+        "owner_ppid": owner_ppid if isinstance(owner_ppid, int) and not isinstance(owner_ppid, bool) else None,
+        "owner_session_id": session_payload.get("owner_session_id"),
+        "agi_id": safe_agi_id,
+        "currentSkill": "agile",
+        "currentStep": stack[-1].get("step") if stack else "2.2.x",
+        "totalSteps": 0,
+        "enterCount": 1,
+        "skillStack": stack,
+        "status": "active",
+        "durableFallback": True,
+        "durableSessionPath": str(session_path),
+        "current_sprint": session_payload.get("current_sprint"),
+        "agile_status": session_payload.get("status"),
+        "updatedAt": now,
+    }
+    if read_only:
+        snapshot["read_only"] = True
+    if sprint_id:
+        snapshot["recovered_sprint"] = sprint_id
+    if warnings_out:
+        snapshot["warnings"] = warnings_out
+
+    with _acquire_session_lock(base_dir, session_id):
+        _atomic_write_json(snapshot_path(base_dir, session_id), snapshot)
+    return snapshot
 
 
 def mark_paused(base_dir: Path, session_id: str = "default") -> Optional[Dict[str, Any]]:

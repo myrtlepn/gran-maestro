@@ -49,6 +49,167 @@ def _snapshot_session_id() -> str:
     return str(os.getppid())
 
 
+def _session_id_from_hook_stdin() -> Optional[str]:
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return None
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return None
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    direct = payload.get("session_id")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    transcript_path = payload.get("transcript_path")
+    if isinstance(transcript_path, str) and transcript_path.strip():
+        stem = Path(transcript_path).name
+        if stem.endswith(".jsonl"):
+            return stem[:-6]
+        return Path(stem).stem
+    return None
+
+
+def _current_uuid_session_id() -> Optional[str]:
+    from scripts._skill_state import UUID_RE
+
+    candidates = [
+        os.environ.get("MST_SESSION_ID", "").strip(),
+        os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip(),
+        _resolve_owner_session_id(_resolve_owner_ppid()) or "",
+        _session_id_from_hook_stdin() or "",
+    ]
+    for candidate in candidates:
+        if UUID_RE.match(candidate):
+            return candidate
+    return None
+
+
+def _agile_session_path(agi_id: str) -> Path:
+    return _common.BASE_DIR / "agile" / agi_id / "session.json"
+
+
+def _request_json_path(req_id: str) -> Path:
+    return _common.BASE_DIR / "requests" / req_id / "request.json"
+
+
+def _load_json_object(path: Path) -> Optional[dict]:
+    data = _common.load_json(path)
+    return data if isinstance(data, dict) else None
+
+
+def _normalize_agi_id_for_recover(value: str) -> str:
+    agi_id = (value or "").strip().upper()
+    if not re.fullmatch(r"AGI-\d+", agi_id):
+        raise ValueError(f"Invalid AGI id: {value}")
+    return agi_id
+
+
+def _with_locked_json_update(path: Path, mutator) -> dict:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+", encoding="utf-8") as f:
+        _common._lock_exclusive(f)
+        try:
+            f.seek(0)
+            raw = f.read()
+            try:
+                payload = json.loads(raw) if raw.strip() else {}
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            updated = mutator(dict(payload))
+            f.seek(0)
+            f.truncate()
+            json.dump(updated, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+            return updated
+        finally:
+            _common._unlock(f)
+
+
+def _read_snapshot_read_only(session_id: str) -> bool:
+    from scripts._skill_state import load_snapshot
+
+    snapshot = load_snapshot(_skill_state_base_dir(), session_id=session_id)
+    return isinstance(snapshot, dict) and snapshot.get("read_only") is True
+
+
+def _owner_mismatch_read_only(agi_id: str, session_id: str) -> tuple[bool, Optional[str]]:
+    session_payload = _load_json_object(_agile_session_path(agi_id))
+    if session_payload is None:
+        return False, None
+    owner = session_payload.get("owner_session_id")
+    if not isinstance(owner, str) or not owner.strip():
+        return False, None
+    owner = owner.strip()
+    if owner == session_id:
+        return False, owner
+    return True, owner
+
+
+def _resource_owner_mismatch(resource_id: str, session_id: str) -> tuple[bool, Optional[str]]:
+    token = (resource_id or "").strip().upper()
+    if token.startswith("AGI-"):
+        return _owner_mismatch_read_only(token, session_id)
+    if token.startswith("REQ-"):
+        request_payload = _load_json_object(_request_json_path(token))
+        if request_payload is None:
+            return False, None
+        owner = request_payload.get("owner_session_id")
+        if not isinstance(owner, str) or not owner.strip():
+            return False, None
+        owner = owner.strip()
+        if owner == session_id:
+            return False, owner
+        return True, owner
+    return False, None
+
+
+def _check_read_only(req_or_agi_id: str) -> int:
+    """Return non-zero when current session must not mutate durable state."""
+    token = (req_or_agi_id or "").strip().upper()
+    session_id = _current_uuid_session_id()
+    if not session_id:
+        return 0
+    mismatch, _ = _resource_owner_mismatch(token, session_id)
+    if mismatch or _read_snapshot_read_only(session_id):
+        print("[read-only] 현재 session이 owner가 아님. --takeover로 소유권 이전 후 재시도", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _append_cross_session_recover_event(
+    session_id: str,
+    agi_id: str,
+    previous_owner: Optional[str],
+    *,
+    takeover: bool,
+) -> Path:
+    from scripts._flow_logger import flow_detail_path
+
+    project_root = _skill_state_base_dir().parent
+    path = flow_detail_path(project_root, session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "ts": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "event": "cross_session_recover",
+        "agi_id": agi_id,
+        "previous_owner_session_id": previous_owner,
+        "new_owner_session_id": session_id,
+        "takeover": bool(takeover),
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False))
+        f.write("\n")
+    return path
+
+
 def _parse_return_to_parent(value: Optional[str]) -> tuple[Optional[str], Optional[int]]:
     if not value:
         return None, None
@@ -343,6 +504,84 @@ def cmd_state_clear(args):
     return 0
 
 
+def cmd_state_recover(args):
+    from scripts._skill_state import (
+        load_snapshot,
+        recover_agile_snapshot_from_durable_state,
+        snapshot_path,
+    )
+
+    try:
+        agi_id = _normalize_agi_id_for_recover(args.agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    session_id = _current_uuid_session_id()
+    if not session_id:
+        print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)
+        return 1
+
+    state_base_dir = _skill_state_base_dir()
+    existing = load_snapshot(state_base_dir, session_id=session_id)
+    if existing is not None:
+        print(json.dumps(existing, ensure_ascii=False, indent=2))
+        return 0
+
+    session_path = _agile_session_path(agi_id)
+    session_payload = _load_json_object(session_path)
+    if session_payload is None:
+        print(f"[cross-session recover] warning: durable session not found: {session_path}", file=sys.stderr)
+        return 0
+
+    previous_owner = session_payload.get("owner_session_id")
+    previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
+    read_only = bool(previous_owner and previous_owner != session_id and not getattr(args, "takeover", False))
+
+    if previous_owner and previous_owner != session_id and getattr(args, "takeover", False):
+        def _mutate_owner(payload: dict) -> dict:
+            payload["owner_session_id"] = session_id
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            return payload
+
+        try:
+            _with_locked_json_update(session_path, _mutate_owner)
+        except Exception as exc:
+            print(f"[cross-session recover] warning: failed to takeover owner: {exc}", file=sys.stderr)
+            read_only = True
+
+    try:
+        snapshot = recover_agile_snapshot_from_durable_state(
+            state_base_dir,
+            agi_id,
+            session_id=session_id,
+            read_only=read_only,
+        )
+    except Exception as exc:
+        print(f"[cross-session recover] warning: failed durable fallback: {exc}", file=sys.stderr)
+        return 0
+    if snapshot is None:
+        print(f"[cross-session recover] warning: durable session not found: {session_path}", file=sys.stderr)
+        return 0
+
+    flow_path = _append_cross_session_recover_event(
+        session_id,
+        agi_id,
+        previous_owner,
+        takeover=bool(getattr(args, "takeover", False) and not read_only),
+    )
+    if read_only:
+        print(
+            f"[cross-session recover] read-only (owner mismatch: previous={previous_owner}, current={session_id})"
+        )
+    for warning in snapshot.get("warnings", []) if isinstance(snapshot.get("warnings"), list) else []:
+        print(f"[cross-session recover] warning: {warning}", file=sys.stderr)
+    print(f"[cross-session recover] snapshot={snapshot_path(state_base_dir, session_id)}")
+    print(f"[cross-session recover] flow-detail={flow_path}")
+    print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_state_mark_paused(args):
     from scripts._skill_state import mark_paused
 
@@ -398,6 +637,10 @@ def register(subparsers):
     state_sub.add_parser("get")
     state_sub.add_parser("clear")
 
+    state_recover = state_sub.add_parser("recover")
+    state_recover.add_argument("agi_id")
+    state_recover.add_argument("--takeover", action="store_true")
+
     state_mark_paused = state_sub.add_parser("mark-paused")
     state_mark_paused.add_argument("--session-id", required=True)
 
@@ -406,3 +649,7 @@ def register(subparsers):
 
     state_paused_count = state_sub.add_parser("paused-count")
     state_paused_count.add_argument("--session-id", required=True)
+
+    recover = sub.add_parser("recover")
+    recover.add_argument("agi_id")
+    recover.add_argument("--takeover", action="store_true")

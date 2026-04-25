@@ -1165,6 +1165,11 @@ def cmd_agile_result(args):
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    from scripts.mst_cmds.state import _check_read_only
+
+    read_only_status = _check_read_only(agi_id)
+    if read_only_status:
+        return read_only_status
 
     if args.sprint < 0:
         print("Error: --sprint must be >= 0", file=sys.stderr)

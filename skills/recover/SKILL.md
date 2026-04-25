@@ -138,6 +138,38 @@ Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 
 | `merging` | merge 상태 확인 | Phase 5 |
 | `merge_conflict` | 사용자에게 옵션 제시 | Phase 5 |
 
+## Cross-session Recovery
+
+AGI 세션은 Claude Code 대화가 바뀌어 현재 `session_id`의
+`.gran-maestro/state/{session_id}/snapshot.json`이 없을 수 있다. 이 경우
+`mst:recover`는 durable state를 fallback source로 사용한다.
+
+동작:
+- 현재 session snapshot이 있으면 기존 snapshot 복구 경로를 유지한다.
+- 현재 session snapshot이 없으면 `.gran-maestro/agile/{AGI_ID}/session.json`과
+  최근 `sprints/S*/result.json`을 읽어 `skillStack`을 재구성한다.
+- 재구성된 snapshot은 `.gran-maestro/state/{current_session_id}/snapshot.json`에
+  `status: "active"`로 생성된다.
+- 복구 완료 시 current session의 `flow-detail.ndjson`에
+  `event: "cross_session_recover"`가 기록된다.
+
+소유권 guard:
+- `session.json.owner_session_id`가 현재 session과 다르면 recover는 성공하지만
+  read-only mode로 진입한다.
+- read-only mode에서는 snapshot에 `read_only: true`가 기록되고, mutation CLI는
+  non-zero로 중단한다.
+- 소유권을 현재 session으로 이전하려면 `--takeover`를 명시한다. takeover는
+  `session.json`을 파일 락으로 직렬화한 뒤 `owner_session_id`를 현재 session으로
+  갱신한다.
+
+예시:
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py recover AGI-001
+python3 {PLUGIN_ROOT}/scripts/mst.py recover AGI-001 --takeover
+python3 {PLUGIN_ROOT}/scripts/mst.py state recover AGI-001 --takeover
+```
+
 ## 출력 형식 (목록)
 
 ```

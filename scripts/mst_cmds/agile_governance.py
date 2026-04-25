@@ -1988,6 +1988,11 @@ def cmd_agile_objective_transition(args):
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    from scripts.mst_cmds.state import _check_read_only
+
+    read_only_status = _check_read_only(agi_id)
+    if read_only_status:
+        return read_only_status
 
     try:
         dod_id = _normalize_dod_id(args.story)
