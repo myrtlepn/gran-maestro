@@ -129,6 +129,7 @@ DISPATCH = {
     ("state", "set-workflow"): state.cmd_state_set_workflow,
     ("state", "get"): state.cmd_state_get,
     ("state", "clear"): state.cmd_state_clear,
+    ("state", "migrate"): state.migrate,
     ("state", "recover"): state.cmd_state_recover,
     ("state", "mark-paused"): state.cmd_state_mark_paused,
     ("state", "resume-paused"): state.cmd_state_resume_paused,

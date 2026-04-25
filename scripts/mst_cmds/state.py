@@ -19,7 +19,7 @@ import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from scripts.mst_cmds import _common
 from scripts.mst_cmds._common import (
     _parse_bool_arg,
@@ -501,6 +501,329 @@ def _inject_owner_metadata_if_missing(args) -> None:
                 print(f"[mst] warning: failed to inject owner metadata into {plan_json}: {exc}", file=sys.stderr)
 
 
+def _state_migration_base_dir() -> Path:
+    env_base = os.environ.get("MST_BASE_DIR", "").strip()
+    if env_base:
+        return Path(env_base)
+    if _common.BASE_DIR:
+        return _common.BASE_DIR.parent
+    return Path.cwd()
+
+
+def _collect_migration_targets(base_dir: Path) -> list[dict]:
+    """Collect legacy PPID state directories and owner_ppid-only metadata files."""
+    targets = []
+    state_dir = base_dir / ".gran-maestro" / "state"
+    if state_dir.is_dir():
+        for child in state_dir.iterdir():
+            if not child.is_dir() or not child.name.isdigit():
+                continue
+            snapshot = child / "snapshot.json"
+            if not snapshot.is_file():
+                continue
+            try:
+                data = json.loads(snapshot.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            targets.append({
+                "type": "rename_dir",
+                "path": str(child),
+                "ppid": int(child.name),
+                "owner_session_id": data.get("owner_session_id"),
+            })
+
+    patterns = [
+        ".gran-maestro/agile/AGI-*/objective/objective.json",
+        ".gran-maestro/requests/REQ-*/request.json",
+        ".gran-maestro/plans/PLN-*/plan.json",
+    ]
+    for pattern in patterns:
+        for json_path in base_dir.glob(pattern):
+            try:
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(data, dict) and "owner_ppid" in data and "owner_session_id" not in data:
+                targets.append({"type": "owner_field", "path": str(json_path), "data": data})
+    return targets
+
+
+def _create_backup(base_dir: Path, targets: list, backup_dir: Optional[Path] = None) -> Path:
+    if backup_dir is None:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_dir = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for target in targets:
+        src = Path(target["path"])
+        if not src.exists():
+            continue
+        dst = backup_dir / src.relative_to(base_dir)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+    return backup_dir
+
+
+def _next_available_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in itertools.count(1):
+        candidate = path.with_name(f"{path.name}-{index}")
+        if not candidate.exists():
+            return candidate
+
+
+def _migrate_ppid_dir(ppid_dir: Path, owner_session_id: Optional[str], base_dir: Path) -> Tuple[Path, Path]:
+    ppid = ppid_dir.name
+    state_dir = base_dir / ".gran-maestro" / "state"
+    target_name = owner_session_id if isinstance(owner_session_id, str) and owner_session_id.strip() else f"legacy-{ppid}"
+    target_dir = state_dir / target_name
+    if target_dir.exists() and target_dir != ppid_dir:
+        target_dir = _next_available_path(state_dir / f"legacy-{ppid}")
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    ppid_dir.rename(target_dir)
+    return ppid_dir, target_dir
+
+
+def _migrate_owner_field(json_path: Path, ppid_to_session_map: dict) -> Tuple[dict, dict]:
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}, {}
+    ppid = data.get("owner_ppid")
+    before = {"owner_ppid": ppid}
+    data.pop("owner_ppid", None)
+    session_id = ppid_to_session_map.get(ppid)
+    if session_id is None:
+        try:
+            session_id = ppid_to_session_map.get(int(ppid))
+        except (TypeError, ValueError):
+            session_id = None
+    if session_id:
+        data["owner_session_id"] = session_id
+        after = {"owner_session_id": session_id}
+    else:
+        data["legacy_owner_ppid"] = ppid
+        after = {"legacy_owner_ppid": ppid}
+    _atomic_json_write(json_path, data)
+    return before, after
+
+
+def _apply_migration(base_dir: Path, targets: list, log_path: Path, dry_run: bool = False) -> int:
+    """Apply PPID to session_id migration and write a user-observable log."""
+    log_lines = []
+    ppid_to_session = {}
+
+    for target in targets:
+        if target.get("type") != "rename_dir":
+            continue
+        ppid = target.get("ppid")
+        owner_session_id = target.get("owner_session_id")
+        if owner_session_id:
+            ppid_to_session[ppid] = owner_session_id
+        src = Path(target["path"])
+        target_name = owner_session_id if owner_session_id else f"legacy-{ppid}"
+        dst = base_dir / ".gran-maestro" / "state" / target_name
+        if dst.exists() and dst != src:
+            dst = _next_available_path(base_dir / ".gran-maestro" / "state" / f"legacy-{ppid}")
+        if not dry_run:
+            _, dst = _migrate_ppid_dir(src, owner_session_id, base_dir)
+        log_lines.append(f"rename_dir: {src} -> {dst}")
+
+    for target in targets:
+        if target.get("type") != "owner_field":
+            continue
+        json_path = Path(target["path"])
+        data = target.get("data") if isinstance(target.get("data"), dict) else {}
+        ppid = data.get("owner_ppid")
+        session_id = ppid_to_session.get(ppid)
+        if session_id is None:
+            try:
+                session_id = ppid_to_session.get(int(ppid))
+            except (TypeError, ValueError):
+                session_id = None
+        before = {"owner_ppid": ppid}
+        after = {"owner_session_id": session_id} if session_id else {"legacy_owner_ppid": ppid}
+        if not dry_run:
+            before, after = _migrate_owner_field(json_path, ppid_to_session)
+        log_lines.append(
+            "owner_field: "
+            f"{json_path} "
+            f"{json.dumps(before, ensure_ascii=False)} -> {json.dumps(after, ensure_ascii=False)}"
+        )
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8")
+    return len(log_lines)
+
+
+def _run_dry_run(base_dir: Path) -> int:
+    targets = _collect_migration_targets(base_dir)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
+    out_targets = []
+    ppid_to_session = {
+        target["ppid"]: target.get("owner_session_id")
+        for target in targets
+        if target["type"] == "rename_dir" and target.get("owner_session_id")
+    }
+
+    for target in targets:
+        if target["type"] == "rename_dir":
+            session_id = target.get("owner_session_id")
+            if session_id:
+                to_path = str(base_dir / ".gran-maestro" / "state" / session_id)
+            else:
+                to_path = str(base_dir / ".gran-maestro" / "state" / f"legacy-{target['ppid']}")
+            out_targets.append({
+                "type": "rename_dir",
+                "from": target["path"],
+                "to": to_path,
+            })
+        elif target["type"] == "owner_field":
+            data = target.get("data") or {}
+            ppid = data.get("owner_ppid")
+            session_id = ppid_to_session.get(ppid)
+            if session_id is None:
+                try:
+                    session_id = ppid_to_session.get(int(ppid))
+                except (TypeError, ValueError):
+                    session_id = None
+            field = "owner_session_id" if session_id else "legacy_owner_ppid"
+            out_targets.append({
+                "type": "json_field",
+                "path": target["path"],
+                "from": "owner_ppid",
+                "to": field,
+            })
+
+    print(json.dumps(
+        {"targets": out_targets, "backup_path": str(backup_path)},
+        ensure_ascii=False,
+        indent=2,
+    ))
+    return 0
+
+
+def _run_rollback(base_dir: Path) -> int:
+    backups_dir = base_dir / ".gran-maestro" / "backups"
+    if not backups_dir.is_dir():
+        print("error: no backup directory found", file=sys.stderr)
+        return 1
+
+    candidates = sorted(
+        [
+            path
+            for path in backups_dir.iterdir()
+            if path.is_dir() and path.name.startswith("state-migrate-")
+        ],
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    if not candidates:
+        print("error: no state-migrate-* backup found", file=sys.stderr)
+        return 1
+
+    latest = candidates[0]
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = base_dir / ".gran-maestro" / "logs" / f"state-migrate-rollback-{timestamp}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_lines = []
+
+    for src in latest.rglob("*"):
+        if src.is_file():
+            rel = src.relative_to(latest)
+            dst = base_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            log_lines.append(f"restore: {dst}")
+
+    log_path.write_text("\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8")
+    print(f"rolled back from {latest}; log={log_path}")
+    return 0
+
+
+def _run_verify(base_dir: Path) -> int:
+    state_dir = base_dir / ".gran-maestro" / "state"
+    issues = []
+    if state_dir.is_dir():
+        for child in state_dir.iterdir():
+            if child.is_dir() and child.name.isdigit():
+                issues.append(f"numeric_ppid_dir_remains: {child}")
+
+    for pattern in [
+        ".gran-maestro/agile/AGI-*/objective/objective.json",
+        ".gran-maestro/requests/REQ-*/request.json",
+        ".gran-maestro/plans/PLN-*/plan.json",
+    ]:
+        for json_path in base_dir.glob(pattern):
+            try:
+                text = json_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if (
+                '"owner_ppid"' in text
+                and '"owner_session_id"' not in text
+                and '"legacy_owner_ppid"' not in text
+            ):
+                issues.append(f"owner_ppid_remains: {json_path}")
+
+    backups_dir = base_dir / ".gran-maestro" / "backups"
+    backup_present = backups_dir.is_dir() and any(
+        path.is_dir() and path.name.startswith("state-migrate-") for path in backups_dir.iterdir()
+    )
+    status = "PASS" if not issues else "FAIL"
+    print(json.dumps(
+        {"status": status, "issues": issues, "backup_present": backup_present},
+        ensure_ascii=False,
+        indent=2,
+    ))
+    return 0 if status == "PASS" else 1
+
+
+def _run_migrate_default(base_dir: Path) -> int:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = base_dir / ".gran-maestro" / "logs" / f"state-migrate-{timestamp}.log"
+    backup_dir = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
+    lock_path = base_dir / ".gran-maestro" / "tmp" / "mst-state-migrate.lock"
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    targets = _collect_migration_targets(base_dir)
+    if not targets:
+        log_path.write_text("[no changes]\n", encoding="utf-8")
+        print("no_changes: legacy PPID state 없음")
+        return 0
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    _create_backup(base_dir, targets, backup_dir)
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        _common._lock_exclusive_with_timeout(lock_file, timeout_sec=5)
+        try:
+            changes = _apply_migration(base_dir, targets, log_path, dry_run=False)
+        finally:
+            _common._unlock(lock_file)
+
+    print(f"migrated: {changes} item(s); backup={backup_dir}; log={log_path}")
+    return 0
+
+
+def migrate(args: argparse.Namespace) -> int:
+    """state migrate: PPID -> session_id migration entry point."""
+    base_dir = _state_migration_base_dir()
+    if args.dry_run:
+        return _run_dry_run(base_dir)
+    if args.rollback:
+        return _run_rollback(base_dir)
+    if args.verify:
+        return _run_verify(base_dir)
+    return _run_migrate_default(base_dir)
+
+
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     state_path = _workflow_state_file(state_base_dir)
@@ -823,6 +1146,13 @@ def register(subparsers):
 
     state_sub.add_parser("get")
     state_sub.add_parser("clear")
+
+    state_migrate = state_sub.add_parser("migrate")
+    mode_group = state_migrate.add_mutually_exclusive_group()
+    mode_group.add_argument("--dry-run", action="store_true")
+    mode_group.add_argument("--verify", action="store_true")
+    mode_group.add_argument("--rollback", action="store_true")
+    state_migrate.set_defaults(func=migrate)
 
     state_recover = state_sub.add_parser("recover")
     state_recover.add_argument("agi_id")

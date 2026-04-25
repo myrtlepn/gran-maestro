@@ -229,6 +229,31 @@ def cmd_hooks_sync(args):
     return 0
 
 
+def _detect_legacy_ppid_state(base_dir: Path) -> int:
+    """legacy 항목 수 (numeric PPID 디렉토리 + owner_ppid 필드만 가진 JSON)."""
+    count = 0
+    state_dir = base_dir / ".gran-maestro" / "state"
+    if state_dir.is_dir():
+        for child in state_dir.iterdir():
+            if child.is_dir() and child.name.isdigit():
+                count += 1
+
+    for pattern in [
+        ".gran-maestro/agile/AGI-*/objective/objective.json",
+        ".gran-maestro/requests/REQ-*/request.json",
+        ".gran-maestro/plans/PLN-*/plan.json",
+    ]:
+        for jp in base_dir.glob(pattern):
+            try:
+                text = jp.read_text("utf-8")
+            except Exception:
+                continue
+            if '"owner_ppid"' in text and '"owner_session_id"' not in text:
+                count += 1
+
+    return count
+
+
 def doctor(args: argparse.Namespace) -> int:
     installed_path, source_path, plugin_root = _resolve_hooks_paths()
     installed_version = _read_text_file(installed_path / ".mst-hook-version")
@@ -275,6 +300,12 @@ def doctor(args: argparse.Namespace) -> int:
     print(f"Expected version:  {source_version}")
     print()
     print(f"Checked at: {checked_at}")
+
+    base_dir = Path(os.environ.get("MST_BASE_DIR", os.getcwd()))
+    legacy_count = _detect_legacy_ppid_state(base_dir)
+    if legacy_count > 0:
+        print(f"[warn] legacy PPID state 감지 — {legacy_count}개 항목")
+        print("실행: python3 mst.py state migrate --dry-run")
     return return_code
 
 
