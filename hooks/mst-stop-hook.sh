@@ -474,7 +474,7 @@ import json
 import sys
 
 details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "allow", "reason": sys.argv[1], "details_anchor": details_anchor}, ensure_ascii=False))
+print(json.dumps({"decision": "approve", "reason": sys.argv[1], "details_anchor": details_anchor}, ensure_ascii=False))
 PY
 }
 
