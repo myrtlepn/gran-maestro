@@ -294,17 +294,117 @@ read_hook_version() {
   printf ''
 }
 
+_auto_migrate_acquire_lock() {
+  local lock_path="$1"
+  local stale_secs="${2:-120}"
+  mkdir -p "$(dirname "$lock_path")" 2>/dev/null || return 1
+  if [ -e "$lock_path" ]; then
+    local now mtime age
+    now="$(date +%s 2>/dev/null || printf '0')"
+    mtime="$(stat -f %m "$lock_path" 2>/dev/null || stat -c %Y "$lock_path" 2>/dev/null || printf '0')"
+    age=$((now - mtime))
+    if [ "$age" -gt "$stale_secs" ]; then
+      rm -f "$lock_path" 2>/dev/null || return 1
+    else
+      return 1
+    fi
+  fi
+  ( set -C; printf '%s\n' "$$" > "$lock_path" ) 2>/dev/null || return 1
+  return 0
+}
+
+_auto_migrate_release_lock() {
+  rm -f "$1" 2>/dev/null || true
+}
+
+_auto_migrate_failed_recently() {
+  local marker="$1"
+  local ttl_secs="${2:-600}"
+  [ -f "$marker" ] || return 1
+  local now mtime age
+  now="$(date +%s 2>/dev/null || printf '0')"
+  mtime="$(stat -f %m "$marker" 2>/dev/null || stat -c %Y "$marker" 2>/dev/null || printf '0')"
+  age=$((now - mtime))
+  if [ "$age" -gt "$ttl_secs" ]; then
+    rm -f "$marker" 2>/dev/null || true
+    return 1
+  fi
+  return 0
+}
+
+_auto_migrate_mark_failed() {
+  local marker="$1"
+  mkdir -p "$(dirname "$marker")" 2>/dev/null || return 1
+  printf '%s\n' "$(date +%s 2>/dev/null || printf '0')" > "$marker" 2>/dev/null || true
+}
+
+_auto_migrate_clear_failed() {
+  rm -f "$1" 2>/dev/null || true
+}
+
 check_hook_version_mismatch() {
   local plugin_version hook_version
   plugin_version="$(read_plugin_version)"
   hook_version="$(read_hook_version)"
 
-  if [ -n "$plugin_version" ] && [ "$plugin_version" != "$hook_version" ]; then
-    local hook_display
-    hook_display="${hook_version:-missing}"
-    echo "[mst-session-init] warning: hook version mismatch (hook=$hook_display plugin=$plugin_version). Run /mst:on to sync hooks." >&2
-    debug_log "session_init_version_mismatch" "hook=$hook_display plugin=$plugin_version"
+  if [ -z "$plugin_version" ] || [ "$plugin_version" = "$hook_version" ]; then
+    return 0
   fi
+
+  local hook_display
+  hook_display="${hook_version:-missing}"
+  echo "[mst-session-init] warning: hook version mismatch (hook=$hook_display plugin=$plugin_version). Auto-migration will attempt cleanup." >&2
+  debug_log "session_init_version_mismatch" "hook=$hook_display plugin=$plugin_version"
+
+  # G4: 환경 detection — claude CLI 부재 또는 명시적 disable 시 skip
+  if [ "${MST_DISABLE_AUTO_MIGRATE:-0}" = "1" ]; then
+    echo "[mst-session-init] auto-migration skipped (MST_DISABLE_AUTO_MIGRATE=1). Run /mst:on manually to sync." >&2
+    return 0
+  fi
+
+  if ! command -v timeout >/dev/null 2>&1; then
+    echo "[mst-session-init] auto-migration skipped (timeout command not in PATH). Run /mst:on manually to sync." >&2
+    return 0
+  fi
+
+  # G3: anti-loop — 직전 마이그레이션 실패 marker 존재 시 skip (TTL 600s)
+  local migration_failed_marker="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/tmp/migration-failed"
+  if _auto_migrate_failed_recently "$migration_failed_marker" 600; then
+    echo "[mst-session-init] auto-migration skipped (recent attempt failed within 10min window). Run /mst:on manually." >&2
+    return 0
+  fi
+
+  # G1: 동시성 lock — 단일 실행 보장
+  local migration_lock="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/tmp/migration.lock"
+  if ! _auto_migrate_acquire_lock "$migration_lock" 120; then
+    debug_log "session_init_auto_migrate_skipped" "another in progress"
+    return 0
+  fi
+
+  # G2: fail-open — 30s timeout + cleanup 실행. 실패해도 SessionStart hook은 exit 0.
+  local plugin_root="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"
+  if [ -z "$plugin_root" ]; then
+    plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  local mst_script="${plugin_root}/scripts/mst.py"
+
+  if [ ! -f "$mst_script" ]; then
+    debug_log "session_init_auto_migrate_skipped" "mst.py missing path=$mst_script"
+    _auto_migrate_release_lock "$migration_lock"
+    return 0
+  fi
+
+  if timeout 30 python3 "$mst_script" on cleanup --silent >/dev/null 2>&1; then
+    _auto_migrate_clear_failed "$migration_failed_marker"
+    debug_log "session_init_auto_migrate_ok" "plugin=$plugin_version"
+  else
+    _auto_migrate_mark_failed "$migration_failed_marker"
+    debug_log "session_init_auto_migrate_failed" "plugin=$plugin_version"
+    echo "[mst-session-init] auto-migration failed; marker recorded (Run /mst:on manually)." >&2
+  fi
+
+  _auto_migrate_release_lock "$migration_lock"
+  return 0
 }
 
 cleanup_stale_markers() {
