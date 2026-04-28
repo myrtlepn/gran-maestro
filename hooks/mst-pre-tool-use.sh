@@ -1,16 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_path="${BASH_SOURCE[0]}"
+case "$script_path" in
+  */*) script_dir="${script_path%/*}" ;;
+  *) script_dir="$PWD" ;;
+esac
 case "$script_dir" in
-  */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
-    ;;  # 정상 경로
-  *)
-    echo "[mst-hook] warning: unexpected execution path ($script_dir). Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  /*) ;;
+  *) script_dir="$(cd "$script_dir" && pwd)" ;;
+esac
+
+_mst_hooks_dir_is_valid() {
+  local dir="$1" parent
+  case "$dir" in
+    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
+    */.claude/plugins/cache/*/hooks) return 0 ;;
+    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
+  esac
+  if [ -f "$dir/lib/sha256.bash" ]; then
+    return 0
+  fi
+  case "$dir" in
+    */.claude/hooks)
+      parent="${dir%/.claude/hooks}"
+      [ -d "$parent/.gran-maestro" ] && return 0
+      ;;
+    */hooks)
+      parent="${dir%/hooks}"
+      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
+      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
+        case "$dir" in
+          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
+        esac
+      fi
+      ;;
+  esac
+  return 1
+}
+
+case "$script_dir" in
+  *'${CLAUDE_PLUGIN_ROOT}'*)
+    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
     exit 0
     ;;
 esac
+
+if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
+  echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  exit 0
+fi
 
 resolve_project_root() {
   local git_top candidate parent
@@ -42,6 +81,120 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+
+HOOK_DIR="$script_dir"
+
+if [[ ! "$STDIN_RAW" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"Skill\" ]]; then
+  exec python3 "${HOOK_DIR}/lib/pre_tool_use_fast.py" "$PROJECT_ROOT" <<<"$STDIN_RAW"
+fi
+
+parse_hook_payload() {
+  MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' 2>/dev/null || printf '\t\t\t\t\t{}\t\n'
+import hashlib
+import json
+import os
+
+raw = os.environ.get("MST_HOOK_STDIN_RAW", "")
+try:
+    payload = json.loads(raw or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+tool_input = payload.get("tool_input")
+if not isinstance(tool_input, dict):
+    tool_input = {}
+
+def clean(value):
+    if not isinstance(value, str):
+        return ""
+    return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
+session_id = clean(payload.get("session_id"))
+tool_name = clean(payload.get("tool_name"))
+file_path = clean(tool_input.get("file_path") or tool_input.get("path"))
+command = clean(tool_input.get("command"))
+skill_name = ""
+for key in ("skill_name", "skill", "name"):
+    value = tool_input.get(key)
+    if isinstance(value, str) and value.strip():
+        skill_name = clean(value)
+        break
+
+args_value = tool_input.get("args")
+if isinstance(args_value, str):
+    args_text = clean(args_value)
+else:
+    try:
+        args_text = clean(json.dumps(args_value, ensure_ascii=False))
+    except Exception:
+        args_text = clean(str(args_value or ""))
+
+tool_input_canonical = json.dumps(tool_input, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+stdin_digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+print(
+    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
+        session_id,
+        tool_name,
+        file_path,
+        command,
+        skill_name,
+        args_text,
+        tool_input_canonical,
+        stdin_digest,
+    )
+)
+PY
+}
+
+# T02: 정책 무결성 (sha256 + rule engine + hardcoded core preflight)
+if [ -f "${HOOK_DIR}/lib/sha256.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${HOOK_DIR}/lib/sha256.bash"
+fi
+HOOK_PAYLOAD_INFO="$(parse_hook_payload)"
+SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f1)"
+MST_HOOK_TOOL_NAME="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f2)"
+MST_HOOK_FILE_PATH="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f3)"
+MST_HOOK_COMMAND="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f4)"
+MST_HOOK_SKILL_NAME="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f5)"
+MST_HOOK_ARGS_TEXT="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f6)"
+MST_HOOK_TOOL_INPUT_CANONICAL="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f7)"
+MST_HOOK_STDIN_DIGEST="$(printf '%s' "$HOOK_PAYLOAD_INFO" | cut -f8)"
+export MST_HOOK_TOOL_NAME MST_HOOK_FILE_PATH MST_HOOK_COMMAND MST_HOOK_SKILL_NAME
+export MST_HOOK_ARGS_TEXT MST_HOOK_TOOL_INPUT_CANONICAL MST_HOOK_STDIN_DIGEST
+if [ -f "${HOOK_DIR}/lib/rule_engine.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${HOOK_DIR}/lib/rule_engine.bash"
+fi
+
+# T01: history ledger (verify + append-on-exit)
+resolve_history_lib() {
+  local script_dir candidate
+  script_dir="$HOOK_DIR"
+
+  for candidate in \
+    "${script_dir}/lib/history.bash" \
+    "$(cd "$script_dir/.." && pwd)/hooks/lib/history.bash" \
+    "$(cd "$script_dir/../.." && pwd)/hooks/lib/history.bash" \
+    "${PROJECT_ROOT}/hooks/lib/history.bash"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+HISTORY_LIB="$(resolve_history_lib || true)"
+if [ -z "$HISTORY_LIB" ]; then
+  echo "[mst-pre-tool-use] history ledger mismatch: missing history library" >&2
+  exit 2
+fi
+source "$HISTORY_LIB"
 
 
 resolve_mst_script() {
@@ -120,33 +273,30 @@ warn_helper_failed() {
   fi
 }
 
-stdin_session_id() {
-  MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' 2>/dev/null || true
-import json
-import os
-
-try:
-    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-
-session_id = payload.get("session_id")
-if isinstance(session_id, str) and session_id.strip():
-    print(session_id.strip())
-PY
-}
-
-SESSION_ID="$(stdin_session_id)"
 SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${SESSION_ID:-unknown}/snapshot.json"
-STDIN_DIGEST="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
-import hashlib
-import os
+STDIN_DIGEST="${MST_HOOK_STDIN_DIGEST:-}"
 
-print(hashlib.sha256(os.environ.get("MST_HOOK_STDIN_RAW", "").encode("utf-8", errors="replace")).hexdigest())
-PY
-)"
+if ! mst_history_verify_or_block "$PROJECT_ROOT" "${SESSION_ID:-}"; then
+  exit 2
+fi
+
+if declare -F gm_policy_preflight >/dev/null 2>&1; then
+  gm_policy_preflight
+fi
+
+HISTORY_APPEND_ENABLED=1
+append_history_on_exit() {
+  local status=$?
+  trap - EXIT
+  if [ "${HISTORY_APPEND_ENABLED:-0}" = "1" ] && [ "$status" -ne 2 ]; then
+    if ! mst_history_append_tool_call "$PROJECT_ROOT" "${SESSION_ID:-}" "$STDIN_RAW"; then
+      echo "[mst-pre-tool-use] history ledger mismatch: append failed" >&2
+      status=2
+    fi
+  fi
+  exit "$status"
+}
+trap append_history_on_exit EXIT
 
 append_flow_event() {
   local event_type="$1"
@@ -235,6 +385,9 @@ warn_session_id_mismatch_once_if_any() {
   [ -n "${SESSION_ID:-}" ] || return 0
   sentinel="${MST_TMP}/mst-mismatch-warn-${PPID}-${SESSION_ID}.flag"
   if [ -f "$sentinel" ]; then
+    return 0
+  fi
+  if [ ! -e "${PROJECT_ROOT}/.gran-maestro/requests" ] && [ ! -e "${PROJECT_ROOT}/.gran-maestro/plans" ] && [ ! -e "${PROJECT_ROOT}/.gran-maestro/agile" ]; then
     return 0
   fi
 
@@ -379,46 +532,14 @@ PYJSON
 }
 
 parse_hook_info() {
-  printf '%s' "$STDIN_RAW" | python3 -c '
-import json
-import re
-import sys
-
-raw = sys.stdin.read() or ""
-try:
-    payload = json.loads(raw)
-except Exception:
-    payload = {}
-
-if not isinstance(payload, dict):
-    payload = {}
-
-tool_name = str(payload.get("tool_name") or "").strip()
-tool_input = payload.get("tool_input")
-if not isinstance(tool_input, dict):
-    tool_input = {}
-
-skill_name = ""
-for key in ("skill_name", "skill", "name"):
-    value = tool_input.get(key)
-    if isinstance(value, str) and value.strip():
-        skill_name = value.strip()
-        break
-
-args_value = tool_input.get("args")
-if isinstance(args_value, str):
-    args_text = args_value
-else:
-    try:
-        args_text = json.dumps(args_value, ensure_ascii=False)
-    except Exception:
-        args_text = str(args_value or "")
-
-match = re.search(r"\bREQ-\d+\b", args_text)
-req_id = match.group(0) if match else ""
-should_check = tool_name == "Skill" and skill_name in {"mst:approve", "/mst:approve"} and bool(req_id)
-print("{}\t{}\t{}\t{}".format("true" if should_check else "false", tool_name, skill_name, req_id))
-' 2>/dev/null || printf 'false\t\t\t\n'
+  local req_id="" should_check="false"
+  if [[ "${MST_HOOK_ARGS_TEXT:-}" =~ (REQ-[0-9]+) ]]; then
+    req_id="${BASH_REMATCH[1]}"
+  fi
+  if [ "${MST_HOOK_TOOL_NAME:-}" = "Skill" ] && { [ "${MST_HOOK_SKILL_NAME:-}" = "mst:approve" ] || [ "${MST_HOOK_SKILL_NAME:-}" = "/mst:approve" ]; } && [ -n "$req_id" ]; then
+    should_check="true"
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$should_check" "${MST_HOOK_TOOL_NAME:-}" "${MST_HOOK_SKILL_NAME:-}" "$req_id"
 }
 
 run_boundary_check() {

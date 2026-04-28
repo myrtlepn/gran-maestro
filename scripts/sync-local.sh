@@ -23,6 +23,12 @@ if [ -d "$REPO_ROOT/hooks" ]; then
   for f in "$REPO_ROOT"/hooks/mst-*.sh; do
     [ -f "$f" ] && cp "$f" "$REPO_ROOT/.claude/hooks/" && chmod +x "$REPO_ROOT/.claude/hooks/$(basename "$f")"
   done
+  if [ -d "$REPO_ROOT/hooks/lib" ]; then
+    mkdir -p "$REPO_ROOT/.claude/hooks/lib"
+    for f in "$REPO_ROOT"/hooks/lib/*; do
+      [ -f "$f" ] && cp "$f" "$REPO_ROOT/.claude/hooks/lib/"
+    done
+  fi
   echo "✓ hooks/ → .claude/hooks/ 동기화 완료"
 fi
 

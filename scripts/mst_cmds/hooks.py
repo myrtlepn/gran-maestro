@@ -169,6 +169,21 @@ def _hook_files_by_name(path: Path) -> dict[str, Path]:
     return {hook_path.name: hook_path for hook_path in sorted(path.iterdir()) if _is_hook_file(hook_path)}
 
 
+def _hook_sync_files(source_hooks_dir: Path) -> list[tuple[Path, Path]]:
+    files: list[tuple[Path, Path]] = []
+    files.extend((path, Path(path.name)) for path in sorted(source_hooks_dir.iterdir()) if path.is_file())
+
+    lib_dir = source_hooks_dir / "lib"
+    if lib_dir.is_dir():
+        files.extend(
+            (path, Path("lib") / path.name)
+            for path in sorted(lib_dir.iterdir())
+            if path.is_file()
+        )
+
+    return files
+
+
 def cmd_hooks_sync(args):
     silent = bool(getattr(args, "silent", False))
     plugin_root = None
@@ -182,7 +197,7 @@ def cmd_hooks_sync(args):
         version_stamp_path = project_hooks_dir / ".mst-hook-version"
         if not source_hooks_dir.is_dir():
             raise RuntimeError(f"hooks source not found: {source_hooks_dir}")
-        source_files = sorted(path for path in source_hooks_dir.iterdir() if path.is_file())
+        source_files = _hook_sync_files(source_hooks_dir)
         if not source_files:
             raise RuntimeError(f"hooks source empty: {source_hooks_dir}")
 
@@ -194,8 +209,8 @@ def cmd_hooks_sync(args):
 
         if current_version == plugin_version:
             resynced_files = 0
-            for src_file in source_files:
-                dest_file = project_hooks_dir / src_file.name
+            for src_file, rel_path in source_files:
+                dest_file = project_hooks_dir / rel_path
                 hashes_match = dest_file.is_file() and _sha256_file(src_file) == _sha256_file(dest_file)
                 if hashes_match:
                     continue
@@ -209,8 +224,8 @@ def cmd_hooks_sync(args):
                     print(f"[hooks] up-to-date (v{plugin_version})")
         else:
             synced_files = 0
-            for src_file in source_files:
-                dest_file = project_hooks_dir / src_file.name
+            for src_file, rel_path in source_files:
+                dest_file = project_hooks_dir / rel_path
                 _atomic_copy_file(src_file, dest_file)
                 synced_files += 1
 

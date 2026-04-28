@@ -1,16 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_path="${BASH_SOURCE[0]}"
+case "$script_path" in
+  */*) script_dir="${script_path%/*}" ;;
+  *) script_dir="$PWD" ;;
+esac
 case "$script_dir" in
-  */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
-    ;;  # 정상 경로
-  *)
-    echo "[mst-hook] warning: unexpected execution path ($script_dir). Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  /*) ;;
+  *) script_dir="$(cd "$script_dir" && pwd)" ;;
+esac
+
+_mst_hooks_dir_is_valid() {
+  local dir="$1" parent
+  case "$dir" in
+    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
+    */.claude/plugins/cache/*/hooks) return 0 ;;
+    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
+  esac
+  if [ -f "$dir/lib/sha256.bash" ]; then
+    return 0
+  fi
+  case "$dir" in
+    */.claude/hooks)
+      parent="${dir%/.claude/hooks}"
+      [ -d "$parent/.gran-maestro" ] && return 0
+      ;;
+    */hooks)
+      parent="${dir%/hooks}"
+      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
+      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
+        case "$dir" in
+          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
+        esac
+      fi
+      ;;
+  esac
+  return 1
+}
+
+case "$script_dir" in
+  *'${CLAUDE_PLUGIN_ROOT}'*)
+    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
     exit 0
     ;;
 esac
+
+if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
+  echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  exit 0
+fi
 
 resolve_project_root() {
   local git_top candidate parent

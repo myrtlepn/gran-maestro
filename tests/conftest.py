@@ -38,23 +38,37 @@ if [ "$#" -gt 0 ]; then
         */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
           ;;
         *)
-          safe_id="$(printf '%s' "$script_dir" | shasum -a 256 | awk '{{print $1}}')"
-          target_root="$cache_root/$safe_id/.claude/plugins/cache/gran-maestro/mst/TEST"
-          target_hooks="$target_root/hooks"
-          mkdir -p "$target_hooks"
-          cp "$script" "$target_hooks/$base"
-          chmod +x "$target_hooks/$base"
-
-          source_scripts="$(cd "$script_dir/.." && pwd)/scripts"
-          rm -rf "$target_root/scripts"
-          if [ -d "$source_scripts" ]; then
-            ln -s "$source_scripts" "$target_root/scripts"
+          # T09 relaxed guard 호환: lib/sha256.bash + parent .git/.gran-maestro 마커가 있으면
+          # 정상 hooks 디렉토리이므로 redirection 없이 그대로 실행 (relaxed guard가 통과시킴).
+          parent_dir="$(dirname "$script_dir")"
+          if [ -f "$script_dir/lib/sha256.bash" ] \
+             && {{ [ -e "$parent_dir/.git" ] || [ -d "$parent_dir/.gran-maestro" ]; }}; then
+            : # passthrough; T09 relaxed guard accepts this path
           else
-            mkdir -p "$target_root/scripts"
-          fi
+            safe_id="$(printf '%s' "$script_dir" | shasum -a 256 | awk '{{print $1}}')"
+            target_root="$cache_root/$safe_id/.claude/plugins/cache/gran-maestro/mst/TEST"
+            target_hooks="$target_root/hooks"
+            mkdir -p "$target_hooks"
+            cp "$script" "$target_hooks/$base"
+            chmod +x "$target_hooks/$base"
 
-          shift
-          exec "$real_bash" "$target_hooks/$base" "$@"
+            # T09: hooks/lib 동시 복사 — fast path python script 로드 보장
+            if [ -d "$script_dir/lib" ]; then
+              rm -rf "$target_hooks/lib"
+              cp -R "$script_dir/lib" "$target_hooks/lib"
+            fi
+
+            source_scripts="$(cd "$script_dir/.." && pwd)/scripts"
+            rm -rf "$target_root/scripts"
+            if [ -d "$source_scripts" ]; then
+              ln -s "$source_scripts" "$target_root/scripts"
+            else
+              mkdir -p "$target_root/scripts"
+            fi
+
+            shift
+            exec "$real_bash" "$target_hooks/$base" "$@"
+          fi
           ;;
       esac
       ;;

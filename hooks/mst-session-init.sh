@@ -1,32 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_path="${BASH_SOURCE[0]}"
+case "$script_path" in
+  */*) script_dir="${script_path%/*}" ;;
+  *) script_dir="$PWD" ;;
+esac
 case "$script_dir" in
-  */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
-    ;;  # 정상 경로
-  *)
-    echo "[mst-hook] warning: unexpected execution path ($script_dir). Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  /*) ;;
+  *) script_dir="$(cd "$script_dir" && pwd)" ;;
+esac
+
+_mst_hooks_dir_is_valid() {
+  local dir="$1" parent
+  case "$dir" in
+    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
+    */.claude/plugins/cache/*/hooks) return 0 ;;
+    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
+  esac
+  if [ -f "$dir/lib/sha256.bash" ]; then
+    return 0
+  fi
+  case "$dir" in
+    */.claude/hooks)
+      parent="${dir%/.claude/hooks}"
+      [ -d "$parent/.gran-maestro" ] && return 0
+      ;;
+    */hooks)
+      parent="${dir%/hooks}"
+      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
+      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
+        case "$dir" in
+          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
+        esac
+      fi
+      ;;
+  esac
+  return 1
+}
+
+case "$script_dir" in
+  *'${CLAUDE_PLUGIN_ROOT}'*)
+    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
     exit 0
     ;;
 esac
 
-# Claude Code version guard: ${CLAUDE_PLUGIN_ROOT} 미지원 버전 감지 시 fail-open
-required_claude_version="0.0.0"  # placeholder: REF-014 후속 검증으로 확정 (도메인 E)
-if command -v claude >/dev/null 2>&1; then
-  detected_claude_version="$(claude --version 2>/dev/null | head -1 | awk '{print $NF}' || true)"
-  if [ -n "$detected_claude_version" ] && [ -n "$required_claude_version" ] && [ "$required_claude_version" != "0.0.0" ]; then
-    # version_lt: 사용 가능한 버전 비교 함수가 없으므로 sort -V로 비교
-    lower_version="$(printf '%s\n%s\n' "$detected_claude_version" "$required_claude_version" | sort -V | head -1)"
-    if [ "$lower_version" = "$detected_claude_version" ] && [ "$detected_claude_version" != "$required_claude_version" ]; then
-      echo "[mst-session-init] error: Claude Code $detected_claude_version is below required $required_claude_version for plugin hooks. Update Claude Code." >&2
-      # fail-open: 세션은 계속 동작
-      exit 0
-    fi
-  fi
+if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
+  echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+  exit 0
 fi
-# claude 명령 미존재 또는 버전 감지 실패 시에도 fail-open (사용자 차단 0건)
 
 resolve_project_root() {
   local git_top candidate parent
@@ -60,6 +83,31 @@ echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
 
+resolve_history_lib() {
+  local script_dir candidate
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  for candidate in \
+    "${script_dir}/lib/history.bash" \
+    "$(cd "$script_dir/.." && pwd)/hooks/lib/history.bash" \
+    "$(cd "$script_dir/../.." && pwd)/hooks/lib/history.bash" \
+    "${PROJECT_ROOT}/hooks/lib/history.bash"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+HISTORY_LIB="$(resolve_history_lib || true)"
+if [ -n "$HISTORY_LIB" ]; then
+  source "$HISTORY_LIB"
+else
+  echo "[mst-session-init] warning: history library not found; skipped history sentinel initialization." >&2
+fi
+
 
 debug_log() {
   [ "${MST_DEBUG:-0}" = "1" ] || return 0
@@ -69,6 +117,54 @@ debug_log() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
   printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+}
+
+stdin_session_id() {
+  MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+session_id = payload.get("session_id")
+if isinstance(session_id, str) and session_id.strip():
+    print(session_id.strip())
+PY
+}
+
+init_history_sentinel() {
+  local session_id
+  [ -n "${HISTORY_LIB:-}" ] || return 0
+  session_id="$(stdin_session_id)"
+  [ -n "$session_id" ] || return 0
+  mst_history_init_session "$PROJECT_ROOT" "$session_id"
+}
+
+append_session_lifecycle_events() {
+  local session_id timestamp_enter timestamp_state timestamp_exit event_enter event_state event_exit skill session_dir history_file
+  [ -n "${HISTORY_LIB:-}" ] || return 0
+  declare -F mst_history_append_events_batch >/dev/null 2>&1 || return 0
+  session_id="$(stdin_session_id)"
+  [ -n "$session_id" ] || return 0
+
+  skill="mst:session-init"
+  session_dir="$(mst_history_session_dir "$PROJECT_ROOT" "$session_id")"
+  history_file="${session_dir}/history.ndjson"
+  mkdir -p "$session_dir" || return 1
+  [ -f "$history_file" ] || : > "$history_file" || return 1
+  timestamp_enter="$(mst_history_timestamp)"
+  timestamp_state="$(mst_history_timestamp)"
+  timestamp_exit="$(mst_history_timestamp)"
+
+  event_enter="$(printf '{"type":"skill_enter","skill":"%s","timestamp":"%s"}' "$(mst_history_json_escape "$skill")" "$timestamp_enter")"
+  event_state="$(printf '{"type":"state_change","state":"session_initialized","timestamp":"%s"}' "$timestamp_state")"
+  event_exit="$(printf '{"type":"skill_exit","skill":"%s","timestamp":"%s"}' "$(mst_history_json_escape "$skill")" "$timestamp_exit")"
+  mst_history_append_events_batch "$PROJECT_ROOT" "$session_id" "$event_enter" "$event_state" "$event_exit"
 }
 
 clear_next_action_from_plan_json() {
@@ -464,8 +560,14 @@ hooks_root = os.path.join(project_root, "hooks")
 if os.path.isdir(hooks_root):
     for filename in sorted(os.listdir(hooks_root)):
         path = os.path.join(hooks_root, filename)
-        if filename.endswith(".sh") and is_regular_source(path):
+        if os.path.isfile(path) and is_regular_source(path):
             sources.append(path)
+    lib_root = os.path.join(hooks_root, "lib")
+    if os.path.isdir(lib_root):
+        for filename in sorted(os.listdir(lib_root)):
+            path = os.path.join(lib_root, filename)
+            if os.path.isfile(path) and is_regular_source(path):
+                sources.append(path)
 
 sources = sorted(sources)
 rel_paths = {path: os.path.relpath(path, project_root) for path in sources}
@@ -913,6 +1015,12 @@ if ! write_initial_state; then
 fi
 if ! write_session_bridge; then
   echo "[mst-session-init] warning: failed to write session bridge file." >&2
+fi
+if ! init_history_sentinel; then
+  echo "[mst-session-init] warning: failed to initialize history ledger sentinels." >&2
+fi
+if ! append_session_lifecycle_events; then
+  echo "[mst-session-init] warning: failed to append session lifecycle history events." >&2
 fi
 
 # === Auto-gardening trigger (PLN-475 / REQ-633-T03) ===

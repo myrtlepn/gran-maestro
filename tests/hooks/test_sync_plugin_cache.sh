@@ -142,6 +142,18 @@ write_project_fixture() {
   printf '{"version":"TEST"}\n' > "$project_root/.claude-plugin/plugin.json"
 }
 
+write_hooks_fixture() {
+  local project_root="$1"
+
+  mkdir -p "$project_root/hooks/lib"
+  cp "$REPO_ROOT/hooks/mst-pre-tool-use.sh" "$project_root/hooks/mst-pre-tool-use.sh"
+  cp "$REPO_ROOT/hooks/lib/pre_tool_use_fast.py" "$project_root/hooks/lib/pre_tool_use_fast.py"
+  cp "$REPO_ROOT/hooks/lib/history.bash" "$project_root/hooks/lib/history.bash"
+  cp "$REPO_ROOT/hooks/lib/rule_engine.bash" "$project_root/hooks/lib/rule_engine.bash"
+  cp "$REPO_ROOT/hooks/lib/sha256.bash" "$project_root/hooks/lib/sha256.bash"
+  chmod +x "$project_root/hooks/mst-pre-tool-use.sh"
+}
+
 create_fake_cache_targets() {
   local claude_home="$1"
   mkdir -p \
@@ -256,6 +268,54 @@ test_ac101_sync_end_to_end() {
   hash_marketplace="$(sha256_file "$marketplace_file")"
   assert_eq "AC-101 cache hash content B" "$hash_source" "$hash_cache"
   assert_eq "AC-101 marketplace hash content B" "$hash_source" "$hash_marketplace"
+}
+
+test_act08_002_sync_hooks_lib_to_plugin_cache() {
+  local case_dir project_root claude_home stdout_file stderr_file
+  local rel source_file cache_file marketplace_file status
+
+  case_dir="$(new_case_dir)"
+  project_root="$case_dir/project"
+  claude_home="$case_dir/home"
+  stdout_file="$case_dir/stdout.log"
+  stderr_file="$case_dir/stderr.log"
+
+  write_project_fixture "$project_root" "# hook lib content"
+  write_hooks_fixture "$project_root"
+  create_fake_cache_targets "$claude_home"
+
+  run_session_init "$project_root" "$claude_home" "$stdout_file" "$stderr_file"
+
+  for rel in \
+    hooks/lib/pre_tool_use_fast.py \
+    hooks/lib/history.bash \
+    hooks/lib/rule_engine.bash \
+    hooks/lib/sha256.bash; do
+    source_file="$project_root/$rel"
+    cache_file="$claude_home/.claude/plugins/cache/gran-maestro/mst/TEST/$rel"
+    marketplace_file="$claude_home/.claude/plugins/marketplaces/gran-maestro/$rel"
+    assert_file_exists "AC-T08-002 cache $rel" "$cache_file"
+    assert_file_exists "AC-T08-002 marketplace $rel" "$marketplace_file"
+    assert_eq "AC-T08-002 cache hash $rel" "$(sha256_file "$source_file")" "$(sha256_file "$cache_file")"
+    assert_eq "AC-T08-002 marketplace hash $rel" "$(sha256_file "$source_file")" "$(sha256_file "$marketplace_file")"
+  done
+
+  set +e
+  (
+    cd "$project_root" || exit 1
+    HOME="$claude_home" bash "$claude_home/.claude/plugins/cache/gran-maestro/mst/TEST/hooks/mst-pre-tool-use.sh" >"$case_dir/copied-hook.stdout" 2>"$case_dir/copied-hook.stderr" <<'JSON'
+{"tool_name":"Read","tool_input":{"file_path":"README.md"}}
+JSON
+  )
+  status=$?
+  set -e
+
+  assert_eq "AC-T08-002 copied cache hook smoke exit code" "0" "$status"
+  if [ -s "$case_dir/copied-hook.stderr" ]; then
+    printf 'FAIL: AC-T08-002 copied cache hook stderr\n' >&2
+    sed 's/^/    /' "$case_dir/copied-hook.stderr" >&2 || true
+    exit 1
+  fi
 }
 
 test_ac102_session_init_smoke_and_cleanup() {
@@ -675,6 +735,7 @@ if ! command -v shasum >/dev/null 2>&1; then
 fi
 
 run_case "AC-101 sync end-to-end" test_ac101_sync_end_to_end
+run_case "AC-T08-002 sync hooks lib to plugin cache" test_act08_002_sync_hooks_lib_to_plugin_cache
 run_case "AC-102 session-init smoke and cleanup" test_ac102_session_init_smoke_and_cleanup
 run_case "AC-103 graceful fallback missing cache" test_ac103_graceful_fallback_missing_cache
 run_case "AC-104 old version protection" test_ac104_old_version_protection

@@ -48,6 +48,7 @@ from scripts.mst_cmds import run as run_cmd
 from scripts.mst_cmds import prompt
 from scripts.mst_cmds import metrics
 from scripts.mst_cmds import status
+from scripts.mst_cmds import policy
 
 
 def set_base_dir(base_dir):
@@ -100,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     prompt.register(sub)
     metrics.register(sub)
     status.register(sub)
+    policy.register(sub)
 
     return parser
 
@@ -252,4 +254,7 @@ DISPATCH = {
     ("prompt", "write-context"): prompt.cmd_prompt_write_context,
     ("metrics", "summary"): metrics.cmd_metrics_summary,
     ("status", "context-usage"): status.cmd_status_context_usage,
+    ("policy", "init"): policy.cmd_policy_init,
+    ("policy", "list"): policy.cmd_policy_list,
+    ("policy", "verify"): policy.cmd_policy_verify,
 }
