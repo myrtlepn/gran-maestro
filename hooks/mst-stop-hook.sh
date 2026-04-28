@@ -1,6 +1,47 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Pre-defined emit functions exposed for source-time test harnesses.
+# Claude Code Stop hook strict schema: stdout JSON contains decision + reason only.
+# details_anchor (when present) is emitted to stderr as "[stop-hook] anchor=<value>".
+emit_approve_json() {
+  local reason="$1"
+  local details_anchor="$2"
+  if [ -n "$details_anchor" ]; then
+    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1] or "approved"
+if not reason.strip():
+    reason = "approved"
+print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+emit_block_json() {
+  local reason="$1"
+  local details_anchor="$2"
+  if [ -n "$details_anchor" ]; then
+    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1] or ""
+if not reason.strip():
+    reason = "stop blocked (reason unspecified)"
+print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
 script_path="${BASH_SOURCE[0]}"
 case "$script_path" in
   */*) script_dir="${script_path%/*}" ;;
@@ -274,13 +315,17 @@ SNAPSHOT_RETURN_TO_STEP=""
 emit_approve_json() {
   local reason="$1"
   local details_anchor="$2"
-  python3 - "$reason" "$details_anchor" <<'PY'
+  if [ -n "$details_anchor" ]; then
+    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
 import json
 import sys
 
-reason = sys.argv[1]
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "approve", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
+reason = sys.argv[1] or "approved"
+if not reason.strip():
+    reason = "approved"
+print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
 PY
 }
 
@@ -519,12 +564,17 @@ emit_allow_json() {
   local reason="$1"
   local details_anchor
   details_anchor="$(details_anchor_for_reason "$reason")"
-  python3 - "$reason" "$details_anchor" <<'PY'
+  if [ -n "$details_anchor" ]; then
+    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
 import json
 import sys
 
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "approve", "reason": sys.argv[1], "details_anchor": details_anchor}, ensure_ascii=False))
+reason = sys.argv[1] or "approved"
+if not reason.strip():
+    reason = "approved"
+print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
 PY
 }
 
@@ -1433,13 +1483,17 @@ has_active_workflow_session() {
 emit_block_json() {
   local reason="$1"
   local details_anchor="$2"
-  python3 - "$reason" "$details_anchor" <<'PY'
+  if [ -n "$details_anchor" ]; then
+    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
 import json
 import sys
 
-reason = sys.argv[1]
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "block", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
+reason = sys.argv[1] or ""
+if not reason.strip():
+    reason = "stop blocked (reason unspecified)"
+print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
 PY
 }
 
