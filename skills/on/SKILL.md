@@ -219,124 +219,15 @@ fi
    }
    ```
 5. `requests/`, `worktrees/` 디렉토리 생성
-6. 워크플로우 Hook 및 스크립트 설치 (MANDATORY):
+6. 워크플로우 Hook 등록 (자동, 사용자 작업 불필요):
 
-   **6a. Hook 파일 복사**: `{PLUGIN_ROOT}/hooks/` → `{PROJECT_ROOT}/.claude/hooks/`
-   - 원본 위치: `{PLUGIN_ROOT}/hooks/` (플러그인 소유 원본)
-   - 대상 파일 3개:
-     - `mst-stop-hook.sh` (Stop hook — mst-loop 스타일 re-feed로 워크플로우 연속 실행 보장)
-     - `mst-session-init.sh` (SessionStart hook — 세션 초기화 + 버전 게이트)
-     - `mst-pre-tool-use.sh` (PreToolUse hook — worktree 경계 진입 가드)
-   - `{PROJECT_ROOT}/.claude/hooks/` 디렉토리가 없으면 생성
-   - 각 파일을 복사하고 실행 권한 부여 (`chmod +x`)
-   - 기존 파일이 있으면 **덮어쓰기** (플러그인 버전 업데이트 반영)
-   - **레거시 hook 정리** (기존 설치에서 업그레이드 시):
-     ```bash
-     # 레거시 4파일 구조 → 3파일 구조 마이그레이션
-     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-continuation-guard.sh"
-     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-skill-push.sh"
-     rm -f "{PROJECT_ROOT}/.claude/hooks/mst-skill-pop.sh"
-     ```
-   - 복사 완료 후 **버전 마커 기록**:
-     ```bash
-     mkdir -p "{PROJECT_ROOT}/.claude/hooks"
-     for f in mst-stop-hook.sh mst-session-init.sh mst-pre-tool-use.sh; do
-       cp "{PLUGIN_ROOT}/hooks/$f" "{PROJECT_ROOT}/.claude/hooks/$f"
-       chmod +x "{PROJECT_ROOT}/.claude/hooks/$f"
-     done
-     # 플러그인 버전을 hook 버전 마커에 기록 (버전 게이트가 비교에 사용)
-     python3 -c "import json; print(json.load(open('{PLUGIN_ROOT}/.claude-plugin/plugin.json'))['version'])" \
-       > "{PROJECT_ROOT}/.claude/hooks/.mst-hook-version"
-     ```
+   **6a. Hook 등록은 hooks.json 자체 등록으로 자동 처리됨**:
+   - 플러그인 루트의 `hooks/hooks.json`이 SessionStart / PreToolUse(matcher="Skill") / Stop / UserPromptSubmit 4개 hook을 `${CLAUDE_PLUGIN_ROOT}/hooks/{스크립트명}` 형식으로 자체 등록합니다 (Claude Code 플러그인 표준 메커니즘, REQ-732 도입).
+   - **/mst:on은 더 이상 hook 파일을 프로젝트로 복사하지 않으며**, `settings.local.json`의 `hooks` 블록도 변경하지 않습니다. 사용자 정의 hook(`env`, `permissions`, 사용자 hook 등록 등) 기존 항목은 그대로 보존됩니다.
+   - 결과: 플러그인 캐시 한 곳을 갱신하면 모든 등록 프로젝트가 자동으로 최신 hook을 사용합니다 (stale 사본 발생 불가).
+   - 기존 `.claude/hooks/` 사본이 남아있는 프로젝트의 정리는 추후 `/mst:on cleanup` (DOD-008)으로 별도 처리할 수 있습니다.
 
-   **6b. Hook 등록**: `{PROJECT_ROOT}/.claude/settings.local.json`에 hook 이벤트 바인딩 등록
-   - 아래 3개 이벤트에 대해 hook이 등록되어 있는지 확인하고, 미등록 시 추가:
-     ```json
-     {
-       "hooks": {
-         "SessionStart": [
-           { "matcher": "", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-session-init.sh" }] }
-         ],
-         "Stop": [
-           { "matcher": "", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-stop-hook.sh" }] }
-         ],
-         "PreToolUse": [
-           { "matcher": "Skill", "hooks": [{ "type": "command", "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/mst-pre-tool-use.sh" }] }
-         ]
-       }
-     }
-     ```
-   - 등록 시 기존 `settings.local.json`의 다른 필드(`env`, `permissions` 등)를 보존한 상태로 병합
-   - 각 이벤트에 동일 `command`가 이미 등록되어 있으면 건너뜀 (중복 방지)
-   - **레거시 hook 참조 정리**: 기존 `PostToolUse` 이벤트와 `mst-continuation-guard.sh` 참조를 제거
-   - `settings.local.json` 파일이 없으면 새로 생성
-   - 설정 파일 파싱/수정은 `python3`로 수행:
-     ```bash
-     python3 - << 'HOOKEOF'
-     import json, os
-
-     settings_path = "{PROJECT_ROOT}/.claude/settings.local.json"
-     try:
-         with open(settings_path, "r", encoding="utf-8") as f:
-             settings = json.load(f)
-     except (FileNotFoundError, json.JSONDecodeError):
-         settings = {}
-
-     if not isinstance(settings, dict):
-         settings = {}
-
-     hooks = settings.setdefault("hooks", {})
-     prefix = '$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks'
-
-     # 레거시 hook 참조 정리 (4파일 → 3파일 마이그레이션)
-     legacy_events = ["PostToolUse"]
-     for event in legacy_events:
-         hooks.pop(event, None)
-
-     # 레거시 hook 참조 정리 (mst-continuation-guard.sh → mst-stop-hook.sh / mst-pre-tool-use.sh)
-     for event, entries in list(hooks.items()):
-         if isinstance(entries, list):
-             hooks[event] = [
-                 e for e in entries
-                 if not (isinstance(e, dict) and any(
-                     isinstance(h, dict) and "mst-continuation-guard.sh" in h.get("command", "")
-                     for h in (e.get("hooks") or [])
-                 ))
-             ]
-
-     # 새 hook 등록
-     hook_map = {
-         "SessionStart": {"matcher": "", "file": "mst-session-init.sh"},
-         "Stop": {"matcher": "", "file": "mst-stop-hook.sh"},
-         "PreToolUse": {"matcher": "Skill", "file": "mst-pre-tool-use.sh"},
-     }
-
-     for event, cfg in hook_map.items():
-         cmd = f"{prefix}/{cfg['file']}"
-         entries = hooks.setdefault(event, [])
-         already = any(
-             isinstance(e, dict) and any(
-                 isinstance(h, dict) and h.get("command", "").endswith(cfg["file"])
-                 for h in (e.get("hooks") or [])
-             )
-             for e in entries
-         )
-         if not already:
-             entries.append({
-                 "matcher": cfg["matcher"],
-                 "hooks": [{"type": "command", "command": cmd}]
-             })
-
-     tmp = settings_path + ".tmp"
-     with open(tmp, "w", encoding="utf-8") as f:
-         json.dump(settings, f, indent=2, ensure_ascii=False)
-         f.write("\n")
-     os.replace(tmp, settings_path)
-     HOOKEOF
-     ```
-   - 완료 메시지: `"✓ 워크플로우 Hook 3개 설치 완료 (레거시 hook 정리됨)"`
-
-   **6c. 버전 알림 스크립트 설치**:
+   **6b. 버전 알림 스크립트 설치**:
    - `check-version.sh`를 `~/.claude/scripts/`에 복사; `settings.json`의 `hooks.UserPromptSubmit`에 아래 hook 추가(미존재 시):
      ```json
      { "type": "command", "command": "~/.claude/scripts/check-version.sh" }
