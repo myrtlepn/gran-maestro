@@ -49,6 +49,7 @@ from scripts.mst_cmds import prompt
 from scripts.mst_cmds import metrics
 from scripts.mst_cmds import status
 from scripts.mst_cmds import policy
+from scripts.mst_cmds import on as on_cmd
 
 
 def set_base_dir(base_dir):
@@ -102,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     metrics.register(sub)
     status.register(sub)
     policy.register(sub)
+    on_cmd.register(sub)
 
     return parser
 
@@ -257,4 +259,5 @@ DISPATCH = {
     ("policy", "init"): policy.cmd_policy_init,
     ("policy", "list"): policy.cmd_policy_list,
     ("policy", "verify"): policy.cmd_policy_verify,
+    ("on", "cleanup"): on_cmd.cmd_on_cleanup,
 }

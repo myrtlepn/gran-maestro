@@ -225,7 +225,12 @@ fi
    - 플러그인 루트의 `hooks/hooks.json`이 SessionStart / PreToolUse(matcher="Skill") / Stop / UserPromptSubmit 4개 hook을 `${CLAUDE_PLUGIN_ROOT}/hooks/{스크립트명}` 형식으로 자체 등록합니다 (Claude Code 플러그인 표준 메커니즘, REQ-732 도입).
    - **/mst:on은 더 이상 hook 파일을 프로젝트로 복사하지 않으며**, `settings.local.json`의 `hooks` 블록도 변경하지 않습니다. 사용자 정의 hook(`env`, `permissions`, 사용자 hook 등록 등) 기존 항목은 그대로 보존됩니다.
    - 결과: 플러그인 캐시 한 곳을 갱신하면 모든 등록 프로젝트가 자동으로 최신 hook을 사용합니다 (stale 사본 발생 불가).
-   - 기존 `.claude/hooks/` 사본이 남아있는 프로젝트의 정리는 추후 `/mst:on cleanup` (DOD-008)으로 별도 처리할 수 있습니다.
+   - 기존 `.claude/hooks/` 사본이 남아있는 프로젝트는 자동으로 정리됩니다 — 본 단계는 `python3 {PLUGIN_ROOT}/scripts/mst.py on cleanup --silent || true`를 호출해 stale mst hook 사본·settings 항목을 안전하게 제거합니다 (사용자 정의 hook은 정규식 패턴 매칭으로 보존). 명시적 호출은 `python3 {PLUGIN_ROOT}/scripts/mst.py on cleanup`(또는 `--dry-run` 미리보기)으로 가능합니다.
+
+   ```bash
+   # mst hook 사본·settings 항목 자동 정리 (silent fail-open)
+   python3 "{PLUGIN_ROOT}/scripts/mst.py" on cleanup --silent || true
+   ```
 
    **6b. 버전 알림 스크립트 설치**:
    - `check-version.sh`를 `~/.claude/scripts/`에 복사; `settings.json`의 `hooks.UserPromptSubmit`에 아래 hook 추가(미존재 시):
