@@ -342,10 +342,59 @@ _auto_migrate_clear_failed() {
   rm -f "$1" 2>/dev/null || true
 }
 
+# DOD-016: append migration.log with simple rotation cap (50KB)
+_auto_migrate_log() {
+  local log_path="$1"
+  local message="$2"
+  mkdir -p "$(dirname "$log_path")" 2>/dev/null || return 0
+  if [ -f "$log_path" ]; then
+    local size
+    size="$(wc -c < "$log_path" 2>/dev/null | tr -d ' ')"
+    case "$size" in
+      ''|*[!0-9]*) size=0 ;;
+    esac
+    if [ "$size" -gt 51200 ]; then
+      tail -c 25600 "$log_path" > "${log_path}.rot" 2>/dev/null && \
+        mv "${log_path}.rot" "$log_path" 2>/dev/null || true
+    fi
+  fi
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown-time')" "$message" \
+    >> "$log_path" 2>/dev/null || true
+}
+
+# DOD-015: detect mst hook entries in user-level ~/.claude/settings.json
+_auto_migrate_detect_user_settings_conflict() {
+  local user_settings="${HOME}/.claude/settings.json"
+  [ -f "$user_settings" ] || return 0
+  if grep -qE 'mst-(stop-hook|session-init|pre-tool-use|auto-chain-context)\.sh' "$user_settings" 2>/dev/null; then
+    echo "[mst-session-init] warning: user-level ~/.claude/settings.json contains mst hook entries. These may conflict with plugin hooks.json self-registration. Manual cleanup recommended (mst will not auto-modify user-level settings)." >&2
+  fi
+}
+
+# DOD-014: detect duplicate hook invocation in same SessionStart (per-PPID marker)
+_auto_migrate_detect_dup_hook() {
+  local marker_dir="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/tmp"
+  local marker="${marker_dir}/session-init-${PPID:-0}.lock"
+  mkdir -p "$marker_dir" 2>/dev/null || return 1
+  if [ -f "$marker" ]; then
+    local now mtime age
+    now="$(date +%s 2>/dev/null || printf '0')"
+    mtime="$(stat -f %m "$marker" 2>/dev/null || stat -c %Y "$marker" 2>/dev/null || printf '0')"
+    age=$((now - mtime))
+    if [ "$age" -lt 30 ]; then
+      return 0
+    fi
+  fi
+  printf '%s\n' "$(date +%s 2>/dev/null || printf '0')" > "$marker" 2>/dev/null || true
+  return 1
+}
+
 check_hook_version_mismatch() {
   local plugin_version hook_version
   plugin_version="$(read_plugin_version)"
   hook_version="$(read_hook_version)"
+
+  local migration_log="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/migration.log"
 
   if [ -z "$plugin_version" ] || [ "$plugin_version" = "$hook_version" ]; then
     return 0
@@ -355,15 +404,28 @@ check_hook_version_mismatch() {
   hook_display="${hook_version:-missing}"
   echo "[mst-session-init] warning: hook version mismatch (hook=$hook_display plugin=$plugin_version). Auto-migration will attempt cleanup." >&2
   debug_log "session_init_version_mismatch" "hook=$hook_display plugin=$plugin_version"
+  _auto_migrate_log "$migration_log" "mismatch_detected hook=$hook_display plugin=$plugin_version"
+
+  # DOD-015: 재귀 가드 — 자식 프로세스가 자동 트리거 진입 시도면 즉시 차단
+  if [ "${MST_AUTO_MIGRATE_IN_PROGRESS:-0}" = "1" ]; then
+    echo "[mst-session-init] auto-migration skipped (recursive call detected via MST_AUTO_MIGRATE_IN_PROGRESS=1)." >&2
+    _auto_migrate_log "$migration_log" "recursive_call_blocked"
+    return 0
+  fi
+
+  # DOD-015: 사용자 레벨 settings 충돌 detection (안내만, 자동 제거 X)
+  _auto_migrate_detect_user_settings_conflict
 
   # G4: 환경 detection — claude CLI 부재 또는 명시적 disable 시 skip
   if [ "${MST_DISABLE_AUTO_MIGRATE:-0}" = "1" ]; then
     echo "[mst-session-init] auto-migration skipped (MST_DISABLE_AUTO_MIGRATE=1). Run /mst:on manually to sync." >&2
+    _auto_migrate_log "$migration_log" "skipped reason=disabled_env"
     return 0
   fi
 
   if ! command -v timeout >/dev/null 2>&1; then
     echo "[mst-session-init] auto-migration skipped (timeout command not in PATH). Run /mst:on manually to sync." >&2
+    _auto_migrate_log "$migration_log" "skipped reason=timeout_missing"
     return 0
   fi
 
@@ -371,6 +433,7 @@ check_hook_version_mismatch() {
   local migration_failed_marker="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/tmp/migration-failed"
   if _auto_migrate_failed_recently "$migration_failed_marker" 600; then
     echo "[mst-session-init] auto-migration skipped (recent attempt failed within 10min window). Run /mst:on manually." >&2
+    _auto_migrate_log "$migration_log" "skipped reason=recent_failure"
     return 0
   fi
 
@@ -378,6 +441,7 @@ check_hook_version_mismatch() {
   local migration_lock="${PROJECT_ROOT:-$(pwd)}/.gran-maestro/tmp/migration.lock"
   if ! _auto_migrate_acquire_lock "$migration_lock" 120; then
     debug_log "session_init_auto_migrate_skipped" "another in progress"
+    _auto_migrate_log "$migration_log" "skipped reason=lock_held"
     return 0
   fi
 
@@ -390,17 +454,21 @@ check_hook_version_mismatch() {
 
   if [ ! -f "$mst_script" ]; then
     debug_log "session_init_auto_migrate_skipped" "mst.py missing path=$mst_script"
+    _auto_migrate_log "$migration_log" "skipped reason=mst_script_missing"
     _auto_migrate_release_lock "$migration_lock"
     return 0
   fi
 
-  if timeout 30 python3 "$mst_script" on cleanup --silent >/dev/null 2>&1; then
+  # DOD-015: cleanup 호출 시 자식 프로세스에 재귀 가드 export
+  if MST_AUTO_MIGRATE_IN_PROGRESS=1 timeout 30 python3 "$mst_script" on cleanup --silent >/dev/null 2>&1; then
     _auto_migrate_clear_failed "$migration_failed_marker"
     debug_log "session_init_auto_migrate_ok" "plugin=$plugin_version"
+    _auto_migrate_log "$migration_log" "auto_migration_ok plugin=$plugin_version"
   else
     _auto_migrate_mark_failed "$migration_failed_marker"
     debug_log "session_init_auto_migrate_failed" "plugin=$plugin_version"
     echo "[mst-session-init] auto-migration failed; marker recorded (Run /mst:on manually)." >&2
+    _auto_migrate_log "$migration_log" "auto_migration_failed plugin=$plugin_version"
   fi
 
   _auto_migrate_release_lock "$migration_lock"
