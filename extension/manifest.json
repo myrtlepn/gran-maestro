@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Gran Maestro Extension",
   "description": "Chrome Extension foundation for REQ-260",
-  "version": "0.59.6",
+  "version": "0.60.0",
   "permissions": [
     "activeTab",
     "storage",

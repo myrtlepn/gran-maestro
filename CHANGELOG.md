@@ -4,6 +4,22 @@
 
 ---
 
+## [0.60.0] — 2026-04-29
+
+### 새 기능
+
+- **`/mst:on cleanup` 자동 마이그레이션** (AGI-019, DOD-007/008/009/010~016): hooks.json 자체 등록(${CLAUDE_PLUGIN_ROOT}) 메커니즘 도입에 맞춰 `/mst:on`이 더 이상 hook 파일을 프로젝트로 복사하거나 `settings.local.json`의 hooks 블록을 수정하지 않도록 재설계했습니다. 등록된 기존 프로젝트는 SessionStart 시 hook 버전 mismatch가 감지되면 자동으로 `mst.py on cleanup`이 실행되어 stale mst hook 사본·settings 항목이 안전하게 정리됩니다 (사용자 정의 hook은 정규식 패턴 매칭으로 100% 보존).
+- **5종 안전 가드**: 자동 마이그레이션 트리거에 G1 동시성 lock(120s stale), G2 fail-open(timeout 30s + return 0), G3 anti-loop(실패 marker TTL 600s), G4 환경 detection(`MST_DISABLE_AUTO_MIGRATE=1` / `timeout` 명령 부재 시 skip), 재귀 가드(`MST_AUTO_MIGRATE_IN_PROGRESS=1`)를 적용했습니다.
+- **마이그레이션 가시성**: `.gran-maestro/migration.log`에 ISO timestamp로 모든 마이그레이션 시도/성공/실패/skip 사유를 기록하며 50KB rotation cap을 적용합니다. 사용자 레벨 `~/.claude/settings.json`에 mst hook 항목이 남아 있으면 충돌 detection으로 안내합니다 (자동 제거는 사용자 책임).
+- **명시적 cleanup 명령**: `python3 scripts/mst.py on cleanup [--dry-run] [--silent] [--json]`으로 수동 정리 가능. `.claude-plugin/plugin.json` + `hooks/hooks.json` 동시 존재 시 plugin source repo로 식별하여 자동 skip하는 가드 포함.
+
+### 개선
+
+- **stop hook strict schema 재확보** (KI-003, DOD-005): fd34058 머지로 회귀했던 stop hook stdout 출력에서 `details_anchor` 키를 제거하고 stderr `[stop-hook] anchor=<value>` 분리 패턴을 복원했습니다. `emit_block_json` 빈 reason fallback (`"stop blocked (reason unspecified)"`) + source-time 테스트 하네스 호환을 위한 source-guard도 함께 추가했습니다. session-init hook의 Claude Code version guard 블록도 함께 복원되었습니다.
+- **회귀 차단 자동화 강화**: 4개 hook 등록·portability(비-git/subdir/symlink) + /mst:on cleanup migrator 패턴 매칭·atomic·lock + 자동 마이그레이션 가드 시나리오를 합쳐 회귀 테스트 91건이 신규로 추가되었습니다 (master 전체 683 passed/0 failed).
+
+---
+
 ## [0.59.6] — 2026-04-25
 
 ### 개선
