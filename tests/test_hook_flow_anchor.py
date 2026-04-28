@@ -1,4 +1,8 @@
-"""REQ-712/T01: stop-hook details_anchor regression coverage."""
+"""REQ-712/T01 + REQ-733/PLN-562: stop-hook flow anchor regression coverage.
+
+DOD-005에 따라 stdout JSON은 {"decision","reason"}만 출력한다. anchor는
+stderr 로그(`[stop-hook] anchor=...`)로 이동했으므로 anchor 검증은 stderr 기준.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ LAYER_1_ANCHOR = "docs/FLOW-CONSTRAINTS.md#layer-1-mode-gate"
 LAYER_2_ANCHOR = "docs/FLOW-CONSTRAINTS.md#layer-2-snapshot-gate"
 STEP_PROGRESS_ANCHOR = "docs/FLOW-CONSTRAINTS.md#step-progress"
 COMPLETION_ANCHOR = "docs/FLOW-CONSTRAINTS.md#completion"
+
+ALLOWED_FIELDS = {"decision", "reason"}
 
 
 def _hook_payload(session_id: str | None = None) -> dict:
@@ -37,6 +43,21 @@ def _assert_anchor_exists(anchor: str | None) -> None:
     assert f"{{#{slug}}}" in content
 
 
+def _assert_strict_schema(payload: dict) -> None:
+    """DOD-005: stdout JSON은 {decision, reason}만 포함."""
+    assert set(payload.keys()) == ALLOWED_FIELDS, (
+        f"stdout JSON keys must be exactly {ALLOWED_FIELDS}, got {set(payload.keys())}"
+    )
+
+
+def _stderr_anchor(result) -> str | None:
+    """stderr에서 [stop-hook] anchor=... 라인의 anchor 추출 (없으면 None)."""
+    for line in result.stderr.splitlines():
+        if line.startswith("[stop-hook] anchor="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
 def test_layer_1_anchor_for_mst_off(tmp_path):
     project_root = init_project_root(tmp_path)
 
@@ -51,10 +72,12 @@ def test_layer_1_anchor_for_mst_off(tmp_path):
     )
 
     payload = stdout_json(result)
+    _assert_strict_schema(payload)
     assert payload["decision"] in {"approve", "allow"}
     assert "stop_hook_active_true" in payload["reason"]
-    assert payload["details_anchor"] == LAYER_1_ANCHOR
-    _assert_anchor_exists(payload["details_anchor"])
+    anchor = _stderr_anchor(result)
+    assert anchor == LAYER_1_ANCHOR
+    _assert_anchor_exists(anchor)
 
 
 def test_layer_2_or_null_for_no_session(tmp_path):
@@ -64,10 +87,12 @@ def test_layer_2_or_null_for_no_session(tmp_path):
     result = run_hook(project_root, _hook_payload(session_id))
 
     payload = stdout_json(result)
+    _assert_strict_schema(payload)
     assert payload["decision"] == "approve"
     assert "no-mst-session" in payload["reason"]
-    assert payload["details_anchor"] in {None, LAYER_2_ANCHOR}
-    _assert_anchor_exists(payload["details_anchor"])
+    anchor = _stderr_anchor(result)
+    assert anchor in {None, LAYER_2_ANCHOR}
+    _assert_anchor_exists(anchor)
 
 
 def test_completion_or_step_progress_for_mst_session(tmp_path):
@@ -82,10 +107,12 @@ def test_completion_or_step_progress_for_mst_session(tmp_path):
     result = run_hook(project_root, _hook_payload(step_session_id))
 
     payload = stdout_json(result)
+    _assert_strict_schema(payload)
     assert payload["decision"] == "block"
     assert "step_progress" in payload["reason"]
-    assert payload["details_anchor"] == STEP_PROGRESS_ANCHOR
-    _assert_anchor_exists(payload["details_anchor"])
+    anchor = _stderr_anchor(result)
+    assert anchor == STEP_PROGRESS_ANCHOR
+    _assert_anchor_exists(anchor)
 
     completion_session_id = make_session_id()
     write_snapshot(
@@ -97,10 +124,12 @@ def test_completion_or_step_progress_for_mst_session(tmp_path):
     result = run_hook(project_root, _hook_payload(completion_session_id))
 
     payload = stdout_json(result)
+    _assert_strict_schema(payload)
     assert payload["decision"] == "approve"
     assert "completion" in payload["reason"]
-    assert payload["details_anchor"] == COMPLETION_ANCHOR
-    _assert_anchor_exists(payload["details_anchor"])
+    anchor = _stderr_anchor(result)
+    assert anchor == COMPLETION_ANCHOR
+    _assert_anchor_exists(anchor)
 
 
 def test_decision_and_reason_fields_unchanged(tmp_path):
@@ -110,6 +139,8 @@ def test_decision_and_reason_fields_unchanged(tmp_path):
     result = run_hook(project_root, _hook_payload(session_id))
 
     payload = stdout_json(result)
+    _assert_strict_schema(payload)
     assert payload["decision"] == "approve"
     assert payload["reason"] == "no-mst-session snapshot_present=false"
-    assert payload["details_anchor"] == LAYER_2_ANCHOR
+    anchor = _stderr_anchor(result)
+    assert anchor == LAYER_2_ANCHOR

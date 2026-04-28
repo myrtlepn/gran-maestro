@@ -1,6 +1,45 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# decision: "approve" | "block" only — Claude Code Stop hook schema
+emit_approve_json() {
+  local reason="$1"
+  local details_anchor="$2"
+  if [ -n "$details_anchor" ]; then
+    echo "[stop-hook] anchor=$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1]
+print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+# decision: "approve" | "block" only — Claude Code Stop hook schema
+emit_block_json() {
+  local reason="$1"
+  local details_anchor="$2"
+  if [ -z "$reason" ]; then
+    reason="stop blocked (reason unspecified)"
+  fi
+  if [ -n "$details_anchor" ]; then
+    echo "[stop-hook] anchor=$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
+import json
+import sys
+
+reason = sys.argv[1]
+print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+PY
+}
+
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
 # ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$script_dir" in
@@ -231,19 +270,6 @@ SNAPSHOT_TOTAL_STEPS=""
 SNAPSHOT_STATUS=""
 SNAPSHOT_RETURN_TO_SKILL=""
 SNAPSHOT_RETURN_TO_STEP=""
-
-emit_approve_json() {
-  local reason="$1"
-  local details_anchor="$2"
-  python3 - "$reason" "$details_anchor" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1]
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "approve", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
-PY
-}
 
 details_anchor_for_reason() {
   local reason="${1:-}"
@@ -476,16 +502,19 @@ PY
 )"
 }
 
+# decision: "approve" | "block" only — Claude Code Stop hook schema
 emit_allow_json() {
   local reason="$1"
   local details_anchor
   details_anchor="$(details_anchor_for_reason "$reason")"
-  python3 - "$reason" "$details_anchor" <<'PY'
+  if [ -n "$details_anchor" ]; then
+    echo "[stop-hook] anchor=$details_anchor" >&2
+  fi
+  python3 - "$reason" <<'PY'
 import json
 import sys
 
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "approve", "reason": sys.argv[1], "details_anchor": details_anchor}, ensure_ascii=False))
+print(json.dumps({"decision": "approve", "reason": sys.argv[1]}, ensure_ascii=False))
 PY
 }
 
@@ -1389,19 +1418,6 @@ has_active_workflow_session() {
   fi
 
   return 1
-}
-
-emit_block_json() {
-  local reason="$1"
-  local details_anchor="$2"
-  python3 - "$reason" "$details_anchor" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1]
-details_anchor = sys.argv[2] or None
-print(json.dumps({"decision": "block", "reason": reason, "details_anchor": details_anchor}, ensure_ascii=False))
-PY
 }
 
 emit_block_decision() {
