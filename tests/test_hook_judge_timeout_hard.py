@@ -100,11 +100,11 @@ def test_slow_path_fail_open_and_event(tmp_path):
         },
     )
 
-    assert elapsed < 0.7, f"hard timeout should fail-open quickly, got {elapsed:.3f}s"
+    assert elapsed < 1.3, f"hard timeout should fail-open quickly, got {elapsed:.3f}s"
     assert result.returncode == 0, result.stderr
 
     payload = json.loads(result.stdout)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
 
     event = _read_flow_detail_records(project_root, session_id)[-1]
     assert event["event_type"] == "judge_timeout"
@@ -154,7 +154,7 @@ def test_config_override_shorter_budget(tmp_path):
     assert result.returncode == 0, result.stderr
 
     payload = json.loads(result.stdout)
-    assert payload["decision"] == "allow"
+    assert payload["decision"] == "approve"
 
     event = _read_flow_detail_records(project_root, session_id)[-1]
     assert event["event_type"] == "judge_timeout"

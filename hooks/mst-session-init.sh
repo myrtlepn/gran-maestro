@@ -1,6 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$script_dir" in
+  */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
+    ;;  # 정상 경로
+  *)
+    echo "[mst-hook] warning: unexpected execution path ($script_dir). Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+    exit 0
+    ;;
+esac
+
+# Claude Code version guard: ${CLAUDE_PLUGIN_ROOT} 미지원 버전 감지 시 fail-open
+required_claude_version="0.0.0"  # placeholder: REF-014 후속 검증으로 확정 (도메인 E)
+if command -v claude >/dev/null 2>&1; then
+  detected_claude_version="$(claude --version 2>/dev/null | head -1 | awk '{print $NF}' || true)"
+  if [ -n "$detected_claude_version" ] && [ -n "$required_claude_version" ] && [ "$required_claude_version" != "0.0.0" ]; then
+    # version_lt: 사용 가능한 버전 비교 함수가 없으므로 sort -V로 비교
+    lower_version="$(printf '%s\n%s\n' "$detected_claude_version" "$required_claude_version" | sort -V | head -1)"
+    if [ "$lower_version" = "$detected_claude_version" ] && [ "$detected_claude_version" != "$required_claude_version" ]; then
+      echo "[mst-session-init] error: Claude Code $detected_claude_version is below required $required_claude_version for plugin hooks. Update Claude Code." >&2
+      # fail-open: 세션은 계속 동작
+      exit 0
+    fi
+  fi
+fi
+# claude 명령 미존재 또는 버전 감지 실패 시에도 fail-open (사용자 차단 0건)
+
 resolve_project_root() {
   local git_top candidate parent
   git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"

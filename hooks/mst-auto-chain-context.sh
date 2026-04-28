@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ${CLAUDE_PLUGIN_ROOT} fail-open guard: 자기 경로가 plugin cache 또는 marketplaces 외부면 silent fail-open
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$script_dir" in
+  */.claude/plugins/cache/*/hooks|*/.claude/plugins/marketplaces/*/hooks)
+    ;;  # 정상 경로
+  *)
+    echo "[mst-hook] warning: unexpected execution path ($script_dir). Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+    exit 0
+    ;;
+esac
+
 resolve_project_root() {
   local git_top candidate parent
   git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"

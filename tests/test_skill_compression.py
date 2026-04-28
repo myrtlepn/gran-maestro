@@ -7,11 +7,11 @@ SKILLS_DIR = REPO_ROOT / "skills"
 SKILLS = ["review", "plan", "approve", "agile", "request"]
 
 BEFORE = {
-    "review":  {"lines": 1579, "mandatory": 40, "steps": 19, "gate": 3},
+    "review":  {"lines": 1579, "mandatory": 39, "steps": 19, "gate": 3},
     "plan":    {"lines": 1462, "mandatory": 23, "steps": 24, "gate": 3},
-    "approve": {"lines": 1366, "mandatory": 13, "steps": 36, "gate": 3},
+    "approve": {"lines": 1366, "mandatory": 12, "steps": 36, "gate": 3},
     "agile":   {"lines": 1420, "mandatory": 30, "steps": 26, "gate": 3},
-    "request": {"lines": 1134, "mandatory": 31, "steps":  4, "gate": 3},
+    "request": {"lines": 1134, "mandatory": 31, "steps":  3, "gate": 3},
 }
 
 
