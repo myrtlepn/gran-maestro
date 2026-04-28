@@ -154,11 +154,12 @@ window_text = str(model_window) if isinstance(model_window, int) else "unknown"
 cache_text = "true" if cache_available else "false"
 auto_approve_text = "true" if auto_approve else "false"
 
-print("<system-reminder>")
-print("[자동 연쇄 컨텍스트]")
-print(f"- 컨텍스트 사용률: {pct_text} ({tokens_text} / {window_text} tokens)")
-print(f"- 캐싱: {cache_text}")
-print(f"- workflow.auto_approve_on_unblock: {auto_approve_text}")
-print("- 안내: 위 수치가 위험 임계 이하이면 chain 지속이 정상 경로입니다. 컨텍스트 크기·토큰 효율·변경 추적 품질을 단독 근거로 chain을 끊지 마세요.")
-print("</system-reminder>")
+ctx_lines = [
+    f"- 컨텍스트 사용률: {pct_text} ({tokens_text} / {window_text} tokens)",
+    f"- 캐싱: {cache_text}",
+    f"- workflow.auto_approve_on_unblock: {auto_approve_text}",
+    "- 안내: 위 수치가 위험 임계 이하이면 chain 지속이 정상 경로입니다. 컨텍스트 크기·토큰 효율·변경 추적 품질을 단독 근거로 chain을 끊지 마세요.",
+]
+additional = "[자동 연쇄 컨텍스트]\n" + "\n".join(ctx_lines)
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": additional}}, ensure_ascii=False))
 PY

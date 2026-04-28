@@ -90,14 +90,15 @@ def test_full_block_format_when_workflow_active(tmp_path):
     result = _run_hook(workspace, {"transcript_path": str(transcript_path)})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith("<system-reminder>\n")
-    assert result.stdout.rstrip().endswith("</system-reminder>")
-    assert "[자동 연쇄 컨텍스트]" in result.stdout
-    assert "- 컨텍스트 사용률: 65.0% (130000 / 200000 tokens)" in result.stdout
-    assert "- 캐싱: true" in result.stdout
-    assert "- workflow.auto_approve_on_unblock: true" in result.stdout
-    assert "위 수치가 위험 임계 이하이면 chain 지속이 정상 경로입니다." in result.stdout
-    assert "단독 근거로 chain을 끊지 마세요." in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    additional = payload["hookSpecificOutput"]["additionalContext"]
+    assert "[자동 연쇄 컨텍스트]" in additional
+    assert "- 컨텍스트 사용률: 65.0% (130000 / 200000 tokens)" in additional
+    assert "- 캐싱: true" in additional
+    assert "- workflow.auto_approve_on_unblock: true" in additional
+    assert "위 수치가 위험 임계 이하이면 chain 지속이 정상 경로입니다." in additional
+    assert "단독 근거로 chain을 끊지 마세요." in additional
 
 
 def test_full_block_format_when_next_action_auto_mode(tmp_path):
@@ -117,8 +118,10 @@ def test_full_block_format_when_next_action_auto_mode(tmp_path):
     result = _run_hook(workspace, {"transcript_path": str(transcript_path)})
 
     assert result.returncode == 0, result.stderr
-    assert "[자동 연쇄 컨텍스트]" in result.stdout
-    assert "- workflow.auto_approve_on_unblock: false" in result.stdout
+    payload = json.loads(result.stdout)
+    additional = payload["hookSpecificOutput"]["additionalContext"]
+    assert "[자동 연쇄 컨텍스트]" in additional
+    assert "- workflow.auto_approve_on_unblock: false" in additional
 
 
 def test_no_op_when_not_in_chain(tmp_path):
