@@ -39,6 +39,7 @@ from scripts.mst_cmds import extension
 from scripts.mst_cmds import config
 from scripts.mst_cmds import preset
 from scripts.mst_cmds import hooks
+from scripts.mst_cmds import hook
 from scripts.mst_cmds import skill
 from scripts.mst_cmds import agile_detail
 from scripts.mst_cmds import agile_governance
@@ -49,6 +50,7 @@ from scripts.mst_cmds import prompt
 from scripts.mst_cmds import metrics
 from scripts.mst_cmds import status
 from scripts.mst_cmds import policy
+from scripts.mst_cmds import confirm
 from scripts.mst_cmds import on as on_cmd
 
 
@@ -96,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     config.register(sub)
     preset.register(sub)
     hooks.register(sub)
+    hook.register(sub)
     skill.register(sub)
     dispatch.register(sub)
     run_cmd.register(sub)
@@ -103,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     metrics.register(sub)
     status.register(sub)
     policy.register(sub)
+    confirm.register(sub)
     on_cmd.register(sub)
 
     return parser
@@ -241,6 +245,7 @@ DISPATCH = {
     ("hooks", "post-skill"): hooks.cmd_hooks_post_skill,
     ("hooks", "sync"): hooks.cmd_hooks_sync,
     ("hooks", "doctor"): hooks.doctor,
+    ("hook", "repair"): hook.cmd_hook_repair,
     ("skill", "build"): skill.cmd_skill_build,
     ("skill", "scaffold"): skill.cmd_skill_scaffold,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
@@ -259,5 +264,6 @@ DISPATCH = {
     ("policy", "init"): policy.cmd_policy_init,
     ("policy", "list"): policy.cmd_policy_list,
     ("policy", "verify"): policy.cmd_policy_verify,
+    ("confirm", None): confirm.cmd_confirm,
     ("on", "cleanup"): on_cmd.cmd_on_cleanup,
 }

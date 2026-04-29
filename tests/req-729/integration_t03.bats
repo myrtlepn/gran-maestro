@@ -188,9 +188,11 @@ setup_policy_dir() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"GM-T03-WARN"* ]]
-  [ "$(wc -l < "$(history_file "$sid")" | tr -d ' ')" = "1001" ]
-  [ "$(jq -r '.seq' "$(history_file "$sid")" | tail -1)" = "1001" ]
-  [ "$(jq -r '.event.tool' "$(history_file "$sid")" | tail -1)" = "Bash" ]
+  # PLN-560 PAC-7 intentionally records WARN as warn_auto_allow and still appends
+  # the normal tool_call event, so the 1000-row fixture grows by two rows.
+  [ "$(wc -l < "$(history_file "$sid")" | tr -d ' ')" = "1002" ]
+  [ "$(jq -r '.seq' "$(history_file "$sid")" | tail -1)" = "1002" ]
+  [ "$(jq -r 'select(.event.type=="tool_call") | .event.tool' "$(history_file "$sid")" | tail -1)" = "Bash" ]
   verify_chain "$sid"
 }
 
@@ -213,7 +215,8 @@ setup_policy_dir() {
     [[ "$output" == *"[core-block]"* ]]
   done
 
-  [ ! -f "$(history_file "$sid")" ]
+  # RV-001 F-08: T10이 hardcoded_core_check return path를 통일해 모든 core BLOCK이 ledger core_block event를 append. PLN-560 D5 ledger 무결성 + REQ-731 statusline 카운터 호환을 위한 의도된 변경.
+  [ "$(jq -s '[.[].event | select(.type == "core_block")] | length' "$(history_file "$sid")")" -eq 5 ]
 }
 
 @test "AC-T03-002 manifest mismatch and history tampering both fail closed" {
@@ -257,7 +260,8 @@ setup_policy_dir() {
     [[ "$output" == *"META-BYPASS-LEDGER-SENTINEL"* ]]
   done
 
-  [ ! -f "$(history_file "$sid")" ]
+  # RV-001 F-08: T10이 hardcoded_core_check return path를 통일해 모든 core BLOCK이 ledger core_block event를 append. PLN-560 D5 ledger 무결성 + REQ-731 statusline 카운터 호환을 위한 의도된 변경.
+  [ "$(jq -s '[.[].event | select(.type == "core_block")] | length' "$(history_file "$sid")")" -eq 4 ]
 }
 
 @test "AC-T05-001 cache bypass attempt fails closed on manifest sha256 mismatch" {
@@ -404,7 +408,8 @@ PY
   [[ "$output" == *"[core-block]"* ]]
   [[ "$output" == *"META-BYPASS-RULE-FILE"* ]]
   [[ "$output" != *"weakening rule must not override core"* ]]
-  [ ! -f "$(history_file "$sid")" ]
+  # RV-001 F-08: T10이 hardcoded_core_check return path를 통일해 모든 core BLOCK이 ledger core_block event를 append. PLN-560 D5 ledger 무결성 + REQ-731 statusline 카운터 호환을 위한 의도된 변경.
+  [ "$(jq -s '[.[].event | select(.type == "core_block")] | length' "$(history_file "$sid")")" -eq 1 ]
 }
 
 @test "AC-T07-002 unknown predicate-only rule fails closed" {
