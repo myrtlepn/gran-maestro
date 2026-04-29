@@ -1,13 +1,13 @@
 ---
 name: resume
-description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 즉시 종료."
+description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 resolver fallback을 한 번 확인한 뒤 종료."
 user-invocable: false
-argument-hint: ""
+argument-hint: "[--wakeup-hint stop-recover]"
 ---
 
 # maestro:resume
 
-**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/mst-loop.sh`) 또는 `claude -p "/mst:resume"` 한 줄로 재진입할 수 있는 **단일 진입점**. 세션 교차/재진입/동시 세션에서 디스크 상태(queue)만 보고 다음 action을 결정한다.
+**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/mst-loop.sh`) 또는 `claude -p "/mst:resume"` 한 줄로 재진입할 수 있는 **단일 진입점**. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다.
 
 ## Gate
 
@@ -23,7 +23,7 @@ resume 경로는 **queue entry를 SSoT**로 사용합니다. plan.json 또는 tm
 ### Exit
 
 - 한 action의 Skill 호출이 완료되면 `complete` 또는 `fail`로 queue 상태를 확정한 뒤 **정상 종료**한다.
-- queue가 비어있으면 "queue empty" 메시지 출력 후 즉시 종료.
+- queue가 비어있으면 resolver fallback을 정확히 한 번 실행한다. resolver가 action을 enqueue하면 다시 queue peek/pop으로 진입하고, `source == "no-op"` 또는 resolver 실패이면 "queue empty" 메시지 출력 후 즉시 종료.
 - 한 iteration에서 2개 이상의 action을 pop하지 않는다 (mst-loop wrapper가 다음 iteration을 담당).
 
 ### 금지 패턴
@@ -59,8 +59,30 @@ resume 경로는 **queue entry를 SSoT**로 사용합니다. plan.json 또는 tm
 python3 {PLUGIN_ROOT}/scripts/mst.py queue peek --json
 ```
 
-- 출력이 `null` 또는 빈 객체: "queue empty — nothing to resume" 알림 후 **즉시 종료** (정상 exit).
+- 출력이 `null` 또는 빈 객체: 아래 resolver fallback 분기로 진행한다.
 - 출력이 JSON entry: 다음 Step 진행. 메모리에 `action = {id, skill, args, source_skill, source_id, auto, resource_id, ...}` 보관.
+
+#### Queue empty fallback: resolver enqueue
+
+queue가 비어 있을 때만 resolver를 호출한다. queue head가 있으면 이 분기를 실행하지 않는다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py resolve-next-action --enqueue --json
+```
+
+사용자가 `/mst:resume --wakeup-hint stop-recover`로 호출한 경우에는 hint를 그대로 resolver에 전달한다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py resolve-next-action --enqueue --wakeup-hint stop-recover --json
+```
+
+- resolver 호출 실패, JSON 파싱 실패, 또는 출력이 비정상인 경우: warn만 출력하고 "queue empty — nothing to resume" 알림 후 **정상 종료**한다.
+- resolver 결과의 `source == "no-op"`: "queue empty — nothing to resume" 알림 후 **정상 종료**한다.
+- resolver 결과의 `source != "no-op"`: resolver가 `--enqueue`로 queue entry를 생성한 것으로 보고 `queue peek --json`을 다시 한 번 실행한다.
+- 재실행한 `queue peek --json` 결과가 `null` 또는 빈 객체이면 "queue empty — nothing to resume" 알림 후 **정상 종료**한다.
+- 재실행한 `queue peek --json` 결과가 JSON entry이면 다음 Step 진행. 메모리에 `action = {id, skill, args, source_skill, source_id, auto, resource_id, ...}` 보관.
+
+이 fallback은 queue가 진짜 비어 있을 때만 동작한다. resume은 fallback source에서 직접 enqueue하지 않으며, enqueue는 반드시 `resolve-next-action --enqueue`가 수행한다.
 
 ### Step 2/5: 큐 Pop (큐 머리 entry를 running으로 전이)
 

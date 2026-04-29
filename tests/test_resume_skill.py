@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """REQ-585 / Task 01: /mst:resume 스킬 + queue 통합 테스트.
 
 Phase 2 범위:
@@ -6,6 +8,7 @@ Phase 2 범위:
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,13 +17,24 @@ ROOT = Path(__file__).resolve().parent.parent
 MST = [sys.executable, str(ROOT / "scripts/mst.py")]
 
 
-def _run_mst(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+def _run_mst(cwd: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
     return subprocess.run(
         MST + list(args),
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=merged_env,
     )
+
+
+def _write_workflow_state(workspace: Path, payload: dict, ppid: str = "12345") -> Path:
+    path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 def test_resume_skill_file_exists_and_valid():
@@ -41,6 +55,14 @@ def test_resume_skill_file_exists_and_valid():
     assert "queue complete" in content or "queue fail" in content, (
         "SKILL.md must mention 'queue complete' or 'queue fail' command"
     )
+    assert "resolve-next-action --enqueue --json" in content, (
+        "SKILL.md must use resolver fallback with --enqueue when the queue is empty"
+    )
+    assert "--wakeup-hint stop-recover" in content, (
+        "SKILL.md must document wakeup-hint forwarding to the resolver"
+    )
+    assert "source == \"no-op\"" in content, "SKILL.md must preserve graceful no-op empty exit"
+    assert "source != \"no-op\"" in content, "SKILL.md must re-peek when resolver enqueues"
 
     # AUTO_MODE / -a 전파 문서화
     assert "AUTO_MODE" in content, "SKILL.md must document AUTO_MODE propagation"
@@ -49,6 +71,150 @@ def test_resume_skill_file_exists_and_valid():
     # 5단계 Step 구조 (Step 1/5 ~ Step 5/5)
     step_count = sum(1 for i in range(1, 6) if f"Step {i}/5" in content)
     assert step_count == 5, f"SKILL.md must have 5 steps (Step 1/5 ~ 5/5), found {step_count}"
+
+
+def test_workflow_state_fallback(tmp_path, monkeypatch):
+    """queue empty + workflow_state 설정 → resolver enqueue → resume pop & dispatch 시뮬레이션."""
+    (tmp_path / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+    _write_workflow_state(
+        tmp_path,
+        {
+            "workflow_active": True,
+            "next_action": {
+                "expected_skill": "mst:request",
+                "source_skill": "mst:plan",
+                "source_id": "PLN-572",
+                "auto_mode": True,
+            },
+        },
+    )
+
+    peek_empty = _run_mst(tmp_path, "queue", "peek", "--json")
+    assert peek_empty.returncode == 0
+    assert json.loads(peek_empty.stdout) is None
+
+    resolved = _run_mst(
+        tmp_path,
+        "resolve-next-action",
+        "--enqueue",
+        "--json",
+        env={"MST_STATE_PPID": "12345"},
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    assert json.loads(resolved.stdout) == {
+        "command": "/mst:request --plan PLN-572 -a",
+        "source": "workflow_state",
+    }
+
+    peek = _run_mst(tmp_path, "queue", "peek", "--json")
+    assert peek.returncode == 0, peek.stderr
+    queued = json.loads(peek.stdout)
+    assert queued["skill"] == "mst:request"
+    assert queued["args"] == "--plan PLN-572 -a"
+    assert queued["auto"] is True
+
+    pop = _run_mst(tmp_path, "queue", "pop", "--json")
+    assert pop.returncode == 0, pop.stderr
+    dispatch = json.loads(pop.stdout)
+    assert dispatch["id"] == queued["id"]
+    assert dispatch["status"] == "running"
+    assert dispatch["args"] == "--plan PLN-572 -a"
+
+
+def test_queue_priority_unchanged(tmp_path, monkeypatch):
+    """queue head가 있으면 resolver --enqueue도 fallback enqueue를 수행하지 않는다."""
+    (tmp_path / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+
+    enq = _run_mst(
+        tmp_path,
+        "queue",
+        "enqueue",
+        "--skill",
+        "mst:approve",
+        "--args",
+        "-a REQ-743",
+        "--auto",
+        "true",
+        "--json",
+    )
+    assert enq.returncode == 0, enq.stderr
+    queue_head = json.loads(enq.stdout)
+
+    _write_workflow_state(
+        tmp_path,
+        {
+            "workflow_active": True,
+            "next_action": {
+                "expected_skill": "mst:request",
+                "source_skill": "mst:plan",
+                "source_id": "PLN-572",
+                "auto_mode": True,
+            },
+        },
+    )
+
+    resolved = _run_mst(
+        tmp_path,
+        "resolve-next-action",
+        "--enqueue",
+        "--json",
+        env={"MST_STATE_PPID": "12345"},
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    assert json.loads(resolved.stdout) == {"command": "/mst:approve -a REQ-743", "source": "queue"}
+
+    queued = _run_mst(tmp_path, "queue", "list", "--status", "queued", "--json")
+    assert queued.returncode == 0, queued.stderr
+    items = json.loads(queued.stdout)
+    assert [item["id"] for item in items] == [queue_head["id"]]
+
+
+def test_wakeup_hint_dispatch(tmp_path, monkeypatch):
+    """--wakeup-hint stop-recover → snapshot RETURN_TO 추출 → enqueue → pop dispatch."""
+    (tmp_path / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+    snapshot_path = tmp_path / ".gran-maestro" / "state" / "cid-001" / "snapshot.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(
+        json.dumps({"returnTo": {"skill": "request", "step": 2}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    resolved = _run_mst(
+        tmp_path,
+        "resolve-next-action",
+        "--enqueue",
+        "--conversation-id",
+        "cid-001",
+        "--wakeup-hint",
+        "stop-recover",
+        "--json",
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    assert json.loads(resolved.stdout) == {
+        "command": "/mst:request (continue from step 2)",
+        "source": "wakeup-hint:stop-recover",
+    }
+
+    pop = _run_mst(tmp_path, "queue", "pop", "--json")
+    assert pop.returncode == 0, pop.stderr
+    dispatch = json.loads(pop.stdout)
+    assert dispatch["skill"] == "mst:request"
+    assert dispatch["args"] == "(continue from step 2)"
+    assert dispatch["source_skill"] == "wakeup-hint"
+    assert dispatch["source_id"] == "stop-recover"
+
+
+def test_resolver_failure_graceful():
+    """resume 문서가 resolver 실패를 queue-empty graceful 종료로 처리하도록 명시한다."""
+    content = (ROOT / "skills/resume/SKILL.md").read_text(encoding="utf-8")
+
+    assert "resolver 호출 실패" in content
+    assert "JSON 파싱 실패" in content
+    assert "queue empty — nothing to resume" in content
+    assert "정상 종료" in content
 
 
 def test_queue_peek_pop_complete_simulation(tmp_path, monkeypatch):

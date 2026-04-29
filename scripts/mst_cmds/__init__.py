@@ -52,6 +52,7 @@ from scripts.mst_cmds import status
 from scripts.mst_cmds import policy
 from scripts.mst_cmds import confirm
 from scripts.mst_cmds import on as on_cmd
+from scripts.mst_cmds import resolver
 
 
 def set_base_dir(base_dir):
@@ -108,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     policy.register(sub)
     confirm.register(sub)
     on_cmd.register(sub)
+    resolver.register(sub)
 
     return parser
 
@@ -268,4 +270,5 @@ DISPATCH = {
     ("policy", "verify"): policy.cmd_policy_verify,
     ("confirm", None): confirm.cmd_confirm,
     ("on", "cleanup"): on_cmd.cmd_on_cleanup,
+    ("resolve-next-action", None): resolver.resolve_next_action,
 }
