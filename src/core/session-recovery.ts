@@ -45,6 +45,8 @@ export type RecoveryAction =
   | 'resume_review'      // Task was in review -- reopen review flow
   | 'resume_feedback'    // Task had pending feedback -- re-trigger execution
   | 're_queue'           // Task was queued -- put it back in the queue
+  | 'resolve_conflict_interactive'  // merge_conflict -- user resolves manually then resumes
+  | 'abort_and_revert'              // merge_conflict -- abort merge and revert to prior state
   | 'user_decision';     // Ambiguous state -- ask the user
 
 // ---------------------------------------------------------------------------
@@ -176,13 +178,26 @@ export function determineRecoveryAction(task: RecoverableTask): RecoveryAction {
     case 'pending':
       return 're_queue';
 
-    case 'merging':
     case 'merge_conflict':
+      return 'resolve_conflict_interactive';
+
+    case 'merging':
       return 'user_decision';
 
     default:
       return 'user_decision';
   }
+}
+
+/**
+ * Return the explicit alternative actions a user may choose when a task is in
+ * `merge_conflict`. The first element is the recommended primary action; the
+ * second is the fallback (abort the merge entirely).
+ */
+export function getMergeConflictAlternatives(
+  _task: RecoverableTask,
+): RecoveryAction[] {
+  return ['resolve_conflict_interactive', 'abort_and_revert'];
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +248,14 @@ export async function recoverTask(
     case 're_queue':
       newStatus = 'queued';
       recoveryNote = 'Re-queued after session recovery';
+      break;
+    case 'resolve_conflict_interactive':
+      newStatus = 'executing';
+      recoveryNote = 'User chose interactive conflict resolution';
+      break;
+    case 'abort_and_revert':
+      newStatus = 'failed';
+      recoveryNote = 'User chose to abort merge and revert';
       break;
     case 'user_decision':
       // Do not change status -- the user will decide

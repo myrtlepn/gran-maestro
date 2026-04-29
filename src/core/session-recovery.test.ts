@@ -1,5 +1,8 @@
 import {
+  determineRecoveryAction,
+  getMergeConflictAlternatives,
   reconcileTaskAndWorktree,
+  type RecoverableTask,
   type ReconcileInput,
 } from "./session-recovery.ts";
 
@@ -123,6 +126,73 @@ runSerialTest("reconcile: read-only (input unchanged)", () => {
 
   assertEquals(JSON.stringify(input), before);
 });
+
+function makeTask(
+  overrides: Partial<RecoverableTask> = {},
+): RecoverableTask {
+  return {
+    taskId: "REQ-001-01",
+    reqId: "REQ-001",
+    lastStatus: "executing",
+    lastPhase: "phase2_execution",
+    worktreePath: "/tmp/test-worktree",
+    hasRunningProcess: false,
+    basePath: "/tmp/test-base",
+    ...overrides,
+  };
+}
+
+runSerialTest(
+  "determineRecoveryAction: merge_conflict (running) -> resolve_conflict_interactive",
+  () => {
+    const action = determineRecoveryAction(
+      makeTask({ lastStatus: "merge_conflict", hasRunningProcess: true }),
+    );
+    assertEquals(action, "resolve_conflict_interactive");
+  },
+);
+
+runSerialTest(
+  "determineRecoveryAction: merge_conflict (no process) -> resolve_conflict_interactive",
+  () => {
+    const action = determineRecoveryAction(
+      makeTask({ lastStatus: "merge_conflict", hasRunningProcess: false }),
+    );
+    assertEquals(action, "resolve_conflict_interactive");
+  },
+);
+
+runSerialTest(
+  "getMergeConflictAlternatives returns the two explicit candidates",
+  () => {
+    const task = makeTask({ lastStatus: "merge_conflict" });
+    const alternatives = getMergeConflictAlternatives(task);
+    assertEquals(alternatives, [
+      "resolve_conflict_interactive",
+      "abort_and_revert",
+    ]);
+  },
+);
+
+runSerialTest(
+  "determineRecoveryAction: merging unchanged -> user_decision",
+  () => {
+    const action = determineRecoveryAction(
+      makeTask({ lastStatus: "merging" }),
+    );
+    assertEquals(action, "user_decision");
+  },
+);
+
+runSerialTest(
+  "determineRecoveryAction: executing with running process -> resume_monitoring",
+  () => {
+    const action = determineRecoveryAction(
+      makeTask({ lastStatus: "executing", hasRunningProcess: true }),
+    );
+    assertEquals(action, "resume_monitoring");
+  },
+);
 
 function assert(condition: unknown, message?: string): asserts condition {
   if (!condition) {
