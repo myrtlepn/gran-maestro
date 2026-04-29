@@ -305,6 +305,17 @@ if history_path.exists():
 local_head = read_head(local_head_path)
 mirror_head = read_head(mirror_head_path)
 has_entries = expected_seq > 1
+
+if (
+    not has_entries
+    and not history_path.exists()
+    and local_head is None
+    and mirror_head is not None
+    and mirror_head != zero_hash
+):
+    mirror_head_path.write_text(zero_hash + "\n", encoding="utf-8")
+    mirror_head = zero_hash
+
 if has_entries and local_head is None:
     fail("missing history.head")
 if has_entries and mirror_head is None:
