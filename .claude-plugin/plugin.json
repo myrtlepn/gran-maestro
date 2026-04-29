@@ -1,7 +1,7 @@
 {
   "name": "mst",
   "description": "AI 오케스트라의 그랜드마스터 — PM이 코드를 쓰지 않고 AI 에이전트를 지휘하여 개발",
-  "version": "0.60.0",
+  "version": "0.59.7",
   "author": {
     "name": "myrtlepn"
   },
@@ -22,5 +22,6 @@
     "./agents/feedback-composer.md",
     "./agents/schema-designer.md",
     "./agents/ui-designer.md"
-  ]
+  ],
+  "hooks": "./hooks/hooks.json"
 }
