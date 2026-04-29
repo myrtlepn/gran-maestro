@@ -330,6 +330,13 @@ SNAPSHOT_RETURN_TO_STEP=""
 emit_approve_json() {
   local reason="$1"
   local details_anchor="$2"
+  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
+    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
+      if ! claim_judge_timeout_emit; then
+        return 0
+      fi
+    fi
+  fi
   if [ -n "$details_anchor" ]; then
     printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
   fi
@@ -342,6 +349,10 @@ if not reason.strip():
     reason = "approved"
 print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
 PY
+  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
+    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
+  fi
+  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
 }
 
 details_anchor_for_reason() {
@@ -495,7 +506,11 @@ judge_timeout_already_emitted() {
 }
 
 claim_judge_timeout_emit() {
-  mkdir "$HOOK_JUDGE_TIMEOUT_MARKER" 2>/dev/null
+  if mkdir "$HOOK_JUDGE_TIMEOUT_MARKER" 2>/dev/null; then
+    HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="true"
+    return 0
+  fi
+  return 1
 }
 
 wait_for_judge_timeout_emit_done() {
@@ -578,6 +593,13 @@ PY
 emit_allow_json() {
   local reason="$1"
   local details_anchor
+  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
+    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
+      if ! claim_judge_timeout_emit; then
+        return 0
+      fi
+    fi
+  fi
   details_anchor="$(details_anchor_for_reason "$reason")"
   if [ -n "$details_anchor" ]; then
     printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
@@ -591,6 +613,10 @@ if not reason.strip():
     reason = "approved"
 print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
 PY
+  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
+    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
+  fi
+  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
 }
 
 emit_judge_timeout_payload() {
@@ -1505,6 +1531,13 @@ has_active_workflow_session() {
 emit_block_json() {
   local reason="$1"
   local details_anchor="$2"
+  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
+    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
+      if ! claim_judge_timeout_emit; then
+        return 0
+      fi
+    fi
+  fi
   if [ -n "$details_anchor" ]; then
     printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
   fi
@@ -1517,6 +1550,10 @@ if not reason.strip():
     reason = "stop blocked (reason unspecified)"
 print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
 PY
+  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
+    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
+  fi
+  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
 }
 
 emit_block_decision() {
