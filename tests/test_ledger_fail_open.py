@@ -33,7 +33,9 @@ emit_ledger_complete "SessionStart" 0
     assert result.stderr == ""
 
 
-def test_hook_ledger_lock_failure_does_not_change_exit_code_or_stderr(tmp_path: Path) -> None:
+def test_hook_ledger_lock_failure_emits_overflow_warning_without_blocking(tmp_path: Path) -> None:
+    """AD-005: lock contention emits stderr warning and writes to overflow file,
+    but the hook itself still returns exit code 0 (non-blocking)."""
     workspace = tmp_path / "workspace"
     ledger_dir = workspace / ".gran-maestro"
     (ledger_dir / "tmp").mkdir(parents=True, exist_ok=True)
@@ -54,5 +56,10 @@ def test_hook_ledger_lock_failure_does_not_change_exit_code_or_stderr(tmp_path: 
         },
     )
 
+    # Hook itself must remain non-blocking.
     assert result.returncode == 0
-    assert result.stderr == ""
+    # AD-005: stderr now carries the contention warning instead of being silent.
+    assert "[mst-ledger] lock contention skipped:" in result.stderr
+    overflow = ledger_dir / "hooks-ledger.overflow.ndjson"
+    assert overflow.exists()
+    assert overflow.read_text(encoding="utf-8").strip() != ""

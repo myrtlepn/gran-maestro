@@ -101,7 +101,7 @@ _mst_ledger_append() {
     "$(_mst_ledger_json_escape "$session_id")" \
     "$(_mst_ledger_json_escape "$source")" \
     "$$")"
-  mkdir -p "$ledger_dir" || return 0
+  mkdir -p "$ledger_dir" 2>/dev/null || return 0
   acquired=0
   for i in 1 2 3 4 5; do
     if mkdir "$lock" 2>/dev/null; then
@@ -110,15 +110,25 @@ _mst_ledger_append() {
     fi
     sleep 0.02 2>/dev/null || true
   done
-  [ "$acquired" = "1" ] || return 0
-  printf '%s\n' "$row" >> "$ledger" 2>/dev/null || true
-  rmdir "$lock" 2>/dev/null || true
+  if [ "$acquired" = "1" ]; then
+    printf '%s\n' "$row" >> "$ledger" 2>/dev/null || true
+    rmdir "$lock" 2>/dev/null || true
+    return 0
+  fi
+  local overflow summary
+  overflow="${ledger%.ndjson}.overflow.ndjson"
+  summary="$(printf '%s' "$row" | head -c 100)"
+  printf '[mst-ledger] lock contention skipped: %s, see %s\n' "$summary" "$overflow" >&2
+  printf '%s\n' "$row" >> "$overflow" 2>/dev/null || true
+  return 0
 }
 
 emit_ledger_start() {
-  ( set +e; _mst_ledger_append "$1" "start" "" >/dev/null 2>&1 ) || true
+  # stdout is suppressed (no row leakage to caller stdout) but stderr is
+  # preserved so the AD-005 lock-contention warning reaches the user.
+  ( set +e; _mst_ledger_append "$1" "start" "" >/dev/null ) || true
 }
 
 emit_ledger_complete() {
-  ( set +e; _mst_ledger_append "$1" "complete" "${2:-}" >/dev/null 2>&1 ) || true
+  ( set +e; _mst_ledger_append "$1" "complete" "${2:-}" >/dev/null ) || true
 }
