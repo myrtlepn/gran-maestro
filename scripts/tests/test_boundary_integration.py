@@ -181,8 +181,8 @@ def test_pre_tool_hook_retries_missing_worktree_then_blocks_after_failed_recheck
 
     assert result.returncode == 0
     assert payload["decision"] == "block"
-    assert payload["reason"] == "boundary_violation:worktree_missing"
-    assert "boundary_entry_repair_failed" in debug_text
+    assert payload["reason"] == "base_not_verified"
+    assert "boundary_entry_repair_pre_diagnosis" in debug_text
     assert_boundary_log(
         tmp_path,
         hook_name="mst-pre-tool-use.sh",
