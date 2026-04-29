@@ -14,6 +14,7 @@ import { ReferenceView } from './views/ReferenceView';
 import { SettingsView } from './views/SettingsView';
 import { ArchivesView } from './views/ArchivesView';
 import { FlowView } from './views/FlowView';
+import { PolicyView } from './views/PolicyView';
 
 function IntentLegacyRedirect() {
   const { intentId } = useParams();
@@ -54,6 +55,7 @@ export function AppRoutes() {
       <Route path="/memory/references" element={<ReferenceView />} />
       <Route path="/memory/references/:refId" element={<ReferenceView />} />
       <Route path="/archives" element={<ArchivesView />} />
+      <Route path="/policy" element={<PolicyView />} />
       <Route path="/settings" element={<SettingsView />} />
       <Route path="*" element={<Navigate to="/overview" replace />} />
     </Routes>

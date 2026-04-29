@@ -13,6 +13,7 @@ from scripts.mst_cmds import _common
 
 POLICY_HOME = Path(".claude") / "gran-maestro-policy"
 DEFAULT_RULE_FILE = "core-bypass.json"
+DEFAULT_RULE_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates" / "defaults" / "policy" / "rules.d"
 
 
 DEFAULT_RULESET = {
@@ -71,6 +72,21 @@ def _write_private_json(path: Path, payload: dict) -> None:
     os.chmod(path, 0o600)
 
 
+def _install_default_rule_templates(rules_dir: Path) -> None:
+    if not DEFAULT_RULE_TEMPLATE_DIR.is_dir():
+        return
+    for template in sorted(DEFAULT_RULE_TEMPLATE_DIR.glob("*.json")):
+        target = rules_dir / template.name
+        if target.exists():
+            os.chmod(target, 0o600)
+            continue
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_bytes(template.read_bytes())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+        os.chmod(target, 0o600)
+
+
 def _manifest_payload(policy_dir: Path) -> dict:
     rules = []
     rules_dir = policy_dir / "rules.d"
@@ -104,6 +120,7 @@ def cmd_policy_init(args: argparse.Namespace) -> int:
         _write_private_json(rule_file, DEFAULT_RULESET)
     else:
         os.chmod(rule_file, 0o600)
+    _install_default_rule_templates(rules_dir)
 
     _write_private_json(policy_dir / "manifest.json", _manifest_payload(policy_dir))
 

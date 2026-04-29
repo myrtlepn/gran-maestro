@@ -1,0 +1,20 @@
+{
+  "id": "PROTECTED-PATHS",
+  "version": 1,
+  "match": {
+    "any": [
+      {"tool": "Write"},
+      {"tool": "Edit"},
+      {"tool": "MultiEdit"}
+    ]
+  },
+  "predicate": {
+    "any": [
+      {"name": "path_protected", "path_glob": ".gran-maestro/sessions/**"},
+      {"name": "path_protected", "path_glob": ".gran-maestro/policy/**"},
+      {"name": "path_protected", "path_glob": "~/.claude/gran-maestro-policy/**"}
+    ]
+  },
+  "decision": "block",
+  "reason": "protected paths Write 차단 (REQ-731 T05)"
+}

@@ -5,11 +5,12 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from scripts.mst_cmds import _common
@@ -45,12 +46,23 @@ def _policy_home() -> Path:
     return claude_home / ".claude" / "gran-maestro-policy"
 
 
+def _allowlist_path() -> Path:
+    explicit = os.environ.get("MST_POLICY_HOME", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve() / "allowlist.json"
+    return Path.home().expanduser() / ".claude" / "gran-maestro-policy" / "allowlist.json"
+
+
 def _project_key(project_root: Path) -> str:
     return hashlib.sha256(os.path.realpath(project_root).encode()).hexdigest()[:16]
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _sha256_text(value: str) -> str:
@@ -107,6 +119,68 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tmp_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def _empty_allowlist() -> dict:
+    return {"version": 1, "entries": []}
+
+
+def _load_allowlist(path: Path) -> dict:
+    if not path.exists():
+        return _empty_allowlist()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return _empty_allowlist()
+    if not isinstance(data, dict):
+        return _empty_allowlist()
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    return {"version": 1, "entries": [entry for entry in entries if isinstance(entry, dict)]}
+
+
+def _save_allowlist(path: Path, data: dict) -> None:
+    normalized = {
+        "version": 1,
+        "entries": data.get("entries") if isinstance(data.get("entries"), list) else [],
+    }
+    _atomic_write_text(path, json.dumps(normalized, indent=2, sort_keys=True) + "\n")
+    os.chmod(path, 0o600)
+
+
+def _parse_expiry(value: object) -> datetime | None:
+    if not value:
+        return None
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _print_allowlist(data: dict) -> None:
+    now = datetime.now(timezone.utc)
+    print("ID | Tool | Args Pattern | Expires | Status")
+    for entry in data.get("entries", []):
+        expires_at = entry.get("expires_at")
+        expiry = _parse_expiry(expires_at)
+        status = "expired" if expiry is not None and now >= expiry else "active"
+        print(
+            " | ".join(
+                [
+                    str(entry.get("id") or "-"),
+                    str(entry.get("tool") or "-"),
+                    str(entry.get("args_pattern") or "*"),
+                    str(expires_at or "never"),
+                    status,
+                ]
+            )
+        )
 
 
 def _write_heads(local_head: Path, mirror_head: Path, head_hash: str) -> None:
@@ -169,6 +243,68 @@ def _confirm_or_abort(args: argparse.Namespace, message: str) -> bool:
         return True
     answer = input(f"{message} [y/N] ").strip().lower()
     return answer in {"y", "yes"}
+
+
+def _read_session_history(session_dir: Path) -> list[dict]:
+    history_file = session_dir / "history.ndjson"
+    if not history_file.is_file():
+        return []
+
+    rows: list[dict] = []
+    for line in history_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            row = dict(row)
+            row.setdefault("session_id", session_dir.name)
+            rows.append(row)
+    return rows
+
+
+def _event_timestamp(row: dict) -> str:
+    event = row.get("event")
+    if isinstance(event, dict):
+        return str(event.get("timestamp") or row.get("timestamp") or "")
+    return str(row.get("timestamp") or "")
+
+
+def _event_type(row: dict) -> str:
+    event = row.get("event")
+    return str(event.get("type") or "") if isinstance(event, dict) else ""
+
+
+def _rule_or_tool(row: dict) -> str:
+    event = row.get("event")
+    if not isinstance(event, dict):
+        return "-"
+    return str(event.get("rule_id") or event.get("tool") or event.get("tool_name") or event.get("repair_target") or "-")
+
+
+def _event_note(row: dict) -> str:
+    event = row.get("event")
+    if not isinstance(event, dict):
+        return "-"
+    return str(event.get("reason") or event.get("message") or event.get("trigger") or "-")
+
+
+def _print_hook_log_table(rows: list[dict]) -> None:
+    print("시간 | 세션 | 이벤트 | 룰/도구 | 비고")
+    for row in rows:
+        print(
+            " | ".join(
+                [
+                    _event_timestamp(row),
+                    str(row.get("session_id") or "-"),
+                    _event_type(row) or "-",
+                    _rule_or_tool(row),
+                    _event_note(row),
+                ]
+            )
+        )
 
 
 def _backup_history(history_file: Path) -> Path:
@@ -369,6 +505,80 @@ def cmd_hook_repair(args: argparse.Namespace) -> int:
         return 2
 
 
+def cmd_hook_log(args: argparse.Namespace) -> int:
+    sessions_dir = _common.BASE_DIR / "sessions"
+    if args.session:
+        session_id = _sanitize_session_id(args.session)
+        rows = _read_session_history(sessions_dir / session_id)
+    else:
+        rows = []
+        if sessions_dir.is_dir():
+            for session_dir in sorted(path for path in sessions_dir.iterdir() if path.is_dir()):
+                rows.extend(_read_session_history(session_dir))
+
+    if args.type:
+        rows = [row for row in rows if _event_type(row) == args.type]
+    rows.sort(key=_event_timestamp)
+
+    limit = max(0, int(args.limit))
+    if limit:
+        rows = rows[-limit:]
+    else:
+        rows = []
+
+    if args.json:
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        _print_hook_log_table(rows)
+    return 0
+
+
+def cmd_hook_allow(args: argparse.Namespace) -> int:
+    if not (args.list or args.remove):
+        try:
+            require_user_tty()
+        except SystemExit as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    allowlist_path = _allowlist_path()
+    data = _load_allowlist(allowlist_path)
+
+    if args.list:
+        _print_allowlist(data)
+        return 0
+
+    if args.remove:
+        before = len(data["entries"])
+        data["entries"] = [entry for entry in data["entries"] if entry.get("id") != args.remove]
+        if len(data["entries"]) == before:
+            print(f"Not found: {args.remove}", file=sys.stderr)
+            return 1
+        _save_allowlist(allowlist_path, data)
+        print(f"Removed: {args.remove}")
+        return 0
+
+    if not args.tool:
+        print("--tool required for add", file=sys.stderr)
+        return 2
+
+    now = datetime.now(timezone.utc)
+    expires_at = _format_utc(now + timedelta(minutes=args.expires)) if args.expires is not None else None
+    entry = {
+        "id": f"alw_{secrets.token_hex(4)}",
+        "tool": args.tool,
+        "args_pattern": args.args_pattern or "*",
+        "expires_at": expires_at,
+        "added_by_tty": True,
+        "created_at": _format_utc(now),
+    }
+    data.setdefault("entries", []).append(entry)
+    _save_allowlist(allowlist_path, data)
+    print(f"Added: {entry['id']}")
+    return 0
+
+
 def register(subparsers):
     hook = subparsers.add_parser("hook")
     hook_sub = hook.add_subparsers(dest="subcommand")
@@ -379,3 +589,18 @@ def register(subparsers):
     repair.add_argument("--truncate-to", type=int)
     repair.add_argument("--yes", action="store_true")
     repair.set_defaults(func=cmd_hook_repair)
+
+    log = hook_sub.add_parser("log")
+    log.add_argument("--session")
+    log.add_argument("--type")
+    log.add_argument("--limit", type=int, default=50)
+    log.add_argument("--json", action="store_true")
+    log.set_defaults(func=cmd_hook_log)
+
+    allow = hook_sub.add_parser("allow")
+    allow.add_argument("tool", nargs="?")
+    allow.add_argument("--args-pattern")
+    allow.add_argument("--expires", type=int)
+    allow.add_argument("--list", action="store_true")
+    allow.add_argument("--remove")
+    allow.set_defaults(func=cmd_hook_allow)

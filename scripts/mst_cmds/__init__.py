@@ -246,6 +246,8 @@ DISPATCH = {
     ("hooks", "sync"): hooks.cmd_hooks_sync,
     ("hooks", "doctor"): hooks.doctor,
     ("hook", "repair"): hook.cmd_hook_repair,
+    ("hook", "log"): hook.cmd_hook_log,
+    ("hook", "allow"): hook.cmd_hook_allow,
     ("skill", "build"): skill.cmd_skill_build,
     ("skill", "scaffold"): skill.cmd_skill_scaffold,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,

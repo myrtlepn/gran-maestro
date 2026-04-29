@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+STATUSLINE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATUSLINE_SOURCE_ROOT="$(cd "${STATUSLINE_SCRIPT_DIR}/.." && pwd)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 BACKUP_FILE="${HOME}/.claude/mst-statusline-backup.json"
 INPUT_JSON="$(cat || true)"
@@ -73,6 +75,24 @@ if isinstance(data, dict):
 
 if path:
     print(path)
+' 2>/dev/null || true
+}
+
+extract_session_id() {
+  printf '%s' "$INPUT_JSON" | python3 -c 'import json, sys
+try:
+    data = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    data = {}
+
+session_id = ""
+if isinstance(data, dict):
+    value = data.get("session_id")
+    if isinstance(value, str):
+        session_id = value.strip()
+
+if session_id:
+    print(session_id)
 ' 2>/dev/null || true
 }
 
@@ -672,6 +692,7 @@ HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
 STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
+SESSION_ID_FROM_INPUT="$(extract_session_id)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
 SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${CURRENT_STATUSLINE_PPID}/snapshot.json"
 if [ ! -f "$SNAPSHOT_PATH" ] && [ -f "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json" ]; then
@@ -684,3 +705,19 @@ if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
 fi
 printf '%s\n' "$MST_LINE"
+COUNTER_SESSION_ID="${MST_SESSION_ID:-$SESSION_ID_FROM_INPUT}"
+if [ -n "$COUNTER_SESSION_ID" ]; then
+  COUNTER_LINE="$(
+    PYTHONPATH="${STATUSLINE_SOURCE_ROOT}${PYTHONPATH:+:$PYTHONPATH}" python3 - "$COUNTER_SESSION_ID" "$PROJECT_ROOT" <<'PY' 2>/dev/null || true
+import sys
+from pathlib import Path
+
+from scripts.mst_cmds.statusline_counters import format_line
+
+print(format_line(sys.argv[1], Path(sys.argv[2])))
+PY
+  )"
+  if [ -n "$COUNTER_LINE" ]; then
+    printf '%s\n' "$COUNTER_LINE"
+  fi
+fi

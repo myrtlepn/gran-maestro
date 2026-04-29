@@ -9,6 +9,7 @@ import {
   Files,
   BookOpen,
   Crosshair,
+  ShieldAlert,
   Settings,
 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -25,6 +26,7 @@ export const TABS = [
   { id: 'designs', label: 'Designs', icon: Palette, key: '6', path: '/designs' },
   { id: 'documents', label: 'Documents', icon: Files, key: '7', path: '/documents' },
   { id: 'memory', label: 'Memory', icon: BookOpen, key: 'i', path: '/memory/intents' },
+  { id: 'policy', label: 'Policy', icon: ShieldAlert, key: '9', path: '/policy' },
   { id: 'settings', label: 'Settings', icon: Settings, key: '8', path: '/settings' },
 ];
 

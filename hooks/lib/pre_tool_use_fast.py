@@ -30,6 +30,12 @@ ALLOWLIST = {
     "history_not_exists_after",
     "path_protected",
 }
+PROTECTED_PATH_PATTERNS = (
+    ".gran-maestro/sessions/**",
+    ".gran-maestro/policy/**",
+    "~/.claude/gran-maestro-policy/**",
+)
+ALLOWLIST_PROTECTED_TARGET_TOOLS = {"Write", "Edit", "MultiEdit"}
 PHASE_GATE_RULE_ID = "GM-PHASE-GATE"
 PHASE_MUTATING_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 PHASE_READONLY_COMMANDS = {
@@ -979,6 +985,88 @@ def policy_home(home: Path) -> Path:
     if raw:
         return Path(raw).expanduser()
     return home / ".claude" / "gran-maestro-policy"
+
+
+def allowlist_path(home: Path) -> Path:
+    return policy_home(home) / "allowlist.json"
+
+
+def parse_allowlist_expiry(value) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def allowlist_target(tool_input: dict) -> str:
+    for key in ("command", "file_path", "path"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def protected_allowlist_target(tool_input: dict) -> str:
+    for key in ("file_path", "notebook_path", "path"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def is_protected_target(target_path: str) -> bool:
+    if not target_path:
+        return False
+    expanded_target = os.path.expanduser(target_path)
+    target_abs = os.path.abspath(expanded_target)
+    for pattern in PROTECTED_PATH_PATTERNS:
+        expanded_pattern = os.path.expanduser(pattern)
+        pattern_abs = os.path.abspath(expanded_pattern)
+        if (
+            fnmatch.fnmatch(target_abs, pattern_abs)
+            or fnmatch.fnmatch(expanded_target, expanded_pattern)
+            or fnmatch.fnmatch(target_path, pattern)
+        ):
+            return True
+    return False
+
+
+def check_allowlist(home: Path, tool_name: str, tool_input: dict) -> bool:
+    if tool_name in ALLOWLIST_PROTECTED_TARGET_TOOLS and is_protected_target(
+        protected_allowlist_target(tool_input)
+    ):
+        return False
+
+    path = allowlist_path(home)
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    now = datetime.now(timezone.utc)
+    target = allowlist_target(tool_input)
+    for entry in data.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("tool") != tool_name:
+            continue
+        expires_at = entry.get("expires_at")
+        if expires_at:
+            expiry = parse_allowlist_expiry(expires_at)
+            if expiry is None or now >= expiry:
+                continue
+        if fnmatch.fnmatch(target, str(entry.get("args_pattern") or "*")):
+            return True
+    return False
 
 
 def history_paths(project_root: Path, home: Path, session_id: str) -> Tuple[Path, Path, Path, Path]:
@@ -2099,8 +2187,8 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
     def validate_predicates(rule_id: str, condition) -> bool:
         if not isinstance(condition, dict):
             return True
-        if "predicate" in condition:
-            name = str(condition.get("predicate") or "")
+        if "predicate" in condition or "name" in condition:
+            name = str(condition.get("predicate") or condition.get("name") or "")
             if name not in ALLOWLIST:
                 unknown_predicate(rule_id, name)
                 return False
@@ -2124,8 +2212,28 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
             except Exception as exc:
                 stderr(f"[policy-warning] rule_file_invalid file={rule_path.name} error={exc}")
                 continue
-            for rule in rule_payload.get("rules", []):
+            raw_rules = rule_payload.get("rules")
+            if not isinstance(raw_rules, list) and isinstance(rule_payload, dict) and rule_payload.get("id"):
+                raw_rules = [rule_payload]
+            if not isinstance(raw_rules, list):
+                continue
+            for rule in raw_rules:
                 if not isinstance(rule, dict):
+                    continue
+                if "match" in rule or "predicate" in rule or "decision" in rule:
+                    compiled_rules.append(
+                        {
+                            "id": str(rule.get("id") or rule_path.name),
+                            "trigger": rule.get("match"),
+                            "condition": rule.get("predicate"),
+                            "action": {
+                                "decision": rule.get("decision"),
+                                "message": rule.get("reason") or rule.get("message"),
+                            },
+                            "severity": rule.get("severity"),
+                            "message": rule.get("reason") or rule.get("message"),
+                        }
+                    )
                     continue
                 compiled_rules.append(
                     {
@@ -2171,9 +2279,24 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
     decisions: List[dict] = []
 
     def path_protected(path_glob: str) -> bool:
-        candidate = get_arg(tool_input, "file_path") or get_arg(tool_input, "path") or get_arg(tool_input, "command")
-        expanded = candidate.replace("~", str(home), 1) if candidate.startswith("~") else candidate
-        return fnmatch.fnmatch(expanded, str(path_glob)) or fnmatch.fnmatch(candidate, str(path_glob))
+        raw_glob = str(path_glob or "")
+        expanded_glob = os.path.expanduser(raw_glob)
+        target = (
+            get_arg(tool_input, "file_path")
+            or get_arg(tool_input, "notebook_path")
+            or get_arg(tool_input, "path")
+            or get_arg(tool_input, "command")
+        )
+        if not target:
+            return False
+        expanded_target = os.path.expanduser(target)
+        target_abs = os.path.abspath(expanded_target)
+        glob_abs = os.path.abspath(expanded_glob)
+        return (
+            fnmatch.fnmatch(target_abs, glob_abs)
+            or fnmatch.fnmatch(expanded_target, expanded_glob)
+            or fnmatch.fnmatch(target, raw_glob)
+        )
 
     def history_exists(type_filter) -> bool:
         return any(match_object(row, type_filter) for row in load_history_events(project_root, str(payload.get("session_id") or ""), history_cache))
@@ -2192,8 +2315,8 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
         nonlocal unknown_predicate_seen
         if not isinstance(predicate, dict):
             return True
-        if "predicate" in predicate:
-            name = str(predicate.get("predicate") or "")
+        if "predicate" in predicate or "name" in predicate:
+            name = str(predicate.get("predicate") or predicate.get("name") or "")
             if name not in ALLOWLIST:
                 unknown_predicate(rule_id, name)
                 raise SystemExit(2)
@@ -2220,6 +2343,12 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
     def trigger_matches(trigger) -> bool:
         if not isinstance(trigger, dict):
             return True
+        if "all" in trigger:
+            items = trigger.get("all")
+            return all(trigger_matches(item) for item in items) if isinstance(items, list) else True
+        if "any" in trigger:
+            items = trigger.get("any")
+            return any(trigger_matches(item) for item in items) if isinstance(items, list) else True
         tool = trigger.get("tool")
         if isinstance(tool, str) and tool and tool_name != tool:
             return False
@@ -2435,42 +2564,53 @@ def main() -> int:
             if override_status is not None:
                 return override_status
 
-        status, policy_decisions = evaluate_policy(project_root, home, payload)
-        if status:
-            if clean_sid and policy_decisions:
-                decision = policy_decisions[0]
-                if decision.get("decision") == "policy_block":
-                    timestamp = format_utc(utc_now())
-                    args_sha256 = sha256_text(canonical_json(tool_input))
-                    side_effect_status = append_event_after_verified(
-                        project_root,
-                        home,
-                        clean_sid,
-                        {
-                            "args_sha256": args_sha256,
-                            "message": str(decision.get("message") or ""),
-                            "rule_id": str(decision.get("rule_id") or "policy_block"),
-                            "timestamp": timestamp,
-                            "tool": str(payload.get("tool_name") or "").strip() or "unknown",
-                            "type": "policy_block",
-                        },
-                    )
-                    if side_effect_status:
-                        return side_effect_status
-                    side_effect_status = request_pending_confirm(
-                        project_root,
-                        home,
-                        clean_sid,
-                        tool_name,
-                        tool_input,
-                        str(decision.get("rule_id") or "policy_block"),
-                    )
-                    if side_effect_status:
-                        return side_effect_status
-            return status
+        allowlisted = check_allowlist(home, tool_name, tool_input)
+        policy_decisions: List[dict] = []
+        if allowlisted:
+            policy_decisions.append(
+                {
+                    "decision": "normal_allow",
+                    "rule_id": "MST-HOOK-ALLOWLIST",
+                    "message": "allowlist matched",
+                }
+            )
+        else:
+            status, policy_decisions = evaluate_policy(project_root, home, payload)
+            if status:
+                if clean_sid and policy_decisions:
+                    decision = policy_decisions[0]
+                    if decision.get("decision") == "policy_block":
+                        timestamp = format_utc(utc_now())
+                        args_sha256 = sha256_text(canonical_json(tool_input))
+                        side_effect_status = append_event_after_verified(
+                            project_root,
+                            home,
+                            clean_sid,
+                            {
+                                "args_sha256": args_sha256,
+                                "message": str(decision.get("message") or ""),
+                                "rule_id": str(decision.get("rule_id") or "policy_block"),
+                                "timestamp": timestamp,
+                                "tool": str(payload.get("tool_name") or "").strip() or "unknown",
+                                "type": "policy_block",
+                            },
+                        )
+                        if side_effect_status:
+                            return side_effect_status
+                        side_effect_status = request_pending_confirm(
+                            project_root,
+                            home,
+                            clean_sid,
+                            tool_name,
+                            tool_input,
+                            str(decision.get("rule_id") or "policy_block"),
+                        )
+                        if side_effect_status:
+                            return side_effect_status
+                return status
 
         phase_decisions: List[dict] = []
-        if clean_sid:
+        if clean_sid and not allowlisted:
             status, phase_decisions = evaluate_phase_gate(project_root, home, payload, clean_sid)
             if status:
                 if phase_decisions and phase_decisions[0].get("decision") == "policy_block":

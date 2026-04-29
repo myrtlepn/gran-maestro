@@ -14,6 +14,7 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { serveDir } from "https://deno.land/std@0.224.0/http/file_server.ts";
+import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 
 import { sseApi } from "./sse.ts";
 import { projectConfigApi } from "./routes/config.ts";
@@ -49,6 +50,7 @@ import {
   loadConfig,
   loadRegistry,
   registry,
+  resolveBaseDir,
   setRegistry,
 } from "./config.ts";
 
@@ -58,6 +60,153 @@ const DIST_DIR = new URL("../dist", import.meta.url).pathname;
 
 app.get("/api/health", (c) => {
   return c.json({ ok: true });
+});
+
+type PolicyHistoryRow = Record<string, unknown> & {
+  event?: Record<string, unknown>;
+  timestamp?: string;
+  session_id?: string;
+};
+
+type AllowlistFile = {
+  entries?: unknown;
+};
+
+function safeEnvGet(name: string): string | undefined {
+  try {
+    return Deno.env.get(name) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function policyBaseDir(projectId?: string): string {
+  const resolved = resolveBaseDir(projectId);
+  if (resolved) {
+    const normalized = resolved.replace(/\\/g, "/");
+    return normalized.endsWith("/.gran-maestro") || normalized === ".gran-maestro"
+      ? resolved
+      : join(resolved, ".gran-maestro");
+  }
+  return join(Deno.cwd(), ".gran-maestro");
+}
+
+function policyAllowlistPath(): string {
+  const explicit = safeEnvGet("MST_POLICY_HOME")?.trim();
+  if (explicit) {
+    return join(explicit, "allowlist.json");
+  }
+
+  const home = safeEnvGet("HOME") ?? safeEnvGet("USERPROFILE") ?? ".";
+  return join(home, ".claude", "gran-maestro-policy", "allowlist.json");
+}
+
+function parseLimit(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "100", 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 100;
+  return Math.min(parsed, 1000);
+}
+
+function policyEvent(row: PolicyHistoryRow): Record<string, unknown> {
+  return typeof row.event === "object" && row.event !== null ? row.event : row;
+}
+
+function eventTimestamp(row: PolicyHistoryRow): string {
+  const event = policyEvent(row);
+  return typeof event.timestamp === "string"
+    ? event.timestamp
+    : typeof row.timestamp === "string"
+    ? row.timestamp
+    : "";
+}
+
+function isBlockedPolicyEvent(row: PolicyHistoryRow): boolean {
+  const event = policyEvent(row);
+  return event.type === "policy_block" || event.type === "core_block";
+}
+
+async function readPolicyHistoryFile(path: string, sessionId: string): Promise<PolicyHistoryRow[]> {
+  let text = "";
+  try {
+    text = await Deno.readTextFile(path);
+  } catch {
+    return [];
+  }
+
+  const rows: PolicyHistoryRow[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as PolicyHistoryRow;
+      if (typeof parsed === "object" && parsed !== null) {
+        rows.push({ ...parsed, session_id: parsed.session_id ?? sessionId });
+      }
+    } catch {
+      // Skip malformed history lines instead of failing the dashboard.
+    }
+  }
+  return rows;
+}
+
+async function readPolicyHistory(baseDir: string, sessionId?: string): Promise<PolicyHistoryRow[]> {
+  const sessionsDir = join(baseDir, "sessions");
+  if (sessionId) {
+    return await readPolicyHistoryFile(join(sessionsDir, sessionId, "history.ndjson"), sessionId);
+  }
+
+  const rows: PolicyHistoryRow[] = [];
+  try {
+    for await (const entry of Deno.readDir(sessionsDir)) {
+      if (!entry.isDirectory) continue;
+      const sessionRows = await readPolicyHistoryFile(
+        join(sessionsDir, entry.name, "history.ndjson"),
+        entry.name,
+      );
+      rows.push(...sessionRows);
+    }
+  } catch {
+    return [];
+  }
+  return rows;
+}
+
+projectApi.get("/policy/timeline", async (c) => {
+  const baseDir = policyBaseDir(c.req.param("projectId"));
+  const sessionId = c.req.query("session")?.trim() || undefined;
+  const limit = parseLimit(c.req.query("limit"));
+  const rows = await readPolicyHistory(baseDir, sessionId);
+  const blockedRows = rows
+    .filter(isBlockedPolicyEvent)
+    .sort((left, right) => eventTimestamp(left).localeCompare(eventTimestamp(right)));
+
+  return c.json(limit > 0 ? blockedRows.slice(-limit) : []);
+});
+
+projectApi.get("/policy/rules", async (c) => {
+  const baseDir = policyBaseDir(c.req.param("projectId"));
+  const rows = await readPolicyHistory(baseDir);
+  const counts: Record<string, number> = {};
+
+  for (const row of rows) {
+    if (!isBlockedPolicyEvent(row)) continue;
+    const event = policyEvent(row);
+    const ruleId = typeof event.rule_id === "string" && event.rule_id.trim()
+      ? event.rule_id.trim()
+      : "unknown";
+    counts[ruleId] = (counts[ruleId] ?? 0) + 1;
+  }
+
+  return c.json(counts);
+});
+
+projectApi.get("/policy/allowlist", async (c) => {
+  try {
+    const text = await Deno.readTextFile(policyAllowlistPath());
+    const data = JSON.parse(text) as AllowlistFile;
+    return c.json(Array.isArray(data.entries) ? data.entries : []);
+  } catch {
+    return c.json([]);
+  }
 });
 
 projectApi.route("/", projectConfigApi);
