@@ -1616,7 +1616,7 @@ run_snapshot_guard() {
 
   if [ -n "${SNAPSHOT_RETURN_TO_SKILL:-}" ]; then
     reason="[RETURN-TO] snapshot return_to=${SNAPSHOT_RETURN_TO_SKILL}/${SNAPSHOT_RETURN_TO_STEP}. Do NOT stop or pause."
-    reason="$reason You MUST immediately return to mst:${SNAPSHOT_RETURN_TO_SKILL} and continue from step ${SNAPSHOT_RETURN_TO_STEP}."
+    reason="$reason You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (SNAPSHOT_RETURN_TO_SKILL=${SNAPSHOT_RETURN_TO_SKILL}, SNAPSHOT_RETURN_TO_STEP=${SNAPSHOT_RETURN_TO_STEP}) to determine the next action."
     persisted_block_count="$(persist_block_state "$reason" 2>/dev/null || printf '%s' "$(( ${BLOCK_COUNT:-0} + 1 ))")"
     debug_log "block" "reason=snapshot_return_to skill=$SNAPSHOT_RETURN_TO_SKILL step=$SNAPSHOT_RETURN_TO_STEP block_count=$persisted_block_count"
     emit_block_decision "$reason"
@@ -2222,7 +2222,7 @@ fi
 
 if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
   REASON="[RETURN-TO] Sub-skill returned with return_to=$RETURN_TO_RAW. Do NOT stop or pause."
-  REASON="$REASON You MUST immediately return to mst:$RETURN_TO_SKILL and continue from step $RETURN_TO_STEP."
+  REASON="$REASON You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (RETURN_TO_SKILL=$RETURN_TO_SKILL, RETURN_TO_STEP=$RETURN_TO_STEP) to determine the next action."
   REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
   REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"

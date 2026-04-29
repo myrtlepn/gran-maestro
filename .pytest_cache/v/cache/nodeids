@@ -49,5 +49,10 @@
   "tests/test_session_bridge_writer.py::test_roundtrip_with_resolve_owner_session_id",
   "tests/test_skill_build.py::test_build_resolves_include",
   "tests/test_skill_wrapper_migration.py::test_codex_skill_model_resolve_simplified",
+  "tests/test_stop_hook_resume_e2e.py::test_stop_hook_to_resolver_e2e",
+  "tests/test_stop_hook_return_to_regression.py::test_snapshot_return_to_baked_reason",
+  "tests/test_stop_hook_return_to_regression.py::test_snapshot_return_to_resume_pattern",
+  "tests/test_stop_hook_return_to_regression.py::test_subskill_return_to_baked_reason",
+  "tests/test_stop_hook_return_to_regression.py::test_subskill_return_to_resume_pattern",
   "tests/test_worktree_path_normalize.py::test_normalize_target_path_resolves_symlink"
 ]
