@@ -97,6 +97,21 @@ mkdir -p "$MST_TMP"
 echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
+MST_LEDGER_HOOK_EVENT="SessionStart"
+if [ -f "${script_dir}/lib/ledger.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+fi
+if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+  emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+  _mst_ledger_complete_once() {
+    local status="${1:-$?}"
+    [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+    MST_LEDGER_COMPLETED=1
+    emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+  }
+  trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
+fi
 
 resolve_history_lib() {
   local script_dir candidate

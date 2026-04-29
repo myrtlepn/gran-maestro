@@ -81,10 +81,29 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+MST_LEDGER_HOOK_EVENT="PreToolUse"
+if [ -f "${script_dir}/lib/ledger.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+fi
+if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+  emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+  _mst_ledger_complete_once() {
+    local status="${1:-$?}"
+    [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+    MST_LEDGER_COMPLETED=1
+    emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+  }
+  trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
+fi
 
 HOOK_DIR="$script_dir"
 
 if [[ ! "$STDIN_RAW" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"Skill\" ]]; then
+  if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
+    _mst_ledger_complete_once 0
+    trap - EXIT
+  fi
   exec python3 "${HOOK_DIR}/lib/pre_tool_use_fast.py" "$PROJECT_ROOT" <<<"$STDIN_RAW"
 fi
 
@@ -293,6 +312,9 @@ append_history_on_exit() {
       echo "[mst-pre-tool-use] history ledger mismatch: append failed" >&2
       status=2
     fi
+  fi
+  if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
+    _mst_ledger_complete_once "$status"
   fi
   exit "$status"
 }

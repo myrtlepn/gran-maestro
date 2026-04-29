@@ -78,6 +78,21 @@ MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 CURRENT_PPID="${MST_STATE_PPID:-$PPID}"
 STATE_FILE="${MST_TMP}/mst-state-${CURRENT_PPID}.json"
 STDIN_RAW="$(cat || true)"
+MST_LEDGER_HOOK_EVENT="UserPromptSubmit"
+if [ -f "${script_dir}/lib/ledger.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+fi
+if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+  emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+  _mst_ledger_complete_once() {
+    local status="${1:-$?}"
+    [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+    MST_LEDGER_COMPLETED=1
+    emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+  }
+  trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
+fi
 
 is_auto_chain_active() {
   python3 - "$STATE_FILE" <<'PY' 2>/dev/null || true

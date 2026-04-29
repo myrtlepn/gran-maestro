@@ -123,6 +123,21 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+MST_LEDGER_HOOK_EVENT="Stop"
+if [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+fi
+if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+  emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+  _mst_ledger_complete_once() {
+    local status="${1:-$?}"
+    [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+    MST_LEDGER_COMPLETED=1
+    emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+  }
+  trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
+fi
 
 
 
@@ -708,6 +723,10 @@ print(value)
 PY
 )"
 
+  if [ "$remaining_ms" -gt "${HOOK_JUDGE_TIMEOUT_MS:-0}" ] 2>/dev/null; then
+    emit_judge_timeout_and_exit
+  fi
+
   while [ "$remaining_ms" -gt 0 ]; do
     chunk_ms="$remaining_ms"
     if [ "$chunk_ms" -gt 20 ]; then
@@ -827,6 +846,9 @@ on_stop_hook_exit() {
   local exit_code="$?"
   trap - EXIT
   cleanup_hook_watchdog
+  if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
+    _mst_ledger_complete_once "$exit_code"
+  fi
   if judge_timeout_already_emitted; then
     exit 0
   fi
