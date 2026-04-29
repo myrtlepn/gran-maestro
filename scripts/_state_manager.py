@@ -3,6 +3,11 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from scripts._state_schema import TASK_STATUSES
+from scripts._state_normalize import migrate_legacy_status
+
+KNOWN_TASK_STATUSES = frozenset(TASK_STATUSES)
+
 
 def timestamp_now() -> str:
     """현재 UTC ISO 8601 타임스탬프 반환."""
@@ -27,11 +32,14 @@ def _find_json_file(base_dir: Path, id: str) -> Optional[Path]:
 
 def set_status(base_dir: Path, id: str, status: str) -> None:
     """JSON 파일의 status 필드와 updated_at을 갱신."""
+    normalized_status = migrate_legacy_status(status, context=id)
+    if normalized_status not in KNOWN_TASK_STATUSES:
+        raise ValueError(f"Invalid status: {status}")
     path = _find_json_file(base_dir, id)
     if not path:
         raise FileNotFoundError(f"JSON not found for ID: {id}")
     data = json.loads(path.read_text(encoding="utf-8"))
-    data["status"] = status
+    data["status"] = normalized_status
     data["updated_at"] = timestamp_now()
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 

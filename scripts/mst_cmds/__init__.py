@@ -12,6 +12,7 @@ from scripts.mst_cmds import worktree
 from scripts.mst_cmds import timestamp
 from scripts.mst_cmds import set as set_mod
 from scripts.mst_cmds import state
+from scripts.mst_cmds import state_cmd
 from scripts.mst_cmds import queue
 from scripts.mst_cmds import measure
 from scripts.mst_cmds import plan
@@ -144,6 +145,7 @@ DISPATCH = {
     ("state", "mark-paused"): state.cmd_state_mark_paused,
     ("state", "resume-paused"): state.cmd_state_resume_paused,
     ("state", "paused-count"): state.cmd_state_paused_count,
+    ("state", "validate"): state_cmd.cmd_state_validate,
     ("recover", None): state.cmd_state_recover,
     ("queue", "enqueue"): queue.cmd_queue_enqueue,
     ("queue", "peek"): queue.cmd_queue_peek,

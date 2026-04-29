@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 from scripts.mst_cmds import _common
+from scripts.mst_cmds.state_cmd import register_state_validate
 from scripts.mst_cmds._common import (
     _parse_bool_arg,
     _skill_state_base_dir,
@@ -1166,6 +1167,7 @@ def register(subparsers):
 
     state_paused_count = state_sub.add_parser("paused-count")
     state_paused_count.add_argument("--session-id", required=True)
+    register_state_validate(state_sub)
 
     recover = sub.add_parser("recover")
     recover.add_argument("agi_id")

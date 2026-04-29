@@ -21,6 +21,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from scripts._state_schema import TERMINAL
+from scripts._state_normalize import migrate_legacy_status
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -143,7 +146,7 @@ WORKFLOW_MAX_ITERATIONS = 20
 
 WORKFLOW_STALL_LIMIT = 3
 
-WORKFLOW_TERMINAL_STATUSES = {"done", "completed", "accepted", "cancelled"}
+WORKFLOW_TERMINAL_STATUSES = frozenset(status.lower() for status in TERMINAL)
 
 def _request_json_path(req_id: str) -> Path:
     return BASE_DIR / "requests" / req_id / "request.json"
@@ -168,9 +171,12 @@ def _phase_status_tuple(data):
 
 def _is_terminal(phase: Optional[int], status: str) -> bool:
     status_normalized = (status or "").lower()
-    return status_normalized in WORKFLOW_TERMINAL_STATUSES or (
-        phase == 5 and status_normalized in {"done", "completed", "accepted"}
-    )
+    if status_normalized in WORKFLOW_TERMINAL_STATUSES:
+        return True
+    if phase != 5:
+        return False
+    migrated_status = migrate_legacy_status(status_normalized).lower()
+    return migrated_status in WORKFLOW_TERMINAL_STATUSES
 
 def next_action(current_phase, status):
     phase = _phase_value(current_phase)

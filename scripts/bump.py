@@ -29,6 +29,8 @@ FILE_PLUGIN = ROOT / ".claude-plugin" / "plugin.json"
 FILE_MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 FILE_EXT_MANIFEST = ROOT / "extension" / "manifest.json"
 FILE_EXT_PACKAGE = ROOT / "extension" / "package.json"
+FILE_STATE_SCHEMA_PY = ROOT / "scripts" / "_state_schema.py"
+FILE_STATE_SCHEMA_JSON = ROOT / "state-schema.json"
 
 
 def read_version_package() -> str:
@@ -181,6 +183,40 @@ def run_builds() -> list[tuple[str, bool]]:
     return results
 
 
+def run_state_schema_generate() -> None:
+    try:
+        subprocess.run(
+            ["python3", "scripts/build_state_schema.py"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print("에러: state schema generate 실패", file=sys.stderr)
+        if e.stdout:
+            print(e.stdout, file=sys.stderr)
+        if e.stderr:
+            print(e.stderr, file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        subprocess.run(
+            ["git", "add", str(FILE_STATE_SCHEMA_PY.relative_to(ROOT)), str(FILE_STATE_SCHEMA_JSON.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print("에러: generated 산출물 git add 실패", file=sys.stderr)
+        if e.stdout:
+            print(e.stdout, file=sys.stderr)
+        if e.stderr:
+            print(e.stderr, file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     valid_types = ("patch", "minor", "major")
 
@@ -229,6 +265,7 @@ def main() -> None:
     write_version_marketplace(new_version)
     write_version_ext_manifest(new_version)
     write_version_ext_package(new_version)
+    run_state_schema_generate()
 
     # 결과 출력
     print(f"버전: {old_version} → {new_version}")
@@ -243,6 +280,8 @@ def main() -> None:
     print(f"  ✓ .claude-plugin/marketplace.json")
     print(f"  ✓ extension/manifest.json")
     print(f"  ✓ extension/package.json")
+    print(f"  ✓ scripts/_state_schema.py (generated)")
+    print(f"  ✓ state-schema.json (generated)")
     print()
     print(f"직전 버전({old_version}) 이후 커밋 로그:")
     print(DIVIDER)

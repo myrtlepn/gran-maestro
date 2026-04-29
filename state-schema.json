@@ -1,0 +1,116 @@
+{
+  "recovery_actions": [
+    "retry",
+    "rollback",
+    "manual",
+    "abort"
+  ],
+  "task_statuses": [
+    "pending",
+    "queued",
+    "executing",
+    "pre_check",
+    "pre_check_failed",
+    "review",
+    "feedback",
+    "merging",
+    "merge_conflict",
+    "done",
+    "failed",
+    "cancelled"
+  ],
+  "terminal": [
+    "done",
+    "failed",
+    "cancelled"
+  ],
+  "transitions": [
+    {
+      "condition": "PM decides execution order",
+      "from": "pending",
+      "guard": "no pending predecessors or predecessors completed",
+      "to": "queued"
+    },
+    {
+      "condition": "Parallel slot available",
+      "from": "queued",
+      "guard": "active_tasks < max_parallel_tasks",
+      "to": "executing"
+    },
+    {
+      "condition": "CLI exit code === 0",
+      "from": "executing",
+      "guard": "commit exists in worktree",
+      "to": "pre_check"
+    },
+    {
+      "condition": "CLI exit code !== 0 and retries exhausted",
+      "from": "executing",
+      "guard": "retry_count >= max_retries",
+      "to": "failed"
+    },
+    {
+      "condition": "Typecheck + tests pass",
+      "from": "pre_check",
+      "to": "review"
+    },
+    {
+      "condition": "Typecheck or tests fail",
+      "from": "pre_check",
+      "to": "pre_check_failed"
+    },
+    {
+      "condition": "Auto retry with feedback attached",
+      "from": "pre_check_failed",
+      "guard": "retry_count < max_retries",
+      "to": "executing"
+    },
+    {
+      "condition": "Retries exhausted",
+      "from": "pre_check_failed",
+      "guard": "retry_count >= max_retries",
+      "to": "feedback"
+    },
+    {
+      "condition": "FAIL or PARTIAL verdict",
+      "from": "review",
+      "to": "feedback"
+    },
+    {
+      "condition": "PASS verdict -- all acceptance criteria met, proceed to merge",
+      "from": "review",
+      "to": "merging"
+    },
+    {
+      "condition": "Root cause classified as implementation error",
+      "from": "feedback",
+      "to": "executing"
+    },
+    {
+      "condition": "Root cause classified as insufficient spec",
+      "from": "feedback",
+      "to": "pending"
+    },
+    {
+      "condition": "Merge succeeded",
+      "from": "merging",
+      "to": "done"
+    },
+    {
+      "condition": "Merge conflict detected",
+      "from": "merging",
+      "to": "merge_conflict"
+    },
+    {
+      "condition": "/mc invoked",
+      "from": "*",
+      "guard": "CLI process receives SIGTERM",
+      "to": "cancelled"
+    },
+    {
+      "condition": "Unrecoverable system error",
+      "from": "*",
+      "to": "failed"
+    }
+  ]
+}

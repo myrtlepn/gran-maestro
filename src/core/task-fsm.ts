@@ -12,28 +12,16 @@
  * @see design-decisions.md section 2
  */
 
+import { TERMINAL, TRANSITIONS, type TaskStatus } from './state-schema';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /**
- * All possible states a single task can be in.
- *
- * Follows the extended status enum from design-decisions.md section 2.
+ * Task status sourced from `state-schema.ts` single source-of-truth.
  */
-export type TaskStatus =
-  | 'pending'            // Created in Phase 1, awaiting execution
-  | 'queued'             // Entered the execution queue (respects max_parallel_tasks)
-  | 'executing'          // Phase 2: CLI is running
-  | 'pre_check'          // Phase 2: pre-verification (typecheck / tests)
-  | 'pre_check_failed'   // Phase 2: pre-verification failed
-  | 'review'             // Phase 3: PM review in progress
-  | 'feedback'           // Phase 4: feedback written, awaiting re-execution
-  | 'merging'            // Phase 5: rebase + merge in progress
-  | 'merge_conflict'     // Phase 5: merge conflict detected
-  | 'done'               // Completed (merged)
-  | 'failed'             // System error
-  | 'cancelled';         // User cancelled
+export type { TaskStatus } from './state-schema';
 
 /**
  * Derived request-level phase computed from the statuses of all child tasks.
@@ -86,122 +74,14 @@ export interface TaskState {
 // ---------------------------------------------------------------------------
 
 /** Terminal statuses -- no outgoing transitions except to themselves. */
-const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
-  'done',
-  'failed',
-  'cancelled',
-]);
+const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(TERMINAL);
 
 /**
  * Declarative table of every valid state transition.
  *
  * Derived from design-decisions.md lines 153-167.
  */
-export const VALID_TRANSITIONS: readonly TaskTransition[] = [
-  // Phase 1 -> Queue
-  {
-    from: 'pending',
-    to: 'queued',
-    condition: 'PM decides execution order',
-    guard: 'no pending predecessors or predecessors completed',
-  },
-  // Queue -> Execute
-  {
-    from: 'queued',
-    to: 'executing',
-    condition: 'Parallel slot available',
-    guard: 'active_tasks < max_parallel_tasks',
-  },
-  // Execute -> Pre-check (success)
-  {
-    from: 'executing',
-    to: 'pre_check',
-    condition: 'CLI exit code === 0',
-    guard: 'commit exists in worktree',
-  },
-  // Execute -> Failed (retries exhausted)
-  {
-    from: 'executing',
-    to: 'failed',
-    condition: 'CLI exit code !== 0 and retries exhausted',
-    guard: 'retry_count >= max_retries',
-  },
-  // Pre-check -> Review (pass)
-  {
-    from: 'pre_check',
-    to: 'review',
-    condition: 'Typecheck + tests pass',
-  },
-  // Pre-check -> Pre-check failed
-  {
-    from: 'pre_check',
-    to: 'pre_check_failed',
-    condition: 'Typecheck or tests fail',
-  },
-  // Pre-check failed -> Re-execute (auto retry)
-  {
-    from: 'pre_check_failed',
-    to: 'executing',
-    condition: 'Auto retry with feedback attached',
-    guard: 'retry_count < max_retries',
-  },
-  // Pre-check failed -> Feedback (retries exhausted)
-  {
-    from: 'pre_check_failed',
-    to: 'feedback',
-    condition: 'Retries exhausted',
-    guard: 'retry_count >= max_retries',
-  },
-  // Review -> Feedback (FAIL / PARTIAL)
-  {
-    from: 'review',
-    to: 'feedback',
-    condition: 'FAIL or PARTIAL verdict',
-  },
-  // Review -> Merging (PASS verdict)
-  {
-    from: 'review',
-    to: 'merging',
-    condition: 'PASS verdict -- all acceptance criteria met, proceed to merge',
-  },
-  // Feedback -> Re-execute (implementation error)
-  {
-    from: 'feedback',
-    to: 'executing',
-    condition: 'Root cause classified as implementation error',
-  },
-  // Feedback -> Pending (spec insufficient -- re-enter Phase 1)
-  {
-    from: 'feedback',
-    to: 'pending',
-    condition: 'Root cause classified as insufficient spec',
-  },
-  // Merging -> Done (merge success)
-  {
-    from: 'merging',
-    to: 'done',
-    condition: 'Merge succeeded',
-  },
-  // Merging -> Merge conflict
-  {
-    from: 'merging',
-    to: 'merge_conflict',
-    condition: 'Merge conflict detected',
-  },
-  // Any non-terminal -> Cancelled (/mc)
-  {
-    from: '*',
-    to: 'cancelled',
-    condition: '/mc invoked',
-    guard: 'CLI process receives SIGTERM',
-  },
-  // Any non-terminal -> Failed (system error)
-  {
-    from: '*',
-    to: 'failed',
-    condition: 'Unrecoverable system error',
-  },
-] as const;
+export const VALID_TRANSITIONS: readonly TaskTransition[] = TRANSITIONS;
 
 // ---------------------------------------------------------------------------
 // Transition helpers
