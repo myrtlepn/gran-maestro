@@ -414,6 +414,9 @@ def _queue_path() -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
+def _queue_lock_path() -> Path:
+    return _skill_state_base_dir() / "pending.ndjson.lock"
+
 def _queue_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -428,12 +431,16 @@ def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
+            entry_id = value.get("entry_id")
+            if not isinstance(entry_id, str) or not entry_id.strip():
+                value["entry_id"] = uuid.uuid4().hex
             entries.append(value)
     return entries
 
 def _queue_build_entry(data: dict) -> dict:
     return {
         "id": uuid.uuid4().hex,
+        "entry_id": uuid.uuid4().hex,
         "skill": str(data.get("skill", "")),
         "args": str(data.get("args", "")),
         "source_skill": str(data.get("source_skill", "")),
@@ -518,22 +525,56 @@ def _queue_read_entries() -> list[dict]:
     if not path.exists():
         return []
 
-    with open(path, "r", encoding="utf-8") as f:
-        _lock_shared(f)
+    lock_path = _queue_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_f:
+        _lock_shared(lock_f)
         try:
-            return _queue_parse_entries(f.read().splitlines())
+            if not path.exists():
+                return []
+            with open(path, "r", encoding="utf-8") as f:
+                return _queue_parse_entries(f.read().splitlines())
         finally:
-            _unlock(f)
+            _unlock(lock_f)
 
 def _queue_compact(mutator):
     path = _queue_path()
-    if not path.exists():
-        return mutator([])[1]
-
-    with open(path, "r+", encoding="utf-8") as f:
-        _lock_exclusive(f)
+    lock_path = _queue_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_f:
+        _lock_exclusive(lock_f)
         try:
-            entries = _queue_parse_entries(f.read().splitlines())
+            if not path.exists():
+                new_entries, result = mutator([])
+                if new_entries:
+                    tmp_name = None
+                    try:
+                        tmp = tempfile.NamedTemporaryFile(
+                            mode="w",
+                            encoding="utf-8",
+                            delete=False,
+                            dir=str(path.parent),
+                            prefix=".pending.",
+                            suffix=".tmp",
+                        )
+                        tmp_name = tmp.name
+                        for entry in new_entries:
+                            tmp.write(_compact_json(entry) + "\n")
+                        tmp.flush()
+                        os.fsync(tmp.fileno())
+                        tmp.close()
+                        os.replace(tmp_name, path)
+                    except Exception:
+                        if tmp_name:
+                            try:
+                                os.unlink(tmp_name)
+                            except OSError:
+                                pass
+                        raise
+                return result
+
+            with open(path, "r", encoding="utf-8") as f:
+                entries = _queue_parse_entries(f.read().splitlines())
             new_entries, result = mutator(entries)
 
             tmp_name = None
@@ -562,22 +603,25 @@ def _queue_compact(mutator):
                 raise
             return result
         finally:
-            _unlock(f)
+            _unlock(lock_f)
 
 def queue_enqueue(data: dict) -> dict:
     _validate_enqueue_entry(data)
     entry = _queue_build_entry(data)
     path = _queue_path()
+    lock_path = _queue_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     line = _compact_json(entry) + "\n"
 
-    with open(path, "a", encoding="utf-8") as f:
-        _lock_exclusive(f)
+    with open(lock_path, "a+", encoding="utf-8") as lock_f:
+        _lock_exclusive(lock_f)
         try:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                os.fsync(f.fileno())
         finally:
-            _unlock(f)
+            _unlock(lock_f)
 
     return entry
 
@@ -587,18 +631,39 @@ def queue_peek() -> dict | None:
             return copy.deepcopy(entry)
     return None
 
-def queue_pop() -> dict | None:
-    now = _queue_timestamp()
+def queue_mark_running(entry_id: str) -> dict | None:
+    target_entry_id = str(entry_id or "")
+    if not target_entry_id:
+        return None
 
     def _mutator(entries):
         for entry in entries:
-            if entry.get("status") == "queued":
-                entry["status"] = "running"
-                entry["consumed_at"] = now
-                return entries, copy.deepcopy(entry)
+            if entry.get("entry_id") != target_entry_id:
+                continue
+            if entry.get("status") != "queued":
+                return entries, None
+            entry["status"] = "running"
+            entry["consumed_at"] = _queue_timestamp()
+            return entries, copy.deepcopy(entry)
         return entries, None
 
     return _queue_compact(_mutator)
+
+def queue_pop() -> dict | None:
+    while True:
+        peeked = None
+        for entry in _queue_read_entries():
+            if entry.get("status") == "queued":
+                peeked = entry
+                break
+        if peeked is None:
+            return None
+        entry_id = peeked.get("entry_id")
+        if not isinstance(entry_id, str) or not entry_id.strip():
+            continue
+        result = queue_mark_running(entry_id)
+        if result is not None:
+            return result
 
 def queue_list(status: str | None) -> list[dict]:
     entries = _queue_read_entries()
@@ -607,13 +672,16 @@ def queue_list(status: str | None) -> list[dict]:
     return [entry for entry in entries if entry.get("status") == status]
 
 def queue_complete(action_id: str, result: str | None = None) -> dict | None:
+    """Mark queue entry complete by `entry_id` (preferred) or legacy `id`."""
     now = _queue_timestamp()
     warn = None
 
     def _mutator(entries):
         nonlocal warn
         for entry in entries:
-            if entry.get("id") != action_id:
+            matches_entry_id = entry.get("entry_id") == action_id
+            matches_id = entry.get("id") == action_id
+            if not (matches_entry_id or matches_id):
                 continue
             status = str(entry.get("status", ""))
             if status in ("done", "failed"):
@@ -633,13 +701,16 @@ def queue_complete(action_id: str, result: str | None = None) -> dict | None:
     return output
 
 def queue_fail(action_id: str, error: str | None = None) -> dict | None:
+    """Mark queue entry failed by `entry_id` (preferred) or legacy `id`."""
     now = _queue_timestamp()
     warn = None
 
     def _mutator(entries):
         nonlocal warn
         for entry in entries:
-            if entry.get("id") != action_id:
+            matches_entry_id = entry.get("entry_id") == action_id
+            matches_id = entry.get("id") == action_id
+            if not (matches_entry_id or matches_id):
                 continue
             status = str(entry.get("status", ""))
             if status in ("done", "failed"):
