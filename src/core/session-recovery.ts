@@ -10,6 +10,7 @@
  */
 
 import type { TaskStatus } from './task-fsm.ts';
+import type { WorktreeState } from './worktree-manager.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -270,4 +271,123 @@ export async function recoverTask(
       `Failed to recover task ${task.taskId}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Task/worktree reconciliation
+// ---------------------------------------------------------------------------
+
+export type ReconcileAction =
+  | 'noop'
+  | 'cleanup_worktree'
+  | 'user_decision'
+  | 'explicit_recovery_required';
+
+export interface ReconcileInput {
+  taskId: string;
+  taskStatus: TaskStatus;
+  worktreeState: WorktreeState;
+}
+
+export interface ReconcileDecision {
+  action: ReconcileAction;
+  reason: string;
+  prompt?: string;
+  warn?: string;
+  taskStatus: TaskStatus;
+  worktreeState: WorktreeState;
+}
+
+const TERMINAL_TASK = new Set<TaskStatus>(['done', 'failed', 'cancelled']);
+const ACTIVE_WT = new Set<WorktreeState>([
+  'creating',
+  'active',
+  'stale',
+  'pre_merge',
+  'cleaning',
+]);
+const CLEANED_WT = new Set<WorktreeState>(['cleaned', 'merged']);
+const ERROR_WT = new Set<WorktreeState>([
+  'error',
+  'conflict',
+  'clean_failed',
+  'create_failed',
+]);
+
+export function reconcileTaskAndWorktree(
+  input: ReconcileInput,
+): ReconcileDecision {
+  const { taskId, taskStatus, worktreeState } = input;
+  const base = { taskStatus, worktreeState };
+
+  if (ERROR_WT.has(worktreeState)) {
+    return {
+      ...base,
+      action: 'user_decision',
+      reason: `worktree in error state: ${worktreeState}`,
+      prompt: `Worktree for ${taskId} in error state ${worktreeState} — manual intervention required`,
+    };
+  }
+
+  if (taskStatus === 'merge_conflict') {
+    if (ACTIVE_WT.has(worktreeState)) {
+      return {
+        ...base,
+        action: 'explicit_recovery_required',
+        reason: 'merge_conflict requires AD-003 explicit action',
+      };
+    }
+
+    if (CLEANED_WT.has(worktreeState)) {
+      return {
+        ...base,
+        action: 'user_decision',
+        reason: 'merge_conflict but worktree gone',
+        prompt: `merge_conflict for ${taskId} but worktree ${worktreeState} — manual review needed`,
+        warn: 'cannot resolve conflict without worktree',
+      };
+    }
+  }
+
+  if (TERMINAL_TASK.has(taskStatus)) {
+    if (ACTIVE_WT.has(worktreeState)) {
+      return {
+        ...base,
+        action: 'cleanup_worktree',
+        reason: 'terminal task with active worktree — cleanup recommended',
+      };
+    }
+
+    if (CLEANED_WT.has(worktreeState)) {
+      return {
+        ...base,
+        action: 'noop',
+        reason: 'aligned: terminal task and cleaned worktree',
+      };
+    }
+  }
+
+  if (ACTIVE_WT.has(worktreeState)) {
+    return {
+      ...base,
+      action: 'noop',
+      reason: 'aligned: active task and active worktree',
+    };
+  }
+
+  if (CLEANED_WT.has(worktreeState)) {
+    return {
+      ...base,
+      action: 'user_decision',
+      reason: 'active task but worktree cleaned',
+      prompt: `Active task ${taskId} (${taskStatus}) but worktree ${worktreeState} — mark as failed?`,
+    };
+  }
+
+  return {
+    ...base,
+    action: 'user_decision',
+    reason: 'unrecognized state combination',
+    prompt: `Unrecognized state: task=${taskStatus} worktree=${worktreeState}`,
+  };
 }
