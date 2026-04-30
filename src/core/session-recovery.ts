@@ -10,6 +10,7 @@
  */
 
 import { paths } from './paths.ts';
+import { parseTaskId } from './task-id.ts';
 import type { TaskStatus } from './task-fsm.ts';
 import type { WorktreeState } from './worktree-manager.ts';
 
@@ -219,16 +220,11 @@ export async function recoverTask(
   task: RecoverableTask,
   action: RecoveryAction,
 ): Promise<void> {
-  // Resolve the status file path from the task ID
-  // e.g. "REQ-001-01" -> reqId="REQ-001", taskNum="01"
-  const parts = task.taskId.split('-');
-  const taskNum = parts[parts.length - 1];
-  const reqId = parts.slice(0, -1).join('-');
-  // AD-008: route through the shared `paths` module so a non-default basePath
-  // cannot drift between recovery and other consumers. `task.basePath` is
-  // retained on the interface for backward compatibility but no longer
-  // dictates the join layout.
-  const statusPath = paths.statusJson(reqId, taskNum);
+  // AD-006: regex-based parseTaskId surfaces a clear RecoveryError on
+  // non-standard task IDs instead of silently routing to a wrong status path.
+  // AD-008: paths.statusJson keeps the join layout consistent across consumers.
+  const { requestId, taskSegment } = parseTaskId(task.taskId);
+  const statusPath = paths.statusJson(requestId, taskSegment);
 
   let newStatus: string;
   let recoveryNote: string;

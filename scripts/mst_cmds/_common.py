@@ -1488,3 +1488,26 @@ def _flat_diff(old, new, prefix=""):
         elif old_value != new_value:
             changes[full_key] = (old_value, new_value)
     return changes
+
+
+# AD-006: regex-based task ID parsing.
+TASK_ID_PATTERN = re.compile(r"^(REQ-\d+)(?:-(.+))?$")
+TASK_SEGMENT_PATTERN = re.compile(r"^\w+(-\w+)*$")
+
+
+def parse_task_id(raw_id):
+    r"""Parse a task ID like REQ-001-01 or REQ-100-T01-X into (request_id, task_segment).
+
+    Mirrors the TS parseTaskId in src/core/task-id.ts. Raises ValueError if the
+    input does not match ``^REQ-\d+(-\w+)*$``. Bare request IDs (REQ-001)
+    are not task identifiers and also raise.
+    """
+    if not isinstance(raw_id, str):
+        raise ValueError(f"invalid task id: {raw_id!r}")
+    match = TASK_ID_PATTERN.match(raw_id)
+    if not match or not match.group(2):
+        raise ValueError(f"invalid task id: {raw_id}")
+    segment = match.group(2)
+    if not TASK_SEGMENT_PATTERN.match(segment):
+        raise ValueError(f"invalid task id: {raw_id}")
+    return match.group(1), segment
