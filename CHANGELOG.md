@@ -4,6 +4,16 @@
 
 ---
 
+## [0.59.8] — 2026-04-30
+
+### 버그 수정
+
+- **agile/mst 자율 루프에서 ScheduleWakeup 자가 페이싱 차단** (REQ-757, PLN-583): mst chain·agile loop 자율 모드 진행 중에 모델이 `ScheduleWakeup`으로 수십 분짜리 자가 지연을 도입해 작업이 정지되던 문제를 차단합니다. PreToolUse hook이 workflow_active=true 상태에서의 ScheduleWakeup을 즉시 차단하고 다음 액션 emit을 강제합니다. 정상적인 `/loop` dynamic mode 사용자는 영향받지 않으며, 의도적 호출이 필요한 경우 `MST_ALLOW_SCHEDULE_WAKEUP=1` 환경 변수로 우회할 수 있습니다.
+- **선조작 후호출 우회 차단**: workflow_state를 false로 미리 바꾼 뒤 ScheduleWakeup을 호출하는 우회 시나리오에 대비해 active→inactive 전환 직후 30초 grace period 동안 계속 차단을 유지합니다.
+- **텍스트 자가 일시정지 패턴 보강**: stop hook의 SELF_PAUSE_RE에 "wakeup", "사이클 후", "N분 후 재개" 등 7개 패턴을 추가하여 텍스트 우회까지 함께 차단합니다.
+
+---
+
 ## [0.60.0] — 2026-04-29
 
 ### 새 기능
