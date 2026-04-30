@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "schema_version": "enforce-tree-v1",
+  "skills": {
+    "mst:plan": {
+      "entry_paths": [
+        "skill_tool",
+        "slash_command",
+        "agent_dispatch"
+      ],
+      "steps": [
+        {
+          "id": "0.1",
+          "name": "Autonomous mode detection",
+          "required": true,
+          "path_whitelist": [],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "0.5",
+          "name": "Debug intent detection",
+          "required": true,
+          "path_whitelist": [],
+          "allowed_sub_skills": [
+            "mst:debug"
+          ],
+          "idempotent": true
+        },
+        {
+          "id": "0.75",
+          "name": "Plan context discovery",
+          "required": true,
+          "path_whitelist": [],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "0.8",
+          "name": "Args intent classification",
+          "required": true,
+          "path_whitelist": [],
+          "allowed_sub_skills": [],
+          "idempotent": true,
+          "note": "Meta path branches do not grant extra path authority."
+        },
+        {
+          "id": "1",
+          "name": "Initialize plan artifacts",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/plan.json",
+            "{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/plan.md",
+            "{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/auto-decisions.md",
+            "{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/ambiguity-log.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": false
+        },
+        {
+          "id": "1.2",
+          "name": "Classify Cynefin domain",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "2",
+          "name": "Collect plan inputs",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/**",
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/**"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "2.1",
+          "name": "Resolve objective links",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/**"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "2.3",
+          "name": "Map dependencies",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.ids.json"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "2.6",
+          "name": "Confirm acceptance criteria",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "3",
+          "name": "Draft execution plan",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "3.3",
+          "name": "Run ambiguity review",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/ambiguity-log.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "3.4",
+          "name": "Record auto decisions",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/auto-decisions.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "3.9",
+          "name": "Prepare final plan review",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md",
+            "{PROJECT_ROOT}/.gran-maestro/run/{PPID}/**"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        },
+        {
+          "id": "4",
+          "name": "Persist plan result",
+          "required": true,
+          "path_whitelist": [
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.json",
+            "{PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md"
+          ],
+          "allowed_sub_skills": [],
+          "idempotent": false
+        },
+        {
+          "id": "9",
+          "name": "Isolated verification node",
+          "required": false,
+          "path_whitelist": [],
+          "allowed_sub_skills": [],
+          "idempotent": true
+        }
+      ],
+      "step_graph": {
+        "0.1": [
+          "0.5"
+        ],
+        "0.5": [
+          "0.75"
+        ],
+        "0.75": [
+          "0.8"
+        ],
+        "0.8": [
+          "1"
+        ],
+        "1": [
+          "1.2"
+        ],
+        "1.2": [
+          "2"
+        ],
+        "2": [
+          "2.1"
+        ],
+        "2.1": [
+          "2.3"
+        ],
+        "2.3": [
+          "2.6"
+        ],
+        "2.6": [
+          "3"
+        ],
+        "3": [
+          "3.3"
+        ],
+        "3.3": [
+          "3.4"
+        ],
+        "3.4": [
+          "3.9"
+        ],
+        "3.9": [
+          "4"
+        ],
+        "4": [],
+        "9": []
+      },
+      "exit_conditions": {
+        "must_complete_steps": [
+          "1",
+          "1.2",
+          "2",
+          "2.1",
+          "2.3",
+          "2.6",
+          "3",
+          "3.3",
+          "3.4",
+          "3.9",
+          "4"
+        ],
+        "min_step_id_at_exit": "4"
+      }
+    }
+  },
+  "global_rules": {
+    "single_active_skill": true,
+    "subagent_inherits_parent_whitelist": true,
+    "allow_recursive_skill_call": false,
+    "max_recursion_depth": 1
+  }
+}

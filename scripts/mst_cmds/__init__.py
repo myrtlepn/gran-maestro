@@ -20,6 +20,7 @@ from scripts.mst_cmds import intent
 from scripts.mst_cmds import fact_check
 from scripts.mst_cmds import reference
 from scripts.mst_cmds import agile
+from scripts.mst_cmds import enforce
 from scripts.mst_cmds import counter
 from scripts.mst_cmds import archive
 from scripts.mst_cmds import gardening
@@ -80,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     fact_check.register(sub)
     reference.register(sub)
     agile.register(sub)
+    enforce.register(sub)
     counter.register(sub)
     archive.register(sub)
     gardening.register(sub)
@@ -208,6 +210,7 @@ DISPATCH = {
     ("agile", "integration-review"): agile_detail.cmd_agile_integration_review,
     ("agile", "alignment-package"): agile_detail.cmd_agile_alignment_package,
     ("agile", "stop-audit"): agile_stop_audit.cmd_agile_stop_audit,
+    ("enforce", "verify"): enforce.cmd_enforce_verify,
     ("counter", "next"): counter.cmd_counter_next,
     ("counter", "peek"): counter.cmd_counter_peek,
     ("version", "get"): version.cmd_version_get,
