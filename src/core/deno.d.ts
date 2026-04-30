@@ -29,7 +29,18 @@ declare namespace Deno {
     constructor(command: string, options?: CommandOptions);
     spawn(): ChildProcess;
     output(): Promise<CommandOutput>;
+    outputSync(): CommandOutput;
   }
+
+  interface Env {
+    get(key: string): string | undefined;
+    set(key: string, value: string): void;
+    delete(key: string): void;
+    has(key: string): boolean;
+    toObject(): Record<string, string>;
+  }
+
+  const env: Env;
 
   interface MkdirOptions {
     recursive?: boolean;

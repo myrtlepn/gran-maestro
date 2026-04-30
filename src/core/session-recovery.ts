@@ -9,6 +9,7 @@
  * @see design-decisions.md section 9
  */
 
+import { paths } from './paths.ts';
 import type { TaskStatus } from './task-fsm.ts';
 import type { WorktreeState } from './worktree-manager.ts';
 
@@ -223,7 +224,11 @@ export async function recoverTask(
   const parts = task.taskId.split('-');
   const taskNum = parts[parts.length - 1];
   const reqId = parts.slice(0, -1).join('-');
-  const statusPath = `${task.basePath}/requests/${reqId}/tasks/${taskNum}/status.json`;
+  // AD-008: route through the shared `paths` module so a non-default basePath
+  // cannot drift between recovery and other consumers. `task.basePath` is
+  // retained on the interface for backward compatibility but no longer
+  // dictates the join layout.
+  const statusPath = paths.statusJson(reqId, taskNum);
 
   let newStatus: string;
   let recoveryNote: string;
