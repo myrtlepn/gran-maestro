@@ -120,6 +120,14 @@ def _parse_agile_failed_items(raw_values) -> List[dict]:
 
     parsed_items = []
     for raw_value in raw_values:
+        if raw_value is None:
+            continue
+        if not isinstance(raw_value, str):
+            raise ValueError(
+                f"invalid --failed JSON: expected string, got {type(raw_value).__name__}"
+            )
+        if not raw_value.strip():
+            continue
         try:
             decoded = json.loads(raw_value)
         except json.JSONDecodeError as exc:
@@ -1421,10 +1429,7 @@ def cmd_agile_retrospective(args):
         print("Error: --velocity-completed must be >= 0", file=sys.stderr)
         return 1
 
-    succeeded = _split_csv_values(args.succeeded)
-    if not succeeded:
-        print("Error: --succeeded is required", file=sys.stderr)
-        return 1
+    succeeded = _split_csv_values(args.succeeded) if args.succeeded else []
 
     try:
         failed = _parse_agile_failed_items(args.failed)
@@ -1437,6 +1442,7 @@ def cmd_agile_retrospective(args):
         args.velocity_completed / args.velocity_planned,
         4,
     )
+    limitations_normalized = str(args.limitations).strip() if args.limitations else ""
     payload = {
         "sprint_id": sprint_id,
         "status": str(args.status),
@@ -1447,7 +1453,7 @@ def cmd_agile_retrospective(args):
             "completed": int(args.velocity_completed),
             "rate": velocity_rate,
         },
-        "known_limitations": str(args.limitations),
+        "known_limitations": limitations_normalized,
         "lessons_learned": str(args.lessons),
         "direction": str(args.direction),
         "timestamp": _now_iso(),
@@ -1503,7 +1509,7 @@ def cmd_agile_retrospective(args):
         "VELOCITY_PLANNED": str(payload["velocity"]["planned"]),
         "VELOCITY_COMPLETED": str(payload["velocity"]["completed"]),
         "VELOCITY_RATE": str(payload["velocity"]["rate"]),
-        "KNOWN_LIMITATIONS": str(payload["known_limitations"]),
+        "KNOWN_LIMITATIONS": str(payload["known_limitations"]) or "없음",
         "LESSONS_LEARNED": str(payload["lessons_learned"]),
         "DIRECTION": str(payload["direction"]),
         "KNOWN_ISSUES": known_issue_lines,
@@ -1797,11 +1803,11 @@ def register(subparsers):
     agile_retrospective.add_argument("agi_id")
     agile_retrospective.add_argument("--sprint", type=int, required=True)
     agile_retrospective.add_argument("--status", required=True)
-    agile_retrospective.add_argument("--succeeded", action="append", required=True)
-    agile_retrospective.add_argument("--failed", action="append", required=True)
+    agile_retrospective.add_argument("--succeeded", action="append", required=False, default=None)
+    agile_retrospective.add_argument("--failed", action="append", required=False, default=None)
     agile_retrospective.add_argument("--velocity-planned", type=int, required=True)
     agile_retrospective.add_argument("--velocity-completed", type=int, required=True)
-    agile_retrospective.add_argument("--limitations", required=True)
+    agile_retrospective.add_argument("--limitations", required=False, default="")
     agile_retrospective.add_argument("--lessons", required=True)
     agile_retrospective.add_argument("--direction", required=True)
     agile_retrospective.add_argument("--json", action="store_true")
