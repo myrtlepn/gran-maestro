@@ -131,10 +131,14 @@ current_ppid_raw = sys.argv[6] if len(sys.argv) > 6 else ""
 guard_window_raw = sys.argv[7] if len(sys.argv) > 7 else "900"
 snapshot_path = sys.argv[8] if len(sys.argv) > 8 else ""
 MAX_TAIL_BYTES = 512 * 1024
+FLOW_TAIL_BYTES = 200 * 1024
+FLOW_WINDOW_LINES = 1000
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
 REQUEST_TERMINAL_STATUSES = {"done", "completed", "accepted", "cancelled"}
 PLAN_TERMINAL_STATUSES = {"done", "completed", "cancelled"}
+FLOW_TERMINAL_EVENT_TYPES = {"commit"}
+FLOW_TERMINAL_STATUSES = {"completed", "done"}
 
 try:
     CURRENT_PPID = int(current_ppid_raw)
@@ -250,7 +254,7 @@ def clean_skill(name, strip_namespace=False):
     return value
 
 
-CONTEXT_ID_PATTERN = re.compile(r"((?:PLN|REQ)-[A-Z0-9]+(?:-[A-Z0-9]+)*)", re.IGNORECASE)
+CONTEXT_ID_PATTERN = re.compile(r"((?:AGI|PLN|REQ)-[A-Z0-9]+(?:-[A-Z0-9]+)*)", re.IGNORECASE)
 
 
 def extract_context_id(args):
@@ -333,6 +337,315 @@ def render_from_snapshot(path):
     if len(labels) >= 4:
         labels = [labels[0], "...", labels[-1]]
     return render_line(labels, "", snapshot_separator())
+
+
+def current_session_id_from_input(raw_input):
+    env_session = clean_text(os.environ.get("MST_SESSION_ID"))
+    if env_session:
+        return env_session
+    if not isinstance(raw_input, str) or not raw_input.strip():
+        return ""
+    try:
+        payload = json.loads(raw_input)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return clean_text(payload.get("session_id"))
+
+
+def load_flow_window_lines(base_dir):
+    log_dir = os.path.join(base_dir, "logs") if base_dir else ""
+    if not log_dir or not os.path.isdir(log_dir):
+        return None
+
+    monthly = []
+    try:
+        for name in os.listdir(log_dir):
+            if re.fullmatch(r"flow-\d{6}\.ndjson", name):
+                monthly.append(name)
+    except Exception:
+        return None
+
+    path = ""
+    if monthly:
+        path = os.path.join(log_dir, sorted(monthly)[-1])
+    else:
+        fixture_path = os.path.join(log_dir, "flow.ndjson")
+        if os.path.isfile(fixture_path):
+            path = fixture_path
+    if not path or not os.path.isfile(path):
+        return None
+
+    try:
+        file_size = os.path.getsize(path)
+        if file_size > FLOW_TAIL_BYTES:
+            start_offset = max(0, file_size - FLOW_TAIL_BYTES)
+            with open(path, "rb") as f:
+                f.seek(start_offset)
+                raw = f.read()
+            text = raw.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            if start_offset > 0 and lines:
+                lines = lines[1:]
+        else:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.read().splitlines()
+    except Exception:
+        return None
+
+    return lines[-FLOW_WINDOW_LINES:]
+
+
+def _flow_nested_dict(entry, key):
+    value = entry.get(key) if isinstance(entry, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _flow_clean_context_id(value):
+    candidate = clean_text(value).upper()
+    if CONTEXT_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return ""
+
+
+def extract_flow_resource_id(entry):
+    if not isinstance(entry, dict):
+        return ""
+    extras = _flow_nested_dict(entry, "extras")
+    event = _flow_nested_dict(entry, "event")
+    for value in (
+        entry.get("resource_id"),
+        extras.get("resource_id"),
+        event.get("resource_id"),
+    ):
+        context_id = _flow_clean_context_id(value)
+        if context_id:
+            return context_id
+    return ""
+
+
+def extract_flow_skill(entry):
+    if not isinstance(entry, dict):
+        return ""
+    extras = _flow_nested_dict(entry, "extras")
+    event = _flow_nested_dict(entry, "event")
+    for value in (entry.get("skill"), event.get("skill"), event.get("name"), extras.get("skill")):
+        skill = clean_skill(value)
+        if skill:
+            return skill
+    return ""
+
+
+def _flow_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if re.fullmatch(r"\d+", cleaned):
+            try:
+                return int(cleaned)
+            except Exception:
+                return None
+    return None
+
+
+def _first_flow_int(entry, keys):
+    extras = _flow_nested_dict(entry, "extras")
+    event = _flow_nested_dict(entry, "event")
+    for source in (entry, event, extras):
+        for key in keys:
+            value = _flow_int(source.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def extract_flow_step_total(entry):
+    step = _first_flow_int(entry, ("step", "current_step", "currentStep"))
+    total = _first_flow_int(entry, ("total_steps", "total", "totalSteps"))
+    return step, total
+
+
+def flow_event_type(entry):
+    event = _flow_nested_dict(entry, "event")
+    extras = _flow_nested_dict(entry, "extras")
+    for source in (entry, event, extras):
+        value = clean_text(source.get("event_type")).lower()
+        if value:
+            return value
+    return ""
+
+
+def flow_status(entry):
+    event = _flow_nested_dict(entry, "event")
+    extras = _flow_nested_dict(entry, "extras")
+    for source in (entry, event, extras):
+        value = clean_text(source.get("status")).lower()
+        if value:
+            return value
+    return ""
+
+
+def is_flow_terminal(entry):
+    if flow_event_type(entry) in FLOW_TERMINAL_EVENT_TYPES:
+        return True
+    if flow_status(entry) in FLOW_TERMINAL_STATUSES:
+        return True
+    step, total = extract_flow_step_total(entry)
+    return step is not None and total is not None and step == total
+
+
+def flow_session_values(entry):
+    extras = _flow_nested_dict(entry, "extras")
+    event = _flow_nested_dict(entry, "event")
+    values = []
+    for source in (entry, event, extras):
+        for key in ("owner_session_id", "session_id"):
+            value = clean_text(source.get(key))
+            if value:
+                values.append(value)
+    return values
+
+
+def _resource_metadata_path(base_dir, resource_id):
+    if not base_dir or not resource_id:
+        return ""
+    if resource_id.startswith("AGI-"):
+        return os.path.join(base_dir, "agile", resource_id, "session.json")
+    if resource_id.startswith("REQ-"):
+        return os.path.join(base_dir, "requests", resource_id, "request.json")
+    if resource_id.startswith("PLN-"):
+        return os.path.join(base_dir, "plans", resource_id, "plan.json")
+    return ""
+
+
+def _load_resource_metadata(base_dir, resource_id, cache):
+    if resource_id in cache:
+        return cache[resource_id]
+    path = _resource_metadata_path(base_dir, resource_id)
+    payload = None
+    if path and os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = None
+    cache[resource_id] = payload
+    return payload
+
+
+def metadata_owner_session_matches(base_dir, resource_id, current_session_id, cache):
+    if not current_session_id:
+        return False
+    payload = _load_resource_metadata(base_dir, resource_id, cache)
+    if not isinstance(payload, dict):
+        return False
+    return clean_text(payload.get("owner_session_id")) == current_session_id
+
+
+def metadata_owner_ppid_matches(base_dir, resource_id, cache):
+    payload = _load_resource_metadata(base_dir, resource_id, cache)
+    if not isinstance(payload, dict):
+        return False
+    owner_ppid = payload.get("owner_ppid")
+    if isinstance(owner_ppid, bool):
+        return False
+    try:
+        owner_ppid = int(owner_ppid)
+    except (TypeError, ValueError):
+        return False
+    return CURRENT_PPID is not None and owner_ppid == CURRENT_PPID
+
+
+def flow_has_explicit_session_scope(entry):
+    return bool(flow_session_values(entry))
+
+
+def flow_matches_current_session(entry, base_dir, resource_id, current_session_id, metadata_cache):
+    if not current_session_id:
+        return False
+    session_values = flow_session_values(entry)
+    if session_values:
+        return current_session_id in session_values
+    return metadata_owner_session_matches(base_dir, resource_id, current_session_id, metadata_cache)
+
+
+def render_from_flow(base_dir, raw_input):
+    lines = load_flow_window_lines(base_dir)
+    if not lines:
+        return None
+
+    current_session_id = current_session_id_from_input(raw_input)
+    metadata_cache = {}
+    parsed = []
+    for order, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        resource_id = extract_flow_resource_id(entry)
+        skill = extract_flow_skill(entry)
+        if not resource_id or not skill:
+            continue
+
+        parsed.append(
+            {
+                "entry": entry,
+                "resource_id": resource_id,
+                "skill": skill,
+                "order": order,
+            }
+        )
+
+    if not parsed:
+        return None
+
+    session_scoped = [
+        item for item in parsed
+        if flow_matches_current_session(
+            item["entry"],
+            base_dir,
+            item["resource_id"],
+            current_session_id,
+            metadata_cache,
+        )
+    ]
+    if session_scoped:
+        scoped = session_scoped
+    else:
+        scoped = [
+            item for item in parsed
+            if not flow_has_explicit_session_scope(item["entry"])
+            and metadata_owner_ppid_matches(base_dir, item["resource_id"], metadata_cache)
+        ]
+
+    if not scoped:
+        return None
+
+    latest_by_frame = {}
+    for item in scoped:
+        latest_by_frame[(item["resource_id"], item["skill"])] = item
+
+    active = [item for item in latest_by_frame.values() if not is_flow_terminal(item["entry"])]
+    if not active:
+        return None
+
+    chosen = max(active, key=lambda item: item["order"])
+    step, total = extract_flow_step_total(chosen["entry"])
+    label = chosen["skill"]
+    if step is not None and total is not None:
+        label = f"{label}[{step}/{total}]"
+    return render_line([label], chosen["resource_id"])
 
 
 def load_state_payload(path):
@@ -662,6 +975,11 @@ def render_output(base_line):
     merged = merge_with_dispatch_prefix(base_line, dispatch_run_dir)
     return prepend_model_prefix(merged, model_prefix)
 
+
+flow_line = render_from_flow(os.path.join(project_root, ".gran-maestro"), input_json)
+if flow_line is not None:
+    print(render_output(flow_line))
+    sys.exit(0)
 
 snapshot_line = render_from_snapshot(snapshot_path)
 if snapshot_line is not None:

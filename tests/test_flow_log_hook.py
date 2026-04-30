@@ -159,6 +159,58 @@ def test_cmd_state_set_uses_rotation(tmp_path, monkeypatch):
     assert not (workspace / ".gran-maestro" / "logs" / "flow.ndjson").exists()
 
 
+def test_cmd_state_set_records_workflow_resource_id_on_enter_and_commit(tmp_path, monkeypatch):
+    workspace = _workspace(tmp_path)
+    monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
+    ppid = os.getpid()
+    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "workflow_active": True,
+                "current_skill": "mst:plan",
+                "active_req": "REQ-775",
+                "next_action": {"source_id": "PLN-775", "source": "AGI-775"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["MST_STATE_PPID"] = str(ppid)
+    env["MST_SNAPSHOT_SESSION_ID"] = "test-s-2"
+    env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env.pop("MST_FLOW_LOG_DIR", None)
+
+    for step in (1, 2):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(MST_SCRIPT),
+                "state",
+                "set",
+                "--skill",
+                "demo",
+                "--step",
+                str(step),
+                "--total",
+                "2",
+            ],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+
+    rotated = workspace / ".gran-maestro" / "logs" / "flow-202604.ndjson"
+    events = [json.loads(line) for line in rotated.read_text(encoding="utf-8").splitlines()]
+    assert [event["event_type"] for event in events] == ["enter", "enter", "commit"]
+    assert all(event["extras"].get("resource_id") == "REQ-775" for event in events)
+
+
 def test_append_event_and_flow_detail_path_default_compatibility(tmp_path):
     project_root = _workspace(tmp_path)
     signature = inspect.signature(append_event)

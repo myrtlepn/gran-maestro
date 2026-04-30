@@ -412,6 +412,45 @@ def _parse_flow_timestamp(value: object) -> Optional[datetime]:
         return None
 
 
+_RESOURCE_ID_RE = re.compile(r"^(?:AGI|REQ|PLN)-[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+
+
+def _normalize_flow_resource_id(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip().upper()
+    if _RESOURCE_ID_RE.fullmatch(candidate):
+        return candidate
+    return ""
+
+
+def _current_flow_resource_id() -> str:
+    try:
+        state_path = _workflow_state_file(_skill_state_base_dir())
+        payload = _workflow_state_load(state_path)
+    except Exception:
+        payload = None
+    if not isinstance(payload, dict):
+        return ""
+
+    candidates = [payload.get("active_req")]
+    next_action_value = payload.get("next_action")
+    if isinstance(next_action_value, dict):
+        candidates.extend(
+            [
+                next_action_value.get("source_id"),
+                next_action_value.get("source"),
+                next_action_value.get("resource_id"),
+            ]
+        )
+
+    for candidate in candidates:
+        resource_id = _normalize_flow_resource_id(candidate)
+        if resource_id:
+            return resource_id
+    return ""
+
+
 def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
     try:
         if not flow_path.exists():
@@ -971,6 +1010,8 @@ def cmd_state_set(args):
         flow_path = flow_log_path(project_root, rotate=True)
         log_session_id = safe_session_id(session_id)
         duration_ms = _previous_enter_duration_ms(flow_path, log_session_id, args.skill)
+        resource_id = _current_flow_resource_id()
+        extras = {"resource_id": resource_id} if resource_id else None
         append_skill_event(
             project_root,
             session_id,
@@ -981,6 +1022,7 @@ def cmd_state_set(args):
             parent_skill=parent_skill,
             parent_step=parent_step,
             duration_ms=duration_ms,
+            extras=extras,
             rotate=True,
         )
         if args.step == args.total:
@@ -994,6 +1036,7 @@ def cmd_state_set(args):
                 parent_skill=parent_skill,
                 parent_step=parent_step,
                 duration_ms=0,
+                extras=extras,
                 rotate=True,
             )
     except Exception as exc:
