@@ -168,6 +168,7 @@ mst_history_fast_verify_unlocked() {
 
   local_value="$(mst_history_read_head_value "$local_head")"
   mirror_value="$(mst_history_read_head_value "$mirror_head")"
+  # fast_verify는 전이 상태(local != mirror)에서 fall-through하여 full verify가 처리한다.
   [ "$local_value" = "$mirror_value" ] || return 1
   [ "$local_value" = "$cached_head" ] || return 1
 
@@ -320,9 +321,34 @@ if has_entries and local_head is None:
     fail("missing history.head")
 if has_entries and mirror_head is None:
     fail("missing home mirror head")
-if local_head is not None and local_head != last_hash:
+if has_entries and local_head == zero_hash:
     fail("history.head")
-if mirror_head is not None and mirror_head != last_hash:
+if has_entries and mirror_head == zero_hash:
+    fail("home mirror head")
+
+def head_within_ndjson(head, last_hash, history_path):
+    if head is None or head == last_hash:
+        return True
+    if head == zero_hash:
+        return True
+    if not history_path.exists():
+        return False
+    with history_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict) and row.get("event_hash") == head:
+                return True
+    return False
+
+if local_head is not None and not head_within_ndjson(local_head, last_hash, history_path):
+    fail("history.head")
+if mirror_head is not None and not head_within_ndjson(mirror_head, last_hash, history_path):
     fail("home mirror head")
 PY
   if [ "$?" -eq 0 ]; then
@@ -403,6 +429,7 @@ print(json.dumps(row, sort_keys=True, separators=(",", ":")))
 PY
 }
 
+# Write order: ndjson(append-only ledger) -> mirror_head(global index) -> local_head(commit point). 부분 실패는 항상 local <= mirror <= ndjson_last_hash로 수렴.
 mst_history_append_event() {
   local project_root="$1" session_id="$2" event_json="$3"
   local session_dir history_file local_head mirror_head heads_dir lock prev_hash row event_hash seq status
@@ -462,11 +489,11 @@ mst_history_append_event() {
   }
   seq="$(mst_history_extract_json_number "seq" "$row")"
   [ -n "$seq" ] || seq="$(mst_history_current_seq "$history_file")"
-  mst_history_write_head "$local_head" "$event_hash" || {
+  mst_history_write_head "$mirror_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
-  mst_history_write_head "$mirror_head" "$event_hash" || {
+  mst_history_write_head "$local_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
@@ -475,6 +502,7 @@ mst_history_append_event() {
   mst_history_release_lock "$lock"
 }
 
+# Write order: ndjson(append-only ledger) -> mirror_head(global index) -> local_head(commit point). 부분 실패는 항상 local <= mirror <= ndjson_last_hash로 수렴.
 mst_history_append_events_batch() {
   local project_root="$1" session_id="$2"
   shift 2 || true
@@ -560,11 +588,11 @@ PY
   }
   seq="$(mst_history_extract_json_number "seq" "$last_row")"
   [ -n "$seq" ] || seq="$(mst_history_current_seq "$history_file" "$session_id")"
-  mst_history_write_head "$local_head" "$event_hash" || {
+  mst_history_write_head "$mirror_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
-  mst_history_write_head "$mirror_head" "$event_hash" || {
+  mst_history_write_head "$local_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
@@ -633,6 +661,7 @@ PY
   printf '{"args_sha256":"%s","timestamp":"%s","tool":"%s","type":"tool_call"}\n' "$args_sha" "$timestamp" "$tool_escaped"
 }
 
+# Write order: ndjson(append-only ledger) -> mirror_head(global index) -> local_head(commit point). 부분 실패는 항상 local <= mirror <= ndjson_last_hash로 수렴.
 mst_history_append_tool_call() {
   local project_root="$1" session_id="$2" stdin_raw="$3"
   local session_dir history_file local_head mirror_head heads_dir lock prev_hash event_json event_hash row status
@@ -712,11 +741,11 @@ PY
     mst_history_release_lock "$lock"
     return 1
   }
-  mst_history_write_head "$local_head" "$event_hash" || {
+  mst_history_write_head "$mirror_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
-  mst_history_write_head "$mirror_head" "$event_hash" || {
+  mst_history_write_head "$local_head" "$event_hash" || {
     mst_history_release_lock "$lock"
     return 1
   }
