@@ -8,6 +8,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from scripts._flow_logger import (
     _rotated_filename,
     append_event,
@@ -209,6 +211,184 @@ def test_cmd_state_set_records_workflow_resource_id_on_enter_and_commit(tmp_path
     events = [json.loads(line) for line in rotated.read_text(encoding="utf-8").splitlines()]
     assert [event["event_type"] for event in events] == ["enter", "enter", "commit"]
     assert all(event["extras"].get("resource_id") == "REQ-775" for event in events)
+
+
+def _run_state_set_with_workflow_payload(
+    workspace: Path,
+    payload: dict,
+    *,
+    ppid: int,
+    session_id: str,
+    step: int = 1,
+    total: int = 2,
+) -> list[dict]:
+    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    env = dict(os.environ)
+    env["MST_STATE_PPID"] = str(ppid)
+    env["MST_SNAPSHOT_SESSION_ID"] = session_id
+    env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env.pop("MST_FLOW_LOG_DIR", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MST_SCRIPT),
+            "state",
+            "set",
+            "--skill",
+            "demo",
+            "--step",
+            str(step),
+            "--total",
+            str(total),
+        ],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rotated = workspace / ".gran-maestro" / "logs" / "flow-202604.ndjson"
+    assert rotated.exists()
+    return [json.loads(line) for line in rotated.read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {
+                "active_req": " req-778 ",
+                "active_agi": "AGI-028",
+                "active_plan": "PLN-605",
+                "next_action": {"source_id": "REQ-LOWER"},
+            },
+            "REQ-778",
+        ),
+        (
+            {
+                "active_req": "AGI-NOT-REQ",
+                "active_agi": " agi-028 ",
+                "active_plan": "PLN-605",
+                "next_action": {"source_id": "REQ-LOWER"},
+            },
+            "AGI-028",
+        ),
+        (
+            {
+                "active_req": "",
+                "active_agi": "not-agi",
+                "agi_id": "AGI-FALLBACK",
+                "active_plan": "PLN-605",
+                "next_action": {"source_id": "REQ-LOWER"},
+            },
+            "AGI-FALLBACK",
+        ),
+        (
+            {
+                "active_req": "",
+                "active_agi": "",
+                "active_plan": " pln-605 ",
+                "next_action": {"source_id": "REQ-LOWER"},
+            },
+            "PLN-605",
+        ),
+        (
+            {
+                "active_req": "",
+                "active_agi": "",
+                "active_plan": "bad-plan",
+                "plan_id": "PLN-FALLBACK",
+                "next_action": {"source_id": "REQ-LOWER"},
+            },
+            "PLN-FALLBACK",
+        ),
+        (
+            {
+                "active_req": "bad-req",
+                "active_agi": "bad-agi",
+                "active_plan": "bad-plan",
+                "next_action": {
+                    "source_id": " req-source-id ",
+                    "source": "AGI-SOURCE",
+                    "resource_id": "PLN-RESOURCE",
+                },
+            },
+            "REQ-SOURCE-ID",
+        ),
+        (
+            {
+                "active_req": "",
+                "active_agi": "",
+                "active_plan": "",
+                "next_action": {
+                    "source_id": "bad-source-id",
+                    "source": " agi-source ",
+                    "resource_id": "PLN-RESOURCE",
+                },
+            },
+            "AGI-SOURCE",
+        ),
+        (
+            {
+                "active_req": "",
+                "active_agi": "",
+                "active_plan": "",
+                "next_action": {
+                    "source_id": "bad-source-id",
+                    "source": "bad-source",
+                    "resource_id": " pln-resource ",
+                },
+            },
+            "PLN-RESOURCE",
+        ),
+    ],
+)
+def test_cmd_state_set_resource_id_priority_and_normalization(tmp_path, monkeypatch, payload, expected):
+    workspace = _workspace(tmp_path)
+    monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
+
+    events = _run_state_set_with_workflow_payload(
+        workspace,
+        payload,
+        ppid=os.getpid(),
+        session_id="priority-session",
+    )
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "enter"
+    assert events[0]["extras"].get("resource_id") == expected
+
+
+def test_cmd_state_set_omits_invalid_resource_id_tokens(tmp_path, monkeypatch):
+    workspace = _workspace(tmp_path)
+    monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
+
+    events = _run_state_set_with_workflow_payload(
+        workspace,
+        {
+            "active_req": "REQ lowercase invalid space inside",
+            "active_agi": "AGI_028",
+            "agi_id": "AGI-",
+            "active_plan": "PLAN-605",
+            "plan_id": "PLN-",
+            "next_action": {
+                "source_id": "REQ-*",
+                "source": "../REQ-778",
+                "resource_id": "REQ-778!",
+            },
+        },
+        ppid=os.getpid(),
+        session_id="invalid-session",
+    )
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "enter"
+    assert "resource_id" not in events[0]["extras"]
 
 
 def test_append_event_and_flow_detail_path_default_compatibility(tmp_path):

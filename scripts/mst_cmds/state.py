@@ -415,11 +415,13 @@ def _parse_flow_timestamp(value: object) -> Optional[datetime]:
 _RESOURCE_ID_RE = re.compile(r"^(?:AGI|REQ|PLN)-[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 
 
-def _normalize_flow_resource_id(value: object) -> str:
+def _normalize_flow_resource_id(value: object, allowed_prefixes: Optional[set[str]] = None) -> str:
     if not isinstance(value, str):
         return ""
     candidate = value.strip().upper()
-    if _RESOURCE_ID_RE.fullmatch(candidate):
+    if _RESOURCE_ID_RE.fullmatch(candidate) and (
+        allowed_prefixes is None or candidate.split("-", 1)[0] in allowed_prefixes
+    ):
         return candidate
     return ""
 
@@ -433,7 +435,19 @@ def _current_flow_resource_id() -> str:
     if not isinstance(payload, dict):
         return ""
 
-    candidates = [payload.get("active_req")]
+    scoped_candidates = [
+        (payload.get("active_req"), {"REQ"}),
+        (payload.get("active_agi"), {"AGI"}),
+        (payload.get("agi_id"), {"AGI"}),
+        (payload.get("active_plan"), {"PLN"}),
+        (payload.get("plan_id"), {"PLN"}),
+    ]
+    for candidate, allowed_prefixes in scoped_candidates:
+        resource_id = _normalize_flow_resource_id(candidate, allowed_prefixes)
+        if resource_id:
+            return resource_id
+
+    candidates = []
     next_action_value = payload.get("next_action")
     if isinstance(next_action_value, dict):
         candidates.extend(
