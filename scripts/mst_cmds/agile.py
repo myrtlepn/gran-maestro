@@ -1243,6 +1243,7 @@ def cmd_agile_result(args):
         payload["previous_lessons"] = str(args.previous_lessons)
     sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
+    result_lock_path = sprint_dir / ".result.lock"
     aux_warnings = []
 
     def _record_aux_warning(stage, exc):
@@ -1255,123 +1256,140 @@ def cmd_agile_result(args):
         )
         print(f"[warn] {stage} hook 실패: {exc}", file=sys.stderr)
 
-    result_md_path = sprint_dir / "result.md"
-    result_md_lines = [
-        f"# {sprint_id} Result",
-        "",
-    ]
-    why_keys = (
-        "sprint_purpose",
-        "selection_reason",
-        "target_dod",
-        "target_dod_text",
-        "previous_direction",
-        "previous_lessons",
-    )
-    has_why = any(key in payload for key in why_keys)
-    if has_why:
-        target_dod = payload.get("target_dod") or "-"
-        target_dod_text = payload.get("target_dod_text") or "-"
-        if target_dod == "-" and target_dod_text == "-":
-            target_dod_line = "-"
-        elif target_dod_text == "-":
-            target_dod_line = target_dod
-        elif target_dod == "-":
-            target_dod_line = target_dod_text
-        else:
-            target_dod_line = f"{target_dod} — {target_dod_text}"
-        result_md_lines.extend(
-            [
-                "## 이 스프린트를 왜 했는가",
-                f"- 스프린트 목적: {payload.get('sprint_purpose') or '-'}",
-                f"- 대상 DoD: {target_dod_line}",
-                f"- 선택 근거: {payload.get('selection_reason') or '-'}",
-                f"- 직전 회고 방향: {payload.get('previous_direction') or '-'}",
-                f"- 직전 교훈: {payload.get('previous_lessons') or '-'}",
+    with open(result_lock_path, "a+", encoding="utf-8") as result_lock_file:
+        result_lock_acquired = False
+        try:
+            _common._lock_exclusive_with_timeout(result_lock_file, timeout_sec=5.0, poll_interval=0.05)
+            result_lock_acquired = True
+        except TimeoutError as exc:
+            print(
+                "Error: agile result lock-contention (lock timeout) "
+                f"agi_id={agi_id} sprint_id={sprint_id} lock_path={result_lock_path} detail={exc}",
+                file=sys.stderr,
+            )
+            return 1
+
+        try:
+            result_md_path = sprint_dir / "result.md"
+            result_md_lines = [
+                f"# {sprint_id} Result",
                 "",
             ]
-        )
-    result_md_lines.extend(
-        [
-            f"- status: {payload['status']}",
-            f"- planned: {', '.join(planned) if planned else '-'}",
-            f"- completed: {', '.join(completed) if completed else '-'}",
-            f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
-            f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
-            f"- summary: {payload.get('summary', '-')}",
-            f"- outcome: {payload.get('outcome', '-')}",
-            f"- timestamp: {timestamp}",
-            "",
-        ]
-    )
-    result_md_lines.extend(_render_sprint_goals_md_lines(sprint_goals))
-    result_md_path.write_text("\n".join(result_md_lines), encoding="utf-8")
-    _append_agile_event(
-        agi_id,
-        "agile.result",
-        {
-            "sprint_id": sprint_id,
-            "status": payload["status"],
-        },
-    )
-
-    # Auto-update index/links.json when PLN/REQ IDs are provided
-    if pln_ids or req_ids:
-        try:
-            links_path = _agi_links_path(agi_id)
-            links = load_json(links_path) or {}
-            if not isinstance(links, dict):
-                links = {}
-            links["agi_id"] = agi_id
-            links.setdefault("pln", [])
-            links.setdefault("req", [])
-            for plan_id in pln_ids:
-                if plan_id not in links["pln"]:
-                    links["pln"].append(plan_id)
-            for req_id in req_ids:
-                if req_id not in links["req"]:
-                    links["req"].append(req_id)
-            links["updated_at"] = _now_iso()
-            save_json(links_path, links)
-        except Exception as exc:
-            _record_aux_warning("links-update", exc)
-
-    # drift report skeleton 생성 (status in [done, failed]일 때만)
-    drift_report_path = None
-    if args.status in ("done", "failed"):
-        try:
-            drift_report_path = _generate_drift_report_skeleton(
-                agi_id=agi_id,
-                sprint_num=args.sprint,
-                source_plan=getattr(args, "pln", None),
-                dod_ref=getattr(args, "dod_ref", None),
-                original_dod_text=None,  # MVP에서는 None, 향후 확장
+            why_keys = (
+                "sprint_purpose",
+                "selection_reason",
+                "target_dod",
+                "target_dod_text",
+                "previous_direction",
+                "previous_lessons",
             )
-        except Exception as exc:
-            _record_aux_warning("drift-report", exc)
-
-        # recall patch manifest skeleton 생성 (drift-report classification 기반)
-        try:
-            classification = None
-            if drift_report_path is not None:
-                try:
-                    report_data = json.loads(Path(drift_report_path).read_text(encoding="utf-8"))
-                    classification = report_data.get("classification")
-                except Exception:
-                    classification = None
-            if classification in ("drift_warning", "objective_stale"):
-                _generate_recall_patch_manifest_skeleton(
-                    agi_id=agi_id,
-                    sprint_num=args.sprint,
-                    classification=classification,
-                    drift_report_path=drift_report_path,
+            has_why = any(key in payload for key in why_keys)
+            if has_why:
+                target_dod = payload.get("target_dod") or "-"
+                target_dod_text = payload.get("target_dod_text") or "-"
+                if target_dod == "-" and target_dod_text == "-":
+                    target_dod_line = "-"
+                elif target_dod_text == "-":
+                    target_dod_line = target_dod
+                elif target_dod == "-":
+                    target_dod_line = target_dod_text
+                else:
+                    target_dod_line = f"{target_dod} — {target_dod_text}"
+                result_md_lines.extend(
+                    [
+                        "## 이 스프린트를 왜 했는가",
+                        f"- 스프린트 목적: {payload.get('sprint_purpose') or '-'}",
+                        f"- 대상 DoD: {target_dod_line}",
+                        f"- 선택 근거: {payload.get('selection_reason') or '-'}",
+                        f"- 직전 회고 방향: {payload.get('previous_direction') or '-'}",
+                        f"- 직전 교훈: {payload.get('previous_lessons') or '-'}",
+                        "",
+                    ]
                 )
-        except Exception as exc:
-            _record_aux_warning("recall-manifest", exc)
+            result_md_lines.extend(
+                [
+                    f"- status: {payload['status']}",
+                    f"- planned: {', '.join(planned) if planned else '-'}",
+                    f"- completed: {', '.join(completed) if completed else '-'}",
+                    f"- generated PLN: {', '.join(pln_ids) if pln_ids else '-'}",
+                    f"- generated REQ: {', '.join(req_ids) if req_ids else '-'}",
+                    f"- summary: {payload.get('summary', '-')}",
+                    f"- outcome: {payload.get('outcome', '-')}",
+                    f"- timestamp: {timestamp}",
+                    "",
+                ]
+            )
+            result_md_lines.extend(_render_sprint_goals_md_lines(sprint_goals))
+            result_md_path.write_text("\n".join(result_md_lines), encoding="utf-8")
+            _append_agile_event(
+                agi_id,
+                "agile.result",
+                {
+                    "sprint_id": sprint_id,
+                    "status": payload["status"],
+                },
+            )
 
-    payload["aux_status"] = "partial" if aux_warnings else "ok"
-    payload["aux_warnings"] = aux_warnings
-    save_json(sprint_dir / "result.json", payload)
+            # Auto-update index/links.json when PLN/REQ IDs are provided
+            if pln_ids or req_ids:
+                try:
+                    links_path = _agi_links_path(agi_id)
+                    links = load_json(links_path) or {}
+                    if not isinstance(links, dict):
+                        links = {}
+                    links["agi_id"] = agi_id
+                    links.setdefault("pln", [])
+                    links.setdefault("req", [])
+                    for plan_id in pln_ids:
+                        if plan_id not in links["pln"]:
+                            links["pln"].append(plan_id)
+                    for req_id in req_ids:
+                        if req_id not in links["req"]:
+                            links["req"].append(req_id)
+                    links["updated_at"] = _now_iso()
+                    save_json(links_path, links)
+                except Exception as exc:
+                    _record_aux_warning("links-update", exc)
+
+            # drift report skeleton 생성 (status in [done, failed]일 때만)
+            drift_report_path = None
+            if args.status in ("done", "failed"):
+                try:
+                    drift_report_path = _generate_drift_report_skeleton(
+                        agi_id=agi_id,
+                        sprint_num=args.sprint,
+                        source_plan=getattr(args, "pln", None),
+                        dod_ref=getattr(args, "dod_ref", None),
+                        original_dod_text=None,  # MVP에서는 None, 향후 확장
+                    )
+                except Exception as exc:
+                    _record_aux_warning("drift-report", exc)
+
+                # recall patch manifest skeleton 생성 (drift-report classification 기반)
+                try:
+                    classification = None
+                    if drift_report_path is not None:
+                        try:
+                            report_data = json.loads(Path(drift_report_path).read_text(encoding="utf-8"))
+                            classification = report_data.get("classification")
+                        except Exception:
+                            classification = None
+                    if classification in ("drift_warning", "objective_stale"):
+                        _generate_recall_patch_manifest_skeleton(
+                            agi_id=agi_id,
+                            sprint_num=args.sprint,
+                            classification=classification,
+                            drift_report_path=drift_report_path,
+                        )
+                except Exception as exc:
+                    _record_aux_warning("recall-manifest", exc)
+
+            payload["aux_status"] = "partial" if aux_warnings else "ok"
+            payload["aux_warnings"] = aux_warnings
+            save_json(sprint_dir / "result.json", payload)
+        finally:
+            if result_lock_acquired:
+                _common._unlock(result_lock_file)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

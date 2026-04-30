@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import multiprocessing
 import os
 import re
 import shutil
@@ -20,6 +21,11 @@ import time
 from pathlib import Path
 
 import pytest
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platform dependent.
+    fcntl = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +39,14 @@ CAUSE_CATEGORIES = {"normal", "lock-contention", "ledger-mismatch", "aux-failure
 AUX_WARNING_STAGES = {"drift-report", "recall-manifest", "links-update"}
 SINGLE_CALL_TIMEOUT_SEC = 30
 CONCURRENT_TIMEOUT_SEC = 60
+
+
+def _sprint_dir(project_root: Path, agi_id: str, sprint: int) -> Path:
+    return project_root / ".gran-maestro" / "agile" / agi_id / "sprints" / f"S{sprint:02d}"
+
+
+def _events_path(project_root: Path, agi_id: str) -> Path:
+    return project_root / ".gran-maestro" / "agile" / agi_id / "events.ndjson"
 
 
 def _clean_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -78,9 +92,9 @@ def isolated_project():
 
 
 def _collect_artifacts(project_root: Path, agi_id: str, sprint: int) -> dict[str, object]:
-    sprint_dir = project_root / ".gran-maestro" / "agile" / agi_id / "sprints" / f"S{sprint:02d}"
+    sprint_dir = _sprint_dir(project_root, agi_id, sprint)
     result_json = sprint_dir / "result.json"
-    events_path = project_root / ".gran-maestro" / "agile" / agi_id / "events.ndjson"
+    events_path = _events_path(project_root, agi_id)
     payload = None
     if result_json.exists():
         try:
@@ -184,7 +198,12 @@ def _stderr_pattern(stderr: str) -> str:
     text = (stderr or "").lower()
     if "history ledger mismatch" in text or "ledger" in text:
         return "ledger-mismatch"
-    if "lock" in text or "contention" in text:
+    if (
+        "lock timeout" in text
+        or "lock-contention" in text
+        or ("lock" in text and "timeout" in text)
+        or ("lock" in text and "contention" in text)
+    ):
         return "lock-contention"
     if "[warn]" in text or "drift-report" in text or "recall" in text:
         return "aux-failure"
@@ -202,9 +221,38 @@ def _classify_outcome(outcome: dict[str, object]) -> str:
         return str(pattern)
     if outcome.get("returncode") != 0 and _stderr_pattern(str(outcome.get("stderr", ""))) == "aux-failure":
         return "aux-failure"
+    if outcome.get("returncode") != 0 and _stderr_pattern(str(outcome.get("stderr", ""))) == "lock-contention":
+        return "lock-contention"
     if outcome.get("returncode") == 0:
         return "normal"
     return "normal"
+
+
+def _read_ndjson_strict(path: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:  # pragma: no cover - asserted in callers.
+            raise AssertionError(f"{path}: invalid JSON at line {line_no}: {exc}") from exc
+        assert isinstance(payload, dict), f"{path}: expected object at line {line_no}, got {type(payload)}"
+        rows.append(payload)
+    return rows
+
+
+def _hold_result_lock(lock_path_text: str, ready_path_text: str, hold_sec: float) -> None:
+    if fcntl is None:
+        return
+
+    lock_path = Path(lock_path_text)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+") as fd:
+        fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
+        Path(ready_path_text).write_text("ready", encoding="utf-8")
+        time.sleep(hold_sec)
+        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
 
 
 def _assert_bounded(outcome: dict[str, object], expected_category: str, limit: int) -> None:
@@ -233,9 +281,18 @@ def test_classify_outcome_timeout():
 
 
 def test_classify_outcome_stderr_pattern():
-    outcome = {"returncode": 1, "stderr_pattern": "aux-failure", "stderr": "", "timeout": False}
+    aux = {"returncode": 1, "stderr_pattern": "aux-failure", "stderr": "", "timeout": False}
+    lock_timeout = {"returncode": 1, "stderr_pattern": "", "stderr": "Error: lock timeout (5s)", "timeout": False}
+    lock_contention = {
+        "returncode": 1,
+        "stderr_pattern": "",
+        "stderr": "agile result lock-contention on sprint",
+        "timeout": False,
+    }
 
-    assert _classify_outcome(outcome) == "aux-failure"
+    assert _classify_outcome(aux) == "aux-failure"
+    assert _classify_outcome(lock_timeout) == "lock-contention"
+    assert _classify_outcome(lock_contention) == "lock-contention"
 
 
 def test_classify_outcome_aux_failure_stderr():
@@ -317,46 +374,129 @@ def test_concurrent_same_sprint(isolated_project):
             outcomes = [future.result(timeout=CONCURRENT_TIMEOUT_SEC) for future in futures]
         except concurrent.futures.TimeoutError:
             elapsed = time.monotonic() - started
-            pytest.xfail(f"test_concurrent_same_sprint cause_category=lock-contention elapsed={elapsed:.3f}s")
+            pytest.fail(
+                "test_concurrent_same_sprint must complete without future timeout; "
+                f"elapsed={elapsed:.3f}s"
+            )
 
     elapsed_group = time.monotonic() - started
     assert elapsed_group <= CONCURRENT_TIMEOUT_SEC, (
         f"test_concurrent_same_sprint cause_category=lock-contention elapsed={elapsed_group:.3f}s "
         f"limit={CONCURRENT_TIMEOUT_SEC}s"
     )
-    if all(outcome["timeout"] for outcome in outcomes):
-        pytest.xfail(
-            "test_concurrent_same_sprint cause_category=lock-contention "
-            f"elapsed={elapsed_group:.3f}s all calls timed out"
-        )
-    if any(outcome["timeout"] for outcome in outcomes):
-        pytest.xfail(
-            "test_concurrent_same_sprint cause_category=lock-contention "
-            f"elapsed={elapsed_group:.3f}s partial timeout observed"
-        )
+    assert not any(outcome["timeout"] for outcome in outcomes), (
+        "test_concurrent_same_sprint must not rely on subprocess timeout; "
+        f"outcomes={outcomes!r}"
+    )
 
     returncodes = [outcome["returncode"] for outcome in outcomes]
     successes = sum(1 for code in returncodes if code == 0)
-    pattern_a = successes == 4
-    pattern_b = 1 <= successes < 4 and all(code is not None for code in returncodes)
+    failures = [outcome for outcome in outcomes if outcome["returncode"] != 0]
+    pattern_a = successes == 4 and not failures
+    pattern_b = 1 <= successes < 4 and failures and all(code is not None for code in returncodes)
     assert pattern_a or pattern_b, (
         f"test_concurrent_same_sprint elapsed={elapsed_group:.3f}s "
         f"returncodes={returncodes!r}"
     )
-    if pattern_a:
-        for outcome in outcomes:
-            _assert_bounded(outcome, "normal", SINGLE_CALL_TIMEOUT_SEC)
-    else:
-        for outcome in outcomes:
-            category = _classify_outcome(outcome)
-            assert category in CAUSE_CATEGORIES, (
-                f"{outcome['case']} cause_category={category} elapsed={outcome['elapsed']:.3f}s "
-                f"returncode={outcome['returncode']} stderr={outcome.get('stderr')!r}"
-            )
-            assert float(outcome["elapsed"]) <= SINGLE_CALL_TIMEOUT_SEC, (
-                f"{outcome['case']} cause_category={category} elapsed={outcome['elapsed']:.3f}s "
-                f"limit={SINGLE_CALL_TIMEOUT_SEC}s"
-            )
+    for outcome in outcomes:
+        assert float(outcome["elapsed"]) <= SINGLE_CALL_TIMEOUT_SEC, (
+            f"{outcome['case']} elapsed={outcome['elapsed']:.3f}s exceeded {SINGLE_CALL_TIMEOUT_SEC}s"
+        )
+    for failure in failures:
+        assert failure["returncode"] not in (0, None), f"unexpected failure returncode={failure['returncode']!r}"
+        category = _classify_outcome(failure)
+        assert category == "lock-contention", (
+            f"{failure['case']} cause_category={category} returncode={failure['returncode']} "
+            f"stderr={failure['stderr']!r}"
+        )
+        stderr_lower = str(failure.get("stderr") or "").lower()
+        assert "lock timeout" in stderr_lower or "lock-contention" in stderr_lower, (
+            f"{failure['case']} expected lock timeout/contention stderr but got {failure['stderr']!r}"
+        )
+
+    successful_summaries = {str(outcome["case"]) for outcome in outcomes if outcome["returncode"] == 0}
+    assert successful_summaries, f"expected at least one successful call, outcomes={outcomes!r}"
+
+    sprint_dir = _sprint_dir(root, agi_id, 3)
+    result_json_path = sprint_dir / "result.json"
+    result_md_path = sprint_dir / "result.md"
+    events_path = _events_path(root, agi_id)
+    assert result_json_path.exists(), f"missing {result_json_path}"
+    assert result_md_path.exists(), f"missing {result_md_path}"
+    assert events_path.exists(), f"missing {events_path}"
+
+    result_payload = json.loads(result_json_path.read_text(encoding="utf-8"))
+    assert isinstance(result_payload, dict), f"invalid result payload type: {type(result_payload)}"
+    final_summary = result_payload.get("summary")
+    assert final_summary in successful_summaries, (
+        f"result.json summary was corrupted: summary={final_summary!r} "
+        f"successful_summaries={sorted(successful_summaries)!r}"
+    )
+
+    result_md = result_md_path.read_text(encoding="utf-8")
+    assert result_md.strip(), f"{result_md_path} is empty"
+    assert any(f"- summary: {summary}" in result_md for summary in successful_summaries), (
+        f"result.md summary does not match successful run: summaries={sorted(successful_summaries)!r}"
+    )
+
+    events = _read_ndjson_strict(events_path)
+    sprint_events = [e for e in events if e.get("event") == "agile.result" and e.get("sprint_id") == "S03"]
+    assert sprint_events, f"no agile.result event for sprint S03 in {events_path}"
+    final_event = sprint_events[-1]
+    assert final_event.get("status") == "done", f"unexpected final sprint event: {final_event!r}"
+
+
+@pytest.mark.skipif(fcntl is None, reason="fcntl is not available on this platform")
+def test_result_lock_held_returns_lock_timeout(isolated_project):
+    root = isolated_project["root"]
+    agi_id = isolated_project["agi_id"]
+    sprint = 7
+    lock_path = _sprint_dir(root, agi_id, sprint) / ".result.lock"
+    ready_path = root / "result-lock-held.ready"
+
+    process = multiprocessing.Process(
+        target=_hold_result_lock,
+        args=(str(lock_path), str(ready_path), 6.0),
+    )
+    process.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not ready_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready_path.exists(), f"lock-holder did not signal readiness: {ready_path}"
+
+        outcome = _run_agile_result(
+            root,
+            agi_id,
+            sprint=sprint,
+            summary="test_result_lock_held_returns_lock_timeout",
+            timeout=SINGLE_CALL_TIMEOUT_SEC,
+        )
+    finally:
+        process.join(timeout=5)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+
+    assert process.exitcode in (0, -15), f"unexpected lock-holder exit code: {process.exitcode}"
+    assert not outcome["timeout"], f"expected CLI failure, got subprocess timeout: {outcome!r}"
+    assert outcome["returncode"] not in (None, 0), f"expected non-zero return code: {outcome!r}"
+    assert float(outcome["elapsed"]) < SINGLE_CALL_TIMEOUT_SEC, (
+        f"command exceeded timeout budget: elapsed={outcome['elapsed']:.3f}s "
+        f"limit={SINGLE_CALL_TIMEOUT_SEC}s"
+    )
+
+    category = _classify_outcome(outcome)
+    assert category == "lock-contention", (
+        f"test_result_lock_held_returns_lock_timeout cause_category={category} "
+        f"stderr={outcome['stderr']!r}"
+    )
+    stderr = str(outcome.get("stderr") or "")
+    stderr_lower = stderr.lower()
+    assert "lock timeout" in stderr_lower or "lock-contention" in stderr_lower, stderr
+    assert agi_id.lower() in stderr_lower, stderr
+    assert f"s{sprint:02d}".lower() in stderr_lower, stderr
+    assert str(lock_path).lower() in stderr_lower, stderr
 
 
 def test_aux_output_failure(isolated_project):
