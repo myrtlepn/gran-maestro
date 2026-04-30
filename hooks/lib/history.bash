@@ -249,7 +249,7 @@ mst_history_verify_chain_unlocked() {
     return 0
   fi
 
-  python3 - "$history_file" "$local_head" "$mirror_head" "$MST_HISTORY_ZERO_HASH" <<'PY'
+  python3 - "$history_file" "$local_head" "$mirror_head" "$MST_HISTORY_ZERO_HASH" "$session_id" <<'PY'
 import hashlib
 import json
 import sys
@@ -259,6 +259,7 @@ history_path = Path(sys.argv[1])
 local_head_path = Path(sys.argv[2])
 mirror_head_path = Path(sys.argv[3])
 zero_hash = sys.argv[4]
+session_id = sys.argv[5]
 
 
 def read_head(path: Path):
@@ -307,15 +308,11 @@ local_head = read_head(local_head_path)
 mirror_head = read_head(mirror_head_path)
 has_entries = expected_seq > 1
 
-if (
-    not has_entries
-    and not history_path.exists()
-    and local_head is None
-    and mirror_head is not None
-    and mirror_head != zero_hash
-):
-    mirror_head_path.write_text(zero_hash + "\n", encoding="utf-8")
-    mirror_head = zero_hash
+if not has_entries:
+    if local_head is not None and local_head != zero_hash:
+        fail("self-heal failed: ndjson empty but heads non-zero (rotation suspected)")
+    if mirror_head is not None and mirror_head != zero_hash:
+        fail("self-heal failed: ndjson empty but heads non-zero (rotation suspected)")
 
 if has_entries and local_head is None:
     fail("missing history.head")
@@ -347,9 +344,34 @@ def head_within_ndjson(head, last_hash, history_path):
     return False
 
 if local_head is not None and not head_within_ndjson(local_head, last_hash, history_path):
-    fail("history.head")
+    fail("self-heal failed: head ahead of ndjson last_hash")
 if mirror_head is not None and not head_within_ndjson(mirror_head, last_hash, history_path):
-    fail("home mirror head")
+    fail("self-heal failed: head ahead of ndjson last_hash")
+
+if (
+    last_hash != zero_hash
+    and (
+        local_head is not None
+        and local_head != last_hash
+        or mirror_head is not None
+        and mirror_head != last_hash
+    )
+):
+    prev_local = local_head or zero_hash
+    prev_mirror = mirror_head or zero_hash
+    targets = []
+    if mirror_head != last_hash:
+        mirror_head_path.write_text(last_hash + "\n", encoding="utf-8")
+        targets.append("mirror")
+    if local_head != last_hash:
+        local_head_path.write_text(last_hash + "\n", encoding="utf-8")
+        targets.append("local")
+    print(
+        f"[mst-history-self-heal] session={session_id} restored={last_hash[:12]} "
+        f"targets={','.join(targets)} prev_local={prev_local[:12]} prev_mirror={prev_mirror[:12]}",
+        file=sys.stderr,
+        flush=True,
+    )
 PY
   if [ "$?" -eq 0 ]; then
     mst_history_write_verify_state \
