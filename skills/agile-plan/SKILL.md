@@ -83,6 +83,15 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 ### Step 0.5: 의도 분류 게이트
 
+#### 0.5.0 command identity guard (MANDATORY)
+
+- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Step 0부터 Exit까지 고정한다.
+- 이 guard는 `/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `/mst:plan` 및 `/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.
+- `/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.
+- Claude Code 내장 plan mode로 진입하지 않는다. 어떤 단계에서도 `EnterPlanMode`를 호출하지 않고, transcript/tool-call/captured output에 `Entered plan mode`를 출력하지 않는다.
+- 재현 fixture `/mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`는 agile-plan 절차의 objective/agile planning 입력으로 먼저 처리한다.
+- 입력 형식이나 필수 정보 부족으로 objective/agile planning 입력으로 수용할 수 없으면, agile-plan 응답 또는 산출물 안에 수용 불가 사유를 남기고 Step 0.5.2 또는 Step 0.5.3의 확인/후보 제시 절차를 따른다. 이 경우에도 다른 명령이나 내장 plan mode로 전환하지 않는다.
+
 - PM은 요청 텍스트를 읽고 아래 질문을 내부 판단한다.
   - "이 요청이 새 프로젝트 objective를 정의하려는 의도인가?"
 - confidence(0.0~1.0)를 산정한다.
@@ -119,7 +128,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 2. 수행 결과를 바탕으로 **objective로 발전시킬 수 있는 후보 1~3개**를 선제시한다.
    - 형식: `[objective 후보] A) {후보1} B) {후보2} C) {후보3}` 또는 `[objective 후보] 1) {후보1} 2) {후보2} 3) {후보3}`
    - 후보 표기는 알파벳/숫자만 사용한다. 그리스 문자·로마 숫자 금지.
-   - 후보가 도출되지 않으면 "objective 후보가 도출되지 않았습니다. 다른 스킬(mst:plan, mst:request 등) 사용을 검토해주세요" 출력 후 종료한다.
+   - 후보가 도출되지 않으면 "objective 후보가 도출되지 않았습니다. agile-plan 입력으로 수용할 수 없는 사유: {사유}" 출력 후 종료한다. 다른 명령이나 내장 plan mode로 전환하지 않는다.
 3. AskUserQuestion으로 후보 중 선택받거나 Other로 직접 objective 입력받아 Step 1A로 진입한다. "종료" 선택지를 포함한다.
 4. 선택된 주제를 Step 1A JTBD Q&A 초기 컨텍스트로 전달한다.
 
