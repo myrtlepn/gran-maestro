@@ -91,6 +91,94 @@ def cmd_archive_list(args):
         print("No archives found.")
     return 0
 
+DEFAULT_ARCHIVE_RETENTION_DAYS = 90
+
+
+def _resolve_retention_days(cli_value: Optional[int]) -> int:
+    """Determine effective retention days for ``archive purge``.
+
+    Priority: CLI ``--max-age-days`` > config ``archive.retention_days`` /
+    ``archive_retention_days`` > :data:`DEFAULT_ARCHIVE_RETENTION_DAYS`.
+    AD-009: a ``null`` config value resolves to the safe default (90 days)
+    rather than infinite retention, since cleanup-created archives would
+    otherwise accumulate indefinitely.
+    """
+    if cli_value is not None:
+        return int(cli_value)
+
+    config_paths = [
+        _common.BASE_DIR / "config.json",
+        _common.BASE_DIR / ".." / ".gran-maestro" / "config.json",
+        _common.BASE_DIR.parent / "config.json",
+    ]
+    cfg = None
+    for path in config_paths:
+        loaded = load_json(path)
+        if loaded is not None:
+            cfg = loaded
+            break
+    if isinstance(cfg, dict):
+        archive_cfg = cfg.get("archive")
+        if isinstance(archive_cfg, dict):
+            value = archive_cfg.get("retention_days")
+            if value is None:
+                value = archive_cfg.get("archive_retention_days")
+            if isinstance(value, (int, float)) and value >= 0:
+                return int(value)
+        legacy_value = cfg.get("archive_retention_days")
+        if isinstance(legacy_value, (int, float)) and legacy_value >= 0:
+            return int(legacy_value)
+    return DEFAULT_ARCHIVE_RETENTION_DAYS
+
+
+def cmd_archive_purge(args):
+    """AD-009: delete archived ``*.tar.gz`` files older than the retention.
+
+    Walks every ``type_archived_dir(type_key)`` so that archives produced by
+    ``archive run`` and ``cleanup`` (both write into the same per-type
+    ``archived/`` directory) are subject to the same retention policy.
+    """
+    retention_days = _resolve_retention_days(getattr(args, "max_age_days", None))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    dry_run = bool(getattr(args, "dry_run", False))
+
+    deleted = []
+    total_bytes = 0
+    for type_key in TYPE_DIRS:
+        archived = type_archived_dir(type_key)
+        if not archived.exists():
+            continue
+        for arc in sorted(archived.glob("*.tar.gz")):
+            try:
+                stat = arc.stat()
+            except OSError:
+                continue
+            mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            if mtime >= cutoff:
+                continue
+            size = stat.st_size
+            total_bytes += size
+            deleted.append((arc, size))
+            if not dry_run:
+                try:
+                    arc.unlink()
+                except OSError as exc:
+                    print(f"[archive purge] failed to delete {arc}: {exc}", file=sys.stderr)
+
+    label = "[dry-run] would delete" if dry_run else "Purged"
+    print(
+        f"{label} {len(deleted)} archive(s), total {total_bytes} bytes "
+        f"(retention={retention_days}d)"
+    )
+    for arc, size in deleted:
+        try:
+            display = arc.relative_to(_common.BASE_DIR)
+        except ValueError:
+            display = arc
+        print(f"  {display} ({size} bytes)")
+    return 0
+
+
 def cmd_archive_restore(args):
     target = args.archive_id.upper()
     prefix = target[:3]
@@ -130,3 +218,12 @@ def register(subparsers):
 
     arc_restore = arc_sub.add_parser("restore")
     arc_restore.add_argument("archive_id")
+
+    arc_purge = arc_sub.add_parser("purge")
+    arc_purge.add_argument(
+        "--max-age-days",
+        type=int,
+        default=None,
+        help="Override retention days (default: config archive.retention_days, or 90 if null)",
+    )
+    arc_purge.add_argument("--dry-run", action="store_true")

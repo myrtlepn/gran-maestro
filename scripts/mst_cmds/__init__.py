@@ -222,6 +222,7 @@ DISPATCH = {
     ("archive", "run-all"): archive.cmd_archive_run_all,
     ("archive", "list"): archive.cmd_archive_list,
     ("archive", "restore"): archive.cmd_archive_restore,
+    ("archive", "purge"): archive.cmd_archive_purge,
     ("gardening", "scan"): gardening.cmd_gardening_scan,
     ("gardening", "auto-archive"): gardening.cmd_gardening_auto_archive,
     ("gardening", "restore"): gardening.cmd_gardening_restore,
