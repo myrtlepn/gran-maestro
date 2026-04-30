@@ -32,6 +32,24 @@ from scripts.mst_cmds._common import (
 
 GARDENING_INACTIVE_STATUSES = {"done", "completed", "cancelled"}
 
+# AD-004: requests in any of these statuses are actively being worked on and
+# must never be flagged as stale candidates regardless of `created_at` age,
+# otherwise an interactive cleanup could archive an in-progress request.
+ACTIVE_PHASE_STATUSES = {
+    "pending",
+    "phase1_analysis",
+    "phase1_spec_drafting",
+    "phase2_pending",
+    "phase2_approving",
+    "phase2_execution",
+    "executing",
+    "reviewing",
+    "phase3_review",
+    "merging",
+    "merge_conflict",
+    "merge_conflict_user_resolving",
+}
+
 GARDENING_STALE_DAYS = 90
 
 GARDENING_REQ_TERMINAL_STATUSES = {"done", "completed", "accepted", "cancelled"}
@@ -118,10 +136,16 @@ def cmd_gardening_scan(args):
                     request_warnings,
                 )
 
+        protected_active_count = 0
         for req_id, req_path, req_data in iter_request_dirs(include_completed=False):
             status = req_data.get("status", "")
             request_status_map[req_id] = status
             if status in GARDENING_INACTIVE_STATUSES:
+                continue
+            if status in ACTIVE_PHASE_STATUSES:
+                # AD-004: in-progress requests must never appear as stale
+                # candidates, regardless of how long ago they were created.
+                protected_active_count += 1
                 continue
 
             elapsed_days = _gardening_elapsed_days(req_data.get("created_at"), now)
@@ -256,6 +280,7 @@ def cmd_gardening_scan(args):
         "requests": len(stale_requests),
         "intents": len(stale_intents),
         "total": len(stale_plans) + len(stale_requests) + len(stale_intents),
+        "protected_active_requests": protected_active_count,
     }
 
     if args.json:
