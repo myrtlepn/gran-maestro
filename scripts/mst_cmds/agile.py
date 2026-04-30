@@ -1243,7 +1243,17 @@ def cmd_agile_result(args):
         payload["previous_lessons"] = str(args.previous_lessons)
     sprint_dir = _agi_session_dir(agi_id) / "sprints" / sprint_id
     sprint_dir.mkdir(parents=True, exist_ok=True)
-    save_json(sprint_dir / "result.json", payload)
+    aux_warnings = []
+
+    def _record_aux_warning(stage, exc):
+        aux_warnings.append(
+            {
+                "stage": stage,
+                "error_class": exc.__class__.__name__,
+                "message": str(exc)[:500],
+            }
+        )
+        print(f"[warn] {stage} hook 실패: {exc}", file=sys.stderr)
 
     result_md_path = sprint_dir / "result.md"
     result_md_lines = [
@@ -1307,21 +1317,24 @@ def cmd_agile_result(args):
 
     # Auto-update index/links.json when PLN/REQ IDs are provided
     if pln_ids or req_ids:
-        links_path = _agi_links_path(agi_id)
-        links = load_json(links_path) or {}
-        if not isinstance(links, dict):
-            links = {}
-        links["agi_id"] = agi_id
-        links.setdefault("pln", [])
-        links.setdefault("req", [])
-        for plan_id in pln_ids:
-            if plan_id not in links["pln"]:
-                links["pln"].append(plan_id)
-        for req_id in req_ids:
-            if req_id not in links["req"]:
-                links["req"].append(req_id)
-        links["updated_at"] = _now_iso()
-        save_json(links_path, links)
+        try:
+            links_path = _agi_links_path(agi_id)
+            links = load_json(links_path) or {}
+            if not isinstance(links, dict):
+                links = {}
+            links["agi_id"] = agi_id
+            links.setdefault("pln", [])
+            links.setdefault("req", [])
+            for plan_id in pln_ids:
+                if plan_id not in links["pln"]:
+                    links["pln"].append(plan_id)
+            for req_id in req_ids:
+                if req_id not in links["req"]:
+                    links["req"].append(req_id)
+            links["updated_at"] = _now_iso()
+            save_json(links_path, links)
+        except Exception as exc:
+            _record_aux_warning("links-update", exc)
 
     # drift report skeleton 생성 (status in [done, failed]일 때만)
     drift_report_path = None
@@ -1335,7 +1348,7 @@ def cmd_agile_result(args):
                 original_dod_text=None,  # MVP에서는 None, 향후 확장
             )
         except Exception as exc:
-            print(f"[warn] drift-report hook 실패: {exc}", file=sys.stderr)
+            _record_aux_warning("drift-report", exc)
 
         # recall patch manifest skeleton 생성 (drift-report classification 기반)
         try:
@@ -1354,7 +1367,11 @@ def cmd_agile_result(args):
                     drift_report_path=drift_report_path,
                 )
         except Exception as exc:
-            print(f"[warn] recall manifest hook 실패: {exc}", file=sys.stderr)
+            _record_aux_warning("recall-manifest", exc)
+
+    payload["aux_status"] = "partial" if aux_warnings else "ok"
+    payload["aux_warnings"] = aux_warnings
+    save_json(sprint_dir / "result.json", payload)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

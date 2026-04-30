@@ -11,6 +11,8 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,13 +22,15 @@ from pathlib import Path
 import pytest
 
 
-_DEFAULT_MST_PY = Path("/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/scripts/mst.py")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_MST_PY = REPO_ROOT / "scripts" / "mst.py"
 MST_PY = (
     Path(os.environ["MST_PLUGIN_ROOT"]) / "scripts" / "mst.py"
     if os.environ.get("MST_PLUGIN_ROOT")
     else _DEFAULT_MST_PY
 )
 CAUSE_CATEGORIES = {"normal", "lock-contention", "ledger-mismatch", "aux-failure"}
+AUX_WARNING_STAGES = {"drift-report", "recall-manifest", "links-update"}
 SINGLE_CALL_TIMEOUT_SEC = 30
 CONCURRENT_TIMEOUT_SEC = 60
 
@@ -76,19 +80,31 @@ def isolated_project():
 def _collect_artifacts(project_root: Path, agi_id: str, sprint: int) -> dict[str, object]:
     sprint_dir = project_root / ".gran-maestro" / "agile" / agi_id / "sprints" / f"S{sprint:02d}"
     result_json = sprint_dir / "result.json"
+    events_path = project_root / ".gran-maestro" / "agile" / agi_id / "events.ndjson"
     payload = None
     if result_json.exists():
         try:
             payload = json.loads(result_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             payload = "invalid-json"
+    agile_result_event = False
+    if events_path.exists():
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("event") == "agile.result" and event.get("sprint_id") == f"S{sprint:02d}":
+                agile_result_event = True
+                break
     return {
         "sprint_dir": str(sprint_dir),
         "result_json": result_json.exists(),
         "result_md": (sprint_dir / "result.md").exists(),
         "drift_report": (sprint_dir / "drift-report.json").exists(),
         "recall_manifest": (sprint_dir / "recall-patch-manifest.json").exists(),
-        "events": (project_root / ".gran-maestro" / "agile" / agi_id / "events.ndjson").exists(),
+        "events": events_path.exists(),
+        "agile_result_event": agile_result_event,
         "payload": payload,
     }
 
@@ -249,6 +265,15 @@ def test_normal_single_call(isolated_project):
         f"test_normal_single_call cause_category=normal elapsed={outcome['elapsed']:.3f}s "
         f"artifacts={artifacts!r}"
     )
+    payload = artifacts["payload"]
+    assert isinstance(payload, dict), (
+        f"test_normal_single_call cause_category=normal elapsed={outcome['elapsed']:.3f}s "
+        f"payload={payload!r}"
+    )
+    assert payload.get("aux_status") == "ok" and payload.get("aux_warnings") == [], (
+        f"test_normal_single_call cause_category=normal elapsed={outcome['elapsed']:.3f}s "
+        f"payload={payload!r}"
+    )
 
 
 def test_repeated_same_sprint(isolated_project):
@@ -337,20 +362,20 @@ def test_concurrent_same_sprint(isolated_project):
 def test_aux_output_failure(isolated_project):
     root = isolated_project["root"]
     agi_id = isolated_project["agi_id"]
-    git_path = root / "git"
-    git_path.write_text("#!/bin/sh\nexit 126\n", encoding="utf-8")
-    git_path.chmod(0o755)
+    links_dir = root / ".gran-maestro" / "agile" / agi_id / "index"
+    shutil.rmtree(links_dir)
+    links_dir.write_text("not a directory\n", encoding="utf-8")
     outcome = _run_agile_result(
         root,
         agi_id,
         sprint=4,
         status="done",
         summary="test_aux_output_failure",
-        env_extra={"PATH": f"{root}{os.pathsep}{os.environ.get('PATH', '')}"},
+        extra_args=["--pln", "PLN-593"],
     )
 
     category = _classify_outcome(outcome)
-    assert category in {"normal", "aux-failure"}, (
+    assert category == "aux-failure", (
         f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
         f"stderr={outcome['stderr']!r}"
     )
@@ -360,9 +385,37 @@ def test_aux_output_failure(isolated_project):
         f"stderr={outcome['stderr']!r}"
     )
     artifacts = outcome["partial_artifacts"]
-    assert artifacts["result_json"] and artifacts["result_md"] and artifacts["drift_report"], (
+    assert (
+        artifacts["result_json"]
+        and artifacts["result_md"]
+        and artifacts["agile_result_event"]
+        and artifacts["drift_report"]
+    ), (
         f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
         f"artifacts={artifacts!r}"
+    )
+    payload = artifacts["payload"]
+    assert isinstance(payload, dict), (
+        f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
+        f"payload={payload!r}"
+    )
+    assert payload.get("aux_status") == "partial", (
+        f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
+        f"payload={payload!r}"
+    )
+    aux_warnings = payload.get("aux_warnings")
+    assert isinstance(aux_warnings, list) and aux_warnings, (
+        f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
+        f"payload={payload!r}"
+    )
+    for warning in aux_warnings:
+        assert isinstance(warning, dict), f"aux warning must be dict: {warning!r}"
+        assert warning.get("stage") in AUX_WARNING_STAGES, f"unexpected aux warning stage: {warning!r}"
+        assert warning.get("error_class"), f"missing aux warning error_class: {warning!r}"
+        assert "message" in warning, f"missing aux warning message: {warning!r}"
+    assert re.search(r"\[warn\] (drift-report|recall-manifest|links-update) hook 실패:", outcome["stderr"]), (
+        f"test_aux_output_failure cause_category={category} elapsed={outcome['elapsed']:.3f}s "
+        f"stderr={outcome['stderr']!r}"
     )
 
 
