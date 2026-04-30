@@ -1385,18 +1385,77 @@ def verify_history(project_root: Path, home: Path, session_id: str) -> Tuple[boo
     local_value = read_head(local_head)
     mirror_value = read_head(mirror_head)
     has_entries = expected_seq > 1
+
+    if not has_entries:
+        if local_value is not None and local_value != ZERO_HASH:
+            stderr("history ledger mismatch: self-heal failed: ndjson empty but heads non-zero (rotation suspected)")
+            return False, None, 0
+        if mirror_value is not None and mirror_value != ZERO_HASH:
+            stderr("history ledger mismatch: self-heal failed: ndjson empty but heads non-zero (rotation suspected)")
+            return False, None, 0
+
     if has_entries and local_value is None:
         stderr("history ledger mismatch: missing history.head")
         return False, None, 0
     if has_entries and mirror_value is None:
         stderr("history ledger mismatch: missing home mirror head")
         return False, None, 0
-    if local_value is not None and local_value != last_hash:
+    if has_entries and local_value == ZERO_HASH:
         stderr("history ledger mismatch: history.head")
         return False, None, 0
-    if mirror_value is not None and mirror_value != last_hash:
+    if has_entries and mirror_value == ZERO_HASH:
         stderr("history ledger mismatch: home mirror head")
         return False, None, 0
+
+    def head_within_ndjson(head: Optional[str]) -> bool:
+        if head is None or head == last_hash or head == ZERO_HASH:
+            return True
+        if not history_file.is_file():
+            return False
+        with history_file.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and row.get("event_hash") == head:
+                    return True
+        return False
+
+    if local_value is not None and not head_within_ndjson(local_value):
+        stderr("history ledger mismatch: self-heal failed: head ahead of ndjson last_hash")
+        return False, None, 0
+    if mirror_value is not None and not head_within_ndjson(mirror_value):
+        stderr("history ledger mismatch: self-heal failed: head ahead of ndjson last_hash")
+        return False, None, 0
+
+    if last_hash != ZERO_HASH and (
+        (local_value is not None and local_value != last_hash)
+        or (mirror_value is not None and mirror_value != last_hash)
+    ):
+        prev_local = local_value or ZERO_HASH
+        prev_mirror = mirror_value or ZERO_HASH
+        targets = []
+
+        def atomic_write_head(path: Path, value: str) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = Path(f"{path}.tmp.{os.getpid()}")
+            tmp_path.write_text(value + "\n", encoding="utf-8")
+            os.replace(tmp_path, path)
+
+        if mirror_value != last_hash:
+            atomic_write_head(mirror_head, last_hash)
+            targets.append("mirror")
+        if local_value != last_hash:
+            atomic_write_head(local_head, last_hash)
+            targets.append("local")
+        stderr(
+            f"[mst-history-self-heal] session={session_id} restored={last_hash[:12]} "
+            f"targets={','.join(targets)} prev_local={prev_local[:12]} prev_mirror={prev_mirror[:12]}"
+        )
 
     verify_state.parent.mkdir(parents=True, exist_ok=True)
     write_verify_state(verify_state, last_hash, file_fingerprint(history_file), expected_seq - 1)
