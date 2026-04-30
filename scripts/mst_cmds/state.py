@@ -514,7 +514,8 @@ def _state_migration_base_dir() -> Path:
 def _collect_migration_targets(base_dir: Path) -> list[dict]:
     """Collect legacy PPID state directories and owner_ppid-only metadata files."""
     targets = []
-    state_dir = base_dir / ".gran-maestro" / "state"
+    gm_dir = _common.base_dir_from_project(base_dir)
+    state_dir = _common.state_dir(gm_dir)
     if state_dir.is_dir():
         for child in state_dir.iterdir():
             if not child.is_dir() or not child.name.isdigit():
@@ -554,7 +555,7 @@ def _collect_migration_targets(base_dir: Path) -> list[dict]:
 def _create_backup(base_dir: Path, targets: list, backup_dir: Optional[Path] = None) -> Path:
     if backup_dir is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup_dir = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
+        backup_dir = _common.backups_dir(_common.base_dir_from_project(base_dir)) / f"state-migrate-{timestamp}"
     backup_dir.mkdir(parents=True, exist_ok=True)
     for target in targets:
         src = Path(target["path"])
@@ -580,7 +581,7 @@ def _next_available_path(path: Path) -> Path:
 
 def _migrate_ppid_dir(ppid_dir: Path, owner_session_id: Optional[str], base_dir: Path) -> Tuple[Path, Path]:
     ppid = ppid_dir.name
-    state_dir = base_dir / ".gran-maestro" / "state"
+    state_dir = _common.state_dir(_common.base_dir_from_project(base_dir))
     target_name = owner_session_id if isinstance(owner_session_id, str) and owner_session_id.strip() else f"legacy-{ppid}"
     target_dir = state_dir / target_name
     if target_dir.exists() and target_dir != ppid_dir:
@@ -627,9 +628,10 @@ def _apply_migration(base_dir: Path, targets: list, log_path: Path, dry_run: boo
             ppid_to_session[ppid] = owner_session_id
         src = Path(target["path"])
         target_name = owner_session_id if owner_session_id else f"legacy-{ppid}"
-        dst = base_dir / ".gran-maestro" / "state" / target_name
+        state_dir = _common.state_dir(_common.base_dir_from_project(base_dir))
+        dst = state_dir / target_name
         if dst.exists() and dst != src:
-            dst = _next_available_path(base_dir / ".gran-maestro" / "state" / f"legacy-{ppid}")
+            dst = _next_available_path(state_dir / f"legacy-{ppid}")
         if not dry_run:
             _, dst = _migrate_ppid_dir(src, owner_session_id, base_dir)
         log_lines.append(f"rename_dir: {src} -> {dst}")
@@ -664,7 +666,8 @@ def _apply_migration(base_dir: Path, targets: list, log_path: Path, dry_run: boo
 def _run_dry_run(base_dir: Path) -> int:
     targets = _collect_migration_targets(base_dir)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_path = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
+    gm_dir = _common.base_dir_from_project(base_dir)
+    backup_path = _common.backups_dir(gm_dir) / f"state-migrate-{timestamp}"
     out_targets = []
     ppid_to_session = {
         target["ppid"]: target.get("owner_session_id")
@@ -675,10 +678,11 @@ def _run_dry_run(base_dir: Path) -> int:
     for target in targets:
         if target["type"] == "rename_dir":
             session_id = target.get("owner_session_id")
+            state_dir = _common.state_dir(gm_dir)
             if session_id:
-                to_path = str(base_dir / ".gran-maestro" / "state" / session_id)
+                to_path = str(state_dir / session_id)
             else:
-                to_path = str(base_dir / ".gran-maestro" / "state" / f"legacy-{target['ppid']}")
+                to_path = str(state_dir / f"legacy-{target['ppid']}")
             out_targets.append({
                 "type": "rename_dir",
                 "from": target["path"],
@@ -710,7 +714,8 @@ def _run_dry_run(base_dir: Path) -> int:
 
 
 def _run_rollback(base_dir: Path) -> int:
-    backups_dir = base_dir / ".gran-maestro" / "backups"
+    gm_dir = _common.base_dir_from_project(base_dir)
+    backups_dir = _common.backups_dir(gm_dir)
     if not backups_dir.is_dir():
         print("error: no backup directory found", file=sys.stderr)
         return 1
@@ -730,7 +735,7 @@ def _run_rollback(base_dir: Path) -> int:
 
     latest = candidates[0]
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    log_path = base_dir / ".gran-maestro" / "logs" / f"state-migrate-rollback-{timestamp}.log"
+    log_path = _common.logs_dir(gm_dir) / f"state-migrate-rollback-{timestamp}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_lines = []
 
@@ -748,7 +753,8 @@ def _run_rollback(base_dir: Path) -> int:
 
 
 def _run_verify(base_dir: Path) -> int:
-    state_dir = base_dir / ".gran-maestro" / "state"
+    gm_dir = _common.base_dir_from_project(base_dir)
+    state_dir = _common.state_dir(gm_dir)
     issues = []
     if state_dir.is_dir():
         for child in state_dir.iterdir():
@@ -772,7 +778,7 @@ def _run_verify(base_dir: Path) -> int:
             ):
                 issues.append(f"owner_ppid_remains: {json_path}")
 
-    backups_dir = base_dir / ".gran-maestro" / "backups"
+    backups_dir = _common.backups_dir(gm_dir)
     backup_present = backups_dir.is_dir() and any(
         path.is_dir() and path.name.startswith("state-migrate-") for path in backups_dir.iterdir()
     )
@@ -787,9 +793,10 @@ def _run_verify(base_dir: Path) -> int:
 
 def _run_migrate_default(base_dir: Path) -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    log_path = base_dir / ".gran-maestro" / "logs" / f"state-migrate-{timestamp}.log"
-    backup_dir = base_dir / ".gran-maestro" / "backups" / f"state-migrate-{timestamp}"
-    lock_path = base_dir / ".gran-maestro" / "tmp" / "mst-state-migrate.lock"
+    gm_dir = _common.base_dir_from_project(base_dir)
+    log_path = _common.logs_dir(gm_dir) / f"state-migrate-{timestamp}.log"
+    backup_dir = _common.backups_dir(gm_dir) / f"state-migrate-{timestamp}"
+    lock_path = gm_dir / "tmp" / "mst-state-migrate.lock"
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     targets = _collect_migration_targets(base_dir)

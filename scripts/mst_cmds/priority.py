@@ -27,13 +27,11 @@ from scripts.mst_cmds._common import (
 
 def cmd_priority(args):
     task_id = args.task_id.upper()
-    parts = task_id.split("-")
-    if len(parts) != 3:
+    try:
+        req_id, task_num = _common.parse_task_id(task_id)
+    except ValueError:
         print(f"Error: invalid task ID '{args.task_id}'. Expected REQ-XXX-YY format.", file=sys.stderr)
         return 1
-
-    req_id = f"{parts[0]}-{parts[1]}"
-    task_num = parts[2]
 
     status_paths = [
         _common.BASE_DIR / "requests" / req_id / "tasks" / task_num / "status.json",

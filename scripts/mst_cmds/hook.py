@@ -92,7 +92,7 @@ def _sanitize_session_id(session_id: str) -> str:
 
 
 def _history_paths(project_root: Path, policy_home: Path, session_id: str) -> tuple[Path, Path, Path, Path]:
-    session_dir = project_root / ".gran-maestro" / "sessions" / session_id
+    session_dir = _common.sessions_dir(project_root) / session_id
     history_file = session_dir / "history.ndjson"
     local_head = session_dir / "history.head"
     mirror_head = policy_home / "ledger-heads" / f"{session_id}.head"
@@ -434,7 +434,7 @@ def _recalculated_manifest(policy_dir: Path) -> dict:
 
 
 def _select_repair_event_session(project_root: Path) -> str:
-    sessions_dir = project_root / ".gran-maestro" / "sessions"
+    sessions_dir = _common.sessions_dir(project_root)
     candidates = sorted(path.name for path in sessions_dir.iterdir() if path.is_dir()) if sessions_dir.is_dir() else []
     return candidates[0] if len(candidates) == 1 else "manifest-repair"
 

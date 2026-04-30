@@ -2,7 +2,7 @@
  * Gran Maestro Dashboard Server
  *
  * Deno + Hono single-file web server with inline SPA.
- * Port 3847 (configurable via .gran-maestro/config.json).
+ * Port 3847 (configurable via the runtime config file).
  *
  * Usage:
  *   deno run --allow-net --allow-read --allow-write src/server.ts
@@ -14,7 +14,6 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { serveDir } from "https://deno.land/std@0.224.0/http/file_server.ts";
-import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 
 import { sseApi } from "./sse.ts";
 import { projectConfigApi } from "./routes/config.ts";
@@ -40,6 +39,7 @@ import { projectIntentsApi } from "./routes/intents.ts";
 import { projectFactChecksApi } from "./routes/fact-checks.ts";
 import { projectReferencesApi } from "./routes/references.ts";
 import { flowApi, initFlowWatcher } from "./routes/flowApi.ts";
+import { normalizeGranMaestroBasePath } from "./core/paths.ts";
 
 import {
   BASE_DIR,
@@ -81,14 +81,7 @@ function safeEnvGet(name: string): string | undefined {
 }
 
 function policyBaseDir(projectId?: string): string {
-  const resolved = resolveBaseDir(projectId);
-  if (resolved) {
-    const normalized = resolved.replace(/\\/g, "/");
-    return normalized.endsWith("/.gran-maestro") || normalized === ".gran-maestro"
-      ? resolved
-      : join(resolved, ".gran-maestro");
-  }
-  return join(Deno.cwd(), ".gran-maestro");
+  return normalizeGranMaestroBasePath(resolveBaseDir(projectId) ?? Deno.cwd());
 }
 
 function policyAllowlistPath(): string {

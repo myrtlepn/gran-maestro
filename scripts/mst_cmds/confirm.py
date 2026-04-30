@@ -33,7 +33,7 @@ def _home() -> Path:
 
 
 def _sessions_dir(project_root: Path) -> Path:
-    return project_root / ".gran-maestro" / "sessions"
+    return _common.sessions_dir(project_root)
 
 
 def _candidate_session_ids(project_root: Path) -> list[str]:

@@ -247,7 +247,7 @@ def cmd_hooks_sync(args):
 def _detect_legacy_ppid_state(base_dir: Path) -> int:
     """legacy 항목 수 (numeric PPID 디렉토리 + owner_ppid 필드만 가진 JSON)."""
     count = 0
-    state_dir = base_dir / ".gran-maestro" / "state"
+    state_dir = _common.state_dir(_common.base_dir_from_project(base_dir))
     if state_dir.is_dir():
         for child in state_dir.iterdir():
             if child.is_dir() and child.name.isdigit():

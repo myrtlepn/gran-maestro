@@ -162,7 +162,7 @@ def _worktree_task_id_from_path(path_value) -> str | None:
 
 
 def _worktree_meta_path(project_root: Path, task_id: str) -> Path:
-    return project_root / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    return _common.worktrees_dir(project_root) / f"{task_id}.meta.json"
 
 
 def _write_worktree_meta_atomic(meta_path: Path, meta_data: dict) -> None:

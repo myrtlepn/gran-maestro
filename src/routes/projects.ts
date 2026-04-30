@@ -1,5 +1,6 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { HUB_MODE, registry, generateProjectId, saveRegistry } from "../config.ts";
+import { isGranMaestroRoot, normalizeGranMaestroBasePath } from "../core/paths.ts";
 import { dirExists } from "../utils.ts";
 
 const projectRegistryApi = new Hono();
@@ -36,8 +37,8 @@ projectRegistryApi.post("/", async (c) => {
     return c.json({ error: "Invalid project path" }, 400);
   }
 
-  if (!/[\\/]\.gran-maestro$/.test(resolvedPath)) {
-    const grandMaestroPath = `${resolvedPath}/.gran-maestro`;
+  if (!isGranMaestroRoot(resolvedPath)) {
+    const grandMaestroPath = normalizeGranMaestroBasePath(resolvedPath);
     if (await dirExists(grandMaestroPath)) {
       resolvedPath = grandMaestroPath;
     }

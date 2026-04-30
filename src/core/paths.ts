@@ -4,8 +4,35 @@
 // instead of joining strings ad-hoc, so that a non-default basePath cannot
 // silently desynchronize between modules.
 
-// @ts-ignore: Node resolution may be unavailable in non-Node type-check envs; shimmed for runtime usage.
-import { join } from 'node:path';
+const GRAN_MAESTRO_DIR = '.gran-maestro';
+
+function stripTrailingSeparators(path: string): string {
+  return path.replace(/[\\/]+$/, '') || path;
+}
+
+function joinPath(base: string, ...segments: string[]): string {
+  return segments.reduce((current, segment) => {
+    const cleanBase = stripTrailingSeparators(current);
+    const cleanSegment = segment.replace(/^[\\/]+/, '');
+    if (cleanBase === '/') {
+      return `/${cleanSegment}`;
+    }
+    if (cleanBase === '.' || cleanBase === '') {
+      return cleanSegment;
+    }
+    return `${cleanBase}/${cleanSegment}`;
+  }, base);
+}
+
+export function isGranMaestroRoot(candidate: string): boolean {
+  const normalized = stripTrailingSeparators(candidate.trim()).replace(/\\/g, '/');
+  return normalized.endsWith(`/${GRAN_MAESTRO_DIR}`) || normalized === GRAN_MAESTRO_DIR;
+}
+
+export function normalizeGranMaestroBasePath(basePath: string): string {
+  const normalized = stripTrailingSeparators(basePath.trim());
+  return isGranMaestroRoot(normalized) ? normalized : joinPath(normalized, GRAN_MAESTRO_DIR);
+}
 
 export class Paths {
   constructor(private readonly basePath: string) {}
@@ -15,39 +42,39 @@ export class Paths {
   }
 
   requestRoot(reqId: string): string {
-    return join(this.basePath, 'requests', reqId);
+    return joinPath(this.basePath, 'requests', reqId);
   }
 
   taskRoot(reqId: string, taskSeg: string): string {
-    return join(this.requestRoot(reqId), 'tasks', taskSeg);
+    return joinPath(this.requestRoot(reqId), 'tasks', taskSeg);
   }
 
   statusJson(reqId: string, taskSeg: string): string {
-    return join(this.taskRoot(reqId, taskSeg), 'status.json');
+    return joinPath(this.taskRoot(reqId, taskSeg), 'status.json');
   }
 
   worktreeMeta(taskId: string): string {
-    return join(this.basePath, 'worktrees', `${taskId}.meta.json`);
+    return joinPath(this.basePath, 'worktrees', `${taskId}.meta.json`);
   }
 
   pendingNdjson(): string {
-    return join(this.basePath, 'state', 'skill', 'pending.ndjson');
+    return joinPath(this.basePath, 'state', 'skill', 'pending.ndjson');
   }
 
   hooksLedger(): string {
-    return join(this.basePath, 'hooks-ledger.ndjson');
+    return joinPath(this.basePath, 'hooks-ledger.ndjson');
   }
 
   hooksOverflow(): string {
-    return join(this.basePath, 'hooks-ledger.overflow.ndjson');
+    return joinPath(this.basePath, 'hooks-ledger.overflow.ndjson');
   }
 
   archiveDir(): string {
-    return join(this.basePath, 'archive');
+    return joinPath(this.basePath, 'archive');
   }
 
   stateSnapshot(ppid: string): string {
-    return join(this.basePath, 'state', 'snapshots', `${ppid}.json`);
+    return joinPath(this.basePath, 'state', 'snapshots', `${ppid}.json`);
   }
 }
 
@@ -74,14 +101,14 @@ export function resolveBasePath(): string {
     if (output.code === 0) {
       const top = new TextDecoder().decode(output.stdout).trim();
       if (top.length > 0) {
-        return join(top, '.gran-maestro');
+        return normalizeGranMaestroBasePath(top);
       }
     }
   } catch (_e) {
     // git unavailable -- fall through to cwd
   }
 
-  return join(Deno.cwd(), '.gran-maestro');
+  return normalizeGranMaestroBasePath(Deno.cwd());
 }
 
 /** Module-level singleton initialised from {@link resolveBasePath}. */

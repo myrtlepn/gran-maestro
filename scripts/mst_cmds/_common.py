@@ -29,6 +29,7 @@ if os.name == "nt":
 else:
     import fcntl
 
+BASE_DIR_NAME = ".gran-maestro"
 BASE_DIR: Path = None
 
 
@@ -95,16 +96,58 @@ def deep_merge(base, override, depth=0):
             result[key] = override_value
     return result
 
+def _base_dir_name() -> str:
+    return BASE_DIR.name if BASE_DIR is not None else BASE_DIR_NAME
+
+
+def base_dir_from_project(project_root: Path) -> Path:
+    return project_root / _base_dir_name()
+
+
+def cwd_base_dir() -> Path:
+    return Path.cwd().resolve() / _base_dir_name()
+
+
 def requests_dir() -> Path:
     return BASE_DIR / "requests"
 
+
 def plans_dir() -> Path:
     return BASE_DIR / "plans"
+
 
 def run_dir() -> Path:
     path = BASE_DIR / "run"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def run_dir_no_create() -> Path:
+    return BASE_DIR / "run" if BASE_DIR is not None else cwd_base_dir() / "run"
+
+
+def state_dir(base_dir: Path | None = None) -> Path:
+    return (base_dir or BASE_DIR) / "state"
+
+
+def sessions_dir(project_root: Path) -> Path:
+    return base_dir_from_project(project_root) / "sessions"
+
+
+def worktrees_dir(project_root: Path) -> Path:
+    return base_dir_from_project(project_root) / "worktrees"
+
+
+def tmp_dir(project_root: Path) -> Path:
+    return base_dir_from_project(project_root) / "tmp"
+
+
+def backups_dir(base_dir: Path) -> Path:
+    return base_dir / "backups"
+
+
+def logs_dir(base_dir: Path) -> Path:
+    return base_dir / "logs"
 
 def iter_request_dirs(include_completed=False):
     """Yield (req_id, path, data) tuples."""

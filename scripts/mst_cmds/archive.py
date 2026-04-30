@@ -39,7 +39,7 @@ def _load_archive_max_active(cli_max: Optional[int], type_key: Optional[str] = N
         return cli_max
 
     config_paths = [
-        _common.BASE_DIR / ".." / ".gran-maestro" / "config.json",
+        _common.BASE_DIR / "config.json",
         _common.BASE_DIR.parent / "config.json",
     ]
     cfg = None
@@ -108,7 +108,6 @@ def _resolve_retention_days(cli_value: Optional[int]) -> int:
 
     config_paths = [
         _common.BASE_DIR / "config.json",
-        _common.BASE_DIR / ".." / ".gran-maestro" / "config.json",
         _common.BASE_DIR.parent / "config.json",
     ]
     cfg = None

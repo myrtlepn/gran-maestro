@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from scripts.mst_cmds import _common
+
 # AD-007: 등록 프로젝트의 mst hook command 두 변종을 모두 매칭
 MST_HOOK_COMMAND_RE = re.compile(
     r"(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]+\))/\.claude/hooks/"
@@ -238,7 +240,7 @@ def _is_plugin_source_repo(project_root: Path) -> bool:
 
 def cmd_on_cleanup(args) -> int:
     project_root = _project_root()
-    lock_path = project_root / ".gran-maestro" / "tmp" / "cleanup.lock"
+    lock_path = _common.tmp_dir(project_root) / "cleanup.lock"
     payload: dict = {"project_root": str(project_root)}
 
     if _is_plugin_source_repo(project_root):

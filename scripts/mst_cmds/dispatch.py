@@ -396,13 +396,11 @@ def cmd_dispatch_kill(args):
 
 
 def _dispatch_run_dir_no_create() -> Path:
-    if _common.BASE_DIR is not None:
-        return _common.BASE_DIR / "run"
-    return Path.cwd().resolve() / ".gran-maestro" / "run"
+    return _common.run_dir_no_create()
 
 
 def _cleanup_archive_dir(now: datetime) -> Path:
-    base_dir = _common.BASE_DIR if _common.BASE_DIR is not None else Path.cwd().resolve() / ".gran-maestro"
+    base_dir = _common.BASE_DIR if _common.BASE_DIR is not None else _common.cwd_base_dir()
     return base_dir / "archive" / "run" / f"{now.year:04d}-{now.month:02d}"
 
 

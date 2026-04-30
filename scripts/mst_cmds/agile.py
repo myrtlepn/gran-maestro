@@ -343,7 +343,7 @@ def _detect_sprint_close_branch(project_root: Path, agi_id: str, sprint: int) ->
     return candidates[0]
 
 def _default_sprint_worktree_path(project_root: Path, agi_id: str, sprint: int) -> Path:
-    return project_root / ".gran-maestro" / "worktrees" / agi_id / f"sprint-{sprint}"
+    return _common.worktrees_dir(project_root) / agi_id / f"sprint-{sprint}"
 
 def _detect_sprint_worktree_path(
     project_root: Path,

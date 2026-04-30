@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+from scripts.mst_cmds import _common
+
 
 COUNTER_KEYS = ("CORE-BLOCK", "POLICY-BLOCK", "PENDING", "OVERRIDE", "WARN")
 EVENT_TYPE_TO_COUNTER = {
@@ -34,13 +36,7 @@ def read_counters(session_id: str, project_root: Path) -> dict[str, int]:
     if not clean_session_id:
         return counts
 
-    history_path = (
-        Path(project_root)
-        / ".gran-maestro"
-        / "sessions"
-        / clean_session_id
-        / "history.ndjson"
-    )
+    history_path = _common.sessions_dir(Path(project_root)) / clean_session_id / "history.ndjson"
     if not history_path.is_file():
         return counts
 

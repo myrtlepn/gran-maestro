@@ -1,4 +1,11 @@
-import { Paths, resolveBasePath } from './paths.ts';
+/// <reference lib="deno.ns" />
+
+import {
+  isGranMaestroRoot,
+  normalizeGranMaestroBasePath,
+  Paths,
+  resolveBasePath,
+} from './paths.ts';
 
 let serial = Promise.resolve();
 
@@ -81,6 +88,18 @@ runSerialTest('Paths.stateSnapshot joins state/snapshots/<ppid>.json', () => {
 runSerialTest('Paths.root returns the basePath unchanged', () => {
   const p = new Paths(BASE);
   assertEquals(p.root, BASE);
+});
+
+runSerialTest('isGranMaestroRoot detects normalized and trailing-slash roots', () => {
+  assertEquals(isGranMaestroRoot('/repo/.gran-maestro'), true);
+  assertEquals(isGranMaestroRoot('/repo/.gran-maestro/'), true);
+  assertEquals(isGranMaestroRoot('/repo'), false);
+});
+
+runSerialTest('normalizeGranMaestroBasePath appends root directory once', () => {
+  assertEquals(normalizeGranMaestroBasePath('/repo'), '/repo/.gran-maestro');
+  assertEquals(normalizeGranMaestroBasePath('/repo/.gran-maestro'), '/repo/.gran-maestro');
+  assertEquals(normalizeGranMaestroBasePath('/repo/.gran-maestro/'), '/repo/.gran-maestro');
 });
 
 runSerialTest('resolveBasePath honours MST_BASE_PATH when set', () => {
