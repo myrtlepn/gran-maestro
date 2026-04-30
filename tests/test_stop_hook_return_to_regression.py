@@ -54,9 +54,18 @@ def _run_hook(project_root: Path, payload: dict) -> subprocess.CompletedProcess:
 
 
 def _stdout_json(result: subprocess.CompletedProcess) -> dict:
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip(), "stop hook must emit decision JSON"
-    return json.loads(result.stdout)
+    assert result.returncode == 0, (
+        "stop hook must exit 0\n"
+        f"stdout:\n{result.stdout!r}\n"
+        f"stderr:\n{result.stderr!r}"
+    )
+    non_empty_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(non_empty_lines) == 1, (
+        "stop hook stdout must contain exactly one non-empty JSON decision line\n"
+        f"stdout:\n{result.stdout!r}\n"
+        f"stderr:\n{result.stderr!r}"
+    )
+    return json.loads(non_empty_lines[0])
 
 
 RESUME_COMMAND = "/mst:resume --wakeup-hint stop-recover"

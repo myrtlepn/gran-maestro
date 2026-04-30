@@ -38,14 +38,36 @@ case "$mode" in
     emit_approve_json "approved" ""
     test ! -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
+  preclaimed-block)
+    mkdir "$HOOK_JUDGE_TIMEOUT_MARKER"
+    emit_block_json "blocked" ""
+    test ! -f "$HOOK_JUDGE_TIMEOUT_DONE"
+    ;;
   claimed-timeout-allow)
     claim_judge_timeout_emit
     emit_allow_json "hook judge timeout (>1ms) fail-open"
     test -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
+  claimed-timeout-then-main-approve)
+    claim_judge_timeout_emit
+    emit_allow_json "hook judge timeout (>1ms) fail-open"
+    emit_approve_json "approved" ""
+    test -f "$HOOK_JUDGE_TIMEOUT_DONE"
+    ;;
+  claimed-timeout-then-main-block)
+    claim_judge_timeout_emit
+    emit_allow_json "hook judge timeout (>1ms) fail-open"
+    emit_block_json "blocked" ""
+    test -f "$HOOK_JUDGE_TIMEOUT_DONE"
+    ;;
   double-main-approve)
     emit_approve_json "approved" ""
     emit_block_json "blocked" ""
+    test -f "$HOOK_JUDGE_TIMEOUT_DONE"
+    ;;
+  double-main-block)
+    emit_block_json "blocked" ""
+    emit_approve_json "approved" ""
     test -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
   *)
@@ -66,25 +88,68 @@ def _run_mode(mode: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _stdout_json(result: subprocess.CompletedProcess[str]) -> dict:
+    non_empty_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(non_empty_lines) == 1, (
+        "stop hook source-time harness must emit exactly one JSON decision line\n"
+        f"stdout:\n{result.stdout!r}\n"
+        f"stderr:\n{result.stderr!r}"
+    )
+    return json.loads(non_empty_lines[0])
+
+
+def _assert_stdout_empty(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.stdout == "", (
+        "preclaimed decision marker must suppress later stdout emission\n"
+        f"stdout:\n{result.stdout!r}\n"
+        f"stderr:\n{result.stderr!r}"
+    )
+
+
 def test_main_emit_claims_marker_and_touches_done():
     result = _run_mode("normal-approve")
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"decision": "approve", "reason": "approved"}
+    assert _stdout_json(result) == {"decision": "approve", "reason": "approved"}
 
 
 def test_main_emit_stays_quiet_when_watchdog_already_claimed():
     result = _run_mode("preclaimed-approve")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
+    _assert_stdout_empty(result)
+
+
+def test_block_emit_stays_quiet_when_watchdog_already_claimed():
+    result = _run_mode("preclaimed-block")
+
+    assert result.returncode == 0, result.stderr
+    _assert_stdout_empty(result)
 
 
 def test_timeout_emit_preserves_already_claimed_fail_open_output():
     result = _run_mode("claimed-timeout-allow")
 
     assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)
+    payload = _stdout_json(result)
+    assert payload["decision"] == "approve"
+    assert payload["reason"] == "hook judge timeout (>1ms) fail-open"
+
+
+def test_timeout_claim_suppresses_later_approve_emit():
+    result = _run_mode("claimed-timeout-then-main-approve")
+
+    assert result.returncode == 0, result.stderr
+    payload = _stdout_json(result)
+    assert payload["decision"] == "approve"
+    assert payload["reason"] == "hook judge timeout (>1ms) fail-open"
+
+
+def test_timeout_claim_suppresses_later_block_emit():
+    result = _run_mode("claimed-timeout-then-main-block")
+
+    assert result.returncode == 0, result.stderr
+    payload = _stdout_json(result)
     assert payload["decision"] == "approve"
     assert payload["reason"] == "hook judge timeout (>1ms) fail-open"
 
@@ -93,12 +158,18 @@ def test_block_emit_claims_marker_and_touches_done():
     result = _run_mode("normal-block")
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"decision": "block", "reason": "blocked"}
+    assert _stdout_json(result) == {"decision": "block", "reason": "blocked"}
 
 
-def test_claim_is_consumed_after_first_main_emit():
+def test_approve_claim_suppresses_later_block_emit():
     result = _run_mode("double-main-approve")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("\n") == 1
-    assert json.loads(result.stdout) == {"decision": "approve", "reason": "approved"}
+    assert _stdout_json(result) == {"decision": "approve", "reason": "approved"}
+
+
+def test_block_claim_suppresses_later_approve_emit():
+    result = _run_mode("double-main-block")
+
+    assert result.returncode == 0, result.stderr
+    assert _stdout_json(result) == {"decision": "block", "reason": "blocked"}

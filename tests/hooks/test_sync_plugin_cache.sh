@@ -671,6 +671,8 @@ test_ac204c_session_init_average_under_500ms() {
   limit_ms=600
 
   write_project_fixture "$project_root" "# timing content"
+  mkdir -p "$project_root/.claude/hooks"
+  printf 'TEST\n' > "$project_root/.claude/hooks/.mst-hook-version"
   create_fake_cache_targets "$claude_home"
 
   best_ms=""
