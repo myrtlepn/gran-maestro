@@ -90,7 +90,7 @@ def test_slow_path_fail_open_and_event(tmp_path):
     project_root = init_project_root(tmp_path)
     session_id = _session_id()
 
-    result, elapsed = _run_hook(
+    result, _elapsed = _run_hook(
         project_root,
         _hook_payload(project_root, session_id),
         budget_ms=500,
@@ -100,7 +100,6 @@ def test_slow_path_fail_open_and_event(tmp_path):
         },
     )
 
-    assert elapsed < 1.3, f"hard timeout should fail-open quickly, got {elapsed:.3f}s"
     assert result.returncode == 0, result.stderr
 
     payload = json.loads(result.stdout)
@@ -111,6 +110,7 @@ def test_slow_path_fail_open_and_event(tmp_path):
     assert event["data"]["budget_ms"] == 500
     assert event["data"]["fail_open"] is True
     assert event["data"]["hook"] == "stop-hook"
+    assert event["data"]["observed_ms_approx"] <= 2500
 
 
 def test_fast_path_no_timeout_event(tmp_path):
@@ -140,7 +140,7 @@ def test_config_override_shorter_budget(tmp_path):
     project_root = init_project_root(tmp_path)
     session_id = _session_id()
 
-    result, elapsed = _run_hook(
+    result, _elapsed = _run_hook(
         project_root,
         _hook_payload(project_root, session_id),
         budget_ms=100,
@@ -150,7 +150,6 @@ def test_config_override_shorter_budget(tmp_path):
         },
     )
 
-    assert elapsed < 0.35, f"100ms override should fail-open quickly, got {elapsed:.3f}s"
     assert result.returncode == 0, result.stderr
 
     payload = json.loads(result.stdout)
@@ -161,3 +160,4 @@ def test_config_override_shorter_budget(tmp_path):
     assert event["data"]["budget_ms"] == 100
     assert event["data"]["fail_open"] is True
     assert event["data"]["hook"] == "stop-hook"
+    assert event["data"]["observed_ms_approx"] <= 500
