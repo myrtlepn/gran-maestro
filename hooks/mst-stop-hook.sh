@@ -719,6 +719,10 @@ PY
     trap - ERR
     trap - TERM
     sleep "$sleep_seconds"
+    if judge_timeout_already_emitted; then
+      wait_for_judge_timeout_emit_done || true
+      exit 0
+    fi
     kill -TERM "$hook_pid" 2>/dev/null || exit 0
     kill_hook_children "$hook_pid"
     sleep 0.05
@@ -726,6 +730,8 @@ PY
       emit_judge_timeout_payload
       kill_hook_children "$hook_pid"
       kill -TERM "$hook_pid" 2>/dev/null || true
+    else
+      wait_for_judge_timeout_emit_done || true
     fi
   ) &
   HOOK_WATCHDOG_PID="$!"
@@ -767,6 +773,10 @@ PY
 should_arm_hook_judge_watchdog() {
   if [ -n "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ]; then
     return 0
+  fi
+
+  if printf '%s\n%s' "$LAST_ASSISTANT_MESSAGE" "$STDIN_RAW" | grep -qE 'return_to=[a-zA-Z0-9_:/-]+'; then
+    return 1
   fi
 
   MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
@@ -2079,6 +2089,30 @@ BLOCK_COUNT="$(printf '%s' "$STATE_INFO" | cut -f13)"
 LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
 STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
 
+RETURN_TO_RAW="$(extract_return_to "$LAST_ASSISTANT_MESSAGE")"
+if [ -z "$RETURN_TO_RAW" ] || [ "$RETURN_TO_RAW" = "null" ]; then
+  RETURN_TO_RAW="$(extract_return_to "$STDIN_RAW")"
+fi
+RETURN_TO_SKILL=""
+RETURN_TO_STEP=""
+if [ -n "$RETURN_TO_RAW" ] && [ "$RETURN_TO_RAW" != "null" ]; then
+  RETURN_TO_SKILL="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f1)"
+  RETURN_TO_STEP="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f2)"
+  debug_log "info" "return_to_detected skill=$RETURN_TO_SKILL step=$RETURN_TO_STEP raw=$RETURN_TO_RAW"
+fi
+
+if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ] && [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
+  REASON="[RETURN-TO] Sub-skill returned with return_to=$RETURN_TO_RAW. Do NOT stop or pause."
+  REASON="$REASON You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (RETURN_TO_SKILL=$RETURN_TO_SKILL, RETURN_TO_STEP=$RETURN_TO_STEP) to determine the next action."
+  REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
+  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+  append_block_audit_entry "$REASON"
+  emit_block_decision "$REASON"
+  debug_log "block" "reason=return_to_detected_workflow_inactive return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
+fi
+
 if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
   if has_active_workflow_session; then
     REASON="active workflow session detected but PPID state missing; continue workflow"
@@ -2118,18 +2152,6 @@ fi
 AGILE_GUARD_ACTIVE="false"
 if [ "$AGILE_LOOP_ACTIVE" = "true" ] || [ "$CURRENT_SKILL" = "mst:agile" ]; then
   AGILE_GUARD_ACTIVE="true"
-fi
-
-RETURN_TO_RAW="$(extract_return_to "$LAST_ASSISTANT_MESSAGE")"
-if [ -z "$RETURN_TO_RAW" ] || [ "$RETURN_TO_RAW" = "null" ]; then
-  RETURN_TO_RAW="$(extract_return_to "$STDIN_RAW")"
-fi
-RETURN_TO_SKILL=""
-RETURN_TO_STEP=""
-if [ -n "$RETURN_TO_RAW" ] && [ "$RETURN_TO_RAW" != "null" ]; then
-  RETURN_TO_SKILL="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f1)"
-  RETURN_TO_STEP="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f2)"
-  debug_log "info" "return_to_detected skill=$RETURN_TO_SKILL step=$RETURN_TO_STEP raw=$RETURN_TO_RAW"
 fi
 
 AGILE_AUTO_MODE_ACTIVE="false"
