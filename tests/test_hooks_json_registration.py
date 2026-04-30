@@ -88,3 +88,26 @@ def test_pretooluse_uses_skill_matcher():
     pre = payload["hooks"].get("PreToolUse", [])
     matchers = [e.get("matcher") for e in pre if isinstance(e, dict)]
     assert "Skill" in matchers, f"PreToolUse(matcher='Skill') not registered, got: {matchers}"
+
+
+def test_pretooluse_uses_schedule_wakeup_matcher():
+    """ScheduleWakeup native tool calls must route through the same PreToolUse hook."""
+    payload = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
+    pre = payload["hooks"].get("PreToolUse", [])
+    matchers = [e.get("matcher") for e in pre if isinstance(e, dict)]
+    assert "Skill" in matchers, f"PreToolUse(matcher='Skill') not registered, got: {matchers}"
+    assert "ScheduleWakeup" in matchers, (
+        f"PreToolUse(matcher='ScheduleWakeup') not registered, got: {matchers}"
+    )
+
+    schedule_entries = [
+        e for e in pre if isinstance(e, dict) and e.get("matcher") == "ScheduleWakeup"
+    ]
+    assert schedule_entries, "ScheduleWakeup matcher entry missing"
+    commands = [
+        h.get("command", "")
+        for entry in schedule_entries
+        for h in entry.get("hooks", [])
+        if isinstance(h, dict)
+    ]
+    assert any("mst-pre-tool-use.sh" in cmd for cmd in commands), commands

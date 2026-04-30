@@ -245,6 +245,7 @@ def _workflow_state_default_payload(now: str):
         "steering_disabled": False,
         "block_count": 0,
         "last_block_reason": "",
+        "last_active_at": None,
         "updated_at": now,
     }
 

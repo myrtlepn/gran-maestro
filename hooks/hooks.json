@@ -20,6 +20,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh"
           }
         ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh"
+          }
+        ]
       }
     ],
     "Stop": [

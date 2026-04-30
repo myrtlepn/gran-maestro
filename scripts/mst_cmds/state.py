@@ -839,6 +839,7 @@ def cmd_state_set_workflow(args):
         if not isinstance(next_action, dict):
             next_action = {}
 
+        was_active = payload.get("workflow_active") is True
         payload["workflow_active"] = bool(args.active)
         payload["current_skill"] = args.skill if args.active else ""
         payload["active_req"] = args.req if args.active else ""
@@ -873,6 +874,9 @@ def cmd_state_set_workflow(args):
             payload["steering_disabled"] = bool(args.steering_disabled)
 
         payload["updated_at"] = now
+
+        if args.active or (was_active and not args.active):
+            payload["last_active_at"] = now
 
         if args.active:
             expected_skill = args.next_skill or ""

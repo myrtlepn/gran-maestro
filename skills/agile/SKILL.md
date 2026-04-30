@@ -50,6 +50,7 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 컨텍스트 길이/요약/정리를 사유로 스프린트 간 정지하는 행위.
 - `AUTO_MODE=true` 또는 `STEERING_DISABLED=true`에서 스프린트 완료 후 선언 뒤 확인 질문을 삽입하는 행위.
 - 스프린트 루프 중 어떤 자체 판단 사유로든 자발적으로 정지하는 행위.
+- Sprint 간 대기 금지: wrapper 미사용 시 `/mst:resume`으로 수동 재개하고, 모델이 자체 페이싱으로 ScheduleWakeup을 호출하지 않는다.
 - 루프가 남아 있는데 `"마무리"`, `"별도 세션"`, `"나머지는"` 등 루프 종료/이관을 암시하는 표현을 기재하는 행위.
 - 정기 스티어링 해당 Sprint에서 Step 3을 건너뛰고 Step 2를 계속 진행하는 행위.
 - 정기 스티어링 미해당 Sprint에서 자의적으로 확인 질문을 삽입하는 행위.
@@ -1107,4 +1108,5 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - 합리화 패턴: "Sprint 경계에서 WIP/stash/squash 부담을 이유로 agile update --status paused를 호출해 루프를 종료한다." | 확인 증거: `MST_AGILE_PAUSE_AUTHORIZED=1` 또는 `--user-requested` 플래그 없이 active→paused 전이를 시도하면 mst.py가 exit≠0으로 차단한다. 해당 호출 0건 또는 차단 로그 존재.
 - 합리화 패턴: "Sprint 간 '자연스러운 단락'이라며 paused 상태 전이 명령으로 정지를 달성한다." | 확인 증거: stop-hook이 `[CRITICAL][SELF-PAUSE-DETECTED]` 마커로 block을 재-emit하고, LLM은 block 수신 즉시 다음 tool call을 emit한다 (상태 전이 명령 재호출 금지).
 - 합리화 패턴: "Step 3 스티어링 보고를 출력했으니 이 지점은 사용자 검토에 자연스러운 단락이다. 다음 Sprint는 `--resume`으로 새 세션에서 재개하도록 안내하자." | 확인 증거: `contains_self_pause_rationalization`이 'handoff framing' 정규식으로 해당 문장을 block으로 재-emit하고, LLM은 block 수신 즉시 Step 2.2.1로 복귀하는 tool call을 emit한다.
+- 합리화 패턴: "Sprint 진입 시점을 모델이 자체 페이싱(ScheduleWakeup 호출)으로 결정한다." | 확인 증거: PreToolUse hook이 ScheduleWakeup을 block한 audit 로그 기록 또는 차단 마커 존재.
 - 합리화 패턴: "Sprint 종료 시 cleanup을 '시간 절약'을 이유로 생략한다." | 확인 증거: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprint-log.json`에 현재 Sprint 레코드 존재.

@@ -59,6 +59,18 @@ PHASE_READONLY_COMMANDS = {
 PHASE_READONLY_GIT_COMMANDS = {"branch", "diff", "log", "show", "status"}
 PHASE_READONLY_MST_SKILLS = {"mst:approve", "mst:request"}
 PHASE_FIND_MUTATING_OPTIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls", "-fprint", "-fprint0"}
+SCHEDULE_WAKEUP_BLOCK_RULE_ID = "MST-SCHEDULE-WAKEUP-BLOCK"
+SCHEDULE_WAKEUP_BLOCK_REASON = (
+    "ScheduleWakeup is blocked during MST workflow chain (workflow_active=true).\n"
+    "Sprint/task progression must continue in-turn. Do not wait or end the turn.\n"
+    "If the turn must end due to external interruption, instruct the user to run\n"
+    "`/mst:resume` or use `scripts/mst-loop.sh`. Do not schedule a wakeup."
+)
+SCHEDULE_WAKEUP_RESUME_HINT = (
+    "[mst] ScheduleWakeup이 차단되었습니다. 'scripts/mst-loop.sh' 또는 '/mst:resume'으로 재개하세요."
+)
+SCHEDULE_WAKEUP_STATE_TTL_SECONDS = 30 * 60
+SCHEDULE_WAKEUP_GRACE_SECONDS = 30
 PHASE_MUTATING_PYTHON_RE = re.compile(
     r"("
     r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax+][^'\"]*['\"]|"
@@ -1579,6 +1591,43 @@ def parse_utc(value: str) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def workflow_state_file(project_root: Path) -> Path:
+    parent_pid = os.environ.get("MST_STATE_PPID")
+    if not (isinstance(parent_pid, str) and parent_pid.isdigit()):
+        parent_pid = str(os.getppid())
+    return project_root / ".gran-maestro" / "tmp" / f"mst-state-{parent_pid}.json"
+
+
+def load_workflow_state(project_root: Path) -> Optional[dict]:
+    path = workflow_state_file(project_root)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def schedule_wakeup_block_active(project_root: Path, now: Optional[datetime] = None) -> bool:
+    payload = load_workflow_state(project_root)
+    if not isinstance(payload, dict):
+        return False
+
+    now = now or utc_now()
+    updated_at = parse_utc(payload.get("updated_at"))
+    if updated_at is not None and (now - updated_at).total_seconds() > SCHEDULE_WAKEUP_STATE_TTL_SECONDS:
+        return False
+
+    if payload.get("workflow_active") is True:
+        return True
+
+    last_active_at = parse_utc(payload.get("last_active_at"))
+    if last_active_at is None:
+        return False
+    return (now - last_active_at).total_seconds() <= SCHEDULE_WAKEUP_GRACE_SECONDS
+
+
 def pending_confirm_ttl() -> int:
     raw = os.environ.get("MST_PENDING_CONFIRM_TTL_SECONDS") or os.environ.get("MST_CONFIRM_TTL_SECONDS") or "86400"
     try:
@@ -2416,6 +2465,13 @@ def hardcoded_core_check(project_root: Path, home: Path, payload: dict) -> int:
             rule_id,
             reason,
         )
+
+    if tool_name == "ScheduleWakeup" and schedule_wakeup_block_active(project_root):
+        if os.environ.get("MST_ALLOW_SCHEDULE_WAKEUP") == "1":
+            stderr("[mst] ScheduleWakeup escape hatch used")
+            return 0
+        stderr(SCHEDULE_WAKEUP_RESUME_HINT)
+        return core_block(SCHEDULE_WAKEUP_BLOCK_RULE_ID, SCHEDULE_WAKEUP_BLOCK_REASON)
 
     if tool_name in {"Write", "Edit", "MultiEdit"} and file_path.startswith(policy_root + "/"):
         if "/rules.d/" in file_path or file_path.endswith("/manifest.json"):

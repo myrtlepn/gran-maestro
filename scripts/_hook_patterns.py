@@ -20,7 +20,15 @@ SELF_PAUSE_RE = re.compile(
     r"|--resume[^\n]{0,30}재개\s*권장"
     r"|추천\s*경로[^\n]{0,30}재개\s*시점"
     r"|사용자\s*검토에\s*자연스러운\s*지점"
-    r"|자연스러운\s*검토\s*지점",
+    r"|자연스러운\s*검토\s*지점"
+    r"|wakeup\s*사이클"
+    r"|wakeup\s*cycle"
+    r"|\d+\s*분\s*(뒤|후)[^.]*재개"
+    r"|다음\s*(사이클|턴)[^.]*재개"
+    r"|자동\s*(재개|재진입)"
+    r"|wakeup\s*(을|를)\s*(사용|호출)"
+    r"|ScheduleWakeup\s*(을|를)"
+    r"|wakeup\s*차단[^.]*(종료|마무리|다음\s*세션)",
     re.IGNORECASE,
 )
 

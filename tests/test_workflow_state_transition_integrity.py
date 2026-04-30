@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -112,3 +113,55 @@ def test_inactive_workflow_clears_current_skill_and_req(tmp_path):
     assert state["workflow_active"] is False
     assert state["current_skill"] == ""
     assert state["active_req"] == ""
+
+
+def test_active_workflow_sets_last_active_at(tmp_path):
+    _prepare_workspace(tmp_path)
+
+    result = _run(
+        tmp_path,
+        "--active", "true",
+        "--skill", "mst:agile",
+        "--req", "REQ-757",
+    )
+
+    assert result.returncode == 0, result.stderr
+    state = _read_state(tmp_path)
+    assert isinstance(state.get("last_active_at"), str)
+    parsed = datetime.fromisoformat(state["last_active_at"].replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    age = datetime.now(timezone.utc) - parsed
+    assert age.total_seconds() < 5
+
+
+def test_active_to_inactive_updates_last_active_at(tmp_path):
+    _prepare_workspace(tmp_path)
+    setup = _run(
+        tmp_path,
+        "--active", "true",
+        "--skill", "mst:agile",
+        "--req", "REQ-757",
+    )
+    assert setup.returncode == 0, setup.stderr
+
+    state_path = _state_path(tmp_path)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    stale_active_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=30)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    payload["last_active_at"] = stale_active_at
+    state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    teardown = _run(
+        tmp_path,
+        "--active", "false",
+        "--auto", "false",
+    )
+    assert teardown.returncode == 0, teardown.stderr
+
+    state = _read_state(tmp_path)
+    assert state["workflow_active"] is False
+    assert state["last_active_at"] != stale_active_at
+    parsed = datetime.fromisoformat(state["last_active_at"].replace("Z", "+00:00"))
+    age = datetime.now(timezone.utc) - parsed
+    assert age.total_seconds() < 5
