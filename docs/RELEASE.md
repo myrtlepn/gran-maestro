@@ -47,6 +47,12 @@ cat .claude-plugin/plugin.json | grep "agents/"
 npx tsc --noEmit
 ```
 
+`npx tsc --noEmit`은 Node/core 호환 TypeScript 검증입니다. Deno dashboard/server 영역(`src/server.ts`, `src/config.ts`, `src/routes/`, `src/flow-watcher.ts` 등)을 변경한 경우 별도로 실행합니다:
+
+```bash
+deno check --no-config src/server.ts
+```
+
 ## 5. 커밋 & 푸시
 
 ```bash

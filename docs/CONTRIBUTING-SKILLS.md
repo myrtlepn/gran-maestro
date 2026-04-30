@@ -153,7 +153,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set \
 ### (b) 테스트 회귀 확인
 새 스킬이 기존 시스템에 부작용을 일으키지 않았는지 자동화 테스트로 검증합니다.
 - [ ] 단위 테스트 실행: `python3 -m pytest tests/ -q` (기존 baseline 통과 여부 확인, 회귀 0이어야 함)
-- [ ] 타입 검사 실행: `npx tsc --noEmit` (TypeScript 타입 오류가 0이어야 함)
+- [ ] core 타입 검사 실행: `npx tsc --noEmit` (Node/core 호환 TypeScript 타입 오류가 0이어야 함)
+- [ ] Deno dashboard/server 영역(`src/server.ts`, `src/config.ts`, `src/routes/`, `src/flow-watcher.ts` 등)을 변경한 경우: `deno check --no-config src/server.ts`
 
 ### (c) mst:on 활성 세션 실제 호출
 로컬 환경에서 직접 스킬을 실행해 봅니다.

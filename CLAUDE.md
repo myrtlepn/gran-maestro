@@ -87,8 +87,8 @@ docs/                # 문서
 1. **버전 동기화**: 5개 파일의 버전이 일치하는지 확인
 2. **agents 배열**: `plugin.json`의 `agents`가 `agents/` 디렉토리 내 모든 `.md` 파일을 나열하는지 확인
 3. **신규 파일 누락**: 새로 추가된 agent/skill 파일이 매니페스트에 반영되었는지 확인
-4. **TypeScript (core)**: `npx tsc --noEmit`으로 타입 오류 없는지 확인 (src/ 변경 시)
-5. **TypeScript (dashboard)**: `deno check src/server.ts`로 대시보드 서버 타입 확인 (server.ts 변경 시, tsconfig에서 제외되므로 별도 검증 필요)
+4. **TypeScript (core)**: `npx tsc --noEmit`으로 Node/core 호환 TypeScript 타입 오류 없는지 확인 (src/ 변경 시)
+5. **TypeScript (dashboard)**: Deno dashboard/server 영역(`src/server.ts`, `src/config.ts`, `src/routes/`, `src/flow-watcher.ts` 등) 변경 시 `deno check --no-config src/server.ts`로 별도 검증
 6. **대시보드 빌드**: `frontend/` 변경 시 `frontend/` 디렉토리에서 `npm run build`로 빌드 후 `dist/`(프로젝트 루트)를 함께 커밋
 
 ## plugin.json 규칙
