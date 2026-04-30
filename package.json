@@ -17,6 +17,7 @@
   "author": "myrtlepn",
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
+    "test": "node --test tests/smoke.test.mjs",
     "sync:local": "bash scripts/sync-local.sh"
   },
   "dependencies": {
