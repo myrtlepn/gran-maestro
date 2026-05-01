@@ -61,6 +61,17 @@ def _last_line(result: subprocess.CompletedProcess) -> str:
     return lines[-1]
 
 
+def _mst_line(result: subprocess.CompletedProcess) -> str:
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert lines, "statusline output is empty"
+    counter_pattern = re.compile(r"^\[CORE-BLOCK:\d+\] \[POLICY-BLOCK:\d+\] ")
+    for line in reversed(lines):
+        if not counter_pattern.match(line):
+            return line
+    raise AssertionError(f"statusline output has no MST line: {result.stdout!r}")
+
+
 def _iso_ago(**kwargs) -> str:
     return (datetime.now(timezone.utc) - timedelta(**kwargs)).isoformat()
 
@@ -83,6 +94,46 @@ def _write_state(workspace: Path, payload: dict) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
     state_path = state_dir / f"mst-state-{os.getpid()}.json"
     state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_flow_events(workspace: Path, events: list[dict]) -> Path:
+    path = workspace / ".gran-maestro" / "logs" / "flow.ndjson"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(json.dumps(event, ensure_ascii=False))
+            handle.write("\n")
+    return path
+
+
+def _flow_event(
+    *,
+    resource_id: str,
+    session_id: str = "current-session",
+    skill: str = "mst:flow-current",
+    step: Optional[int] = 2,
+    total_steps: Optional[int] = 5,
+    event_type: str = "enter",
+    timestamp: Optional[str] = None,
+    extras: Optional[dict] = None,
+    **overrides,
+) -> dict:
+    event_extras = dict(extras or {})
+    if resource_id:
+        event_extras.setdefault("resource_id", resource_id)
+    event = {
+        "timestamp": timestamp or _iso_ago(minutes=30),
+        "session_id": session_id,
+        "skill": skill,
+        "event_type": event_type,
+        "extras": event_extras,
+    }
+    if step is not None:
+        event["step"] = step
+    if total_steps is not None:
+        event["total_steps"] = total_steps
+    event.update(overrides)
+    return event
 
 
 def _write_run(
@@ -198,6 +249,171 @@ def test_statusline_legacy_default_snapshot_fallback_drops_legacy_run(tmp_path):
     assert result.stderr == ""
 
 
+def test_resource_id_flow_result_is_primary_over_newer_ppid_snapshot(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "step": 9,
+            "total": 9,
+            "skillStack": [],
+        },
+    )
+    _write_flow_events(
+        workspace,
+        [
+            _flow_event(
+                resource_id="REQ-781",
+                skill="mst:flow-current",
+                step=2,
+                total_steps=5,
+                timestamp=_iso_ago(hours=3),
+            ),
+        ],
+    )
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert line == "flow-current[2/5] (REQ-781)"
+    assert "snapshot-legacy" not in line
+    assert "9/9" not in line
+
+
+def test_incomplete_resource_id_flow_is_not_merged_with_snapshot_values(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "step": 7,
+            "total": 8,
+            "skillStack": [],
+        },
+    )
+    _write_flow_events(
+        workspace,
+        [
+            _flow_event(
+                resource_id="REQ-781",
+                skill="mst:flow-current",
+                step=2,
+                total_steps=None,
+            ),
+        ],
+    )
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert line == "snapshot-legacy[7/8]"
+    assert "flow-current" not in line
+    assert "REQ-781" not in line
+
+
+def test_flow_resource_id_uses_extras_before_legacy_event_mirror(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "skillStack": [],
+        },
+    )
+    event = _flow_event(
+        resource_id="REQ-781",
+        event={"resource_id": "REQ-LEGACY"},
+    )
+    event["resource_id"] = "REQ-TOP"
+    _write_flow_events(workspace, [event])
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert line == "flow-current[2/5] (REQ-781)"
+    assert "REQ-LEGACY" not in line
+    assert "REQ-TOP" not in line
+
+
+def test_flow_resource_id_ignores_top_level_without_canonical_or_legacy_mirror(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "skillStack": [],
+        },
+    )
+    event = _flow_event(resource_id="")
+    event["resource_id"] = "REQ-TOP"
+    _write_flow_events(workspace, [event])
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert re.fullmatch(r"snapshot-legacy\([1-9]s\)", line), line
+    assert "REQ-TOP" not in line
+
+
+def test_flow_resource_id_allows_legacy_event_mirror_fallback(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "skillStack": [],
+        },
+    )
+    event = _flow_event(resource_id="", event={"resource_id": "REQ-LEGACY"})
+    _write_flow_events(workspace, [event])
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert line == "flow-current[2/5] (REQ-LEGACY)"
+    assert "snapshot-legacy" not in line
+
+
+def test_terminal_supersession_is_limited_to_same_resource_and_skill(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot-legacy",
+            "enteredAt": _iso_ago(seconds=1),
+            "skillStack": [],
+        },
+    )
+    _write_flow_events(
+        workspace,
+        [
+            _flow_event(resource_id="REQ-781", skill="mst:closed", step=1, total_steps=5),
+            _flow_event(
+                resource_id="REQ-781",
+                skill="mst:closed",
+                step=5,
+                total_steps=5,
+                event_type="commit",
+            ),
+            _flow_event(resource_id="REQ-781", skill="mst:survives-skill", step=2, total_steps=5),
+            _flow_event(resource_id="REQ-782", skill="mst:survives-resource", step=3, total_steps=5),
+        ],
+    )
+
+    result = _run_statusline(workspace, json.dumps({"session_id": "current-session"}))
+    line = _mst_line(result)
+
+    assert line == "survives-resource[3/5] (REQ-782)"
+    assert "closed" not in line
+    assert "snapshot-legacy" not in line
+
+
 def _write_transcript(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
@@ -250,7 +466,7 @@ def test_end_to_end_chain(tmp_path):
 @pytest.mark.parametrize(
     "scenario",
     [
-        "missing_snapshot_state_fallback",
+        "missing_snapshot_state_does_not_intercept_idle",
         "legacy_snapshot_missing_entered_at",
         "missing_run_dir_snapshot_only",
         "dispatch_register_without_skill",
@@ -261,12 +477,12 @@ def test_regression_scenarios(tmp_path, scenario):
     workspace = tmp_path / "workspace"
     payload = "{}"
 
-    if scenario == "missing_snapshot_state_fallback":
+    if scenario == "missing_snapshot_state_does_not_intercept_idle":
         _write_state(
             workspace,
             {"current_skill": "mst:current", "updated_at": _iso_ago(minutes=5)},
         )
-        expected = r"current\(5m\)"
+        expected = r"MST idle"
 
     elif scenario == "legacy_snapshot_missing_entered_at":
         _write_snapshot(

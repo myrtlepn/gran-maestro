@@ -139,15 +139,17 @@ def _flow_event(
     extras: Optional[dict] = None,
     **overrides,
 ) -> dict:
+    event_extras = dict(extras or {})
+    if resource_id:
+        event_extras.setdefault("resource_id", resource_id)
     event = {
         "timestamp": _iso_ago(seconds=5),
         "session_id": session_id,
-        "resource_id": resource_id,
         "skill": skill,
         "step": step,
         "total_steps": total_steps,
         "event_type": event_type,
-        "extras": extras or {},
+        "extras": event_extras,
     }
     event.update(overrides)
     return event
@@ -289,7 +291,7 @@ def test_bad_or_empty_snapshot_falls_back_to_idle(tmp_path, case):
     assert last_line == "MST idle"
 
 
-def test_bad_snapshot_preserves_state_then_transcript_fallback_order(tmp_path):
+def test_bad_snapshot_skips_state_and_uses_transcript_fallback(tmp_path):
     workspace = tmp_path / "workspace"
     path = _snapshot_path(workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -307,7 +309,36 @@ def test_bad_snapshot_preserves_state_then_transcript_fallback_order(tmp_path):
     result = _run_statusline(workspace, json.dumps({"transcript_path": str(transcript_path)}))
     last_line = _last_line(result)
 
-    assert re.fullmatch(r"state\(6m\)", last_line), last_line
+    assert re.fullmatch(r"transcript\(4m\) \(REQ-668\)", last_line), last_line
+    assert "state" not in last_line
+
+
+def test_snapshot_wins_over_state_and_transcript_fallbacks(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_snapshot(
+        workspace,
+        {
+            "currentSkill": "mst:snapshot",
+            "enteredAt": _iso_ago(seconds=2),
+            "skillStack": [],
+        },
+    )
+    _write_state(
+        workspace,
+        {
+            "current_skill": "mst:state",
+            "updated_at": _iso_ago(minutes=6),
+        },
+    )
+    transcript_path = workspace / "session.jsonl"
+    _write_transcript(transcript_path)
+
+    result = _run_statusline(workspace, json.dumps({"transcript_path": str(transcript_path)}))
+    last_line = _last_line(result)
+
+    assert re.fullmatch(r"snapshot\([2-9]s\)", last_line), last_line
+    assert "state" not in last_line
+    assert "transcript" not in last_line
 
 
 def test_default_snapshot_path_is_used_as_graceful_fallback(tmp_path):

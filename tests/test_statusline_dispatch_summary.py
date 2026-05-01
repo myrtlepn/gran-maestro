@@ -122,7 +122,7 @@ def test_statusline_omits_dispatch_summary_when_no_run_files(tmp_path):
     assert re.search(r"MST \d+ run · oldest \d+s", last_line) is None
 
 
-def test_state_priority_uses_prefixed_context_id_over_transcript(tmp_path):
+def test_transcript_fallback_ignores_state_and_authoritative_candidates(tmp_path):
     workspace = tmp_path / "workspace"
     transcript_path = workspace / "session.transcript"
     _write_state(
@@ -133,6 +133,12 @@ def test_state_priority_uses_prefixed_context_id_over_transcript(tmp_path):
             "next_action": {"source_id": "", "source": ""},
             "updated_at": "2026-04-18T00:00:00Z",
         },
+    )
+    _write_context_fixture(
+        workspace,
+        "REQ-651",
+        "phase1_analysis",
+        owner_ppid=os.getpid(),
     )
     _write_transcript(
         transcript_path,
@@ -157,11 +163,13 @@ def test_state_priority_uses_prefixed_context_id_over_transcript(tmp_path):
     result = _run_statusline(workspace, payload)
     last_line = _last_line(result)
 
-    assert "(REQ-651-01)" in last_line
-    assert "request(" not in last_line
+    assert "request(" in last_line
+    assert "(REQ-999)" in last_line
+    assert "(REQ-651-01)" not in last_line
+    assert "(REQ-651)" not in last_line
 
 
-def test_state_uses_next_action_source_id_with_prefixed_plan_id(tmp_path):
+def test_state_only_candidate_falls_back_to_idle(tmp_path):
     workspace = tmp_path / "workspace"
     _write_state(
         workspace,
@@ -176,7 +184,7 @@ def test_state_uses_next_action_source_id_with_prefixed_plan_id(tmp_path):
     result = _run_statusline(workspace)
     last_line = _last_line(result)
 
-    assert "(PLN-493-ALT)" in last_line
+    assert last_line == "MST idle"
 
 
 def test_transcript_pending_skill_extracts_prefixed_context_id_only(tmp_path):
@@ -304,7 +312,7 @@ def test_transcript_fallback_uses_prefixed_context_id_without_free_text(tmp_path
         ("PLN-499", "active"),
     ],
 )
-def test_same_session_non_terminal_fixture_becomes_fallback_active(tmp_path, context_id, status):
+def test_same_session_non_terminal_fixture_does_not_become_primary_fallback(tmp_path, context_id, status):
     workspace = tmp_path / "workspace"
     _write_context_fixture(
         workspace,
@@ -319,7 +327,7 @@ def test_same_session_non_terminal_fixture_becomes_fallback_active(tmp_path, con
     )
     last_line = _last_line(result)
 
-    assert last_line == f"MST active ({context_id})"
+    assert last_line == "MST idle"
 
 
 @pytest.mark.parametrize(
@@ -329,7 +337,7 @@ def test_same_session_non_terminal_fixture_becomes_fallback_active(tmp_path, con
         ("PLN-499", "done"),
     ],
 )
-def test_terminal_fixture_is_not_promoted_and_stays_clear(tmp_path, context_id, status):
+def test_terminal_fixture_does_not_become_primary_fallback(tmp_path, context_id, status):
     workspace = tmp_path / "workspace"
     _write_context_fixture(
         workspace,
@@ -344,7 +352,7 @@ def test_terminal_fixture_is_not_promoted_and_stays_clear(tmp_path, context_id, 
     )
     last_line = _last_line(result)
 
-    assert last_line == f"MST clear ({context_id})"
+    assert last_line == "MST idle"
 
 
 def test_foreign_or_invalid_owner_fixture_falls_back_to_idle(tmp_path):
@@ -371,7 +379,7 @@ def test_foreign_or_invalid_owner_fixture_falls_back_to_idle(tmp_path):
     assert last_line == "MST idle"
 
 
-def test_dispatch_group_node_is_appended_to_fallback_active_line(tmp_path):
+def test_dispatch_group_node_is_not_prefixed_by_authoritative_fallback(tmp_path):
     workspace = tmp_path / "workspace"
     run_dir = workspace / ".gran-maestro" / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -393,4 +401,4 @@ def test_dispatch_group_node_is_appended_to_fallback_active_line(tmp_path):
     )
     last_line = _last_line(result)
 
-    assert re.fullmatch(r"active \(REQ-659\) > \[codex:dispatch-01\((?:4[5-9]|5[0-9])s\)\]", last_line), last_line
+    assert re.fullmatch(r"\[codex:dispatch-01\((?:4[5-9]|5[0-9])s\)\]", last_line), last_line

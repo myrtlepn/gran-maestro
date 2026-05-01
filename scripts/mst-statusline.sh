@@ -49,17 +49,6 @@ if command:
   printf '%s' "$DEFAULT_HUD_COMMAND"
 }
 
-resolve_state_file() {
-  local by_ppid
-  by_ppid="${MST_TMP}/mst-state-${CURRENT_STATUSLINE_PPID}.json"
-  if [ -f "$by_ppid" ]; then
-    printf '%s' "$by_ppid"
-    return 0
-  fi
-
-  printf ''
-}
-
 extract_transcript_path() {
   printf '%s' "$INPUT_JSON" | python3 -c 'import json, sys
 try:
@@ -111,32 +100,28 @@ save_transcript_bridge() {
 }
 
 build_mst_line() {
-  local state_file="$1"
-  local transcript_path="${2:-}"
-  local dispatch_run_dir="${3:-}"
-  local input_json="${4:-}"
-  local project_root="${5:-}"
-  local current_ppid="${6:-}"
-  local guard_window_sec="${7:-900}"
-  local snapshot_path="${8:-}"
+  local transcript_path="${1:-}"
+  local dispatch_run_dir="${2:-}"
+  local input_json="${3:-}"
+  local project_root="${4:-}"
+  local current_ppid="${5:-}"
+  local guard_window_sec="${6:-900}"
+  local snapshot_path="${7:-}"
   python3 -c 'import json, os, re, sys
 from datetime import datetime, timezone
 
-state_path = sys.argv[1] if len(sys.argv) > 1 else ""
-transcript_path = sys.argv[2] if len(sys.argv) > 2 else ""
-dispatch_run_dir = sys.argv[3] if len(sys.argv) > 3 else ""
-input_json = sys.argv[4] if len(sys.argv) > 4 else ""
-project_root = sys.argv[5] if len(sys.argv) > 5 else ""
-current_ppid_raw = sys.argv[6] if len(sys.argv) > 6 else ""
-guard_window_raw = sys.argv[7] if len(sys.argv) > 7 else "900"
-snapshot_path = sys.argv[8] if len(sys.argv) > 8 else ""
+transcript_path = sys.argv[1] if len(sys.argv) > 1 else ""
+dispatch_run_dir = sys.argv[2] if len(sys.argv) > 2 else ""
+input_json = sys.argv[3] if len(sys.argv) > 3 else ""
+project_root = sys.argv[4] if len(sys.argv) > 4 else ""
+current_ppid_raw = sys.argv[5] if len(sys.argv) > 5 else ""
+guard_window_raw = sys.argv[6] if len(sys.argv) > 6 else "900"
+snapshot_path = sys.argv[7] if len(sys.argv) > 7 else ""
 MAX_TAIL_BYTES = 512 * 1024
 FLOW_TAIL_BYTES = 200 * 1024
 FLOW_WINDOW_LINES = 1000
 SNIFF_LINE_LIMIT = 100
 SKILL_TOOL_NAMES = {"Skill", "proxy_Skill"}
-REQUEST_TERMINAL_STATUSES = {"done", "completed", "accepted", "cancelled"}
-PLAN_TERMINAL_STATUSES = {"done", "completed", "cancelled"}
 FLOW_TERMINAL_EVENT_TYPES = {"commit"}
 FLOW_TERMINAL_STATUSES = {"completed", "done"}
 
@@ -415,7 +400,6 @@ def extract_flow_resource_id(entry):
     extras = _flow_nested_dict(entry, "extras")
     event = _flow_nested_dict(entry, "event")
     for value in (
-        entry.get("resource_id"),
         extras.get("resource_id"),
         event.get("resource_id"),
     ):
@@ -597,12 +581,15 @@ def render_from_flow(base_dir, raw_input):
         skill = extract_flow_skill(entry)
         if not resource_id or not skill:
             continue
+        step, total = extract_flow_step_total(entry)
 
         parsed.append(
             {
                 "entry": entry,
                 "resource_id": resource_id,
                 "skill": skill,
+                "step": step,
+                "total": total,
                 "order": order,
             }
         )
@@ -636,72 +623,18 @@ def render_from_flow(base_dir, raw_input):
     for item in scoped:
         latest_by_frame[(item["resource_id"], item["skill"])] = item
 
-    active = [item for item in latest_by_frame.values() if not is_flow_terminal(item["entry"])]
+    active = [
+        item for item in latest_by_frame.values()
+        if not is_flow_terminal(item["entry"])
+        and item["step"] is not None
+        and item["total"] is not None
+    ]
     if not active:
         return None
 
     chosen = max(active, key=lambda item: item["order"])
-    step, total = extract_flow_step_total(chosen["entry"])
-    label = chosen["skill"]
-    if step is not None and total is not None:
-        label = f"{label}[{step}/{total}]"
+    label = "{}[{}/{}]".format(chosen["skill"], chosen["step"], chosen["total"])
     return render_line([label], chosen["resource_id"])
-
-
-def load_state_payload(path):
-    if not path or not os.path.isfile(path):
-        return None, "missing"
-
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return None, "invalid"
-
-    if not isinstance(data, dict):
-        return None, "invalid"
-
-    return data, "valid"
-
-
-def render_from_state(data):
-    if not isinstance(data, dict):
-        return None
-
-    current_skill = clean_skill(data.get("current_skill"))
-    if not current_skill:
-        return None
-
-    updated_at = ""
-    for field in ("updated_at", "started_at"):
-        value = data.get(field)
-        if isinstance(value, str) and value.strip():
-            updated_at = value.strip()
-            break
-
-    label = f"{current_skill}({format_elapsed(updated_at)})"
-
-    active_req = data.get("active_req")
-    if isinstance(active_req, str):
-        active_req = active_req.strip().upper()
-    else:
-        active_req = ""
-
-    if not CONTEXT_ID_PATTERN.fullmatch(active_req):
-        active_req = ""
-
-    if not active_req:
-        next_action = data.get("next_action")
-        if isinstance(next_action, dict):
-            for key in ("source_id", "source"):
-                value = next_action.get(key)
-                if isinstance(value, str):
-                    candidate = value.strip().upper()
-                    if CONTEXT_ID_PATTERN.fullmatch(candidate):
-                        active_req = candidate
-                        break
-
-    return render_line([label], active_req)
 
 
 def load_transcript_lines(path):
@@ -821,86 +754,6 @@ def render_from_transcript(path):
     return render_line(labels, context_id)
 
 
-def render_fallback_status(status_label, context_id):
-    line = f"MST {status_label}"
-    if context_id:
-        line += f" ({context_id})"
-    return line
-
-
-def _iter_authoritative_candidates(root_dir, pattern):
-    if not root_dir or not os.path.isdir(root_dir):
-        return
-    for current_root, dirnames, filenames in os.walk(root_dir):
-        dirnames.sort()
-        filenames.sort()
-        for filename in filenames:
-            if filename != pattern:
-                continue
-            yield os.path.join(current_root, filename)
-
-
-def _read_same_session_context(path, terminal_statuses):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-
-    context_id = clean_text(payload.get("id")).upper()
-    if not CONTEXT_ID_PATTERN.fullmatch(context_id):
-        return None
-
-    owner_ppid = payload.get("owner_ppid")
-    if isinstance(owner_ppid, bool):
-        return None
-    try:
-        owner_ppid = int(owner_ppid)
-    except (TypeError, ValueError):
-        return None
-    if CURRENT_PPID is None or owner_ppid != CURRENT_PPID:
-        return None
-
-    status = clean_text(payload.get("status")).lower()
-    if not status:
-        return None
-    if status in terminal_statuses:
-        return ("clear", context_id)
-    return ("active", context_id)
-
-
-def render_from_authoritative_fallback(base_dir):
-    if not base_dir or not os.path.isdir(base_dir):
-        return None
-
-    clear_context_id = ""
-    for path in _iter_authoritative_candidates(os.path.join(base_dir, "requests"), "request.json"):
-        match = _read_same_session_context(path, REQUEST_TERMINAL_STATUSES)
-        if match is None:
-            continue
-        status_label, context_id = match
-        if status_label == "active":
-            return render_fallback_status("active", context_id)
-        if not clear_context_id:
-            clear_context_id = context_id
-
-    for path in _iter_authoritative_candidates(os.path.join(base_dir, "plans"), "plan.json"):
-        match = _read_same_session_context(path, PLAN_TERMINAL_STATUSES)
-        if match is None:
-            continue
-        status_label, context_id = match
-        if status_label == "active":
-            return render_fallback_status("active", context_id)
-        if not clear_context_id:
-            clear_context_id = context_id
-
-    if clear_context_id:
-        return render_fallback_status("clear", clear_context_id)
-    return None
-
-
 def build_dispatch_node_group(run_dir):
     if not run_dir or not os.path.isdir(run_dir):
         return ""
@@ -986,29 +839,17 @@ if snapshot_line is not None:
     print(render_output(snapshot_line))
     sys.exit(0)
 
-state_payload, state_status = load_state_payload(state_path)
-state_line = render_from_state(state_payload)
-if state_line is not None:
-    print(render_output(state_line))
-    sys.exit(0)
-
 transcript_line = render_from_transcript(transcript_path)
 if transcript_line is not None:
     print(render_output(transcript_line))
     sys.exit(0)
 
-fallback_line = render_from_authoritative_fallback(os.path.join(project_root, ".gran-maestro"))
-if fallback_line is not None:
-    print(render_output(fallback_line))
-    sys.exit(0)
-
 print(render_output("MST idle"))
-' "$state_file" "$transcript_path" "$dispatch_run_dir" "$input_json" "$project_root" "$current_ppid" "$guard_window_sec" "$snapshot_path" 2>/dev/null || printf 'MST idle\n'
+' "$transcript_path" "$dispatch_run_dir" "$input_json" "$project_root" "$current_ppid" "$guard_window_sec" "$snapshot_path" 2>/dev/null || printf 'MST idle\n'
 }
 
 HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
-STATE_FILE="$(resolve_state_file)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 SESSION_ID_FROM_INPUT="$(extract_session_id)"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
@@ -1017,7 +858,7 @@ if [ ! -f "$SNAPSHOT_PATH" ] && [ -f "${PROJECT_ROOT}/.gran-maestro/state/defaul
   SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
 fi
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$STATE_FILE" "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
+MST_LINE="$(build_mst_line "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
