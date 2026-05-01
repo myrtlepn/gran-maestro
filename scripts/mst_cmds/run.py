@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds._common import load_json, resolve_started_by_pid
 from scripts.mst_cmds.dispatch import _coerce_positive_int, _dispatch_state_path, _load_dispatch_config, _now_iso
 
@@ -232,6 +233,7 @@ def cmd_run(args):
                 stderr=subprocess.PIPE,
                 bufsize=0,
                 text=False,
+                env=session_mod.child_env_with_session_id(),
             )
             tee_error: list[BaseException] = []
 

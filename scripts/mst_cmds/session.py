@@ -24,6 +24,101 @@ from scripts.mst_cmds._common import (
     load_json,
 )
 
+
+def _canonical_uuid4(value: str) -> str | None:
+    try:
+        parsed = uuid.UUID(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    canonical = str(parsed)
+    if parsed.variant != uuid.RFC_4122 or parsed.version != 4 or canonical != str(value).strip():
+        return None
+    return canonical
+
+
+def _session_id_from_payload(raw: str) -> str | None:
+    if not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    direct = payload.get("session_id")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    transcript_path = payload.get("transcript_path")
+    if isinstance(transcript_path, str) and transcript_path.strip():
+        stem = Path(transcript_path).name
+        return stem[:-6] if stem.endswith(".jsonl") else Path(stem).stem
+    return None
+
+
+def _session_id_from_stdin_or_env_payload() -> str | None:
+    raw = os.environ.get("MST_HOOK_STDIN_RAW", "")
+    if raw:
+        return _session_id_from_payload(raw)
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return None
+        return _session_id_from_payload(sys.stdin.read())
+    except Exception:
+        return None
+
+
+def _session_id_from_bridge() -> str | None:
+    base_dir = _common.BASE_DIR
+    if base_dir is None:
+        env_base = os.environ.get("MST_BASE_DIR", "").strip()
+        base_dir = Path(env_base) if env_base else None
+    if base_dir is None:
+        return None
+    bridge_path = base_dir / "tmp" / f"claude-session-{os.getppid()}.id"
+    try:
+        return _canonical_uuid4(bridge_path.read_text(encoding="utf-8").strip())
+    except Exception:
+        return None
+
+
+def resolve_session_id_value() -> str:
+    env_value = os.environ.get("MST_SESSION_ID", "").strip()
+    if env_value:
+        return env_value
+
+    for candidate in (
+        _session_id_from_bridge(),
+        _session_id_from_stdin_or_env_payload(),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    return str(uuid.uuid4())
+
+
+def ensure_session_id_in_env() -> str:
+    session_id = resolve_session_id_value()
+    if not session_id:
+        raise RuntimeError("MST_SESSION_ID could not be resolved")
+    os.environ["MST_SESSION_ID"] = session_id
+    return session_id
+
+
+def child_env_with_session_id() -> dict[str, str]:
+    session_id = ensure_session_id_in_env()
+    child_env = os.environ.copy()
+    child_env["MST_SESSION_ID"] = session_id
+    return child_env
+
+
+def cmd_session_resolve(args):
+    session_id = resolve_session_id_value()
+    if args.json:
+        print(json.dumps({"session_id": session_id}, ensure_ascii=False))
+    else:
+        print(session_id)
+    return 0
+
 def cmd_session_split_prompts(args):
     if not args.prompts_dir:
         print("Error: directory not found", file=sys.stderr)
@@ -137,6 +232,9 @@ def register(subparsers):
 
     sess_complete = sess_sub.add_parser("complete")
     sess_complete.add_argument("session_id")
+
+    sess_resolve = sess_sub.add_parser("resolve")
+    sess_resolve.add_argument("--json", action="store_true")
 
     sess_split = sess_sub.add_parser("split-prompts", help="combined-prompts.txt를 개별 프롬프트 파일로 분리")
     sess_split.add_argument("--dir", dest="prompts_dir", required=False, help="prompts 디렉토리 경로")

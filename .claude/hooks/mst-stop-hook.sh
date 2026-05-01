@@ -160,6 +160,32 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+extract_stdin_session_id_literal() {
+  local raw="$1" rest value
+  case "$raw" in
+    *\"session_id\"*)
+      rest="${raw#*\"session_id\"}"
+      rest="${rest#*:}"
+      rest="${rest#*\"}"
+      value="${rest%%\"*}"
+      value="${value//$'\n'/}"
+      value="${value//$'\r'/}"
+      value="${value//$'\t'/}"
+      case "$value" in
+        ""|*[!A-Za-z0-9_-]*) return 0 ;;
+      esac
+      printf '%s\n' "$value"
+      ;;
+  esac
+}
+
+if [ -z "${MST_SESSION_ID:-}" ]; then
+  MST_SESSION_ID="$(extract_stdin_session_id_literal "$STDIN_RAW" || true)"
+  if [ -z "${MST_SESSION_ID:-}" ] && [ -f "${PROJECT_ROOT}/scripts/mst.py" ]; then
+    MST_SESSION_ID="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 "${PROJECT_ROOT}/scripts/mst.py" session resolve 2>/dev/null || true)"
+  fi
+fi
+export MST_SESSION_ID
 MST_LEDGER_HOOK_EVENT="Stop"
 if [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null

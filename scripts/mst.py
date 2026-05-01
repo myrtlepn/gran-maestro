@@ -64,6 +64,7 @@ def cmd_workflow_run(args):
 BASE_DIR_OPTIONAL_COMMANDS = {
     ("hooks", "doctor"),
     ("hooks", "sync"),
+    ("session", "resolve"),
     ("skill", "build"),
     ("skill", "scaffold"),
 }

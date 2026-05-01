@@ -3,6 +3,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -121,3 +122,52 @@ def test_write_initial_state_preserved(tmp_path):
     assert payload["workflow_active"] is False
     assert payload["current_skill"] == ""
     assert payload["next_action"]["skill"] == ""
+
+
+def test_session_init_exports_session_id_to_child_sync(tmp_path):
+    project_root = tmp_path / "project"
+    claude_home = tmp_path / "home"
+    (project_root / ".gran-maestro").mkdir(parents=True)
+    (project_root / ".gran-maestro" / "config.resolved.json").write_text(
+        json.dumps({"gardening": {"auto_archive": {"enabled": True, "session_init_guard_seconds": 0}}}),
+        encoding="utf-8",
+    )
+    (project_root / ".claude-plugin").mkdir()
+    (project_root / ".claude-plugin" / "plugin.json").write_text('{"version":"TEST"}\n', encoding="utf-8")
+    (project_root / "hooks").mkdir()
+    (project_root / "scripts").mkdir()
+    fake_mst = project_root / "scripts" / "mst.py"
+    fake_mst.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib\n"
+        "pathlib.Path('.gran-maestro/tmp/hook-child-session-id.txt').write_text("
+        "os.environ.get('MST_SESSION_ID', ''), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    cache_target = claude_home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst" / "TEST"
+    marketplace_target = claude_home / ".claude" / "plugins" / "marketplaces" / "gran-maestro"
+    cache_target.mkdir(parents=True)
+    marketplace_target.mkdir(parents=True)
+
+    result = subprocess.run(
+        ["bash", str(HOOK_SCRIPT)],
+        cwd=project_root,
+        input=json.dumps({"session_id": VALID_SESSION_ID}),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "HOME": str(claude_home),
+            "MST_CLAUDE_HOME": str(claude_home),
+            "PLUGIN_ROOT": str(project_root),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    env_file = project_root / ".gran-maestro" / "tmp" / "hook-child-session-id.txt"
+    for _ in range(50):
+        if env_file.exists():
+            break
+        time.sleep(0.02)
+    assert env_file.read_text(encoding="utf-8") == VALID_SESSION_ID

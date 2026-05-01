@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import signal
 import subprocess
 import sys
@@ -8,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+UUID_V4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 def _run_mst(workspace: Path, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -18,6 +21,28 @@ def _run_mst(workspace: Path, *args: str, timeout: int = 30) -> subprocess.Compl
         text=True,
         check=False,
         timeout=timeout,
+    )
+
+
+def _run_mst_without_session_env(
+    workspace: Path,
+    *args: str,
+    optimized: bool = False,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env.pop("MST_SESSION_ID", None)
+    executable = [sys.executable]
+    if optimized:
+        executable.append("-O")
+    return subprocess.run(
+        [*executable, str(MST_SCRIPT), *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+        env=env,
     )
 
 
@@ -59,6 +84,63 @@ def test_run_basic_tee_and_state(tmp_path):
     assert "started_at" in state
     assert "terminated_at" in state
     assert "pid" in state
+
+
+def test_run_child_env_gets_generated_session_id_without_parent_env(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst_without_session_env(
+        workspace,
+        "run",
+        "--task-id",
+        "T-SESSION-ENV",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--",
+        sys.executable,
+        "-c",
+        "import os; print(os.environ.get('MST_SESSION_ID', ''))",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    observed = proc.stdout.strip().splitlines()[-1]
+    assert UUID_V4_RE.match(observed)
+    assert observed in (log_dir / "running.log").read_text(encoding="utf-8")
+
+
+def test_run_child_env_guard_survives_python_optimized_mode(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst_without_session_env(
+        workspace,
+        "run",
+        "--task-id",
+        "T-SESSION-ENV-O",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--",
+        sys.executable,
+        "-c",
+        "import os; print(os.environ.get('MST_SESSION_ID', ''))",
+        optimized=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert UUID_V4_RE.match(proc.stdout.strip().splitlines()[-1])
 
 
 def test_heartbeat_thread_updates(tmp_path):

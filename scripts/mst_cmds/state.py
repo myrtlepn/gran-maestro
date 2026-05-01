@@ -97,6 +97,19 @@ def _current_uuid_session_id() -> Optional[str]:
     return None
 
 
+def _canonical_uuid4(value: object) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = uuid.UUID(value.strip())
+    except ValueError:
+        return None
+    canonical = str(parsed)
+    if parsed.variant != uuid.RFC_4122 or parsed.version != 4 or canonical != value.strip():
+        return None
+    return canonical
+
+
 def _agile_session_path(agi_id: str) -> Path:
     return _common.BASE_DIR / "agile" / agi_id / "session.json"
 
@@ -1089,17 +1102,6 @@ def cmd_state_recover(args):
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    session_id = _current_uuid_session_id()
-    if not session_id:
-        print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)
-        return 1
-
-    state_base_dir = _skill_state_base_dir()
-    existing = load_snapshot(state_base_dir, session_id=session_id)
-    if existing is not None:
-        print(json.dumps(existing, ensure_ascii=False, indent=2))
-        return 0
-
     session_path = _agile_session_path(agi_id)
     session_payload = _load_json_object(session_path)
     if session_payload is None:
@@ -1108,6 +1110,25 @@ def cmd_state_recover(args):
 
     previous_owner = session_payload.get("owner_session_id")
     previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
+    session_id = _current_uuid_session_id()
+    if not session_id:
+        explicit_session_env = (
+            os.environ.get("MST_SESSION_ID", "").strip()
+            or os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip()
+        )
+        restored_owner = _canonical_uuid4(previous_owner)
+        if explicit_session_env or not restored_owner:
+            print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)
+            return 1
+        session_id = restored_owner
+        os.environ["MST_SESSION_ID"] = session_id
+
+    state_base_dir = _skill_state_base_dir()
+    existing = load_snapshot(state_base_dir, session_id=session_id)
+    if existing is not None:
+        print(json.dumps(existing, ensure_ascii=False, indent=2))
+        return 0
+
     read_only = bool(previous_owner and previous_owner != session_id and not getattr(args, "takeover", False))
 
     if previous_owner and previous_owner != session_id and getattr(args, "takeover", False):

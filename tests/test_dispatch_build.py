@@ -1,3 +1,5 @@
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -5,6 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:
@@ -55,6 +58,8 @@ def test_dispatch_build_codex_includes_required_fragments(tmp_path):
     assert "2>&1 | tee" in command
     assert "EXIT_CODE:" in command
     assert "< /dev/null" in command
+    assert "export MST_SESSION_ID" in command
+    assert "session resolve" in command
 
 
 def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
@@ -95,6 +100,8 @@ def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
     assert "2>&1 | tee" in command
     assert "EXIT_CODE:" in command
     assert "< /dev/null" in command
+    assert "export MST_SESSION_ID" in command
+    assert "session resolve" in command
 
 
 def test_dispatch_build_claude_not_supported(tmp_path):
@@ -125,3 +132,45 @@ def test_dispatch_build_claude_not_supported(tmp_path):
 
     assert proc.returncode != 0
     assert "claude" in (proc.stderr + proc.stdout).lower()
+
+
+def test_dispatch_build_command_propagates_session_env_when_executed(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-env",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+    prefix = re.split(r"codex exec|gemini -p", command, maxsplit=1)[0]
+    check = subprocess.run(
+        ["bash", "-c", prefix + 'printf "%s\\n" "$MST_SESSION_ID"'],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "MST_SESSION_ID": SESSION_ID},
+    )
+
+    assert check.returncode == 0, check.stderr
+    assert check.stdout.strip().splitlines()[-1] == SESSION_ID

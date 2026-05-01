@@ -13,6 +13,7 @@ from pathlib import Path
 
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import resolve_model as resolve_model_mod
+from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds._common import (
     _parse_utc_datetime,
     _plugin_root,
@@ -190,9 +191,16 @@ def cmd_dispatch_build(args):
 
     mst_script = _common._mst_script_path().resolve()
     q = shlex.quote
+    session_bootstrap_cmd = (
+        f'MST_SESSION_ID="${{MST_SESSION_ID:-$(python3 {q(str(mst_script))} session resolve < /dev/null)}}"; '
+        "export MST_SESSION_ID; "
+        'if [ -z "$MST_SESSION_ID" ]; then '
+        'echo "Error: MST_SESSION_ID could not be resolved before dispatch spawn" >&2; exit 2; '
+        "fi"
+    )
 
     register_cmd = (
-        f"python3 {q(str(mst_script))} dispatch register "
+        f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch register '
         f"--task-id {q(task_id)} --pid $$ --provider {q(provider)} "
         f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))} "
         f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}"'
@@ -200,21 +208,22 @@ def cmd_dispatch_build(args):
 
     if provider == "codex":
         cli_cmd = (
-            f"codex exec --full-auto -m {q(resolved_model)} -C {q(str(worktree_dir))} "
+            f'MST_SESSION_ID="$MST_SESSION_ID" codex exec --full-auto -m {q(resolved_model)} -C {q(str(worktree_dir))} '
             f"\"$(cat {q(str(prompt_file))})\""
         )
     else:
         cli_cmd = (
-            f"gemini -p \"$(cat {q(str(prompt_file))})\" --model {q(resolved_model)} "
+            f'MST_SESSION_ID="$MST_SESSION_ID" gemini -p \"$(cat {q(str(prompt_file))})\" --model {q(resolved_model)} '
             "--approval-mode yolo --sandbox=false"
         )
 
     heartbeat_cmd = (
-        f"python3 {q(str(mst_script))} dispatch heartbeat "
+        f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat '
         f"--task-id {q(task_id)} --final --exit-code \"$EC\""
     )
 
     command = (
+        f"{session_bootstrap_cmd}; "
         f"{register_cmd}; "
         "set -o pipefail; "
         f"{cli_cmd} < /dev/null 2>&1 | tee {q(str(log_file))}; "
@@ -257,6 +266,7 @@ def cmd_dispatch_preflight(args):
 
 
 def cmd_dispatch_register(args):
+    session_mod.ensure_session_id_in_env()
     now = _now_iso()
     task_id = str(args.task_id).strip()
     payload = {

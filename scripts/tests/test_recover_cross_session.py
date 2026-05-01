@@ -60,9 +60,12 @@ def flow_path(root: Path, session_id: str = SID_B) -> Path:
     return root / ".gran-maestro" / "state" / session_id / "flow-detail.ndjson"
 
 
-def run_mst(root: Path, *args: str, session_id: str = SID_B) -> subprocess.CompletedProcess[str]:
+def run_mst(root: Path, *args: str, session_id: str | None = SID_B) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env["MST_SESSION_ID"] = session_id
+    if session_id is None:
+        env.pop("MST_SESSION_ID", None)
+    else:
+        env["MST_SESSION_ID"] = session_id
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
     return subprocess.run(
         ["python3", str(MST), *args],
@@ -75,7 +78,7 @@ def run_mst(root: Path, *args: str, session_id: str = SID_B) -> subprocess.Compl
     )
 
 
-def recover(root: Path, *args: str, session_id: str = SID_B) -> subprocess.CompletedProcess[str]:
+def recover(root: Path, *args: str, session_id: str | None = SID_B) -> subprocess.CompletedProcess[str]:
     return run_mst(root, "recover", AGI_ID, *args, session_id=session_id)
 
 
@@ -188,3 +191,16 @@ def test_invalid_session_id_rejected(tmp_path: Path, monkeypatch) -> None:
 
     assert result.returncode != 0
     assert "current session_id is required" in result.stderr
+
+
+def test_recover_restores_owner_session_id_when_env_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    agi_dir = write_agile_fixture(tmp_path, owner_session_id=SID_A)
+
+    result = recover(tmp_path, session_id=None)
+
+    assert result.returncode == 0, result.stderr
+    assert read_json(agi_dir / "session.json")["owner_session_id"] == SID_A
+    snapshot = read_json(snapshot_path(tmp_path, SID_A))
+    assert snapshot["sessionId"] == SID_A
+    assert snapshot.get("read_only") is not True

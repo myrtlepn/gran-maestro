@@ -1,11 +1,23 @@
 """REQ-696/T01 T3: session_id snapshot isolation regression tests."""
 
+from __future__ import annotations
+
 import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 from tests.fixtures.hook_harness import run_hook, stdout_json
 from tests.fixtures.session_helper import pair_sessions
 from tests.fixtures.snapshot_factory import build_snapshot, write_snapshot
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+UUID_V4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+VALID_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _hook_payload(session_id: str) -> dict:
@@ -45,3 +57,85 @@ def test_session_a_snapshot_integrity_after_b_hook(tmp_path):
     post_content = a_path.read_text(encoding="utf-8")
     assert pre_hash == post_hash
     assert pre_content == post_content
+
+
+def _run_mst(workspace: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    merged_env = os.environ.copy()
+    merged_env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    if env:
+        merged_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(MST_SCRIPT), *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        env=merged_env,
+        check=False,
+        timeout=30,
+    )
+
+
+def _workspace_files(workspace: Path) -> set[str]:
+    base = workspace / ".gran-maestro"
+    if not base.exists():
+        return set()
+    return {str(path.relative_to(base)) for path in base.rglob("*")}
+
+
+def test_session_resolve_returns_existing_env_without_writes(tmp_path: Path) -> None:
+    (tmp_path / ".gran-maestro").mkdir()
+    before = _workspace_files(tmp_path)
+
+    result = _run_mst(tmp_path, "session", "resolve", env={"MST_SESSION_ID": VALID_SESSION_ID})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == VALID_SESSION_ID
+    assert _workspace_files(tmp_path) == before
+
+
+def test_session_resolve_generates_uuid_without_state_side_effects(tmp_path: Path) -> None:
+    (tmp_path / ".gran-maestro").mkdir()
+    before = _workspace_files(tmp_path)
+
+    result = _run_mst(tmp_path, "session", "resolve", env={"MST_SESSION_ID": ""})
+
+    assert result.returncode == 0, result.stderr
+    assert UUID_V4_RE.match(result.stdout.strip())
+    assert _workspace_files(tmp_path) == before
+
+
+def test_session_resolve_json_output_is_side_effect_free(tmp_path: Path) -> None:
+    (tmp_path / ".gran-maestro").mkdir()
+
+    result = _run_mst(tmp_path, "session", "resolve", "--json", env={"MST_SESSION_ID": VALID_SESSION_ID})
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"session_id": VALID_SESSION_ID}
+
+
+def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) -> None:
+    (tmp_path / ".gran-maestro").mkdir()
+    script = (
+        'export MST_SESSION_ID="${MST_SESSION_ID:-$(python3 '
+        + str(MST_SCRIPT)
+        + ' session resolve)}"; '
+        'first="$MST_SESSION_ID"; '
+        'export MST_SESSION_ID="${MST_SESSION_ID:-$(python3 '
+        + str(MST_SCRIPT)
+        + ' session resolve)}"; '
+        'printf "%s\\n%s\\n" "$first" "$MST_SESSION_ID"'
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    first, second = result.stdout.strip().splitlines()
+    assert UUID_V4_RE.match(first)
+    assert second == first
