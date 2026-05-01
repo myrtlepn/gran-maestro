@@ -862,7 +862,7 @@ Maestro 오케스트레이션 스킬을 활성화하고 `.gran-maestro/mode.json
 
 **한 줄 설명**: 세션 아카이브를 타입별로 세밀하게 관리합니다.
 
-**인자**: `[--run [--type {ideation|discussion|requests}]] [--restore {ID}] [--purge [--before {YYYY-MM-DD}]] [--list]`
+**인자**: `[--run [--type {ideation|discussion|requests}]] [--restore {ID}] [--purge [--max-age-days N] [--dry-run]] [--list]`
 
 #### 목적
 
@@ -880,7 +880,8 @@ Maestro 오케스트레이션 스킬을 활성화하고 `.gran-maestro/mode.json
 /mst:archive --list                              # 아카이브 현황 조회
 /mst:archive --run --type ideation               # ideation만 아카이브
 /mst:archive --restore IDN-003                   # 특정 세션 복원
-/mst:archive --purge --before 2025-01-01         # 2025년 이전 아카이브 삭제
+/mst:archive --purge --dry-run                  # 삭제 대상 미리보기
+/mst:archive --purge --max-age-days 30          # 30일보다 오래된 아카이브 삭제
 ```
 
 ---

@@ -11,7 +11,7 @@ TS_SCHEMA_PATH = ROOT_DIR / "src" / "core" / "state-schema.ts"
 PY_SCHEMA_PATH = ROOT_DIR / "scripts" / "_state_schema.py"
 JSON_SCHEMA_PATH = ROOT_DIR / "state-schema.json"
 
-EXPORT_NAMES = ("TASK_STATUSES", "TERMINAL", "TRANSITIONS", "RECOVERY_ACTIONS")
+EXPORT_NAMES = ("TASK_STATUSES", "TERMINAL", "TRANSITIONS", "RECOVERY_ACTIONS", "ACTIVE_PHASE_STATUSES")
 
 
 def _extract_export(source: str, export_name: str) -> Any:
@@ -39,6 +39,7 @@ def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     task_statuses = _ensure_unique(list(schema["TASK_STATUSES"]), "TASK_STATUSES")
     terminal = _ensure_unique(list(schema["TERMINAL"]), "TERMINAL")
     recovery_actions = _ensure_unique(list(schema["RECOVERY_ACTIONS"]), "RECOVERY_ACTIONS")
+    active_phase_statuses = _ensure_unique(list(schema["ACTIVE_PHASE_STATUSES"]), "ACTIVE_PHASE_STATUSES")
 
     status_set = set(task_statuses)
     if not set(terminal).issubset(status_set):
@@ -71,6 +72,7 @@ def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
         "terminal": terminal,
         "transitions": transitions_out,
         "recovery_actions": recovery_actions,
+        "active_phase_statuses": active_phase_statuses,
     }
 
 
@@ -79,6 +81,7 @@ def _render_python(schema: dict[str, Any]) -> str:
     terminal = tuple(schema["terminal"])
     transitions = schema["transitions"]
     recovery_actions = tuple(schema["recovery_actions"])
+    active_phase_statuses = tuple(schema["active_phase_statuses"])
 
     transitions_block = json.dumps(transitions, indent=2, ensure_ascii=True)
     transitions_block = transitions_block.replace("true", "True").replace("false", "False").replace("null", "None")
@@ -91,6 +94,7 @@ def _render_python(schema: dict[str, Any]) -> str:
         f"TERMINAL = frozenset({terminal!r})",
         f"TRANSITIONS = {transitions_block}",
         f"RECOVERY_ACTIONS = {recovery_actions!r}",
+        f"ACTIVE_PHASE_STATUSES = frozenset({active_phase_statuses!r})",
         "",
     ]
     return "\n".join(lines)

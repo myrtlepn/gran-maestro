@@ -45,6 +45,7 @@ def test_generator_extracts_all_exports() -> None:
         "TERMINAL",
         "TRANSITIONS",
         "RECOVERY_ACTIONS",
+        "ACTIVE_PHASE_STATUSES",
     )
     for name in required_names:
         assert hasattr(generated, name)

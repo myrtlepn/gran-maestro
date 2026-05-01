@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
+from scripts import _state_schema
 from scripts.mst_cmds import _common
 from scripts.mst_cmds._common import (
     _create_intent_store,
@@ -32,23 +33,7 @@ from scripts.mst_cmds._common import (
 
 GARDENING_INACTIVE_STATUSES = {"done", "completed", "cancelled"}
 
-# AD-004: requests in any of these statuses are actively being worked on and
-# must never be flagged as stale candidates regardless of `created_at` age,
-# otherwise an interactive cleanup could archive an in-progress request.
-ACTIVE_PHASE_STATUSES = {
-    "pending",
-    "phase1_analysis",
-    "phase1_spec_drafting",
-    "phase2_pending",
-    "phase2_approving",
-    "phase2_execution",
-    "executing",
-    "reviewing",
-    "phase3_review",
-    "merging",
-    "merge_conflict",
-    "merge_conflict_user_resolving",
-}
+ACTIVE_PHASE_STATUSES = _state_schema.ACTIVE_PHASE_STATUSES
 
 GARDENING_STALE_DAYS = 90
 

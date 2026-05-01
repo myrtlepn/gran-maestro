@@ -108,6 +108,13 @@ recover 자체 로그는 stdout에 간결히 남긴다. `--json` 결과의 `orph
 
 `AskUserQuestion`으로 사용자 확인 후 실행
 
+### 사용자 대면 복구 안내
+
+- `merge_conflict` 상태는 자동으로 무시하거나 재시도하지 않는다. 충돌 파일 목록을 먼저 보여주고, 사용자가 `충돌 수동 해소 후 재개` 또는 `worktree 재생성 후 재실행` 중 하나를 선택하게 한다.
+- 사용자가 충돌을 수동으로 해소한 뒤에는 `git diff --check`로 충돌 마커 잔존 여부를 검증한다. 마커가 남아 있으면 커밋하지 않고 재해소 안내를 출력한다.
+- 태스크 ID 인자는 공통 `parse_task_id` 검증 규칙을 따른다. 잘못된 ID가 들어오면 `REQ-NNN-TNN` 계열 형식을 안내하고 복구 대상을 추측하지 않는다.
+- `.gran-maestro/` 경로는 프로젝트 루트에 문자열로 직접 붙이지 않고 공통 path helper를 기준으로 계산한다. 재개 안내에 경로를 출력할 때도 `{PROJECT_ROOT}/.gran-maestro/...` 절대경로 형식을 사용한다.
+
 ### 외주 실행/재실행 프로토콜
 
 Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 **반드시 `/mst:codex` 또는 `/mst:gemini` 외주**; Claude(PM) 직접 코드 작성 금지.

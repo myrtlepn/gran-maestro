@@ -122,6 +122,21 @@ export const RECOVERY_ACTIONS = [
   "abort"
 ] as const;
 
+export const ACTIVE_PHASE_STATUSES = [
+  "pending",
+  "phase1_analysis",
+  "phase1_spec_drafting",
+  "phase2_pending",
+  "phase2_approving",
+  "phase2_execution",
+  "executing",
+  "reviewing",
+  "phase3_review",
+  "merging",
+  "merge_conflict",
+  "merge_conflict_user_resolving"
+] as const;
+
 const LEGACY_DONE_STATUSES = new Set(["completed", "accepted"]);
 const LEGACY_MIGRATION_WARNED = new Set<string>();
 

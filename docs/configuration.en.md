@@ -135,7 +135,7 @@ Settings for request history retention and session archive.
 | `history.retention_days` | `30` | history retention period (days) |
 | `history.auto_archive` | `true` | auto archive |
 | `archive.max_active_sessions` | `200` | maximum active sessions |
-| `archive.archive_retention_days` | `null` | archive retention period (null = indefinite) |
+| `archive.archive_retention_days` | `90` | archive retention period in days; default purge threshold |
 | `archive.auto_archive_on_create` | `true` | auto-archive when sessions exceed limits at creation |
 | `archive.auto_archive_on_complete` | `true` | auto-archive on completion |
 | `archive.archive_directory` | `.gran-maestro/archive` | archive path |

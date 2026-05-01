@@ -113,6 +113,11 @@ Skill(skill: "{action.skill}", args: "{action.args}")
 - 호출된 하위 스킬이 `args`의 `-a`를 감지하여 AUTO_MODE를 활성화한다 (기존 스킬 프로토콜 그대로).
 - 이로써 "-a가 스킬 경계에서 흐려지는" 문제를 해결한다: queue에 한 번만 기록하면 이후 pop/호출에서도 유지된다.
 
+**사용자 대면 재개 안내**:
+- queue entry나 fallback action에 잘못된 task ID가 포함되면 공통 `parse_task_id` 검증 에러를 그대로 보여주고, 임의로 `split('-')` 결과를 해석해 다른 요청/태스크를 실행하지 않는다.
+- 하위 스킬이 `merge_conflict` 복구 상태로 진입하면 `/mst:recover`의 explicit recovery 안내를 따른다. 충돌은 자동 성공 처리하지 않고, 수동 해소 또는 worktree 재생성 선택지를 노출한다.
+- `.gran-maestro/` 경로는 queue/resolver가 제공한 절대경로 또는 공통 path helper 산출값만 사용한다. 문자열 concat으로 프로젝트 루트와 `.gran-maestro`를 재구성하지 않는다.
+
 ### Step 4/5: 완료 기록 (complete | fail)
 
 Step 3의 Skill 호출 결과를 기준으로 queue 상태를 확정한다.

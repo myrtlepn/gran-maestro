@@ -226,7 +226,7 @@
       "pln": 200,
       "des": 200
     },
-    "archive_retention_days": null,
+    "archive_retention_days": 90,
     "auto_archive_on_create": true,
     "auto_archive_on_complete": true,
     "archive_directory": ".gran-maestro/archive"

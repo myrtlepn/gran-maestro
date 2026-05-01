@@ -768,7 +768,7 @@ Cleans all session types in one command. Ideation and discussion keep only recen
 
 **One-line description**: manage session archives by type in a granular way.
 
-**Arguments**: `[--run [--type {ideation|discussion|requests}]] [--restore {ID}] [--purge [--before {YYYY-MM-DD}]] [--list]`
+**Arguments**: `[--run [--type {ideation|discussion|requests}]] [--restore {ID}] [--purge [--max-age-days N] [--dry-run]] [--list]`
 
 #### Purpose
 
@@ -786,7 +786,8 @@ Archives session directories under each type's `archived/` using tar.gz. Keeps u
 /mst:archive --list                              # view archive status
 /mst:archive --run --type ideation               # archive only ideation
 /mst:archive --restore IDN-003                   # restore specific session
-/mst:archive --purge --before 2025-01-01         # delete archives before 2025
+/mst:archive --purge --dry-run                  # preview purge targets
+/mst:archive --purge --max-age-days 30          # delete archives older than 30 days
 ```
 
 ---

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts import _state_schema
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
@@ -65,15 +67,7 @@ def _run_scan_json(workspace: Path) -> dict:
 
 @pytest.mark.parametrize(
     "active_status",
-    [
-        "executing",
-        "phase1_analysis",
-        "phase2_execution",
-        "reviewing",
-        "phase3_review",
-        "merge_conflict",
-        "merging",
-    ],
+    sorted(_state_schema.ACTIVE_PHASE_STATUSES),
 )
 def test_active_phase_request_not_flagged_as_stale(tmp_path: Path, active_status: str) -> None:
     """Requests in any ACTIVE_PHASE_STATUSES must not appear in stale_requests

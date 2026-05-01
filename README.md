@@ -134,6 +134,20 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 
 의도치 않은 공유(gist, PR 첨부, 스크린샷, Slack 파일 업로드 등)를 피하고, 공유가 필요한 경우 해당 파일을 검토 후 필요한 부분만 발췌하십시오. `flow.ndjson`(스킬 레벨)은 상대적으로 민감도가 낮지만 동일 원칙 적용을 권장합니다.
 
+## 운영 및 트러블슈팅
+
+**오래된 아카이브 삭제**: `/mst:archive --purge`는 `.gran-maestro/*/archived/*.tar.gz` 중 retention 기간보다 오래된 파일을 삭제합니다. 신규 프로젝트 기본값은 `archive.archive_retention_days: 90`이며, 임시로 기준을 바꾸려면 `--max-age-days`를 사용합니다.
+
+```bash
+python3 scripts/mst.py archive purge --dry-run
+python3 scripts/mst.py archive purge --max-age-days 30 --dry-run
+python3 scripts/mst.py archive purge
+```
+
+먼저 `--dry-run`으로 삭제 대상을 확인한 뒤 실제 purge를 실행하세요. `archive_retention_days`는 아카이브를 만드는 시점의 보관 개수가 아니라, 이미 만들어진 tar.gz를 며칠 뒤 삭제할지 정하는 보존 기간입니다.
+
+**진행 중 요청 보호**: cleanup/gardening은 `phase1_analysis`, `phase2_execution`, `phase3_review`, `merging`, `merge_conflict` 같은 active phase 요청을 오래되었다는 이유만으로 stale 후보에 넣지 않습니다. 보호 건수는 gardening scan 요약의 `protected_active_requests`에서 확인할 수 있습니다.
+
 ## 라이선스
 
 MIT License — 자세한 내용은 [LICENSE](LICENSE)를 참조하세요.

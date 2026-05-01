@@ -171,7 +171,7 @@ Git worktree 생성 및 관리 설정입니다.
 | `history.retention_days` | `30` | 이력 보존 기간 (일) |
 | `history.auto_archive` | `true` | 자동 아카이브 |
 | `archive.max_active_sessions` | `200` | 최대 활성 세션 수 |
-| `archive.archive_retention_days` | `null` | 아카이브 보존 기간 (null=무기한) |
+| `archive.archive_retention_days` | `90` | 아카이브 보존 기간 (일). purge 기준 기본값 |
 | `archive.auto_archive_on_create` | `true` | 세션 생성 시 초과분 자동 아카이브 |
 | `archive.auto_archive_on_complete` | `true` | 완료 시 자동 아카이브 |
 | `archive.archive_directory` | `.gran-maestro/archive` | 아카이브 저장 경로 |

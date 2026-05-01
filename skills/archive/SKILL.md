@@ -2,7 +2,7 @@
 name: archive
 description: "세션 아카이브를 관리합니다. 오래된 ideation/discussion/request/capture 항목을 압축 보관하고, 아카이브 현황 조회/복원/삭제를 수행합니다. 사용자가 '아카이브', '정리', '세션 정리'를 말하거나 /mst:archive를 호출할 때 사용."
 user-invocable: true
-argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {ID}] [--purge [--before {YYYY-MM-DD}]] [--list]"
+argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {ID}] [--purge [--max-age-days N] [--dry-run]] [--list]"
 ---
 
 # maestro:archive
@@ -16,7 +16,7 @@ argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
 | `max_active_sessions` | 200 | 타입별 활성 유지 갯수 |
-| `archive_retention_days` | null | null=영구 보존, 숫자=N일 후 아카이브 자동 삭제 |
+| `archive_retention_days` | 90 | 아카이브 보존 기간. 숫자=N일 후 purge 대상, 신규 프로젝트 기본값은 90일 |
 | `auto_archive_on_create` | true | 새 세션 생성 시 자동 아카이브 체크 |
 | `archive_directory` | `{type_dir}/archived` | 타입별 아카이브 저장 경로 (자동) |
 
@@ -57,7 +57,7 @@ argument-hint: "[--run [--type {ideation|discussion|requests|cap}]] [--restore {
 Gran Maestro — 아카이브 현황
 ═══════════════════════════════════════
 
-설정: max_active=20, retention=영구, auto_archive=ON
+설정: max_active=20, retention=90일, auto_archive=ON
 
 타입         활성    아카이브   상태
 ─────────────────────────────────────
@@ -81,7 +81,7 @@ requests     23      0         초과 (3개 아카이브 대상)
    tar -czf {PROJECT_ROOT}/.gran-maestro/{type_dir}/archived/{type}-{ID_from}-{ID_to}-{YYYYMMDD}.tar.gz \
      -C {PROJECT_ROOT}/.gran-maestro/{type_dir} {session_dirs...}
    ```
-5. `archive_retention_days` 설정 시 만료된 tar.gz 자동 삭제 (mtime 기준)
+5. `archive_retention_days` 기준으로 만료된 tar.gz를 purge 대상에 포함한다 (mtime 기준, 기본 90일)
 6. 결과 요약 표시:
 
 ```
@@ -101,11 +101,12 @@ requests: 3개 세션 아카이브됨
 3. 세션 디렉토리만 추출: `tar -xzf {archive_file} -C {PROJECT_ROOT}/.gran-maestro/{type_dir} {session_dir}`
 4. 복원 결과 표시; 아카이브 파일 자체는 삭제 안 함
 
-### `--purge [--before {YYYY-MM-DD}]`: 오래된 아카이브 삭제
+### `purge [--max-age-days N] [--dry-run]`: 오래된 아카이브 삭제
 
-- `--before`: 해당 날짜 이전 tar.gz 삭제
-- 미지정: `archive_retention_days` 기준 만료 파일 삭제 (null이면 "보존 기간 미설정" 안내)
-- 삭제 전 대상 목록 표시 + `AskUserQuestion` 확인 후 실행
+- 미지정: `archive.archive_retention_days` 기준 만료 파일 삭제 (기본 90일)
+- `--max-age-days N`: 이번 실행에서만 N일보다 오래된 tar.gz를 삭제 대상으로 본다
+- `--dry-run`: 삭제하지 않고 대상 목록과 총 byte만 출력한다
+- 출력은 `Purged N archive(s), total B bytes (retention=Nd)` 형식이다
 
 ### `--list`: 아카이브된 세션 목록 표시
 
@@ -141,6 +142,8 @@ requests (1 archive):
 ## 진행 중 세션 보호 규칙
 
 `done`/`completed`/`cancelled` 아닌 모든 항목은 자동/수동 아카이브 모두에서 절대 아카이브 금지 (예: `analyzing`, `collecting`, `phase1_analysis`, `phase2_execution` 등).
+
+Requests는 `ACTIVE_PHASE_STATUSES` guard도 적용한다. `pending`, `phase1_analysis`, `phase2_execution`, `reviewing`, `phase3_review`, `merging`, `merge_conflict` 등 활성 phase 요청은 오래되어도 stale/cleanup 후보에서 보호되며, gardening scan 요약의 `protected_active_requests`로 보호 건수를 확인할 수 있다.
 
 ## counter.json 보호 규칙
 
@@ -192,12 +195,13 @@ requests (1 archive):
 /mst:archive --run --type cap          # captures만 아카이브 (TTL 기반)
 /mst:archive --restore IDN-003        # IDN-003 복원
 /mst:archive --list                   # 아카이브 목록
-/mst:archive --purge                  # 만료 아카이브 삭제
-/mst:archive --purge --before 2026-01-01  # 특정 날짜 이전 삭제
+/mst:archive --purge                  # 기본 retention(90일) 기준 만료 아카이브 삭제
+/mst:archive --purge --dry-run        # 삭제 없이 purge 대상 미리보기
+/mst:archive --purge --max-age-days 30  # 30일보다 오래된 아카이브 삭제
 ```
 
 ## 문제 해결
 
 - "아카이브 대상 없음" → 모든 세션 진행 중이거나 활성 수가 `max_active_sessions` 이하
 - "복원 후 세션 미표시" → 복원된 `session.json`/`request.json` 상태 확인
-- "디스크 부족" → `--purge` 또는 `archive_retention_days` 설정
+- "디스크 부족" → `--purge --dry-run`으로 삭제 대상을 확인한 뒤 `--purge` 실행 또는 `archive_retention_days` 조정

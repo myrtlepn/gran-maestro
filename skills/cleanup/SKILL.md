@@ -173,8 +173,20 @@ Gran Maestro — Cleanup 모의 실행
 - **자동 정리 (Step 1, 2)**: `done`/`completed`/`cancelled` 세션만 아카이브
 - **Plans**: `plan.json`의 `status`가 `active`인 플랜은 아카이브 제외
             (`completed`, `archived` 상태만 아카이브 대상)
+- **Requests active phase guard**: `pending`, `phase1_analysis`, `phase2_execution`, `reviewing`, `phase3_review`, `merging`, `merge_conflict` 등 `ACTIVE_PHASE_STATUSES`에 포함된 요청은 오래되어도 stale 후보로 취급하지 않는다. `gardening scan` 요약의 `protected_active_requests`가 보호 건수를 보여준다.
 - **인터랙티브 정리 (Step 3)**: 사용자 명시 선택 세션만 아카이브 (상태 무관)
 - 진행 중 세션은 keep count 초과여도 자동 삭제 안 함
+
+## 아카이브 purge 연계
+
+`cleanup`으로 생성된 tar.gz도 `/mst:archive --purge`와 동일한 retention 정책의 대상이다. 오래된 아카이브를 실제 삭제하기 전에는 아래처럼 dry-run으로 대상과 retention을 확인한다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py archive purge --dry-run
+python3 {PLUGIN_ROOT}/scripts/mst.py archive purge --max-age-days 30 --dry-run
+```
+
+실제 삭제는 dry-run 결과 확인 후 `--dry-run` 없이 실행한다.
 
 ## 에러 처리
 
