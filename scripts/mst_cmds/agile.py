@@ -974,11 +974,17 @@ def _read_text_stripped(path: Path) -> Optional[str]:
         return None
 
 
-def _history_ledger_status_readonly(project_root: Path, home: Path, session_id: str) -> dict:
+def _history_ledger_status_readonly(
+    project_root: Path,
+    home: Path,
+    session_id: str,
+    policy_home: Path | None = None,
+) -> dict:
     session_dir = project_root / ".gran-maestro" / "sessions" / session_id
     history_file = session_dir / "history.ndjson"
     local_head = session_dir / "history.head"
-    mirror_head = home / ".claude" / "gran-maestro-policy" / "ledger-heads" / f"{session_id}.head"
+    resolved_policy_home = policy_home or home / ".claude" / "gran-maestro-policy"
+    mirror_head = resolved_policy_home / "ledger-heads" / f"{session_id}.head"
 
     expected_prev = ZERO_HASH
     expected_seq = 1
@@ -1031,6 +1037,17 @@ def _history_ledger_status_readonly(project_root: Path, home: Path, session_id: 
     if mirror_value != last_hash:
         return {"ok": False, "reason": "home mirror head"}
     return {"ok": True, "reason": "ok", "last_hash": last_hash, "seq": expected_seq - 1}
+
+
+def _history_ledger_mismatch_payload(lock_path: Path, ledger_status: dict) -> dict | None:
+    if ledger_status.get("ok"):
+        return None
+    return _diagnostic_payload(
+        "ledger-mismatch",
+        "run-ledger-verification",
+        lock_path,
+        ledger_status=ledger_status,
+    )
 
 
 def _path_has_symlink(path: Path, stop_at: Path) -> bool:
@@ -1120,6 +1137,7 @@ def _diagnose_history_lock(
     project_root: Path | str | None = None,
     base_dir: Path | str | None = None,
     home: Path | str | None = None,
+    policy_home: Path | str | None = None,
     session_id: str | None = None,
     lock_path: Path | str | None = None,
     stale_after_sec: int = STALE_LOCK_SECONDS,
@@ -1128,6 +1146,9 @@ def _diagnose_history_lock(
     resolved_base_dir = _diagnostic_base_dir(project_root=project_root, base_dir=base_dir)
     resolved_project_root = _diagnostic_project_root(project_root=project_root, base_dir=resolved_base_dir)
     resolved_home = Path(home).expanduser().resolve(strict=False) if home is not None else Path.home()
+    resolved_policy_home = (
+        Path(policy_home).expanduser().resolve(strict=False) if policy_home is not None else None
+    )
     sid = str(session_id or "").strip()
     resolved_lock_path = Path(lock_path).expanduser() if lock_path is not None else resolved_base_dir / "sessions" / sid / "history.lock"
 
@@ -1139,6 +1160,16 @@ def _diagnose_history_lock(
             resolved_lock_path,
             scope_status=scope_status,
         )
+
+    ledger_status = _history_ledger_status_readonly(
+        resolved_project_root,
+        resolved_home,
+        sid,
+        policy_home=resolved_policy_home,
+    )
+    ledger_mismatch = _history_ledger_mismatch_payload(resolved_lock_path, ledger_status)
+    if ledger_mismatch is not None:
+        return ledger_mismatch
 
     owner, owner_reason = _load_lock_owner(resolved_lock_path)
     owner_pid = owner.get("owner_pid")
@@ -1177,15 +1208,6 @@ def _diagnose_history_lock(
             resolved_lock_path,
             reason=status_reason or "insufficient-owner-identity",
             owner_status="unknown",
-        )
-
-    ledger_status = _history_ledger_status_readonly(resolved_project_root, resolved_home, sid)
-    if not ledger_status.get("ok"):
-        return _diagnostic_payload(
-            "ledger-mismatch",
-            "run-ledger-verification",
-            resolved_lock_path,
-            ledger_status=ledger_status,
         )
 
     try:
@@ -1803,6 +1825,7 @@ def cmd_agile_diagnose_lock(args):
         "project_root": _common.BASE_DIR.parent if _common.BASE_DIR is not None else Path.cwd(),
         "base_dir": _common.BASE_DIR if _common.BASE_DIR is not None else Path.cwd() / ".gran-maestro",
         "home": Path.home(),
+        "policy_home": Path.home() / ".claude" / "gran-maestro-policy",
         "session_id": getattr(args, "session_id", None),
         "lock_path": Path(args.lock_path).expanduser() if args.lock_path else None,
         "lock_kind": args.lock_kind,
