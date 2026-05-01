@@ -18,7 +18,7 @@ import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from scripts.mst_cmds import _common
 from scripts.mst_cmds.agile_governance import (
     _generate_drift_report_skeleton,
@@ -937,6 +937,357 @@ def cmd_agile_update(args):
 
 
 FINALIZE_ACCEPTED_STATUSES = {"done", "completed", "accepted"}
+STALE_LOCK_SECONDS = 3600
+ZERO_HASH = "0" * 64
+
+
+def _diagnostic_payload(category: str, next_action: str, lock_path: Path, **fields: Any) -> dict:
+    payload = {
+        "category": category,
+        "next_action": next_action,
+        "lock_path": str(lock_path),
+    }
+    payload.update({key: value for key, value in fields.items() if value is not None})
+    return payload
+
+
+def _diagnostic_base_dir(project_root: Path | str | None = None, base_dir: Path | str | None = None) -> Path:
+    if base_dir is not None:
+        return Path(base_dir).expanduser().resolve(strict=False)
+    if project_root is not None:
+        return Path(project_root).expanduser().resolve(strict=False) / ".gran-maestro"
+    if _common.BASE_DIR is not None:
+        return Path(_common.BASE_DIR).resolve(strict=False)
+    return Path.cwd().resolve(strict=False) / ".gran-maestro"
+
+
+def _diagnostic_project_root(project_root: Path | str | None = None, base_dir: Path | str | None = None) -> Path:
+    if project_root is not None:
+        return Path(project_root).expanduser().resolve(strict=False)
+    return _diagnostic_base_dir(base_dir=base_dir).parent
+
+
+def _read_text_stripped(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def _history_ledger_status_readonly(project_root: Path, home: Path, session_id: str) -> dict:
+    session_dir = project_root / ".gran-maestro" / "sessions" / session_id
+    history_file = session_dir / "history.ndjson"
+    local_head = session_dir / "history.head"
+    mirror_head = home / ".claude" / "gran-maestro-policy" / "ledger-heads" / f"{session_id}.head"
+
+    expected_prev = ZERO_HASH
+    expected_seq = 1
+    last_hash = ZERO_HASH
+    try:
+        lines = history_file.read_text(encoding="utf-8").splitlines() if history_file.is_file() else []
+    except OSError as exc:
+        return {"ok": False, "reason": f"history read failed: {exc}"}
+
+    for line_no, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception as exc:
+            return {"ok": False, "reason": f"invalid json line={line_no}: {exc}"}
+        if not isinstance(row, dict):
+            return {"ok": False, "reason": f"row is not object line={line_no}"}
+        if row.get("seq") != expected_seq:
+            return {"ok": False, "reason": f"seq line={line_no}"}
+        if row.get("prev_hash") != expected_prev:
+            return {"ok": False, "reason": f"prev_hash line={line_no}"}
+        event = row.get("event")
+        if not isinstance(event, dict):
+            return {"ok": False, "reason": f"event line={line_no}"}
+        canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        computed = hashlib.sha256((expected_prev + "\n" + canonical).encode("utf-8")).hexdigest()
+        if row.get("event_hash") != computed:
+            return {"ok": False, "reason": f"event_hash line={line_no}"}
+        expected_prev = computed
+        last_hash = computed
+        expected_seq += 1
+
+    local_value = _read_text_stripped(local_head)
+    mirror_value = _read_text_stripped(mirror_head)
+    has_entries = expected_seq > 1
+    if not has_entries:
+        if local_value is not None and local_value != ZERO_HASH:
+            return {"ok": False, "reason": "history.head non-zero for empty ledger"}
+        if mirror_value is not None and mirror_value != ZERO_HASH:
+            return {"ok": False, "reason": "mirror head non-zero for empty ledger"}
+        return {"ok": True, "reason": "ok", "last_hash": ZERO_HASH, "seq": 0}
+
+    if local_value is None:
+        return {"ok": False, "reason": "missing history.head"}
+    if mirror_value is None:
+        return {"ok": False, "reason": "missing home mirror head"}
+    if local_value != last_hash:
+        return {"ok": False, "reason": "history.head"}
+    if mirror_value != last_hash:
+        return {"ok": False, "reason": "home mirror head"}
+    return {"ok": True, "reason": "ok", "last_hash": last_hash, "seq": expected_seq - 1}
+
+
+def _path_has_symlink(path: Path, stop_at: Path) -> bool:
+    current = path
+    stop = stop_at.resolve(strict=False)
+    while True:
+        if current.is_symlink():
+            return True
+        if current.resolve(strict=False) == stop:
+            return False
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _history_scope_status(base_dir: Path, session_id: str, lock_path: Path) -> tuple[bool, str]:
+    expected = (base_dir / "sessions" / session_id / "history.lock").resolve(strict=False)
+    resolved = lock_path.expanduser().resolve(strict=False)
+    if _path_has_symlink(lock_path, base_dir.parent):
+        return False, "symlink-lock-path"
+    if resolved != expected:
+        return False, f"expected={expected}"
+    return True, "ok"
+
+
+def _result_scope_status(base_dir: Path, agi_id: str, sprint_id: str, lock_path: Path) -> tuple[bool, str]:
+    expected = (base_dir / "agile" / agi_id / "sprints" / sprint_id / ".result.lock").resolve(strict=False)
+    resolved = lock_path.expanduser().resolve(strict=False)
+    if _path_has_symlink(lock_path, base_dir.parent):
+        return False, "symlink-lock-path"
+    if resolved != expected:
+        return False, f"expected={expected}"
+    return True, "ok"
+
+
+def _result_partial_artifact(sprint_dir: Path) -> Optional[Path]:
+    candidates = []
+    for pattern in ("*.tmp", "*.partial", ".*.tmp", "result.json.tmp", "result.md.tmp"):
+        candidates.extend(sprint_dir.glob(pattern))
+    for path in sorted(set(candidates)):
+        if path.name == ".result.lock":
+            continue
+        if path.exists():
+            return path
+    result_json = sprint_dir / "result.json"
+    if result_json.is_file():
+        try:
+            json.loads(result_json.read_text(encoding="utf-8"))
+        except Exception:
+            return result_json
+    return None
+
+
+def _load_lock_owner(lock_path: Path) -> tuple[dict, Optional[str]]:
+    owner_path = lock_path / "owner.json"
+    if not owner_path.is_file():
+        return {}, "missing-owner-metadata"
+    try:
+        owner = json.loads(owner_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {}, f"malformed-owner-metadata: {exc}"
+    if not isinstance(owner, dict):
+        return {}, "owner-metadata-not-object"
+    return owner, None
+
+
+def _process_status(pid: Any) -> tuple[str, Optional[str]]:
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return "unknown", "invalid-owner-pid"
+    if pid_int <= 0:
+        return "unknown", "invalid-owner-pid"
+    try:
+        os.kill(pid_int, 0)
+        return "live", None
+    except ProcessLookupError:
+        return "missing", None
+    except PermissionError as exc:
+        return "inconclusive", str(exc)
+    except OSError as exc:
+        return "inconclusive", str(exc)
+
+
+def _diagnose_history_lock(
+    *,
+    project_root: Path | str | None = None,
+    base_dir: Path | str | None = None,
+    home: Path | str | None = None,
+    session_id: str | None = None,
+    lock_path: Path | str | None = None,
+    stale_after_sec: int = STALE_LOCK_SECONDS,
+    **_: Any,
+) -> dict:
+    resolved_base_dir = _diagnostic_base_dir(project_root=project_root, base_dir=base_dir)
+    resolved_project_root = _diagnostic_project_root(project_root=project_root, base_dir=resolved_base_dir)
+    resolved_home = Path(home).expanduser().resolve(strict=False) if home is not None else Path.home()
+    sid = str(session_id or "").strip()
+    resolved_lock_path = Path(lock_path).expanduser() if lock_path is not None else resolved_base_dir / "sessions" / sid / "history.lock"
+
+    scope_ok, scope_status = _history_scope_status(resolved_base_dir, sid, resolved_lock_path)
+    if not scope_ok:
+        return _diagnostic_payload(
+            "scope-mismatch",
+            "inspect-lock-owner",
+            resolved_lock_path,
+            scope_status=scope_status,
+        )
+
+    owner, owner_reason = _load_lock_owner(resolved_lock_path)
+    owner_pid = owner.get("owner_pid")
+    owner_started_at = owner.get("owner_started_at")
+    owner_session_id = owner.get("session_id")
+    if owner_reason or owner_pid in (None, "") or owner_started_at in (None, "") or owner_session_id in (None, ""):
+        return _diagnostic_payload(
+            "owner-unknown",
+            "inspect-lock-owner",
+            resolved_lock_path,
+            reason=owner_reason or "insufficient-owner-identity",
+            owner_status="unknown",
+        )
+
+    owner_status, status_reason = _process_status(owner_pid)
+    if owner_status == "live":
+        return _diagnostic_payload(
+            "owner-live",
+            "wait-for-owner",
+            resolved_lock_path,
+            owner_pid=int(owner_pid),
+            owner_status="live",
+        )
+    if owner_status == "inconclusive":
+        return _diagnostic_payload(
+            "diagnosis-inconclusive",
+            "inspect-lock-owner",
+            resolved_lock_path,
+            reason=status_reason or "process lookup failed",
+            owner_status="inconclusive",
+        )
+    if owner_status == "unknown":
+        return _diagnostic_payload(
+            "owner-unknown",
+            "inspect-lock-owner",
+            resolved_lock_path,
+            reason=status_reason or "insufficient-owner-identity",
+            owner_status="unknown",
+        )
+
+    ledger_status = _history_ledger_status_readonly(resolved_project_root, resolved_home, sid)
+    if not ledger_status.get("ok"):
+        return _diagnostic_payload(
+            "ledger-mismatch",
+            "run-ledger-verification",
+            resolved_lock_path,
+            ledger_status=ledger_status,
+        )
+
+    try:
+        lock_age = max(0.0, time.time() - resolved_lock_path.stat().st_mtime)
+    except OSError:
+        lock_age = 0.0
+    if lock_age >= float(stale_after_sec):
+        return _diagnostic_payload(
+            "history-lock-stale-candidate",
+            "manual-recovery-approval",
+            resolved_lock_path,
+            lock_age=lock_age,
+        )
+    return _diagnostic_payload(
+        "owner-unknown",
+        "inspect-lock-owner",
+        resolved_lock_path,
+        reason="owner-missing-but-lock-age-below-threshold",
+        owner_status="missing",
+    )
+
+
+def _diagnose_result_lock(
+    *,
+    project_root: Path | str | None = None,
+    base_dir: Path | str | None = None,
+    agi_id: str | None = None,
+    sprint: int | None = None,
+    sprint_id: str | None = None,
+    lock_path: Path | str | None = None,
+    **_: Any,
+) -> dict:
+    resolved_base_dir = _diagnostic_base_dir(project_root=project_root, base_dir=base_dir)
+    agi = str(agi_id or "").strip()
+    sid = str(sprint_id or "").strip() or (f"S{int(sprint):02d}" if sprint is not None else "")
+    resolved_lock_path = Path(lock_path).expanduser() if lock_path is not None else resolved_base_dir / "agile" / agi / "sprints" / sid / ".result.lock"
+    scope_ok, scope_status = _result_scope_status(resolved_base_dir, agi, sid, resolved_lock_path)
+    if not scope_ok:
+        return _diagnostic_payload(
+            "scope-mismatch",
+            "inspect-lock-owner",
+            resolved_lock_path,
+            scope_status=scope_status,
+        )
+
+    sprint_dir = resolved_lock_path.parent
+    artifact_path = _result_partial_artifact(sprint_dir)
+    if artifact_path is not None:
+        return _diagnostic_payload(
+            "partial-output-detected",
+            "inspect-partial-output",
+            resolved_lock_path,
+            artifact_path=str(artifact_path),
+        )
+
+    if resolved_lock_path.exists():
+        with open(resolved_lock_path, "a+", encoding="utf-8") as result_lock_file:
+            acquired = False
+            try:
+                _common._lock_exclusive_with_timeout(result_lock_file, timeout_sec=0.0, poll_interval=0.01)
+                acquired = True
+            except TimeoutError:
+                return _diagnostic_payload(
+                    "result-lock-contention",
+                    "wait-for-owner",
+                    resolved_lock_path,
+                    agi_id=agi,
+                    sprint_id=sid,
+                )
+            finally:
+                if acquired:
+                    _common._unlock(result_lock_file)
+
+    return _diagnostic_payload(
+        "owner-unknown",
+        "inspect-lock-owner",
+        resolved_lock_path,
+        reason="no-result-lock-contention-detected",
+        owner_status="unknown",
+        agi_id=agi,
+        sprint_id=sid,
+    )
+
+
+def _diagnose_stale_lock(**context: Any) -> dict:
+    kind = str(context.get("lock_kind") or context.get("kind") or "").strip().lower()
+    lock_path = context.get("lock_path")
+    lock_name = Path(lock_path).name if lock_path is not None else ""
+    if kind == "result" or lock_name == ".result.lock":
+        return _diagnose_result_lock(**context)
+    return _diagnose_history_lock(**context)
+
+
+diagnose_stale_lock = _diagnose_stale_lock
+
+
+def diagnose_agile_stale_lock(**context: Any) -> dict:
+    return _diagnose_stale_lock(**context)
+
+
+def diagnose_history_lock(**context: Any) -> dict:
+    return _diagnose_history_lock(**context)
 
 
 def _load_first_json_object(raw: str):
@@ -1301,11 +1652,21 @@ def cmd_agile_result(args):
             _common._lock_exclusive_with_timeout(result_lock_file, timeout_sec=5.0, poll_interval=0.05)
             result_lock_acquired = True
         except TimeoutError as exc:
+            diagnostic = _diagnostic_payload(
+                "result-lock-contention",
+                "wait-for-owner",
+                result_lock_path,
+                agi_id=agi_id,
+                sprint_id=sprint_id,
+                compatible_signal="lock-contention",
+            )
             print(
                 "Error: agile result lock-contention (lock timeout) "
+                "category=result-lock-contention next_action=wait-for-owner "
                 f"agi_id={agi_id} sprint_id={sprint_id} lock_path={result_lock_path} detail={exc}",
                 file=sys.stderr,
             )
+            print(json.dumps(diagnostic, ensure_ascii=False, sort_keys=True), file=sys.stderr)
             return 1
 
         try:
@@ -1434,6 +1795,25 @@ def cmd_agile_result(args):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(str(sprint_dir / "result.json"))
+    return 0
+
+
+def cmd_agile_diagnose_lock(args):
+    context = {
+        "project_root": _common.BASE_DIR.parent if _common.BASE_DIR is not None else Path.cwd(),
+        "base_dir": _common.BASE_DIR if _common.BASE_DIR is not None else Path.cwd() / ".gran-maestro",
+        "home": Path.home(),
+        "session_id": getattr(args, "session_id", None),
+        "lock_path": Path(args.lock_path).expanduser() if args.lock_path else None,
+        "lock_kind": args.lock_kind,
+        "kind": args.lock_kind,
+        "agi_id": getattr(args, "agi_id", None),
+        "sprint": getattr(args, "sprint", None),
+        "sprint_id": getattr(args, "sprint_id", None),
+        "stale_after_sec": getattr(args, "stale_after_sec", STALE_LOCK_SECONDS),
+    }
+    payload = _diagnose_stale_lock(**context)
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 def cmd_agile_dispatch_result(args):
@@ -1828,6 +2208,15 @@ def register(subparsers):
     agile_result.add_argument("--foundational-reason", dest="foundational_reason")
     agile_result.add_argument("--json", action="store_true")
 
+    agile_diagnose_lock = agile_sub.add_parser("diagnose-lock")
+    agile_diagnose_lock.add_argument("--lock-kind", choices=["history", "result"], default="history")
+    agile_diagnose_lock.add_argument("--lock-path")
+    agile_diagnose_lock.add_argument("--session-id")
+    agile_diagnose_lock.add_argument("--agi-id")
+    agile_diagnose_lock.add_argument("--sprint", type=int)
+    agile_diagnose_lock.add_argument("--sprint-id")
+    agile_diagnose_lock.add_argument("--stale-after-sec", type=int, default=STALE_LOCK_SECONDS)
+
     agile_dispatch_result = agile_sub.add_parser("dispatch-result")
     agile_dispatch_result.add_argument("agi_id")
     agile_dispatch_result.add_argument("--sprint", type=int, required=True)
@@ -1862,6 +2251,7 @@ def register(subparsers):
     dispatch = getattr(parent_module, "DISPATCH", None)
     if isinstance(dispatch, dict):
         dispatch.setdefault(("agile", "finalize"), cmd_agile_finalize)
+        dispatch.setdefault(("agile", "diagnose-lock"), cmd_agile_diagnose_lock)
 
     agile_sprint_close = agile_sub.add_parser("sprint-close")
     agile_sprint_close.add_argument("agi_id")

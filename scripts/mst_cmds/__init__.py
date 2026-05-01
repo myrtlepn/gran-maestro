@@ -192,6 +192,7 @@ DISPATCH = {
     ("agile", "takeover"): agile.cmd_agile_takeover,
     ("agile", "update"): agile.cmd_agile_update,
     ("agile", "result"): agile.cmd_agile_result,
+    ("agile", "diagnose-lock"): agile.cmd_agile_diagnose_lock,
     ("agile", "dispatch-result"): agile.cmd_agile_dispatch_result,
     ("agile", "sprint-close"): agile.cmd_agile_sprint_close,
     ("agile", "retrospective"): agile.cmd_agile_retrospective,

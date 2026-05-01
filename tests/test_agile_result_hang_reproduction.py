@@ -37,6 +37,8 @@ MST_PY = (
 )
 CAUSE_CATEGORIES = {"normal", "lock-contention", "ledger-mismatch", "aux-failure"}
 AUX_WARNING_STAGES = {"drift-report", "recall-manifest", "links-update"}
+LOCK_CONTENTION_CATEGORIES = {"result-lock-contention", "lock-contention"}
+LOCK_CONTENTION_NEXT_ACTIONS = {"wait-for-owner", "retry"}
 SINGLE_CALL_TIMEOUT_SEC = 30
 CONCURRENT_TIMEOUT_SEC = 60
 
@@ -210,6 +212,40 @@ def _stderr_pattern(stderr: str) -> str:
     if "error:" in text:
         return "error"
     return ""
+
+
+def _extract_diagnostic(outcome: dict[str, object]) -> dict[str, object]:
+    """Best-effort parser for JSON or key=value diagnostic output."""
+
+    for stream_name in ("stdout", "stderr"):
+        raw = str(outcome.get(stream_name) or "").strip()
+        if not raw:
+            continue
+        for candidate in (raw, *raw.splitlines()):
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+
+    text = "\n".join(str(outcome.get(name) or "") for name in ("stdout", "stderr"))
+    fields: dict[str, object] = {}
+    for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)=([^\s]+)", text):
+        fields[match.group(1)] = match.group(2).rstrip(",")
+    lowered = text.lower()
+    if "result-lock-contention" in lowered:
+        fields.setdefault("category", "result-lock-contention")
+    elif "lock-contention" in lowered or "lock timeout" in lowered:
+        fields.setdefault("category", "lock-contention")
+    if "wait-for-owner" in lowered:
+        fields.setdefault("next_action", "wait-for-owner")
+    elif "retry" in lowered:
+        fields.setdefault("next_action", "retry")
+    return fields
 
 
 def _classify_outcome(outcome: dict[str, object]) -> str:
@@ -494,9 +530,57 @@ def test_result_lock_held_returns_lock_timeout(isolated_project):
     stderr = str(outcome.get("stderr") or "")
     stderr_lower = stderr.lower()
     assert "lock timeout" in stderr_lower or "lock-contention" in stderr_lower, stderr
-    assert agi_id.lower() in stderr_lower, stderr
-    assert f"s{sprint:02d}".lower() in stderr_lower, stderr
-    assert str(lock_path).lower() in stderr_lower, stderr
+    diagnostic = _extract_diagnostic(outcome)
+    assert diagnostic.get("category") in LOCK_CONTENTION_CATEGORIES, (
+        f"missing DOD-004 lock contention category: diagnostic={diagnostic!r} stderr={stderr!r}"
+    )
+    assert str(diagnostic.get("agi_id") or "").lower() == agi_id.lower(), diagnostic
+    assert str(diagnostic.get("sprint_id") or "").lower() == f"s{sprint:02d}".lower(), diagnostic
+    diagnostic_lock_path = Path(str(diagnostic.get("lock_path") or "")).resolve(strict=False)
+    assert diagnostic_lock_path == lock_path.resolve(strict=False), diagnostic
+    assert diagnostic.get("next_action") in LOCK_CONTENTION_NEXT_ACTIONS, diagnostic
+    assert lock_path.exists(), f"lock file must be preserved on contention: {lock_path}"
+
+    artifacts = outcome["partial_artifacts"]
+    payload = artifacts.get("payload") if isinstance(artifacts, dict) else None
+    assert not (isinstance(payload, dict) and payload.get("aux_status") == "partial"), (
+        "lock diagnostic failures must not be wrapped as successful aux_status=partial "
+        f"payloads: {payload!r}"
+    )
+
+
+def test_orphan_result_lock_file_does_not_block_success(isolated_project):
+    root = isolated_project["root"]
+    agi_id = isolated_project["agi_id"]
+    sprint = 8
+    lock_path = _sprint_dir(root, agi_id, sprint) / ".result.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("orphan lock file without an fcntl owner\n", encoding="utf-8")
+
+    outcome = _run_agile_result(
+        root,
+        agi_id,
+        sprint=sprint,
+        summary="test_orphan_result_lock_file_does_not_block_success",
+        timeout=SINGLE_CALL_TIMEOUT_SEC,
+    )
+
+    _assert_bounded(outcome, "normal", SINGLE_CALL_TIMEOUT_SEC)
+    assert outcome["returncode"] == 0, (
+        f"orphan result lock should not block success: stderr={outcome['stderr']!r}"
+    )
+    assert lock_path.exists(), f"orphan result lock file should not be deleted: {lock_path}"
+    artifacts = outcome["partial_artifacts"]
+    assert artifacts["result_json"] and artifacts["result_md"] and artifacts["events"], artifacts
+    payload = artifacts["payload"]
+    assert isinstance(payload, dict), payload
+    assert payload.get("summary") == "test_orphan_result_lock_file_does_not_block_success"
+    assert payload.get("aux_status") == "ok", payload
+    result_json_path = _sprint_dir(root, agi_id, sprint) / "result.json"
+    events_path = _events_path(root, agi_id)
+    json.loads(result_json_path.read_text(encoding="utf-8"))
+    events = _read_ndjson_strict(events_path)
+    assert any(event.get("event") == "agile.result" and event.get("sprint_id") == "S08" for event in events)
 
 
 def test_aux_output_failure(isolated_project):
