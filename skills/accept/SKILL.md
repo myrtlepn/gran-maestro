@@ -124,39 +124,36 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - **base/브랜치 변수 준비 (MANDATORY)**:
      - `request.json.detected_base`가 있으면 해당 값을 최우선 base로 사용한다.
      - `request.json.detected_base`가 없으면 fallback: `config.worktree.base_branch` → `master` 순서로 사용한다.
-     - `BASE_SLUG`는 base 이름의 `/`를 `-`로 치환한 값이다. (T03 helper가 있는 환경에서는 동일 규칙의 helper를 재사용한다.)
-     - `{BASE_BRANCH}` checkout 실패 시 감지 base와 실제 git 상태가 불일치한 것으로 보고 명시적 오류를 출력한 뒤 중단한다.
+     - branch name은 `worktree branch-name` helper로만 산출하며, AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/...` 형식을 사용한다.
+     - accept worktree 생성 실패 시 감지 base와 실제 git 상태가 불일치한 것으로 보고 명시적 오류를 출력한 뒤 중단한다.
      ```bash
      REQUEST_JSON="{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/request.json"
      DETECTED_BASE=$(python3 -c 'import json, sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(str(data.get("detected_base") or "").strip())' "$REQUEST_JSON")
      CONFIG_BASE_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch 2>/dev/null || true)
      CONFIG_BASE_BRANCH=$(printf "%s" "$CONFIG_BASE_BRANCH" | head -n 1 | xargs)
      BASE_BRANCH="${DETECTED_BASE:-${CONFIG_BASE_BRANCH:-master}}"
-     BASE_SLUG=$(python3 -c 'import sys; print(sys.argv[1].replace("/", "-"))' "$BASE_BRANCH")
-     REQ_BRANCH="gran-maestro/${BASE_SLUG}/REQ-NNN"
-     TASK_BRANCH_PREFIX="gran-maestro/${BASE_SLUG}/REQ-NNN-T"
+     REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --role integration --agi "${AGI_ID:-}")
+     TASK_BRANCH_PREFIX=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --task T --agi "${AGI_ID:-}")
      echo "[accept] squash base: ${BASE_BRANCH}"
      echo "[accept] request branch: ${REQ_BRANCH}"
      ```
    - **3-1. 각 태스크 worktree → REQ 브랜치 일반 머지 (태스크 커밋 이력 보존)**:
      ```bash
-     # 각 태스크 브랜치를 REQ 브랜치에 머지 (커밋 이력 보존)
-     git -C {PROJECT_ROOT} checkout "${REQ_BRANCH}"
-     git -C {PROJECT_ROOT} merge --no-ff "${TASK_BRANCH_PREFIX}01"
-     git -C {PROJECT_ROOT} merge --no-ff "${TASK_BRANCH_PREFIX}02"
+     # 각 태스크 브랜치를 dedicated integration worktree에서 REQ 브랜치에 머지한다.
+     INTEGRATION_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role integration --agi "${AGI_ID:-}")
+     git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}01"
+     git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}02"
      # ... (태스크 수만큼 반복)
      ```
    - **3-2. REQ 브랜치 → base squash-merge (단일 커밋 생성)**:
      ```bash
-     git -C {PROJECT_ROOT} checkout master
-     git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN
+     ACCEPT_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role accept --agi "${AGI_ID:-}")
+     ACCEPT_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --role accept --agi "${AGI_ID:-}")
+     python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$ACCEPT_WORKTREE" --branch "$ACCEPT_BRANCH" --base "$BASE_BRANCH"
+     git -C "$ACCEPT_WORKTREE" merge --squash "${REQ_BRANCH}"
      ```
-     하위 호환 snapshot 계약은 위 flat REQ branch 예시를 유지한다. 실제 실행은 아래 감지 base 변수를 사용한다.
-     ```bash
-     git -C {PROJECT_ROOT} checkout "${BASE_BRANCH}"
-     git -C {PROJECT_ROOT} merge --squash "${REQ_BRANCH}"
-     ```
-     예: `request.json.detected_base="feature/branch-rules"`이면 `git checkout feature/branch-rules` 후 `git merge --squash gran-maestro/feature-branch-rules/REQ-NNN`를 실행한다.
+     실제 실행은 감지 base 변수를 사용하며, 원본 `PROJECT_ROOT`에서는 checkout/merge를 수행하지 않는다.
+     예: `request.json.detected_base="feature/branch-rules"`, `AGI_ID="AGI-026"`이면 accept worktree가 `feature/branch-rules`에서 생성되고 그 내부에서 `gran-maestro/feature-branch-rules/AGI-026/REQ-NNN`를 squash merge한다.
      [커밋 양식 감지]
      1. `git -C {PROJECT_ROOT} log --pretty=format:"%s" -10`을 실행해 최근 10개 커밋 subject를 수집한다.
      2. 수집된 subject에서 `[REQ-`로 시작하는 항목을 우선 분석 대상으로 사용하고, 없으면 전체 10개를 분석 대상으로 사용한다.

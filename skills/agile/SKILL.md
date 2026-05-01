@@ -525,9 +525,7 @@ Dispatch 시작 전 primary worktree가 base 브랜치에 있는지 확인한다
 1. `git -C {PROJECT_ROOT} rev-parse --abbrev-ref HEAD`로 현재 HEAD를 확인한다.
 2. base 브랜치는 `config.worktree.base_branch`를 우선 사용하고, 값이 비어 있으면 `master`로 fallback 한다.
 3. `HEAD == base`이면 dispatch를 계속 진행한다.
-4. `HEAD != base`이면 `git -C {PROJECT_ROOT} status --porcelain`로 미커밋 변경을 확인한다.
-   - 미커밋 변경이 없으면 `git -C {PROJECT_ROOT} checkout {base}`를 시도한다. 성공하면 dispatch를 계속 진행한다.
-   - checkout 실패 또는 미커밋 변경 존재 시 dispatch를 중단하고 known issue를 자동 등록한다.
+4. `HEAD != base`이면 dispatch를 중단하고 known issue를 자동 등록한다. 이 가드는 primary worktree를 자동 checkout하지 않는다.
 
 ```bash
 CURRENT_HEAD=$(git -C {PROJECT_ROOT} rev-parse --abbrev-ref HEAD)
@@ -536,26 +534,12 @@ BASE_BRANCH=${BASE_BRANCH:-master}
 
 if [ "$CURRENT_HEAD" != "$BASE_BRANCH" ]; then
   UNCOMMITTED=$(git -C {PROJECT_ROOT} status --porcelain)
-
-  if [ -z "$UNCOMMITTED" ]; then
-    if git -C {PROJECT_ROOT} checkout "$BASE_BRANCH"; then
-      echo "[Sprint Dispatch 가드] primary worktree를 base=${BASE_BRANCH}로 복귀했습니다."
-    else
-      echo "[Sprint Dispatch 차단] primary worktree HEAD=${CURRENT_HEAD}. base=${BASE_BRANCH} checkout 실패. base=${BASE_BRANCH}로 이동 후 재시도"
-      python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
-        --description "primary worktree hijack: HEAD=${CURRENT_HEAD}, base checkout 실패" \
-        --severity MAJOR \
-        --sprint {CURRENT_SPRINT}
-      exit 1
-    fi
-  else
-    echo "[Sprint Dispatch 차단] primary worktree에 미커밋 변경 + HEAD=${CURRENT_HEAD}. base=${BASE_BRANCH}로 이동 후 재시도"
-    python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
-      --description "primary worktree hijack: HEAD=${CURRENT_HEAD}, uncommitted 변경 존재" \
-      --severity MAJOR \
-      --sprint {CURRENT_SPRINT}
-    exit 1
-  fi
+  echo "[Sprint Dispatch 차단] primary worktree HEAD=${CURRENT_HEAD}, base=${BASE_BRANCH}. 원본 checkout 변경 없이 중단합니다."
+  python3 {PLUGIN_ROOT}/scripts/mst.py agile known-issues add {AGI_ID} \
+    --description "primary worktree hijack: HEAD=${CURRENT_HEAD}, base=${BASE_BRANCH}, dirty=${UNCOMMITTED:+true}" \
+    --severity MAJOR \
+    --sprint {CURRENT_SPRINT}
+  exit 1
 fi
 ```
 

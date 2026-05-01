@@ -33,12 +33,41 @@ def base_slug(base: str) -> str:
     return str(base).replace("/", "-")
 
 
-def req_branch_name(req_id: str, base: str) -> str:
+def _agi_segment(agi_id: str | None) -> str | None:
+    agi_value = str(agi_id).strip() if agi_id is not None else ""
+    return agi_value or None
+
+
+def req_branch_name(req_id: str, base: str, agi_id: str | None = None) -> str:
+    agi_value = _agi_segment(agi_id)
+    if agi_value:
+        return f"gran-maestro/{base_slug(base)}/{agi_value}/{req_id}"
     return f"gran-maestro/{base_slug(base)}/{req_id}"
 
 
-def task_branch_name(req_id: str, task_id: str, base: str) -> str:
-    return f"{req_branch_name(req_id, base)}-{task_id}"
+def task_branch_name(req_id: str, task_id: str, base: str, agi_id: str | None = None) -> str:
+    return f"{req_branch_name(req_id, base, agi_id)}-{task_id}"
+
+
+def role_branch_name(req_id: str, role: str, base: str, agi_id: str | None = None) -> str:
+    role_value = str(role).strip()
+    normalized_role = role_value.lower()
+    if normalized_role == "integration":
+        return req_branch_name(req_id, base, agi_id)
+    if normalized_role.startswith("review-"):
+        return f"{req_branch_name(req_id, base, agi_id)}-review-{role_value[7:]}"
+    return f"{req_branch_name(req_id, base, agi_id)}-{normalized_role}"
+
+
+def role_worktree_path(project_root: Path, req_id: str, role: str, agi_id: str | None = None) -> Path:
+    role_value = str(role).strip()
+    normalized_role = role_value.lower()
+    agi_value = _agi_segment(agi_id)
+    if agi_value:
+        if normalized_role.startswith("review-"):
+            return _common.worktrees_dir(project_root) / agi_value / req_id / "review" / role_value[7:]
+        return _common.worktrees_dir(project_root) / agi_value / req_id / normalized_role
+    return _common.worktrees_dir(project_root) / req_id / normalized_role
 
 
 def matching_protected_pattern(branch: str, protected_patterns: list[str]) -> str | None:
@@ -762,6 +791,74 @@ def cmd_worktree_detect_orphans(args):
 
 
 
+def _read_git_worktree_branch(project_root: Path, worktree_path: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(worktree_path), "symbolic-ref", "--quiet", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if result.returncode != 0:
+        return None
+    return _coerce_nonempty_str(result.stdout)
+
+
+def _worktree_is_dirty(project_root: Path, worktree_path: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(worktree_path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _find_worktree_root(project_root: Path, worktree_path: Path) -> Path | None:
+    try:
+        for root in _list_worktree_roots(project_root):
+            if _normalize_target_path(root) == _normalize_target_path(worktree_path):
+                return root
+    except RuntimeError:
+        return None
+    return None
+
+
+def classify_worktree_collision(project_root: Path, worktree_path: Path, branch: str) -> str:
+    normalized_path = _normalize_target_path(worktree_path)
+    path_exists = normalized_path.exists()
+    listed_root = _find_worktree_root(project_root, normalized_path)
+    branch_exists = _git_branch_exists(project_root, branch)
+
+    if listed_root is not None:
+        current_branch = _read_git_worktree_branch(project_root, normalized_path)
+        if _worktree_is_dirty(project_root, normalized_path):
+            return "dirty_worktree_manual_conflict"
+        if current_branch == branch and branch_exists:
+            return "reusable_existing_worktree"
+        return "stale_orphan_cleanup_required"
+
+    if path_exists and not (normalized_path / ".git").exists():
+        return "fatal_conflict"
+    if path_exists or branch_exists:
+        return "stale_orphan_cleanup_required"
+    return "no_collision"
+
+
+def cmd_worktree_classify_collision(args):
+    branch = str(getattr(args, "branch", "") or "").strip()
+    if not branch:
+        print("Error: --branch is required", file=sys.stderr)
+        return 1
+    project_root = _resolve_master_project_root()
+    classification = classify_worktree_collision(project_root, Path(args.path), branch)
+    payload = {"classification": classification, "path": str(_normalize_target_path(args.path)), "branch": branch}
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(classification)
+    return 0 if classification in {"no_collision", "reusable_existing_worktree"} else 2
+
+
 def cmd_worktree_resolve_base(args):
     try:
         detected_base = current_head_branch()
@@ -826,10 +923,19 @@ def cmd_worktree_slug(args):
 
 
 def cmd_worktree_branch_name(args):
-    if getattr(args, "task", None):
-        print(task_branch_name(args.req, args.task, args.base))
+    agi_id = getattr(args, "agi", None)
+    role = getattr(args, "role", None)
+    if role:
+        print(role_branch_name(args.req, role, args.base, agi_id))
+    elif getattr(args, "task", None):
+        print(task_branch_name(args.req, args.task, args.base, agi_id))
     else:
-        print(req_branch_name(args.req, args.base))
+        print(req_branch_name(args.req, args.base, agi_id))
+    return 0
+
+
+def cmd_worktree_path(args):
+    print(role_worktree_path(_project_root(), args.req, args.role, getattr(args, "agi", None)))
     return 0
 
 
@@ -1216,6 +1322,13 @@ def register(subparsers):
     worktree_branch_name.add_argument("--req", required=True)
     worktree_branch_name.add_argument("--base", required=True)
     worktree_branch_name.add_argument("--task")
+    worktree_branch_name.add_argument("--role")
+    worktree_branch_name.add_argument("--agi")
+
+    worktree_path = worktree_sub.add_parser("path")
+    worktree_path.add_argument("--req", required=True)
+    worktree_path.add_argument("--role", required=True)
+    worktree_path.add_argument("--agi")
 
     worktree_check_boundary = worktree_sub.add_parser("check-boundary")
     worktree_check_boundary.add_argument("--req", required=True)
@@ -1229,5 +1342,12 @@ def register(subparsers):
     worktree_detect_orphans.add_argument("--scope", default=None)
     worktree_detect_orphans.add_argument("--prefix", default=None)
 
+    worktree_classify_collision = worktree_sub.add_parser("classify-collision")
+    worktree_classify_collision.add_argument("--path", required=True)
+    worktree_classify_collision.add_argument("--branch", required=True)
+    worktree_classify_collision.add_argument("--json", action="store_true")
+
+    _register_worktree_dispatch("path", cmd_worktree_path)
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
     _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)
+    _register_worktree_dispatch("classify-collision", cmd_worktree_classify_collision)

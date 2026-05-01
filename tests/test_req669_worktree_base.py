@@ -92,6 +92,9 @@ def test_ac004_req_branch_name_uses_base_slug() -> None:
     assert worktree.req_branch_name("REQ-NNN", "feature/branch-rules") == (
         "gran-maestro/feature-branch-rules/REQ-NNN"
     )
+    assert worktree.req_branch_name("REQ-779", "feature/branch-rules", "AGI-026") == (
+        "gran-maestro/feature-branch-rules/AGI-026/REQ-779"
+    )
 
 
 @pytest.mark.parametrize(
@@ -111,6 +114,40 @@ def test_ac006_task_worktree_branch_and_base_names() -> None:
     assert worktree.task_branch_name("REQ-069", "T01", "feature/x") == (
         "gran-maestro/feature-x/REQ-069-T01"
     )
+    assert worktree.task_branch_name("REQ-779", "T01", "feature/x", "AGI-026") == (
+        "gran-maestro/feature-x/AGI-026/REQ-779-T01"
+    )
+
+
+def test_role_branch_names_are_deterministic() -> None:
+    assert worktree.role_branch_name("REQ-069", "integration", "feature/x") == (
+        "gran-maestro/feature-x/REQ-069"
+    )
+    assert worktree.role_branch_name("REQ-069", "accept", "feature/x") == (
+        "gran-maestro/feature-x/REQ-069-accept"
+    )
+    assert worktree.role_branch_name("REQ-779", "integration", "feature/x", "AGI-026") == (
+        "gran-maestro/feature-x/AGI-026/REQ-779"
+    )
+    assert worktree.role_branch_name("REQ-779", "accept", "feature/x", "AGI-026") == (
+        "gran-maestro/feature-x/AGI-026/REQ-779-accept"
+    )
+    assert worktree.role_branch_name("REQ-779", "review-RV-001", "feature/x", "AGI-026") == (
+        "gran-maestro/feature-x/AGI-026/REQ-779-review-RV-001"
+    )
+
+
+def test_role_worktree_paths_are_deterministic() -> None:
+    project_root = Path("/repo")
+    assert worktree.role_worktree_path(project_root, "REQ-069", "integration") == (
+        project_root / ".gran-maestro" / "worktrees" / "REQ-069" / "integration"
+    )
+    assert worktree.role_worktree_path(project_root, "REQ-069", "accept", "AGI-026") == (
+        project_root / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-069" / "accept"
+    )
+    assert worktree.role_worktree_path(project_root, "REQ-069", "review-RV-001", "AGI-026") == (
+        project_root / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-069" / "review" / "RV-001"
+    )
 
 
 def test_ac007_detected_base_persisted_on_success(repo: Path) -> None:
@@ -123,3 +160,59 @@ def test_ac007_detected_base_persisted_on_success(repo: Path) -> None:
         (repo / ".gran-maestro" / "requests" / "REQ-069" / "request.json").read_text(encoding="utf-8")
     )
     assert request_data.get("detected_base") == "feature/x"
+
+
+def test_branch_name_cli_accepts_agi_namespace(capsys) -> None:
+    exit_code = worktree.cmd_worktree_branch_name(
+        argparse.Namespace(req="REQ-779", base="feature/x", task=None, role="integration", agi="AGI-026")
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.strip() == "gran-maestro/feature-x/AGI-026/REQ-779"
+
+
+def test_collision_reusable_existing_worktree(repo: Path) -> None:
+    path = repo / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-779" / "integration"
+    branch = "gran-maestro/main/AGI-026/REQ-779"
+    assert _run_git(repo, "worktree", "add", "-b", branch, str(path), "main").returncode == 0
+
+    assert worktree.classify_worktree_collision(repo, path, branch) == "reusable_existing_worktree"
+
+
+def test_collision_stale_orphan_cleanup_required(repo: Path) -> None:
+    path = repo / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-779" / "accept"
+    branch = "gran-maestro/main/AGI-026/REQ-779-accept"
+    assert _run_git(repo, "branch", branch, "main").returncode == 0
+
+    assert worktree.classify_worktree_collision(repo, path, branch) == "stale_orphan_cleanup_required"
+
+
+def test_collision_dirty_worktree_manual_conflict(repo: Path) -> None:
+    path = repo / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-779" / "integration"
+    branch = "gran-maestro/main/AGI-026/REQ-779"
+    assert _run_git(repo, "worktree", "add", "-b", branch, str(path), "main").returncode == 0
+    (path / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    assert worktree.classify_worktree_collision(repo, path, branch) == "dirty_worktree_manual_conflict"
+
+
+def test_collision_fatal_conflict(repo: Path) -> None:
+    path = repo / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-779" / "integration"
+    path.mkdir(parents=True)
+
+    assert worktree.classify_worktree_collision(repo, path, "gran-maestro/main/AGI-026/REQ-779") == "fatal_conflict"
+
+
+def test_collision_classifier_does_not_generate_suffix(repo: Path) -> None:
+    path = repo / ".gran-maestro" / "worktrees" / "AGI-026" / "REQ-779" / "accept"
+    branch = "gran-maestro/main/AGI-026/REQ-779-accept"
+    assert _run_git(repo, "branch", branch, "main").returncode == 0
+
+    classification = worktree.classify_worktree_collision(repo, path, branch)
+
+    assert classification == "stale_orphan_cleanup_required"
+    assert "-1" not in classification
+    assert "uuid" not in classification
+    assert "timestamp" not in classification
+    assert "random" not in classification

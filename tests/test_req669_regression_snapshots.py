@@ -16,25 +16,19 @@ def _skill_text(name: str) -> str:
     return (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_approve_req_branch_name_snapshot_is_flat_req_branch() -> None:
+def test_approve_req_branch_name_snapshot_uses_integration_worktree() -> None:
     content = _skill_text("approve")
 
-    match = re.search(
-        r"git show-ref --verify --quiet refs/heads/(?P<branch>gran-maestro/REQ-NNN)"
-        r"\s*\\\s*\n\s*\|\| git checkout -b (?P=branch) \{config\.worktree\.base_branch\}",
-        content,
-    )
-
-    assert match is not None
-    branch_template = match.group("branch")
-    branch_name = branch_template.replace("NNN", "001")
-
-    assert branch_name == "gran-maestro/REQ-001"
-    assert re.fullmatch(r"gran-maestro/REQ-\d{3}", branch_name)
-    assert "--base gran-maestro/REQ-NNN" in content
+    assert "--role integration" in content
+    assert 'branch-name --req REQ-NNN --base "$DETECTED_BASE" --role integration --agi "${AGI_ID:-}"' in content
+    assert 'branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE" --agi "${AGI_ID:-}"' in content
+    assert "INTEGRATION_WORKTREE" in content
+    assert "git checkout -b \"$REQ_BRANCH\"" not in content
+    assert "git checkout -b gran-maestro/REQ-NNN" not in content
+    assert re.search(r"worktree create --path \"\$INTEGRATION_WORKTREE\" --branch \"\$REQ_BRANCH\"", content)
 
 
-def test_accept_master_squash_merge_snapshot() -> None:
+def test_accept_squash_merge_snapshot_uses_accept_worktree() -> None:
     content = _skill_text("accept")
 
     match = re.search(
@@ -46,11 +40,14 @@ def test_accept_master_squash_merge_snapshot() -> None:
     assert match is not None
     commands = [line.strip() for line in match.group("commands").splitlines() if line.strip()]
 
-    assert commands[0] == "git -C {PROJECT_ROOT} checkout master"
-    assert commands[1] == "git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN"
-    assert commands[0].split()[-1] == "master"
-    assert "--squash" in commands[1].split()
-    assert commands[1].split()[-1] == "gran-maestro/REQ-NNN"
+    assert any("--role accept" in command for command in commands)
+    assert any('--role accept --agi "${AGI_ID:-}"' in command for command in commands)
+    assert '--role integration --agi "${AGI_ID:-}"' in content
+    assert '--task T --agi "${AGI_ID:-}"' in content
+    assert any("worktree create --path \"$ACCEPT_WORKTREE\"" in command for command in commands)
+    assert any("git -C \"$ACCEPT_WORKTREE\" merge --squash \"${REQ_BRANCH}\"" == command for command in commands)
+    assert "git -C {PROJECT_ROOT} checkout master" not in content
+    assert "git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN" not in content
 
 
 def test_worktree_base_branch_config_read_write_snapshot(monkeypatch, capsys) -> None:

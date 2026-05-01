@@ -397,32 +397,67 @@ def _current_git_branch(project_root: Path) -> Optional[str]:
     branch = result.stdout.strip()
     return branch or None
 
-def _checkout_sprint_close_base(project_root: Path, base: str) -> Optional[str]:
-    if _current_git_branch(project_root) == base:
-        return None
-    result = _run_sprint_close_git(project_root, ["checkout", base])
+def _sprint_close_role_worktree_path(project_root: Path, agi_id: str, sprint: int) -> Path:
+    return _common.worktrees_dir(project_root) / agi_id / f"sprint-{sprint}-close"
+
+
+def _create_sprint_close_role_worktree(project_root: Path, path: Path, base: str) -> Optional[str]:
+    if path.exists():
+        return f"sprint-close role worktree already exists: {path}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result = _run_sprint_close_git(project_root, ["worktree", "add", "--detach", str(path), base])
     if result.returncode != 0:
-        return _sprint_close_error_text(result, f"git checkout {base} failed")
+        return _sprint_close_error_text(result, "git worktree add --detach failed")
     return None
 
-def _abort_sprint_close_merge(project_root: Path) -> None:
-    _run_sprint_close_git(project_root, ["merge", "--abort"])
+
+def _remove_sprint_close_role_worktree(project_root: Path, path: Path) -> Optional[str]:
+    result = _run_sprint_close_git(project_root, ["worktree", "remove", "--force", str(path)])
+    if result.returncode != 0:
+        return _sprint_close_error_text(result, "git worktree remove failed")
+    return None
+
+
+def _abort_sprint_close_merge(worktree_path: Path) -> None:
+    _run_sprint_close_git(worktree_path, ["merge", "--abort"])
+
+
+def _update_sprint_close_base_ref(project_root: Path, base: str, new_sha: str, old_sha: str) -> Optional[str]:
+    result = _run_sprint_close_git(project_root, ["update-ref", f"refs/heads/{base}", new_sha, old_sha])
+    if result.returncode != 0:
+        return _sprint_close_error_text(result, "git update-ref failed")
+    return None
+
+
+def _current_sprint_close_worktree_is_clean(project_root: Path, base: str) -> bool:
+    if _current_git_branch(project_root) != base:
+        return False
+    status = _run_sprint_close_git(project_root, ["status", "--porcelain"])
+    return status.returncode == 0 and not status.stdout.strip()
+
+
+def _refresh_current_sprint_close_worktree(project_root: Path, new_sha: str) -> Optional[str]:
+    result = _run_sprint_close_git(project_root, ["reset", "--hard", new_sha])
+    if result.returncode != 0:
+        return _sprint_close_error_text(result, "git reset --hard failed")
+    return None
+
 
 def _perform_sprint_close_squash_merge(
-    project_root: Path,
+    worktree_path: Path,
     branch: str,
     message: str,
 ) -> str:
-    merge_result = _run_sprint_close_git(project_root, ["merge", "--squash", branch])
+    merge_result = _run_sprint_close_git(worktree_path, ["merge", "--squash", branch])
     if merge_result.returncode != 0:
-        _abort_sprint_close_merge(project_root)
+        _abort_sprint_close_merge(worktree_path)
         raise RuntimeError(_sprint_close_error_text(merge_result, "git merge --squash failed"))
 
-    commit_result = _run_sprint_close_git(project_root, ["commit", "-m", message])
+    commit_result = _run_sprint_close_git(worktree_path, ["commit", "-m", message])
     if commit_result.returncode != 0:
-        _abort_sprint_close_merge(project_root)
+        _abort_sprint_close_merge(worktree_path)
         raise RuntimeError(_sprint_close_error_text(commit_result, "git commit failed"))
-    return _git_rev_parse(project_root, "HEAD")
+    return _git_rev_parse(worktree_path, "HEAD")
 
 def _append_sprint_close_log(agi_id: str, record: dict) -> None:
     log_path = _common.BASE_DIR / "agile" / agi_id / "sprint-log.json"
@@ -510,7 +545,7 @@ def cmd_agile_sprint_close(args):
     payload["worktree_exists"] = worktree_exists
 
     if branch_exists:
-        actions.append(f"checkout {base}")
+        actions.append(f"prepare sprint-close role worktree from {base}")
         branch_tree = _git_rev_parse(project_root, f"{branch}^{{tree}}")
         try:
             existing_sha, tree_error = _find_existing_sprint_squash_commit(
@@ -553,21 +588,33 @@ def cmd_agile_sprint_close(args):
                 if args.message is not None
                 else f"[{agi_id} Sprint {sprint}] squash-merged: (자동 생성)"
             )
-            actions.append(f"git merge --squash {branch}")
-            actions.append("git commit squash merge")
+            actions.append(f"git merge --squash {branch} in sprint-close role worktree")
+            actions.append("git commit squash merge in sprint-close role worktree")
             if not dry_run:
-                checkout_error = _checkout_sprint_close_base(project_root, base)
-                if checkout_error:
-                    print(f"Error: {checkout_error}", file=sys.stderr)
+                close_worktree_path = _sprint_close_role_worktree_path(project_root, agi_id, sprint)
+                refresh_current_root = _current_sprint_close_worktree_is_clean(project_root, base)
+                create_error = _create_sprint_close_role_worktree(project_root, close_worktree_path, base)
+                if create_error:
+                    print(f"Error: {create_error}", file=sys.stderr)
                     payload["status"] = "partial"
                     _print_sprint_close_result(payload, args.json)
                     return 1
                 try:
-                    payload["squash_commit_sha"] = _perform_sprint_close_squash_merge(
-                        project_root,
+                    old_base_sha = _git_rev_parse(project_root, f"{base}^{{commit}}")
+                    squash_sha = _perform_sprint_close_squash_merge(
+                        close_worktree_path,
                         branch,
                         message,
                     )
+                    update_error = _update_sprint_close_base_ref(project_root, base, squash_sha, old_base_sha)
+                    if update_error:
+                        raise RuntimeError(update_error)
+                    if refresh_current_root:
+                        refresh_error = _refresh_current_sprint_close_worktree(project_root, squash_sha)
+                        if refresh_error:
+                            warnings.append(refresh_error)
+                            print(f"Warning: {refresh_error}", file=sys.stderr)
+                    payload["squash_commit_sha"] = squash_sha
                 except RuntimeError as exc:
                     print(f"Error: {exc}", file=sys.stderr)
                     payload["status"] = "partial"
@@ -584,6 +631,11 @@ def cmd_agile_sprint_close(args):
                     )
                     _print_sprint_close_result(payload, args.json)
                     return 1
+                finally:
+                    remove_error = _remove_sprint_close_role_worktree(project_root, close_worktree_path)
+                    if remove_error:
+                        warnings.append(remove_error)
+                        print(f"Warning: {remove_error}", file=sys.stderr)
     elif branch:
         actions.append(f"skip missing branch {branch}")
 
@@ -596,13 +648,6 @@ def cmd_agile_sprint_close(args):
         payload["status"] = "dry_run"
         _print_sprint_close_result(payload, args.json)
         return 0
-
-    checkout_error = _checkout_sprint_close_base(project_root, base)
-    if checkout_error:
-        print(f"Error: {checkout_error}", file=sys.stderr)
-        payload["status"] = "partial"
-        _print_sprint_close_result(payload, args.json)
-        return 1
 
     partial_failure = False
     if worktree_exists and worktree_path is not None:
@@ -637,12 +682,6 @@ def cmd_agile_sprint_close(args):
             print(f"Warning: {warning}", file=sys.stderr)
         else:
             payload["branch_deleted"] = True
-
-    final_checkout_error = _checkout_sprint_close_base(project_root, base)
-    if final_checkout_error:
-        partial_failure = True
-        warnings.append(final_checkout_error)
-        print(f"Warning: {final_checkout_error}", file=sys.stderr)
 
     if partial_failure:
         payload["status"] = "partial"

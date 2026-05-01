@@ -491,21 +491,15 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 
 ```bash
 DETECTED_BASE="{Step 2.7에서 저장한 request.json.detected_base}"
-REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$DETECTED_BASE")
-git show-ref --verify --quiet "refs/heads/${REQ_BRANCH}" \
-  || git checkout -b "$REQ_BRANCH" "$DETECTED_BASE"
+REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$DETECTED_BASE" --role integration --agi "${AGI_ID:-}")
+INTEGRATION_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role integration --agi "${AGI_ID:-}")
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$INTEGRATION_WORKTREE" --branch "$REQ_BRANCH" --base "$DETECTED_BASE"
 ```
 
-하위 호환 snapshot 계약 예시:
-```bash
-git show-ref --verify --quiet refs/heads/gran-maestro/REQ-NNN \
-  || git checkout -b gran-maestro/REQ-NNN {config.worktree.base_branch}
-```
-태스크 worktree 생성 시 flat REQ branch를 base로 전달하는 경우 `--base gran-maestro/REQ-NNN` 형식을 유지한다.
-
-REQ 브랜치명은 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 감지된 base의 `/`만 `-`로 치환한다.
-이 브랜치는 모든 태스크 커밋의 집합점이 되며, accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash-merge한다(T04).
-단일 태스크 REQ에서도 반드시 이 단계를 실행해야 accept의 3단계 플로우가 정상 작동한다.
+REQ 브랜치명은 AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/REQ-NNN`, 없으면 legacy fallback으로 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 감지된 base의 `/`만 `-`로 치환한다.
+REQ 브랜치 checkout과 태스크 통합은 원본 `PROJECT_ROOT`가 아니라 `INTEGRATION_WORKTREE`에서만 수행한다.
+accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash-merge한다(T04).
+단일 태스크 REQ에서도 반드시 integration worktree를 생성해야 accept의 3단계 플로우가 정상 작동한다.
 
 **태스크가 1개인 경우**: 기존 순차 실행과 동일 처리.
 
@@ -521,10 +515,10 @@ REQ 브랜치명은 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`
 
 ##### 4a. Worktree 일괄 생성
 
-독립 태스크들의 git worktree를 미리 생성합니다. 태스크 worktree는 REQ 중간 브랜치를 기준으로 생성:
+독립 태스크들의 git worktree를 미리 생성합니다. 태스크 worktree는 integration worktree에서 준비된 REQ 브랜치를 기준으로 생성:
 
 ```bash
-TASK_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE")
+TASK_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE" --agi "${AGI_ID:-}")
 python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path {worktree_path} --branch "$TASK_BRANCH" --base "$REQ_BRANCH"
 ```
 
