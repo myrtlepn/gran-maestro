@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import cleanup as cleanup_mod
 from scripts.mst_cmds import resolve_model as resolve_model_mod
 from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds._common import (
@@ -266,12 +267,13 @@ def cmd_dispatch_preflight(args):
 
 
 def cmd_dispatch_register(args):
-    session_mod.ensure_session_id_in_env()
+    session_id = session_mod.ensure_session_id_in_env()
     now = _now_iso()
     task_id = str(args.task_id).strip()
+    marker_pid = int(args.pid)
     payload = {
         "task_id": task_id,
-        "pid": int(args.pid),
+        "pid": marker_pid,
         "started_at": now,
         "phase": "running",
         "provider": str(args.provider).strip().lower(),
@@ -290,6 +292,21 @@ def cmd_dispatch_register(args):
             )
     else:
         payload["started_by_pid"] = resolve_started_by_pid()
+    try:
+        cleanup_mod.write_active_flow_marker_for_pid(
+            project_root=_common.BASE_DIR.parent,
+            session_id=session_id,
+            pid=marker_pid,
+            mode="single-shot",
+            extra={
+                "entrypoint": "dispatch",
+                "task_id": task_id,
+                "provider": payload["provider"],
+                "worktree_dir": payload["worktree_dir"],
+            },
+        )
+    except Exception as exc:
+        print(f"[dispatch] warning: failed to write active-flow marker ({exc})", file=sys.stderr)
     save_json(_dispatch_state_path(task_id), payload)
     print(json.dumps(payload, ensure_ascii=False))
     return 0
@@ -442,11 +459,11 @@ def _cleanup_marker_reason(payload: dict, archive_after_seconds: int, now: datet
     return None
 
 
-def cmd_dispatch_cleanup(args):
+def _dispatch_cleanup_markers(args) -> dict:
     run_directory = _dispatch_run_dir_no_create()
     if not run_directory.is_dir():
         print("SUMMARY: archived=0 legacy=0 stale_done=0 preserved=0")
-        return 0
+        return {"status": "ok", "archived": 0, "legacy": 0, "stale_done": 0, "preserved": 0}
 
     now = datetime.now(timezone.utc)
     archive_after_seconds = max(0, int(args.archive_after_days)) * 86400
@@ -498,6 +515,27 @@ def cmd_dispatch_cleanup(args):
             stale_done += 1
 
     print(f"SUMMARY: archived={archived} legacy={legacy} stale_done={stale_done} preserved={preserved}")
+    return {
+        "status": "ok",
+        "archived": archived,
+        "legacy": legacy,
+        "stale_done": stale_done,
+        "preserved": preserved,
+    }
+
+
+def cmd_dispatch_cleanup(args):
+    session_id = os.environ.get("MST_SESSION_ID", "").strip() or "dispatch-cleanup"
+    result = cleanup_mod.run_cleanup_with_lock_report(
+        project_root=_common.BASE_DIR.parent,
+        entrypoint="stale-marker",
+        session_id=session_id,
+        timeout_seconds=5.0,
+        cleanup_fn=lambda _context: _dispatch_cleanup_markers(args),
+    )
+    if result.get("status") == "skipped":
+        print(f"SUMMARY: archived=0 legacy=0 stale_done=0 preserved=0")
+        print(f"[dispatch] cleanup skipped: {result.get('reason', 'unknown')}", file=sys.stderr)
     return 0
 
 

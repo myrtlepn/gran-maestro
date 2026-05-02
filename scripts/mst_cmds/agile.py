@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import cleanup as cleanup_mod
 from scripts.mst_cmds.agile_governance import (
     _generate_drift_report_skeleton,
     _generate_recall_patch_manifest_skeleton,
@@ -1404,16 +1405,37 @@ def _remove_finalize_worktrees(project_root: Path, agi_id: str) -> list[str]:
 
 
 def _run_finalize_orphan_cleanup(project_root: Path) -> tuple[dict, bool]:
-    result = _finalize_mst_command(project_root, "worktree", "detect-orphans", "--clean", "--json")
-    payload = _load_first_json_object(result.stdout)
+    session_id = os.environ.get("MST_SESSION_ID", "").strip() or "phase5"
+
+    def _cleanup(_context: dict) -> dict:
+        result = _finalize_mst_command(project_root, "worktree", "detect-orphans", "--clean", "--json")
+        payload = _load_first_json_object(result.stdout)
+        if not isinstance(payload, dict):
+            payload = {"cleaned": [], "failed": []}
+        payload.setdefault("cleaned", [])
+        payload.setdefault("failed", [])
+        if result.returncode != 0 and not payload.get("failed"):
+            message = result.stderr.strip() or result.stdout.strip() or "worktree detect-orphans failed"
+            raise RuntimeError(message)
+        return {
+            "status": "ok" if result.returncode == 0 and not payload.get("failed") else "failed",
+            "payload": payload,
+            "returncode": result.returncode,
+        }
+
+    report = cleanup_mod.run_cleanup_with_lock_report(
+        project_root=project_root,
+        entrypoint="phase5",
+        session_id=session_id,
+        timeout_seconds=5.0,
+        cleanup_fn=_cleanup,
+    )
+    payload = report.get("payload")
     if not isinstance(payload, dict):
         payload = {"cleaned": [], "failed": []}
     payload.setdefault("cleaned", [])
     payload.setdefault("failed", [])
-    if result.returncode != 0 and not payload.get("failed"):
-        message = result.stderr.strip() or result.stdout.strip() or "worktree detect-orphans failed"
-        raise RuntimeError(message)
-    return payload, result.returncode == 0 and not payload.get("failed")
+    return payload, report.get("status") == "ok" and not payload.get("failed")
 
 
 def _run_finalize_boundary_check(project_root: Path, agi_id: str) -> bool | None:

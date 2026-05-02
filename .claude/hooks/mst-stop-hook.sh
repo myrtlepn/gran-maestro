@@ -225,6 +225,93 @@ resolve_mst_script() {
 
 MST_SCRIPT="$(resolve_mst_script)"
 
+run_stophook_cleanup_contract() {
+  [ "${MST_STOP_HOOK_CLEANUP_DISABLE:-0}" = "1" ] && return 0
+
+  python3 - "$PROJECT_ROOT" "${MST_SESSION_ID:-unknown}" "$$" "$MST_SCRIPT" <<'PY' >&2 || true
+import json
+import os
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1]).resolve()
+session_id = sys.argv[2] or "unknown"
+try:
+    hook_pid = int(sys.argv[3])
+except Exception:
+    hook_pid = os.getpid()
+mst_script = Path(sys.argv[4]).resolve()
+repo_root = mst_script.parents[1]
+sys.path.insert(0, str(repo_root))
+
+from scripts.mst_cmds import cleanup
+
+
+active_dir = project_root / ".gran-maestro" / "active-flow"
+marker_path = active_dir / f"{session_id}.json"
+
+
+def _load_marker():
+    try:
+        if marker_path.is_file():
+            payload = cleanup._load_json_object(marker_path)
+            if payload:
+                payload.setdefault("session_id", session_id)
+                return payload
+    except Exception:
+        return None
+    return None
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, "").strip())
+    except Exception:
+        return default
+    return value if value >= 0 else default
+
+
+def _cleanup(_context):
+    marker = _load_marker()
+    validation = cleanup.validate_active_flow_marker(marker)
+    validity = validation.get("validity", "missing")
+    decision = cleanup.decide_cleanup_action(
+        entrypoint="stophook",
+        marker=marker,
+        marker_validity=validity,
+        hook_session_id=session_id,
+        hook_target_pid=cleanup.stophook_target_pid_from_env(),
+        hook_process_pid=hook_pid,
+    )
+    marker_pid = marker.get("pid") if isinstance(marker, dict) else None
+    kill_candidates = cleanup.filter_stophook_kill_candidates(
+        [marker_pid, hook_pid],
+        marker_pid=marker_pid,
+        hook_process_pid=hook_pid,
+    )
+    resolved = decision.get("resolved_action")
+    status = "ok" if resolved == "fallthrough" else "skipped"
+    return {
+        "status": status,
+        "reason": f"stophook-{resolved}",
+        "marker_validity": validity,
+        "marker_mode": marker.get("mode") if isinstance(marker, dict) else None,
+        "real_cleanup": bool(decision.get("real_cleanup")),
+        "kill_candidates": kill_candidates,
+    }
+
+
+report = cleanup.run_cleanup_with_lock_report(
+    project_root=project_root,
+    entrypoint="stophook",
+    session_id=session_id,
+    timeout_seconds=_positive_float_env("MST_STOP_HOOK_CLEANUP_TIMEOUT_SECONDS", 0.2),
+    cleanup_fn=_cleanup,
+)
+print("[stop-hook cleanup] " + json.dumps(report, ensure_ascii=False, sort_keys=True))
+PY
+}
+
 resolve_repo_script() {
   local script_name="$1"
   local script_dir candidate
@@ -967,6 +1054,8 @@ if should_arm_hook_judge_watchdog; then
   start_hook_judge_watchdog "$$" "$HOOK_JUDGE_TIMEOUT_MS"
   run_hook_judge_timeout_test_sleep
 fi
+
+run_stophook_cleanup_contract
 
 SNAPSHOT_PROBE_EXPORTS=""
 if [ -f "$SNAPSHOT_PROBE_SCRIPT" ]; then

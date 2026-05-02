@@ -64,12 +64,59 @@ done
 
 PLUGIN_ROOT="${PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/gran-maestro}"
 MST_PY="$PLUGIN_ROOT/scripts/mst.py"
+PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
 
 if [[ ! -f "$MST_PY" ]]; then
     echo "error: mst.py not found at $MST_PY" >&2
     echo "hint: set PLUGIN_ROOT env var or check plugin installation" >&2
     exit 1
 fi
+
+MST_LOOP_CLEANUP_DONE=0
+run_mstloop_cleanup() {
+    if [[ "$MST_LOOP_CLEANUP_DONE" == "1" ]]; then
+        return 0
+    fi
+    MST_LOOP_CLEANUP_DONE=1
+    python3 - "$PROJECT_ROOT" "${MST_SESSION_ID:-mstloop}" "$MST_PY" <<'PY' || true
+import json
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1]).resolve()
+session_id = sys.argv[2] or "mstloop"
+mst_py = Path(sys.argv[3]).resolve()
+repo_root = mst_py.parents[1]
+sys.path.insert(0, str(repo_root))
+
+from scripts.mst_cmds import cleanup
+
+
+def _cleanup(_context):
+    return {"status": "ok", "reason": "mst-loop-exit", "real_cleanup": False}
+
+
+report = cleanup.run_cleanup_with_lock_report(
+    project_root=project_root,
+    entrypoint="mstloop",
+    session_id=session_id,
+    timeout_seconds=5.0,
+    cleanup_fn=_cleanup,
+)
+print("[mst-loop] cleanup " + json.dumps(report, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+PY
+}
+
+on_mstloop_exit() {
+    local status="$?"
+    trap - EXIT
+    run_mstloop_cleanup
+    exit "$status"
+}
+
+trap on_mstloop_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "[mst-loop] starting (max=$MAX_ITERATIONS, sleep=${SLEEP_SECONDS}s, dry_run=$DRY_RUN)"
 

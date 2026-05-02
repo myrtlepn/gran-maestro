@@ -1,0 +1,37 @@
+[
+  {
+    "id": "phase5",
+    "entrypoint": "phase5",
+    "source": "scripts/mst_cmds/agile.py",
+    "production_path": "agile finalize phase 5 cleanup",
+    "required_wrapper": "run_cleanup_with_lock_report"
+  },
+  {
+    "id": "mstloop",
+    "entrypoint": "mstloop",
+    "source": "scripts/mst-loop.sh",
+    "production_path": "mst-loop EXIT trap cleanup",
+    "required_wrapper": "run_cleanup_with_lock_report"
+  },
+  {
+    "id": "stophook",
+    "entrypoint": "stophook",
+    "source": "hooks/mst-stop-hook.sh",
+    "production_path": "Stop hook cleanup",
+    "required_wrapper": "run_cleanup_with_lock_report"
+  },
+  {
+    "id": "stale-marker",
+    "entrypoint": "stale-marker",
+    "source": "scripts/mst_cmds/cleanup.py",
+    "production_path": "active-flow stale marker cleanup",
+    "required_wrapper": "run_cleanup_with_lock_report"
+  },
+  {
+    "id": "direct-cli",
+    "entrypoint": "direct-cli",
+    "source": "scripts/mst_cmds/cleanup.py",
+    "production_path": "mst.py cleanup direct CLI",
+    "required_wrapper": "run_cleanup_with_lock_report"
+  }
+]
