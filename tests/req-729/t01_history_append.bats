@@ -55,6 +55,8 @@ PY
   [ "$(jq -r '.event.type' "$(history_file "$sid")")" = "tool_call" ]
   [ "$(jq -r '.event.tool' "$(history_file "$sid")")" = "Bash" ]
   [ "$(jq -r '.event.args_sha256 | test("^[0-9a-f]{64}$")' "$(history_file "$sid")")" = "true" ]
+  [ "$(jq -r '.session_id' "$(history_file "$sid")")" = "$sid" ]
+  [ "$(jq -r '.event.session_id' "$(history_file "$sid")")" = "$sid" ]
 }
 
 @test "AC-001b serializes concurrent hook appends with mkdir lock" {
@@ -122,4 +124,5 @@ PY
   [[ "$types" == *"skill_exit"* ]]
   [[ "$types" == *"state_change"* ]]
   [[ "$types" == *"tool_call"* ]]
+  jq -s -e --arg sid "$sid" 'all(.[]; .session_id == $sid and .event.session_id == $sid)' "$(history_file "$sid")" >/dev/null
 }

@@ -447,5 +447,6 @@ PY
   [ "$(jq -s '[.[].event | select(.type == "skill_enter" and .skill == "mst:session-init")] | length' "$(history_file "$sid")")" -ge 1 ]
   [ "$(jq -s '[.[].event | select(.type == "state_change" and .state == "session_initialized")] | length' "$(history_file "$sid")")" -ge 1 ]
   [ "$(jq -s '[.[].event | select(.type == "skill_exit" and .skill == "mst:session-init")] | length' "$(history_file "$sid")")" -ge 1 ]
+  jq -s -e --arg sid "$sid" 'all(.[]; .session_id == $sid and .event.session_id == $sid)' "$(history_file "$sid")" >/dev/null
   verify_chain "$sid"
 }

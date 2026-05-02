@@ -1491,6 +1491,24 @@ def acquire_lock(lock_dir: Path) -> bool:
     return False
 
 
+def build_history_row(event: dict, prev_hash: str, seq: int, session_id: str) -> Tuple[dict, str]:
+    stamped_event = dict(event)
+    stamped_event["session_id"] = session_id
+    canonical_event = canonical_json(stamped_event)
+    event_hash = sha256_text(prev_hash + "\n" + canonical_event)
+    row = {
+        "event": stamped_event,
+        "event_hash": event_hash,
+        "prev_hash": prev_hash,
+        "seq": seq,
+        "session_id": session_id,
+    }
+    for key in ("tool", "args_sha256", "timestamp"):
+        if key in stamped_event:
+            row[key] = stamped_event[key]
+    return row, event_hash
+
+
 def append_tool_call(project_root: Path, home: Path, session_id: str, tool_name: str, tool_input: dict) -> int:
     if not session_id:
         return 0
@@ -1521,17 +1539,7 @@ def append_tool_call(project_root: Path, home: Path, session_id: str, tool_name:
             "tool": tool_name or "unknown",
             "type": "tool_call",
         }
-        canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        event_hash = sha256_text(prev_hash + "\n" + canonical_event)
-        row = {
-            "args_sha256": event["args_sha256"],
-            "event": event,
-            "event_hash": event_hash,
-            "prev_hash": prev_hash,
-            "seq": seq + 1,
-            "timestamp": timestamp,
-            "tool": event["tool"],
-        }
+        row, event_hash = build_history_row(event, prev_hash, seq + 1, clean_sid)
         with history_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
         local_head.write_text(event_hash + "\n", encoding="utf-8")
@@ -1572,17 +1580,7 @@ def append_tool_call_after_verified(project_root: Path, home: Path, session_id: 
         "tool": tool_name or "unknown",
         "type": "tool_call",
     }
-    canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    event_hash = sha256_text(prev_hash + "\n" + canonical_event)
-    row = {
-        "args_sha256": event["args_sha256"],
-        "event": event,
-        "event_hash": event_hash,
-        "prev_hash": prev_hash,
-        "seq": seq + 1,
-        "timestamp": timestamp,
-        "tool": event["tool"],
-    }
+    row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
     with history_file.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
     local_head.write_text(event_hash + "\n", encoding="utf-8")
@@ -1611,17 +1609,7 @@ def append_event_after_verified(project_root: Path, home: Path, session_id: str,
         except OSError:
             seq = 0
 
-    canonical_event = canonical_json(event)
-    event_hash = sha256_text(prev_hash + "\n" + canonical_event)
-    row = {
-        "event": event,
-        "event_hash": event_hash,
-        "prev_hash": prev_hash,
-        "seq": seq + 1,
-    }
-    for key in ("tool", "args_sha256", "timestamp"):
-        if key in event:
-            row[key] = event[key]
+    row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
     with history_file.open("a", encoding="utf-8") as handle:
         handle.write(canonical_json(row) + "\n")
     local_head.write_text(event_hash + "\n", encoding="utf-8")

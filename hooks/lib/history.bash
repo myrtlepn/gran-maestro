@@ -418,10 +418,8 @@ mst_history_init_session() {
 }
 
 mst_history_next_row() {
-  local history_file="$1" prev_hash="$2" event_json="$3"
-  local canonical_event event_hash seq
-  canonical_event="$(printf '%s' "$event_json" | mst_history_canonical_json)" || return 1
-  event_hash="$(printf '%s\n%s' "$prev_hash" "$canonical_event" | mst_history_sha256_text)" || return 1
+  local history_file="$1" prev_hash="$2" event_json="$3" session_id="$4"
+  local seq
   if [ -f "$history_file" ]; then
     seq="$(wc -l < "$history_file" | tr -d ' ')"
     case "$seq" in ''|*[!0-9]*) seq=0 ;; esac
@@ -430,19 +428,24 @@ mst_history_next_row() {
     seq=1
   fi
 
-  python3 - "$seq" "$prev_hash" "$event_hash" "$canonical_event" <<'PY'
+  python3 - "$seq" "$prev_hash" "$event_json" "$session_id" <<'PY'
+import hashlib
 import json
 import sys
 
 seq = int(sys.argv[1])
 prev_hash = sys.argv[2]
-event_hash = sys.argv[3]
-event = json.loads(sys.argv[4])
+event = json.loads(sys.argv[3])
+session_id = sys.argv[4]
+event["session_id"] = session_id
+canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
+event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
 row = {
     "seq": seq,
     "prev_hash": prev_hash,
     "event_hash": event_hash,
     "event": event,
+    "session_id": session_id,
 }
 for key in ("tool", "args_sha256", "timestamp"):
     if key in event:
@@ -490,7 +493,7 @@ mst_history_append_event() {
     prev_hash="$MST_HISTORY_ZERO_HASH"
   fi
 
-  row="$(mst_history_next_row "$history_file" "$prev_hash" "$event_json")"
+  row="$(mst_history_next_row "$history_file" "$prev_hash" "$event_json" "$session_id")"
   status=$?
   if [ "$status" -ne 0 ]; then
     mst_history_release_lock "$lock"
@@ -563,16 +566,18 @@ mst_history_append_events_batch() {
   seq="$(mst_history_current_seq "$history_file" "$session_id")"
   case "$seq" in ''|*[!0-9]*) seq=0 ;; esac
 
-  rows="$(python3 - "$prev_hash" "$seq" "$@" <<'PY'
+  rows="$(python3 - "$prev_hash" "$seq" "$session_id" "$@" <<'PY'
 import hashlib
 import json
 import sys
 
 prev_hash = sys.argv[1]
 seq = int(sys.argv[2])
+session_id = sys.argv[3]
 
-for raw_event in sys.argv[3:]:
+for raw_event in sys.argv[4:]:
     event = json.loads(raw_event)
+    event["session_id"] = session_id
     canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
     event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
     seq += 1
@@ -581,6 +586,7 @@ for raw_event in sys.argv[3:]:
         "prev_hash": prev_hash,
         "event_hash": event_hash,
         "event": event,
+        "session_id": session_id,
     }
     for key in ("tool", "args_sha256", "timestamp"):
         if key in event:
@@ -747,17 +753,22 @@ PY
   fi
 
   prev_hash="$(mst_history_read_head_value "$local_head" "$MST_HISTORY_ZERO_HASH")"
-  event_hash="$(printf '%s\n%s' "$prev_hash" "$event_json" | mst_history_sha256_text)" || {
+  row="$(mst_history_next_row "$history_file" "$prev_hash" "$event_json" "$session_id")"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    mst_history_release_lock "$lock"
+    return "$status"
+  fi
+  event_hash="$(mst_history_extract_json_string "event_hash" "$row")" || {
     mst_history_release_lock "$lock"
     return 1
   }
-
-  status="$(mst_history_current_seq "$history_file" "$session_id")"
-  case "$status" in ''|*[!0-9]*) status=0 ;; esac
-  status=$((status + 1))
-
-  row="$(printf '{"args_sha256":"%s","event":%s,"event_hash":"%s","prev_hash":"%s","seq":%s,"timestamp":"%s","tool":"%s"}' \
-    "$args_sha" "$event_json" "$event_hash" "$prev_hash" "$status" "$timestamp" "$tool_escaped")"
+  [ -n "$event_hash" ] || {
+    mst_history_release_lock "$lock"
+    return 1
+  }
+  status="$(mst_history_extract_json_number "seq" "$row")"
+  [ -n "$status" ] || status="$(mst_history_current_seq "$history_file" "$session_id")"
 
   printf '%s\n' "$row" >> "$history_file" || {
     mst_history_release_lock "$lock"
