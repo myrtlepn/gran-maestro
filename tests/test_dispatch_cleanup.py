@@ -142,6 +142,24 @@ def test_dry_run_no_archive(tmp_path):
     assert "dry-preserved.json" not in proc.stdout
 
 
+def test_dispatch_cleanup_archive_does_not_touch_worktree_meta_archive(tmp_path):
+    workspace = _workspace(tmp_path)
+    legacy = _write_marker(workspace, "legacy-marker")
+    legacy_payload = json.loads(legacy.read_text(encoding="utf-8"))
+    legacy_payload.pop("started_by_pid")
+    legacy.write_text(json.dumps(legacy_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    worktree_meta = workspace / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown" / "2026-01" / "REQ-799-T03.meta.json"
+    worktree_meta.parent.mkdir(parents=True, exist_ok=True)
+    worktree_meta.write_text(json.dumps({"state": "cleaned"}), encoding="utf-8")
+
+    proc = _run_mst(workspace, "dispatch", "cleanup", "--legacy")
+
+    assert proc.returncode == 0, proc.stderr
+    assert _archive_path(workspace, "legacy-marker").exists()
+    assert worktree_meta.exists()
+
+
+
 def test_summary_output(tmp_path):
     workspace = _workspace(tmp_path)
     legacy = _write_marker(workspace, "summary-legacy")

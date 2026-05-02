@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import fnmatch
 import glob
 import hashlib
@@ -226,6 +227,256 @@ def _persist_active_worktree_meta(project_root: Path, path_value, branch: str) -
     _write_worktree_meta_atomic(meta_path, meta_data)
 
 
+def _safe_worktree_archive_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
+    token = token.strip(".-")
+    return token or "lineage-unknown"
+
+
+def _worktree_archive_session_token(meta_data: dict) -> str:
+    for key in ("session_id", "owner_session_id"):
+        value = _coerce_nonempty_str(meta_data.get(key))
+        if value:
+            return _safe_worktree_archive_token(value)
+    return "lineage-unknown"
+
+
+def _worktree_meta_archive_target(
+    project_root: Path,
+    meta_path: Path,
+    meta_data: dict,
+    now: datetime | None = None,
+) -> Path:
+    timestamp = now or datetime.now(timezone.utc)
+    month = timestamp.strftime("%Y-%m")
+    token = _worktree_archive_session_token(meta_data)
+    archive_dir = _common.worktrees_dir(project_root) / ".archive" / token / month
+    target = archive_dir / meta_path.name
+    if not target.exists():
+        return target
+
+    stem = meta_path.stem
+    suffix = meta_path.suffix
+    index = 1
+    while True:
+        candidate = archive_dir / f"{stem}.{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _move_meta_to_archive(meta_path: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        meta_path.rename(target)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        shutil.move(str(meta_path), str(target))
+
+
+def _parse_archive_datetime(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(float(value), timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    raw = _coerce_nonempty_str(value)
+    if not raw:
+        return None
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", raw):
+        try:
+            return datetime.fromtimestamp(float(raw), timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _archive_meta_reference_time(meta_path: Path, meta_data: dict | None = None) -> datetime:
+    data = meta_data if isinstance(meta_data, dict) else _common.load_json(meta_path)
+    if isinstance(data, dict):
+        for key in ("migrated_at", "original_mtime"):
+            parsed = _parse_archive_datetime(data.get(key))
+            if parsed is not None:
+                return parsed
+    return datetime.fromtimestamp(meta_path.stat().st_mtime, timezone.utc)
+
+
+def _iter_worktree_archive_session_groups(project_root: Path) -> list[dict]:
+    archive_root = _common.worktrees_dir(project_root) / ".archive"
+    if not archive_root.is_dir():
+        return []
+
+    groups: list[dict] = []
+    for session_dir in sorted(path for path in archive_root.iterdir() if path.is_dir()):
+        file_entries: list[dict] = []
+        for meta_path in sorted(session_dir.glob("*/*.meta.json")):
+            meta_data = _common.load_json(meta_path)
+            if not isinstance(meta_data, dict):
+                meta_data = {}
+            ref_time = _archive_meta_reference_time(meta_path, meta_data)
+            file_entries.append({"path": str(meta_path), "reference_time": ref_time})
+        if not file_entries:
+            continue
+        file_entries.sort(key=lambda item: item["reference_time"], reverse=True)
+        groups.append({"session_token": session_dir.name, "files": file_entries})
+    return groups
+
+
+def _normalize_retention_value(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(parsed, 0)
+
+
+def _load_worktree_archive_retention_defaults() -> tuple[int | None, int | None]:
+    for config_name in ("config.resolved.json", "config.json"):
+        data = _common.load_json(_common.BASE_DIR / config_name) or {}
+        worktree_config = data.get("worktree") if isinstance(data, dict) else None
+        if isinstance(worktree_config, dict):
+            days = _normalize_retention_value(worktree_config.get("archive_retention_days"))
+            count = _normalize_retention_value(worktree_config.get("archive_retention_count"))
+            if days is not None or count is not None:
+                return days, count
+    defaults = _common.load_json(_common._plugin_root() / "templates" / "defaults" / "config.json") or {}
+    worktree_defaults = defaults.get("worktree") if isinstance(defaults, dict) else None
+    if isinstance(worktree_defaults, dict):
+        return (
+            _normalize_retention_value(worktree_defaults.get("archive_retention_days")),
+            _normalize_retention_value(worktree_defaults.get("archive_retention_count")),
+        )
+    return 30, 100
+
+
+def prune_worktree_meta_archive(
+    project_root: Path,
+    *,
+    retention_days: int | None = None,
+    retention_count: int | None = None,
+    apply: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    if retention_days is None and retention_count is None:
+        return {"dry_run": not apply, "retention_days": None, "retention_count": None, "kept": [], "deleted": []}
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = current_time - timedelta(days=retention_days) if retention_days is not None else None
+    kept: list[dict] = []
+    deleted: list[dict] = []
+
+    for group in _iter_worktree_archive_session_groups(project_root):
+        for idx, entry in enumerate(group["files"]):
+            reference_time = entry["reference_time"]
+            keep_by_days = cutoff is not None and reference_time >= cutoff
+            keep_by_count = retention_count is not None and idx < retention_count
+            serialized = {
+                "session_token": group["session_token"],
+                "reference_time": reference_time.isoformat().replace("+00:00", "Z"),
+                "path": entry["path"],
+                "files": [entry["path"]],
+                "keep_by_days": keep_by_days,
+                "keep_by_count": keep_by_count,
+            }
+            if keep_by_days or keep_by_count:
+                kept.append(serialized)
+                continue
+            deleted.append(serialized)
+            if apply:
+                try:
+                    Path(entry["path"]).unlink(missing_ok=True)
+                except OSError as exc:
+                    serialized.setdefault("errors", []).append(f"{entry['path']}: {exc}")
+
+    if apply:
+        archive_root = _common.worktrees_dir(project_root) / ".archive"
+        if archive_root.is_dir():
+            for directory in sorted((p for p in archive_root.glob("*/*") if p.is_dir()), reverse=True):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            for directory in sorted((p for p in archive_root.glob("*") if p.is_dir()), reverse=True):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+
+    return {
+        "dry_run": not apply,
+        "retention_days": retention_days,
+        "retention_count": retention_count,
+        "kept": kept,
+        "deleted": deleted,
+    }
+
+
+def _migrate_legacy_cleaned_meta_file(
+    project_root: Path,
+    meta_path: Path,
+    meta_data: dict,
+    *,
+    migrated_at_dt: datetime,
+) -> dict | None:
+    try:
+        original_mtime = meta_path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+    migrated_at = migrated_at_dt.isoformat().replace("+00:00", "Z")
+    next_data = dict(meta_data)
+    next_data.setdefault("original_mtime", original_mtime)
+    next_data["migrated_at"] = migrated_at
+    target_time = _parse_archive_datetime(next_data.get("original_mtime")) or migrated_at_dt
+    target = _worktree_meta_archive_target(project_root, meta_path, next_data, target_time)
+    _write_worktree_meta_atomic(meta_path, next_data)
+    _move_meta_to_archive(meta_path, target)
+    return {"source": str(meta_path), "target": str(target)}
+
+
+def migrate_legacy_cleaned_worktree_meta(project_root: Path, *, now: datetime | None = None) -> dict:
+    worktrees_dir = _common.worktrees_dir(project_root)
+    if not worktrees_dir.is_dir():
+        return {"migrated": [], "skipped": []}
+
+    migrated: list[dict] = []
+    skipped: list[dict] = []
+    migrated_at_dt = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+
+    for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
+        meta_data = _common.load_json(meta_path)
+        if not isinstance(meta_data, dict):
+            skipped.append({"path": str(meta_path), "reason": "invalid-json"})
+            continue
+        if meta_data.get("state") != "cleaned":
+            skipped.append({"path": str(meta_path), "reason": "not-cleaned"})
+            continue
+
+        migrated_item = _migrate_legacy_cleaned_meta_file(
+            project_root,
+            meta_path,
+            meta_data,
+            migrated_at_dt=migrated_at_dt,
+        )
+        if migrated_item is not None:
+            migrated.append(migrated_item)
+
+    return {"migrated": migrated, "skipped": skipped}
+
+
 def _mark_worktree_meta_cleaned(project_root: Path, path_value) -> None:
     task_id = _worktree_task_id_from_path(path_value)
     if not task_id:
@@ -248,7 +499,15 @@ def _mark_worktree_meta_cleaned(project_root: Path, path_value) -> None:
     meta_data.setdefault("created_at", now)
     meta_data["state"] = "cleaned"
     meta_data["last_activity_at"] = now
+    meta_data["archived_at"] = now
+    archive_target = _worktree_meta_archive_target(
+        project_root,
+        meta_path,
+        meta_data,
+        datetime.fromisoformat(now.replace("Z", "+00:00")),
+    )
     _write_worktree_meta_atomic(meta_path, meta_data)
+    _move_meta_to_archive(meta_path, archive_target)
 
 
 def _resolve_master_project_root() -> Path:
@@ -502,6 +761,8 @@ def _iter_cleaned_meta_entries(project_root: Path) -> list[dict]:
     if not worktrees_dir.is_dir():
         return entries
 
+    migrated_at_dt = datetime.now(timezone.utc).replace(microsecond=0)
+    migrated_at = migrated_at_dt.isoformat().replace("+00:00", "Z")
     for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
         meta_data = _common.load_json(meta_path)
         if not isinstance(meta_data, dict):
@@ -518,6 +779,9 @@ def _iter_cleaned_meta_entries(project_root: Path) -> list[dict]:
                 "path": str(worktree_path) if worktree_path else None,
                 "branch": _coerce_nonempty_str(meta_data.get("branch")),
                 "meta_path": str(meta_path.resolve(strict=False)),
+                "legacy_cleaned_meta": True,
+                "legacy_meta_data": meta_data,
+                "legacy_migrated_at": migrated_at,
             }
         )
     return entries
@@ -714,6 +978,23 @@ def _clean_detected_orphan(project_root: Path, orphan: dict) -> tuple[bool, list
     raw_meta_path = orphan.get("meta_path")
     if raw_meta_path:
         meta_path = Path(str(raw_meta_path))
+        if orphan.get("legacy_cleaned_meta"):
+            migrated_item = _migrate_legacy_cleaned_meta_file(
+                project_root,
+                meta_path,
+                orphan.get("legacy_meta_data") if isinstance(orphan.get("legacy_meta_data"), dict) else {},
+                migrated_at_dt=_parse_archive_datetime(orphan.get("legacy_migrated_at"))
+                or datetime.now(timezone.utc).replace(microsecond=0),
+            )
+            if migrated_item is not None:
+                steps.append(
+                    {
+                        "command": f"migrate meta {meta_path}",
+                        "ok": True,
+                        "message": migrated_item["target"],
+                    }
+                )
+            return True, steps
         try:
             meta_path.unlink(missing_ok=True)
             steps.append({"command": f"remove meta {meta_path}", "ok": True, "message": str(meta_path)})
@@ -751,6 +1032,48 @@ def _print_detect_orphans_payload(payload: dict, as_json: bool) -> None:
             print(f"[recover-orphan] {status} taskId={orphan.get('taskId')}")
 
 
+def cmd_worktree_archive_retention(args):
+    project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
+    default_days, default_count = _load_worktree_archive_retention_defaults()
+    retention_days = _normalize_retention_value(getattr(args, "days", None))
+    retention_count = _normalize_retention_value(getattr(args, "count", None))
+    if retention_days is None and not getattr(args, "no_days", False):
+        retention_days = default_days
+    if retention_count is None and not getattr(args, "no_count", False):
+        retention_count = default_count
+
+    payload = prune_worktree_meta_archive(
+        project_root,
+        retention_days=retention_days,
+        retention_count=retention_count,
+        apply=bool(getattr(args, "apply", False)),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        mode = "apply" if getattr(args, "apply", False) else "dry-run"
+        print(
+            f"[worktree-archive-retention] mode={mode} "
+            f"days={retention_days} count={retention_count} "
+            f"delete={len(payload['deleted'])} keep={len(payload['kept'])}"
+        )
+        for item in payload["deleted"]:
+            print(f"delete session={item['session_token']} files={len(item['files'])}")
+    return 0
+
+
+def cmd_worktree_migrate_cleaned_meta(args):
+    project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
+    payload = migrate_legacy_cleaned_worktree_meta(project_root)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"[worktree-migrate-cleaned-meta] migrated={len(payload['migrated'])} skipped={len(payload['skipped'])}")
+        for item in payload["migrated"]:
+            print(f"migrated {item['source']} -> {item['target']}")
+    return 0
+
+
 def cmd_worktree_detect_orphans(args):
     project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
 
@@ -762,6 +1085,8 @@ def cmd_worktree_detect_orphans(args):
             orphans = _detect_scoped_orphans(project_root, scope=scope, prefix=prefix)
         else:
             orphans = _detect_cleaned_orphans(project_root)
+            if not orphans:
+                migrate_legacy_cleaned_worktree_meta(project_root)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -1347,7 +1672,20 @@ def register(subparsers):
     worktree_classify_collision.add_argument("--branch", required=True)
     worktree_classify_collision.add_argument("--json", action="store_true")
 
+    worktree_archive_retention = worktree_sub.add_parser("archive-retention")
+    worktree_archive_retention.add_argument("--days", type=int)
+    worktree_archive_retention.add_argument("--count", type=int)
+    worktree_archive_retention.add_argument("--no-days", action="store_true")
+    worktree_archive_retention.add_argument("--no-count", action="store_true")
+    worktree_archive_retention.add_argument("--apply", action="store_true")
+    worktree_archive_retention.add_argument("--json", action="store_true")
+
+    worktree_migrate_cleaned_meta = worktree_sub.add_parser("migrate-cleaned-meta")
+    worktree_migrate_cleaned_meta.add_argument("--json", action="store_true")
+
     _register_worktree_dispatch("path", cmd_worktree_path)
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
     _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)
     _register_worktree_dispatch("classify-collision", cmd_worktree_classify_collision)
+    _register_worktree_dispatch("archive-retention", cmd_worktree_archive_retention)
+    _register_worktree_dispatch("migrate-cleaned-meta", cmd_worktree_migrate_cleaned_meta)

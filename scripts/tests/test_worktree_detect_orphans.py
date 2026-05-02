@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -83,7 +85,7 @@ def _run_detect_orphans(
     )
 
 
-def test_detect_orphans_cleans_cleaned_meta_with_lingering_worktree(
+def test_detect_orphans_archives_cleaned_meta_with_lingering_worktree(
     master_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -119,12 +121,17 @@ def test_detect_orphans_cleans_cleaned_meta_with_lingering_worktree(
     assert payload["orphans"][0]["worktree_listed"] is True
     assert payload["orphans"][0]["branch_exists"] is True
     assert not meta_path.exists()
+    archived = list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))
+    assert len(archived) == 1
+    archived_meta = json.loads(archived[0].read_text(encoding="utf-8"))
+    assert archived_meta["state"] == "cleaned"
+    assert archived_meta["taskId"] == task_id
     assert not worktree_path.exists()
     assert worktree_path.resolve(strict=False) not in _worktree_roots(master_repo)
     assert not _branch_exists(master_repo, branch)
 
 
-def test_detect_orphans_ignores_cleaned_meta_without_artifacts(
+def test_detect_orphans_migrates_cleaned_meta_without_artifacts(
     master_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -154,10 +161,13 @@ def test_detect_orphans_ignores_cleaned_meta_without_artifacts(
     assert exit_code == 0, captured.err
     assert payload["cleaned"] == []
     assert payload["orphans"] == []
-    assert meta_path.exists()
+    assert not meta_path.exists()
+    archived = list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text(encoding="utf-8"))["taskId"] == task_id
 
 
-def test_detect_orphans_cleans_branch_only_orphan(
+def test_detect_orphans_archives_branch_only_cleaned_meta_orphan(
     master_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -193,7 +203,53 @@ def test_detect_orphans_cleans_branch_only_orphan(
     assert payload["orphans"][0]["branch_exists"] is True
     assert payload["orphans"][0]["path_exists"] is False
     assert not meta_path.exists()
+    archived = list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text(encoding="utf-8"))["taskId"] == task_id
     assert not _branch_exists(master_repo, branch)
+
+
+def test_detect_orphans_migrates_legacy_cleaned_meta_idempotently(master_repo: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    task_id = "REQ-799-T03-IDEMPOTENT"
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / f"{task_id}.meta.json"
+    original_dt = datetime.fromisoformat("2026-04-20T00:00:00+00:00")
+    _write_json(
+        meta_path,
+        {
+            "taskId": task_id,
+            "path": str(tmp_path / task_id),
+            "branch": "gran-maestro/main/REQ-799-T03-IDEMPOTENT",
+            "state": "cleaned",
+        },
+    )
+    os.utime(meta_path, (original_dt.timestamp(), original_dt.timestamp()))
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    first_exit = _run_detect_orphans(clean=False, as_json=True)
+    first = capsys.readouterr()
+    first_payload = json.loads(first.out)
+
+    assert first_exit == 0, first.err
+    assert first_payload["orphans"] == []
+    assert not meta_path.exists()
+    archived = list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown" / "2026-04").glob("*.meta.json"))
+    assert len(archived) == 1
+    archived_meta = json.loads(archived[0].read_text(encoding="utf-8"))
+    assert archived_meta["taskId"] == task_id
+    assert archived_meta["state"] == "cleaned"
+    assert archived_meta["original_mtime"] == original_dt.timestamp()
+    assert "migrated_at" in archived_meta
+
+    second_exit = _run_detect_orphans(clean=False, as_json=True)
+    second = capsys.readouterr()
+    second_payload = json.loads(second.out)
+
+    assert second_exit == 0, second.err
+    assert second_payload["orphans"] == []
+    assert len(list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))) == 1
+
 
 
 def test_detect_orphans_empty_state(master_repo: Path, monkeypatch, capsys) -> None:

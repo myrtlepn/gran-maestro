@@ -368,7 +368,7 @@ def test_stop_hook_logs_exit_merge_conflict_block(tmp_path: Path) -> None:
     )
 
 
-def test_stop_boundary_log_then_detect_orphans_cleans_lingering_branch(tmp_path: Path) -> None:
+def test_stop_boundary_log_then_detect_orphans_migrates_cleaned_meta(tmp_path: Path) -> None:
     req_id = "REQ-687"
     task_id = "T01"
     full_task_id = f"{req_id}-{task_id}"
@@ -425,11 +425,15 @@ def test_stop_boundary_log_then_detect_orphans_cleans_lingering_branch(tmp_path:
     payload = parse_stdout_json(orphan_result)
 
     assert orphan_result.returncode == 0, orphan_result.stderr
-    assert payload["cleaned"] == [full_task_id]
-    assert payload["orphans"][0]["branch_exists"] is True
-    assert payload["orphans"][0]["worktree_listed"] is False
-    assert payload["orphans"][0]["path_exists"] is False
+    assert payload["cleaned"] == []
+    assert payload["orphans"] == []
     assert not meta_path.exists()
+    archived = list((tmp_path / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))
+    assert len(archived) == 1
+    archived_meta = json.loads(archived[0].read_text(encoding="utf-8"))
+    assert archived_meta["taskId"] == full_task_id
+    assert archived_meta["state"] == "cleaned"
+    assert "archived_at" in archived_meta or "migrated_at" in archived_meta
 
 
 def test_worktree_create_and_remove_help_smoke() -> None:

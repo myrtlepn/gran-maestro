@@ -198,7 +198,9 @@
     "base_branch": "main",
     "protected_branches": ["main", "master", "release/*"],
     "stale_timeout_hours": 24,
-    "auto_cleanup_on_cancel": true
+    "auto_cleanup_on_cancel": true,
+    "archive_retention_days": 30,
+    "archive_retention_count": 100
   },
   "retry": {
     "max_cli_retries": 2,

@@ -79,6 +79,22 @@ def test_purge_handles_multiple_type_dirs(tmp_path: Path) -> None:
     assert "Purged 2 archive" in result.stdout
 
 
+def test_purge_does_not_delete_worktree_meta_archives(tmp_path: Path) -> None:
+    workspace, gm = _init_workspace(tmp_path)
+    old_req = _make_tar(gm, "requests", "requests-old.tar.gz", age_days=200)
+    worktree_meta = gm / "worktrees" / ".archive" / "lineage-unknown" / "2026-01" / "REQ-799-T03.meta.json"
+    worktree_meta.parent.mkdir(parents=True, exist_ok=True)
+    worktree_meta.write_text(json.dumps({"state": "cleaned"}), encoding="utf-8")
+    old = (datetime.now(timezone.utc) - timedelta(days=200)).timestamp()
+    os.utime(worktree_meta, (old, old))
+
+    result = _run_purge(workspace, "--max-age-days", "30")
+
+    assert result.returncode == 0, result.stderr
+    assert not old_req.exists()
+    assert worktree_meta.exists(), "archive purge must not own worktree meta archive retention"
+
+
 def test_purge_default_when_config_null_uses_90_days(tmp_path: Path) -> None:
     """AD-009: ``archive_retention_days: null`` must resolve to the safe 90-day
     default rather than infinite retention.

@@ -137,6 +137,8 @@ DISPATCH = {
     ("worktree", "path"): worktree.cmd_worktree_path,
     ("worktree", "detect-orphans"): worktree.cmd_worktree_detect_orphans,
     ("worktree", "classify-collision"): worktree.cmd_worktree_classify_collision,
+    ("worktree", "archive-retention"): worktree.cmd_worktree_archive_retention,
+    ("worktree", "migrate-cleaned-meta"): worktree.cmd_worktree_migrate_cleaned_meta,
     ("timestamp", "now"): timestamp.cmd_timestamp,
     ("set-status", None): set_mod.cmd_set_status,
     ("set-field", None): set_mod.cmd_set_field,
