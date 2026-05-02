@@ -1,6 +1,8 @@
 # Session ID Migration Plan (Gran Maestro)
 
-## 1. Context (현재 PPID 모델의 한계)
+## 1. Context (MST_SESSION_ID canonical 전환)
+
+신규 사용자와 신규 hook/statusline 예시는 `MST_SESSION_ID`를 canonical session identity로 사용한다. `MST_STATE_PPID`와 `MST_SNAPSHOT_SESSION_ID`는 0.60.x에서만 읽히는 deprecated alias이며, compatibility only 문맥에서 기존 상태를 읽거나 migration 안내를 출력하기 위해 남아 있다.
 
 Gran Maestro의 기존 owner 식별은 OS 프로세스 계층의 PPID를 중심으로 동작했다. 이 모델은 단일 터미널에서 짧게 실행되는 세션에는 충분하지만, Claude Code 대화의 의미론적 수명과 일치하지 않는다. AGI-018의 DOD-013/018/019/020은 이 불일치를 제거하고 `session_id`를 hook, CLI, snapshot, durable resource ownership의 공통 정체성 축으로 삼는 것을 목표로 한다.
 
@@ -26,10 +28,10 @@ Gran Maestro의 기존 owner 식별은 OS 프로세스 계층의 PPID를 중심�
 | `hooks/mst-stop-hook.sh:1395` | `payload.get("owner_ppid")` | stop-hook 내부 boundary payload 출력에서도 owner PPID를 하위 판정으로 전달한다. |
 | `hooks/mst-stop-hook.sh:1425` | `owner_ppid = data.get("owner_ppid")` | boundary 판단 입력에서 `owner_ppid`를 읽어 current PPID와 비교할 준비를 한다. |
 | `hooks/mst-stop-hook.sh:1553` | `session_mismatch ppid=%s owner=%s` | boundary exit 단계에서 current PPID와 owner PPID 불일치 시 enforcement를 건너뛴다. |
-| `scripts/mst_cmds/_common.py:191` | `MST_STATE_PPID` / `os.getppid()` | skill state base 탐색 시 session 디렉토리 key가 PPID 기반 환경변수 또는 parent PID로 결정된다. |
+| `scripts/mst_cmds/_common.py:191` | `MST_STATE_PPID` / `os.getppid()` | deprecated alias compatibility only: skill state base 탐색 시 기존 PPID 기반 session 디렉토리를 읽는다. |
 | `scripts/mst_cmds/_common.py:385` | `is_pid_alive(state_pid)` | stale state 파일을 검사할 때 PID liveness를 사용해 현재 실행 가능한 next action인지 판단한다. |
-| `scripts/mst_cmds/state.py:35` | `_resolve_owner_ppid()` | owner metadata 주입 시 `MST_STATE_PPID` 또는 `os.getppid()`를 owner PPID로 해석한다. |
-| `scripts/mst_cmds/state.py:42` | `_snapshot_session_id()` | `MST_SNAPSHOT_SESSION_ID`가 없으면 `MST_STATE_PPID` 또는 `os.getppid()`를 snapshot session key로 fallback한다. |
+| `scripts/mst_cmds/state.py:35` | `_resolve_owner_ppid()` | deprecated alias compatibility only: owner metadata의 legacy `owner_ppid` 보강에만 사용한다. |
+| `scripts/mst_cmds/state.py:42` | `_snapshot_session_id()` | `MST_SESSION_ID`가 canonical이며, `MST_SNAPSHOT_SESSION_ID`/`MST_STATE_PPID`는 deprecated alias compatibility only fallback이다. |
 | `scripts/mst_cmds/state.py:124` | `data["owner_ppid"] = ppid` | request/plan JSON에 `owner_ppid`가 없으면 현재 PPID를 보강 기록한다. |
 | `scripts/mst_cmds/worktree.py:1136` | `_coerce_int(request_data.get("owner_ppid"))` | worktree boundary 검사에서 request owner PPID와 current PPID를 비교한다. |
 
@@ -41,7 +43,7 @@ Gran Maestro의 기존 owner 식별은 OS 프로세스 계층의 PPID를 중심�
 
 2차 fallback은 `transcript_path` basename에서 UUID를 추출하는 방식이다. 예를 들어 `/Users/me/.claude/projects/x/123e4567-e89b-42d3-a456-426614174000.jsonl`이 들어오면 basename의 `.jsonl` suffix를 제거해 `123e4567-e89b-42d3-a456-426614174000`을 얻는다. 이 fallback은 hook stdin에 `session_id`가 없지만 transcript 파일 경로는 있는 환경에서 silent drop을 막기 위한 보조 경로다.
 
-3차 fallback은 `session_id`도 없고 `transcript_path`도 없거나, 둘 다 UUID v4 정책을 통과하지 못하는 경우다. 마이그레이션 공존 기간에는 `session_id_invalid` 또는 `session_id_resolution_failed` warning을 남긴 뒤 PPID fallback을 유지한다. 단, 이 fallback은 정상 소유권 모델이 아니라 legacy compatibility 경로이며, 사용자에게 migration 또는 hook stdin 계약 점검이 필요하다는 진단을 보여야 한다.
+3차 fallback은 `MST_SESSION_ID`, hook `session_id`, `transcript_path`가 모두 없거나 UUID v4 정책을 통과하지 못하는 경우다. 마이그레이션 공존 기간에는 `session_id_invalid` 또는 `session_id_resolution_failed` warning을 남긴 뒤 deprecated alias compatibility only fallback을 유지한다. 단, 이 fallback은 정상 소유권 모델이 아니라 legacy compatibility 경로이며, 사용자에게 migration 또는 hook stdin 계약 점검이 필요하다는 진단을 보여야 한다.
 
 ## 4. 전환 단계 (Phase 1~5)
 
@@ -92,3 +94,11 @@ Sprint N+5는 Phase 4 마이그레이션 CLI 구현이다. `mst.py state migrate
 Sprint N+6은 Phase 4 recover/takeover 보강이다. 손상 snapshot 격리, durable state 기반 부분 복구, `takeover_log` storm 감지를 연결한다. 사용자 관찰 변화는 `/mst:recover --rewind-to {skill}/{step}` 또는 대시보드 "rewind to here"가 새 session_id snapshot을 만들고, storm 상황에서는 mutation이 차단되는 것이다.
 
 Sprint N+7은 Phase 5 PPID owner 제거다. owner 판정 helper에서 `owner_ppid`와 `is_pid_alive(state_pid)` 의존을 제거하고, PPID는 debug/audit log 보조 필드로만 남긴다. 사용자 관찰 변화는 새 request/plan JSON에 owner 판정 필드로 `owner_session_id`만 필요하며, PPID 불일치 때문에 resume/recover가 막히지 않는 것이다.
+
+
+## 8. 0.61.0 legacy alias removal readiness
+
+- Legacy alias list: `MST_STATE_PPID`, `MST_SNAPSHOT_SESSION_ID`. Both are deprecated aliases for compatibility only; new user docs and examples must use `MST_SESSION_ID`.
+- Allowed residual locations during 0.60.x: `scripts/mst_cmds/env_alias_compat.py`, `scripts/mst_cmds/hooks.py` doctor reporting, `scripts/mst_cmds/state.py` and `_common.py` compatibility fallbacks, `scripts/_flow_logger.py`, `scripts/mst-statusline.sh`, `hooks/mst-auto-chain-context.sh`, `hooks/lib/pre_tool_use_fast.py`, and compatibility tests.
+- Remove in 0.61.0: env alias fallback helper/warning marker in `env_alias_compat.py`, direct-alias allowlist entries in `tests/test_env_alias_compatibility.py`, doctor legacy-env-alias report branch, runtime compatibility fallback reads in hooks/statusline/state helpers, and these deprecated alias documentation notes.
+- Doctor token contract until removal: when either deprecated alias is present, output includes `legacy-env-alias`, `MST_SESSION_ID`, `deprecated`, and `migration`.

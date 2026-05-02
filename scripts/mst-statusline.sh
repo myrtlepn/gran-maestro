@@ -7,7 +7,7 @@ STATUSLINE_SOURCE_ROOT="$(cd "${STATUSLINE_SCRIPT_DIR}/.." && pwd)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 BACKUP_FILE="${HOME}/.claude/mst-statusline-backup.json"
 INPUT_JSON="$(cat || true)"
-CURRENT_STATUSLINE_PPID="${MST_STATE_PPID:-$PPID}"
+CURRENT_STATUSLINE_PPID="${MST_STATE_PPID:-$PPID}" # deprecated alias: PPID-scoped compatibility only
 
 DEFAULT_HUD_COMMAND="$(cat <<'CMD'
 bash -c 'plugin_dir=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null | sort -t/ -k$(echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/claude-hud/claude-hud/" | tr "/" "\n" | wc -l)n | tail -1); exec "/opt/homebrew/bin/node" "${plugin_dir}/dist/index.js"'
@@ -83,6 +83,39 @@ if isinstance(data, dict):
 if session_id:
     print(session_id)
 ' 2>/dev/null || true
+}
+
+resolve_canonical_session_id() {
+  local input_session_id="${1:-}"
+  if [ -n "${MST_SESSION_ID:-}" ]; then
+    printf '%s\n' "$MST_SESSION_ID"
+  elif [ -n "$input_session_id" ]; then
+    printf '%s\n' "$input_session_id"
+  fi
+}
+
+resolve_snapshot_path() {
+  local canonical_session_id="${1:-}"
+  local legacy_ppid="${2:-}"
+  local candidate
+  if [ -n "$canonical_session_id" ]; then
+    candidate="${PROJECT_ROOT}/.gran-maestro/state/${canonical_session_id}/snapshot.json"
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+  # compatibility only: legacy PPID state directory remains readable until 0.61.0.
+  candidate="${PROJECT_ROOT}/.gran-maestro/state/${legacy_ppid}/snapshot.json"
+  if [ -f "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [ -f "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json" ]; then
+    printf '%s\n' "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
+    return 0
+  fi
+  printf '%s\n' "$candidate"
 }
 
 save_transcript_bridge() {
@@ -852,11 +885,9 @@ HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
 SESSION_ID_FROM_INPUT="$(extract_session_id)"
+CANONICAL_STATUSLINE_SESSION_ID="$(resolve_canonical_session_id "$SESSION_ID_FROM_INPUT")"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
-SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${CURRENT_STATUSLINE_PPID}/snapshot.json"
-if [ ! -f "$SNAPSHOT_PATH" ] && [ -f "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json" ]; then
-  SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
-fi
+SNAPSHOT_PATH="$(resolve_snapshot_path "${MST_SESSION_ID:-}" "$CURRENT_STATUSLINE_PPID")"
 save_transcript_bridge "$TRANSCRIPT_PATH"
 MST_LINE="$(build_mst_line "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
 
@@ -864,7 +895,7 @@ if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
 fi
 printf '%s\n' "$MST_LINE"
-COUNTER_SESSION_ID="${MST_SESSION_ID:-$SESSION_ID_FROM_INPUT}"
+COUNTER_SESSION_ID="$CANONICAL_STATUSLINE_SESSION_ID"
 if [ -n "$COUNTER_SESSION_ID" ]; then
   COUNTER_LINE="$(
     PYTHONPATH="${STATUSLINE_SOURCE_ROOT}${PYTHONPATH:+:$PYTHONPATH}" python3 - "$COUNTER_SESSION_ID" "$PROJECT_ROOT" <<'PY' 2>/dev/null || true

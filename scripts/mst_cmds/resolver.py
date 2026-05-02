@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional, TypedDict
 
 from scripts._skill_state import load_snapshot
+from scripts.mst_cmds.env_alias_compat import legacy_session_id_from_env
 from scripts.mst_cmds._common import _skill_state_base_dir, queue_enqueue, queue_peek
 from scripts.mst_cmds._state_manager import read_workflow_state
 
@@ -139,10 +140,10 @@ def resolve_conversation_id(explicit: Optional[str] = None) -> Optional[str]:
 
 
 def _snapshot_session_candidates(conversation_id: Optional[str]) -> list[str]:
+    legacy_session_id, _legacy_alias = legacy_session_id_from_env(warn=True)
     candidates = [
         conversation_id or "",
-        os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip(),
-        os.environ.get("MST_STATE_PPID", "").strip(),
+        legacy_session_id or "",
         str(os.getppid()),
         "default",
     ]

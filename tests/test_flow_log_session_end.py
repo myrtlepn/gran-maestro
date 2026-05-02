@@ -138,3 +138,28 @@ def test_session_end_event_schema(tmp_path):
     assert event["total_steps"] == 0
     assert event["schema_version"] == 1
     assert event["session_id"] == "schema-session"
+
+
+def test_session_end_prefers_mst_session_id_over_legacy_snapshot_alias(tmp_path, monkeypatch):
+    """DOD-010: atexit fallback identity uses MST_SESSION_ID before legacy aliases."""
+    workspace = _workspace(tmp_path)
+    flow_dir = tmp_path / "logs"
+    canonical_session_id = "canonical-flow-session"
+    legacy_session_id = "legacy-flow-session"
+    detail_path = workspace / ".gran-maestro" / "state" / legacy_session_id / "flow-detail.ndjson"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_path.write_text('{"event_type":"existing"}\n', encoding="utf-8")
+    _flow_logger._fsync_counters.clear()
+    _flow_logger._fsync_counters[str(workspace / ".gran-maestro" / "state" / "missing" / "flow-detail.ndjson")] = 1
+    monkeypatch.setenv("MST_FLOW_LOG_DIR", str(flow_dir))
+    monkeypatch.setenv("MST_FLOW_LOG_MONTH", MONTH)
+    monkeypatch.setenv("MST_SESSION_ID", canonical_session_id)
+    monkeypatch.setenv("MST_SNAPSHOT_SESSION_ID", legacy_session_id)
+    monkeypatch.setenv("MST_STATE_PPID", "12345")
+
+    _flow_logger._session_end_flush()
+
+    events = _read_flow_events(flow_dir)
+    event = next(event for event in events if event["event_type"] == "flow_session_end")
+    assert event["session_id"] == canonical_session_id
+    assert event["session_id"] != legacy_session_id

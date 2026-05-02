@@ -75,7 +75,7 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-CURRENT_PPID="${MST_STATE_PPID:-$PPID}"
+CURRENT_PPID="${MST_STATE_PPID:-$PPID}" # deprecated alias: workflow tmp state compatibility only
 STATE_FILE="${MST_TMP}/mst-state-${CURRENT_PPID}.json"
 STDIN_RAW="$(cat || true)"
 MST_LEDGER_HOOK_EVENT="UserPromptSubmit"

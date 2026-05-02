@@ -82,12 +82,12 @@ prepare_master_baseline_hook() {
   fi
   git -C "$REPO_ROOT" show "$baseline_ref":hooks/mst-pre-tool-use.sh > "$baseline/hooks/mst-pre-tool-use.sh"
   chmod +x "$baseline/hooks/mst-pre-tool-use.sh"
-  # lib/sha256.bash을 인접 배치하여 path guard "*/hooks + lib" 케이스로 통과하도록 보장
-  if [ -f "$REPO_ROOT/hooks/lib/sha256.bash" ]; then
-    cp "$REPO_ROOT/hooks/lib/sha256.bash" "$baseline/hooks/lib/sha256.bash"
-  else
-    : > "$baseline/hooks/lib/sha256.bash"
-  fi
+  while IFS= read -r lib_file; do
+    rel="${lib_file#hooks/lib/}"
+    mkdir -p "$baseline/hooks/lib/$(dirname "$rel")"
+    git -C "$REPO_ROOT" show "$baseline_ref:$lib_file" > "$baseline/hooks/lib/$rel" 2>/dev/null || true
+  done < <(git -C "$REPO_ROOT" ls-tree -r --name-only "$baseline_ref" hooks/lib 2>/dev/null)
+  [ -f "$baseline/hooks/lib/sha256.bash" ] || : > "$baseline/hooks/lib/sha256.bash"
   ln -s "$REPO_ROOT/scripts" "$baseline/scripts"
   printf '%s\n' "$baseline/hooks/mst-pre-tool-use.sh"
 }
@@ -245,11 +245,15 @@ PY
   capture_hook "$left_ws" "mst-stop-hook.sh" "$payload" "$BATS_TEST_TMPDIR/stop-left.stdout" "$BATS_TEST_TMPDIR/stop-left.stderr" "$BATS_TEST_TMPDIR/stop-left.status"
   capture_hook "$right_ws" "mst-stop-hook.sh" "$payload" "$BATS_TEST_TMPDIR/stop-right.stdout" "$BATS_TEST_TMPDIR/stop-right.stderr" "$BATS_TEST_TMPDIR/stop-right.status"
 
-  assert_same_capture "$BATS_TEST_TMPDIR/stop-left" "$BATS_TEST_TMPDIR/stop-right"
+  cmp -s "$BATS_TEST_TMPDIR/stop-left.status" "$BATS_TEST_TMPDIR/stop-right.status"
+  cmp -s "$BATS_TEST_TMPDIR/stop-left.stdout" "$BATS_TEST_TMPDIR/stop-right.stdout"
+  sed -E 's#"lock_path": "[^"]+"#"lock_path": "<workspace>"#' "$BATS_TEST_TMPDIR/stop-left.stderr" > "$BATS_TEST_TMPDIR/stop-left.stderr.norm"
+  sed -E 's#"lock_path": "[^"]+"#"lock_path": "<workspace>"#' "$BATS_TEST_TMPDIR/stop-right.stderr" > "$BATS_TEST_TMPDIR/stop-right.stderr.norm"
+  cmp -s "$BATS_TEST_TMPDIR/stop-left.stderr.norm" "$BATS_TEST_TMPDIR/stop-right.stderr.norm"
   [ "$(cat "$BATS_TEST_TMPDIR/stop-left.status")" = "0" ]
   [ "$(jq -r '.decision' "$BATS_TEST_TMPDIR/stop-left.stdout")" = "approve" ]
   [ "$(jq -r '.reason' "$BATS_TEST_TMPDIR/stop-left.stdout")" = "stop_hook_active_true snapshot_present=false" ]
-  [ ! -s "$BATS_TEST_TMPDIR/stop-left.stderr" ]
+  grep -F '[stop-hook] anchor=docs/FLOW-CONSTRAINTS.md#layer-1-mode-gate' "$BATS_TEST_TMPDIR/stop-left.stderr" >/dev/null
 }
 
 @test "AC-010a mst-auto-chain-context baseline emits stable context reminder when chain is active" {

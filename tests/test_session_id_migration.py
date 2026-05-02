@@ -139,3 +139,69 @@ def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) 
     first, second = result.stdout.strip().splitlines()
     assert UUID_V4_RE.match(first)
     assert second == first
+
+
+def test_session_resolve_prefers_mst_session_id_over_legacy_aliases(tmp_path: Path) -> None:
+    """DOD-010: MST_SESSION_ID is canonical when legacy aliases conflict."""
+    (tmp_path / ".gran-maestro").mkdir()
+
+    result = _run_mst(
+        tmp_path,
+        "session",
+        "resolve",
+        env={
+            "MST_SESSION_ID": "canonical-session",
+            "MST_STATE_PPID": "legacy-ppid-session",
+            "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "canonical-session"
+    assert "legacy" not in result.stdout.strip()
+
+
+def test_session_resolve_legacy_only_snapshot_alias_falls_back_with_deprecation_signal(tmp_path: Path) -> None:
+    """DOD-010: 0.60.x MST_SNAPSHOT_SESSION_ID remains a warned fallback."""
+    (tmp_path / ".gran-maestro").mkdir()
+
+    result = _run_mst(
+        tmp_path,
+        "session",
+        "resolve",
+        env={
+            "MST_SESSION_ID": "",
+            "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "legacy-snapshot-session"
+    warning = result.stderr.lower()
+    assert "legacy-env-alias" in warning
+    assert "mst_snapshot_session_id" in warning
+    assert "deprecated" in warning
+    assert "migration" in warning
+
+
+def test_session_resolve_legacy_only_state_ppid_alias_falls_back_with_deprecation_signal(tmp_path: Path) -> None:
+    """DOD-010: 0.60.x MST_STATE_PPID remains a warned fallback."""
+    (tmp_path / ".gran-maestro").mkdir()
+
+    result = _run_mst(
+        tmp_path,
+        "session",
+        "resolve",
+        env={
+            "MST_SESSION_ID": "",
+            "MST_STATE_PPID": "424242",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "424242"
+    warning = result.stderr.lower()
+    assert "legacy-env-alias" in warning
+    assert "mst_state_ppid" in warning
+    assert "deprecated" in warning
+    assert "migration" in warning

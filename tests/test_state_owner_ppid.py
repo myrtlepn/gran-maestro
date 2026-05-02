@@ -222,3 +222,46 @@ def test_read_owner_ppid_rejects_bool(tmp_path):
         assert result.returncode == 1, (
             f"expected exit 1 for bool owner_ppid={bool_str}, got {result.returncode}"
         )
+
+
+def test_owner_session_id_prefers_mst_session_id_over_legacy_bridge(tmp_path):
+    """DOD-010: mixed env must record MST_SESSION_ID, not MST_STATE_PPID bridge identity."""
+    req_id = "REQ-006"
+    canonical_session_id = "223e4567-e89b-42d3-a456-426614174000"
+    legacy_bridge_session_id = "323e4567-e89b-42d3-a456-426614174000"
+    workspace, req_json = _setup_workspace(
+        tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
+    )
+    fake_ppid = 87654
+    _write_session_bridge(workspace, fake_ppid, legacy_bridge_session_id)
+
+    env = {
+        **os.environ,
+        "MST_SESSION_ID": canonical_session_id,
+        "MST_STATE_PPID": str(fake_ppid),
+        "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MST_SCRIPT),
+            "state",
+            "set-workflow",
+            "--active",
+            "true",
+            "--skill",
+            "mst:request",
+            "--req",
+            req_id,
+        ],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_session_id"] == canonical_session_id
+    assert data["owner_session_id"] != legacy_bridge_session_id

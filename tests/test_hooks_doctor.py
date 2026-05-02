@@ -112,3 +112,23 @@ def test_output_contains_required_fields(tmp_path, monkeypatch, capsys):
     assert "Source hooks:" in captured.out
     assert "Installed version:" in captured.out
     assert "Expected version:" in captured.out
+
+
+def test_doctor_output_contains_legacy_env_alias_migration_tokens(tmp_path, monkeypatch, capsys):
+    """DOD-010: doctor exposes deprecated legacy alias migration signal."""
+    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    monkeypatch.setenv("MST_STATE_PPID", "12345")
+    monkeypatch.setenv("MST_SNAPSHOT_SESSION_ID", "legacy-snapshot-session")
+    monkeypatch.setenv("MST_SESSION_ID", "canonical-session")
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+    output = f"{captured.out}\n{captured.err}"
+
+    assert return_code == 0
+    assert "legacy-env-alias" in output
+    assert "MST_SESSION_ID" in output
+    assert "deprecated" in output
+    assert "migration" in output

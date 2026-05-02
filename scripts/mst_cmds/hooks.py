@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import env_alias_compat
 from scripts.mst_cmds import skill as skill_cmd
 from scripts.mst_cmds.worktree import inspect_lineage_unknown_worktree_meta
 from scripts.mst_cmds._common import (
@@ -32,9 +33,9 @@ from scripts.mst_cmds._common import (
 
 
 def _snapshot_session_id() -> str:
-    ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
-    if ppid_env:
-        return ppid_env
+    session_id, _source = env_alias_compat.resolve_session_id_from_env(warn_legacy=False)
+    if session_id:
+        return session_id
     return str(os.getppid())
 
 
@@ -245,6 +246,31 @@ def cmd_hooks_sync(args):
     return 0
 
 
+def _detect_legacy_env_aliases() -> list[tuple[str, str]]:
+    detected: list[tuple[str, str]] = []
+    for alias in env_alias_compat.LEGACY_SESSION_ALIASES:
+        value = os.environ.get(alias, "").strip()
+        if value:
+            detected.append((alias, value))
+    return detected
+
+
+def _print_legacy_env_alias_report(detected: list[tuple[str, str]]) -> None:
+    if not detected:
+        return
+    canonical = os.environ.get(env_alias_compat.CANONICAL_SESSION_ENV, "").strip() or "<unset>"
+    print()
+    print("[legacy-env-alias] deprecated session env alias detected; migration: set MST_SESSION_ID as canonical.")
+    print(f"  MST_SESSION_ID={canonical}")
+    print("  detected legacy aliases:")
+    for alias, value in detected:
+        print(f"  - {alias}={value} (deprecated alias; compatibility only)")
+    print("  0.61.0 removal readiness:")
+    print("  - legacy alias list: MST_STATE_PPID, MST_SNAPSHOT_SESSION_ID")
+    print("  - allowed residual surfaces: scripts/mst_cmds/env_alias_compat.py, doctor reporting, runtime compatibility fallbacks, compatibility tests/docs")
+    print("  - remove compatibility helper/test/allowlist/docs items: env_alias_compat fallback warnings, tests/test_env_alias_compatibility.py alias allowlist, SESSION-ID-MIGRATION deprecated alias notes")
+
+
 def _detect_legacy_ppid_state(base_dir: Path) -> int:
     """legacy 항목 수 (numeric PPID 디렉토리 + owner_ppid 필드만 가진 JSON)."""
     count = 0
@@ -316,6 +342,8 @@ def doctor(args: argparse.Namespace) -> int:
     print(f"Expected version:  {source_version}")
     print()
     print(f"Checked at: {checked_at}")
+
+    _print_legacy_env_alias_report(_detect_legacy_env_aliases())
 
     base_dir = Path(os.environ.get("MST_BASE_DIR", os.getcwd()))
     legacy_count = _detect_legacy_ppid_state(base_dir)

@@ -153,11 +153,16 @@ def _session_end_flush() -> None:
                 finally:
                     os_module.close(fd)
 
-            session_id = (
-                _extract_session_id_from_path(path_str)
-                or os_module.environ.get("MST_SNAPSHOT_SESSION_ID")
-                or "unknown"
-            )
+            session_id = None
+            try:
+                from scripts.mst_cmds.env_alias_compat import resolve_session_id_from_env
+
+                session_id, _source = resolve_session_id_from_env(warn_legacy=True)
+            except Exception:
+                session_id = None
+            if not session_id and path.exists():
+                session_id = _extract_session_id_from_path(path_str)
+            session_id = session_id or "unknown"
             project_root = _find_project_root(path_str)
             flow_path = flow_log_path(project_root, rotate=True)
             flow_path.parent.mkdir(parents=True, exist_ok=True)

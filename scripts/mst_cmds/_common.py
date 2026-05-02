@@ -238,7 +238,13 @@ def next_action(current_phase, status):
 
 def _skill_state_base_dir() -> Path:
     local_base_dir = Path.cwd().resolve() / ".gran-maestro"
-    session_id = os.environ.get("MST_STATE_PPID", "").strip() or str(os.getppid())
+    try:
+        from scripts.mst_cmds.env_alias_compat import resolve_session_id_from_env
+
+        session_id, _source = resolve_session_id_from_env(warn_legacy=True)
+    except Exception:
+        session_id = None
+    session_id = session_id or str(os.getppid())
 
     def has_session_state(base_dir: Path | None) -> bool:
         if not base_dir:

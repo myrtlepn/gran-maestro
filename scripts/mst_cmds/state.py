@@ -21,6 +21,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 from scripts.mst_cmds import _common
+from scripts.mst_cmds.env_alias_compat import (
+    canonical_session_id_from_env,
+    legacy_session_id_from_env,
+    resolve_session_id_from_env,
+)
 from scripts.mst_cmds.state_cmd import register_state_validate
 from scripts.mst_cmds._common import (
     _parse_bool_arg,
@@ -49,12 +54,9 @@ def _resolve_owner_ppid() -> int:
 
 
 def _snapshot_session_id() -> str:
-    session_env = os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip()
+    session_env, _source = resolve_session_id_from_env()
     if session_env:
         return session_env
-    ppid_env = os.environ.get("MST_STATE_PPID", "").strip()
-    if ppid_env:
-        return ppid_env
     return str(os.getppid())
 
 
@@ -85,9 +87,9 @@ def _session_id_from_hook_stdin() -> Optional[str]:
 def _current_uuid_session_id() -> Optional[str]:
     from scripts._skill_state import UUID_RE
 
+    env_session_id, _source = resolve_session_id_from_env()
     candidates = [
-        os.environ.get("MST_SESSION_ID", "").strip(),
-        os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip(),
+        env_session_id or "",
         _resolve_owner_session_id(_resolve_owner_ppid()) or "",
         _session_id_from_hook_stdin() or "",
     ]
@@ -546,7 +548,7 @@ def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optio
 
 def _inject_owner_metadata_if_missing(args) -> None:
     ppid = _resolve_owner_ppid()
-    session_id = _resolve_owner_session_id(ppid)
+    session_id = canonical_session_id_from_env() or _resolve_owner_session_id(ppid)
 
     req_id = (getattr(args, "req", "") or "").strip()
     if req_id.startswith("REQ-") and _common.BASE_DIR:
@@ -1112,10 +1114,7 @@ def cmd_state_recover(args):
     previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
     session_id = _current_uuid_session_id()
     if not session_id:
-        explicit_session_env = (
-            os.environ.get("MST_SESSION_ID", "").strip()
-            or os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip()
-        )
+        explicit_session_env, _source = resolve_session_id_from_env()
         restored_owner = _canonical_uuid4(previous_owner)
         if explicit_session_env or not restored_owner:
             print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)

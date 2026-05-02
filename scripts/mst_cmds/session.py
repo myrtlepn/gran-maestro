@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds.env_alias_compat import resolve_session_id_from_env
 from scripts.mst_cmds._common import (
     load_json,
 )
@@ -82,7 +83,7 @@ def _session_id_from_bridge() -> str | None:
 
 
 def resolve_session_id_value() -> str:
-    env_value = os.environ.get("MST_SESSION_ID", "").strip()
+    env_value, _env_source = resolve_session_id_from_env()
     if env_value:
         return env_value
 
