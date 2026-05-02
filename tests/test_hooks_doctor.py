@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 from scripts.mst_cmds import hooks
@@ -59,6 +60,43 @@ def test_status_source_not_found(tmp_path, monkeypatch, capsys):
     assert return_code == 0
     assert "Status: SOURCE_NOT_FOUND" in captured.out
     assert "source hooks not found" in captured.err
+
+
+def test_doctor_reports_lineage_unknown_candidates_read_only(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    meta_path = tmp_path / "workspace" / ".gran-maestro" / "worktrees" / "REQ-801-T03.meta.json"
+    _write(meta_path, json.dumps({"taskId": "REQ-801-T03", "state": "cleaned"}))
+    before = meta_path.read_text(encoding="utf-8")
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "stale meta lineage=unknown candidates=1" in captured.out
+    assert "mst.py worktree migrate-archive --dry-run" in captured.out
+    assert "mst.py worktree migrate-archive --apply" in captured.out
+    assert "mst.py worktree migrate-archive --delete --apply" in captured.out
+    assert meta_path.read_text(encoding="utf-8") == before
+    assert not (meta_path.parent / ".archive").exists()
+
+
+def test_doctor_reports_zero_candidate_clean_state(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(
+        tmp_path / "workspace" / ".gran-maestro" / "worktrees" / "REQ-801-ok.meta.json",
+        json.dumps({"taskId": "REQ-801-ok", "session_id": "session-ok"}),
+    )
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "stale meta lineage=unknown candidates=0" in captured.out
+    assert "clean: lineage=unknown candidate 없음" in captured.out
 
 
 def test_output_contains_required_fields(tmp_path, monkeypatch, capsys):

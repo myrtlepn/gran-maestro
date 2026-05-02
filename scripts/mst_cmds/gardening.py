@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 from scripts import _state_schema
 from scripts.mst_cmds import _common
+from scripts.mst_cmds.worktree import inspect_lineage_unknown_worktree_meta
 from scripts.mst_cmds._common import (
     _create_intent_store,
     _parse_utc_datetime,
@@ -88,6 +89,36 @@ def _gardening_display_date(value):
         return str(value or "-")
     return dt.date().isoformat()
 
+
+def _gardening_worktree_migrate_archive_report() -> dict:
+    recommended_commands = [
+        "mst.py worktree migrate-archive --dry-run",
+        "mst.py worktree migrate-archive --apply",
+        "mst.py worktree migrate-archive --delete --apply",
+    ]
+    try:
+        payload = inspect_lineage_unknown_worktree_meta(Path(_common.BASE_DIR).parent)
+    except Exception as exc:
+        reason = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
+        return {
+            "ok": False,
+            "candidate_count": 0,
+            "skipped_count": 0,
+            "clean": False,
+            "error": reason,
+            "recommended_commands": recommended_commands,
+        }
+    candidate_count = int(payload.get("candidate_count") or 0)
+    skipped_count = int(payload.get("skipped_count") or 0)
+    return {
+        "ok": True,
+        "candidate_count": candidate_count,
+        "skipped_count": skipped_count,
+        "clean": candidate_count == 0,
+        "recommended_commands": recommended_commands,
+    }
+
+
 def cmd_gardening_scan(args):
     now = datetime.now(timezone.utc)
     warnings = []
@@ -104,6 +135,7 @@ def cmd_gardening_scan(args):
     intent_section_message = None
 
     request_status_map = {}
+    protected_active_count = 0
 
     req_root = requests_dir()
     if not req_root.exists():
@@ -121,7 +153,6 @@ def cmd_gardening_scan(args):
                     request_warnings,
                 )
 
-        protected_active_count = 0
         for req_id, req_path, req_data in iter_request_dirs(include_completed=False):
             status = req_data.get("status", "")
             request_status_map[req_id] = status
@@ -267,6 +298,7 @@ def cmd_gardening_scan(args):
         "total": len(stale_plans) + len(stale_requests) + len(stale_intents),
         "protected_active_requests": protected_active_count,
     }
+    worktree_migrate_archive = _gardening_worktree_migrate_archive_report()
 
     if args.json:
         stale_plans_json = []
@@ -298,6 +330,7 @@ def cmd_gardening_scan(args):
             "stale_intents": stale_intents_json,
             "warnings": warnings,
             "summary": summary,
+            "worktree_migrate_archive": worktree_migrate_archive,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -370,6 +403,23 @@ def cmd_gardening_scan(args):
         print("[Intents] stale 항목 없음")
     for warning in intent_warnings:
         print(warning)
+    print("")
+
+    print("[Worktree migrate-archive]")
+    if worktree_migrate_archive.get("ok"):
+        print(
+            "  stale meta lineage=unknown "
+            f"candidates={worktree_migrate_archive['candidate_count']} "
+            f"skipped={worktree_migrate_archive['skipped_count']}"
+        )
+        if worktree_migrate_archive.get("clean"):
+            print("  clean: lineage=unknown candidate 없음")
+    else:
+        print(f"  진단 실패: {worktree_migrate_archive.get('error')}")
+    if not worktree_migrate_archive.get("clean"):
+        print("  권장 명령:")
+        for command in worktree_migrate_archive.get("recommended_commands", []):
+            print(f"    {command}")
     print("")
 
     print("=======================================")

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import skill as skill_cmd
+from scripts.mst_cmds.worktree import inspect_lineage_unknown_worktree_meta
 from scripts.mst_cmds._common import (
     TYPE_DIRS,
     _archive_run_type,
@@ -321,6 +322,26 @@ def doctor(args: argparse.Namespace) -> int:
     if legacy_count > 0:
         print(f"[warn] legacy PPID state 감지 — {legacy_count}개 항목")
         print("실행: python3 mst.py state migrate --dry-run")
+
+    try:
+        worktree_meta_report = inspect_lineage_unknown_worktree_meta(base_dir)
+    except Exception as exc:
+        reason = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
+        print(f"[warn] worktree stale meta 진단 실패 — {reason}")
+    else:
+        candidate_count = int(worktree_meta_report.get("candidate_count") or 0)
+        skipped_count = int(worktree_meta_report.get("skipped_count") or 0)
+        print(
+            "[worktree-migrate-archive] "
+            f"stale meta lineage=unknown candidates={candidate_count} skipped={skipped_count}"
+        )
+        if candidate_count > 0:
+            print("권장 명령:")
+            print("  mst.py worktree migrate-archive --dry-run")
+            print("  mst.py worktree migrate-archive --apply")
+            print("  mst.py worktree migrate-archive --delete --apply")
+        else:
+            print("[worktree-migrate-archive] clean: lineage=unknown candidate 없음")
     return return_code
 
 

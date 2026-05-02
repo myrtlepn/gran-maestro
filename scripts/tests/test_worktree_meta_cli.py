@@ -607,6 +607,148 @@ def test_migrate_legacy_cleaned_meta_is_idempotent_and_records_times(master_repo
     assert list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json")) == [first_target]
 
 
+def _lineage_unknown_archive_path(master_repo: Path, month: str, meta_filename: str) -> Path:
+    return master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown" / month / meta_filename
+
+
+def _set_mtime(path: Path, iso_value: str) -> float:
+    timestamp = datetime.fromisoformat(iso_value).timestamp()
+    os.utime(path, (timestamp, timestamp))
+    return timestamp
+
+
+def _snapshot_file(path: Path) -> tuple[str, float, bool]:
+    return (path.read_text(encoding="utf-8"), path.stat().st_mtime, path.exists())
+
+
+def test_read_only_lineage_unknown_inspection_reports_counts_without_mutation(master_repo: Path) -> None:
+    worktrees_dir = master_repo / ".gran-maestro" / "worktrees"
+    candidate = worktrees_dir / "REQ-801-inspect.meta.json"
+    invalid = worktrees_dir / "REQ-801-inspect-invalid.meta.json"
+    _write_json(candidate, {"taskId": "REQ-801-inspect", "state": "cleaned"})
+    _write_file(invalid, "{not json")
+    _set_mtime(candidate, "2026-04-10T12:00:00+00:00")
+    snapshots = {path: _snapshot_file(path) for path in (candidate, invalid)}
+    target = _lineage_unknown_archive_path(master_repo, "2026-04", candidate.name)
+
+    payload = worktree_cmd.inspect_lineage_unknown_worktree_meta(master_repo)
+
+    assert payload["candidate_count"] == 1
+    assert payload["skipped_count"] == 1
+    assert payload["dry_run"] is True
+    assert payload["candidates"][0]["source"] == str(candidate)
+    assert not target.exists()
+    for path, snapshot in snapshots.items():
+        assert _snapshot_file(path) == snapshot
+
+
+def test_migrate_archive_dry_run_reports_lineage_unknown_candidates_and_invalid_json(master_repo: Path) -> None:
+    worktrees_dir = master_repo / ".gran-maestro" / "worktrees"
+    missing = worktrees_dir / "REQ-801-missing.meta.json"
+    blank = worktrees_dir / "REQ-801-blank.meta.json"
+    valid_session = worktrees_dir / "REQ-801-valid-session.meta.json"
+    valid_owner = worktrees_dir / "REQ-801-valid-owner.meta.json"
+    invalid = worktrees_dir / "REQ-801-invalid.meta.json"
+
+    _write_json(missing, {"taskId": "REQ-801-missing", "state": "cleaned"})
+    _write_json(blank, {"taskId": "REQ-801-blank", "state": "cleaned", "session_id": " ", "owner_session_id": ""})
+    _write_json(valid_session, {"taskId": "REQ-801-valid-session", "state": "cleaned", "session_id": "session-ok"})
+    _write_json(valid_owner, {"taskId": "REQ-801-valid-owner", "state": "cleaned", "owner_session_id": "owner-ok"})
+    _write_file(invalid, "{not json")
+    snapshots = {path: _snapshot_file(path) for path in (missing, blank, valid_session, valid_owner, invalid)}
+
+    result = _run_mst(master_repo, "worktree", "migrate-archive", "--dry-run", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    candidates = {Path(item["source"]).name: item for item in payload["candidates"]}
+    skipped = {Path(item["source"]).name: item for item in payload["skipped"]}
+    assert set(candidates) == {missing.name, blank.name}
+    assert all(item["lineage"] == "unknown" for item in candidates.values())
+    assert valid_session.name in skipped
+    assert valid_owner.name in skipped
+    assert skipped[invalid.name]["reason"] == "invalid-json"
+    assert payload["candidate_count"] == 2
+    for path, snapshot in snapshots.items():
+        assert _snapshot_file(path) == snapshot
+
+
+def test_migrate_archive_default_and_dry_run_do_not_mutate_source_or_archive(master_repo: Path) -> None:
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / "REQ-801-dry-run.meta.json"
+    _write_json(meta_path, {"taskId": "REQ-801-dry-run", "state": "cleaned"})
+    _set_mtime(meta_path, "2026-04-10T12:00:00+00:00")
+    snapshot = _snapshot_file(meta_path)
+    target = _lineage_unknown_archive_path(master_repo, "2026-04", meta_path.name)
+
+    default_result = _run_mst(master_repo, "worktree", "migrate-archive")
+
+    assert default_result.returncode == 0, default_result.stderr
+    assert str(meta_path) in default_result.stdout
+    assert str(target) in default_result.stdout
+    assert "lineage=unknown" in default_result.stdout
+    assert "candidates=1" in default_result.stdout
+    assert _snapshot_file(meta_path) == snapshot
+    assert not target.exists()
+
+    json_result = _run_mst(master_repo, "worktree", "migrate-archive", "--dry-run", "--json")
+
+    assert json_result.returncode == 0, json_result.stderr
+    payload = json.loads(json_result.stdout)
+    assert payload["dry_run"] is True
+    assert payload["candidate_count"] == 1
+    assert payload["candidates"][0]["source"] == str(meta_path)
+    assert payload["candidates"][0]["target"] == str(target)
+    assert payload["candidates"][0]["lineage"] == "unknown"
+    assert _snapshot_file(meta_path) == snapshot
+    assert not target.exists()
+
+
+def test_migrate_archive_apply_moves_source_and_records_unknown_lineage(master_repo: Path) -> None:
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / "REQ-801-apply.meta.json"
+    _write_json(meta_path, {"taskId": "REQ-801-apply", "state": "cleaned"})
+    original_mtime = _set_mtime(meta_path, "2026-04-15T08:09:10+00:00")
+    target = _lineage_unknown_archive_path(master_repo, "2026-04", meta_path.name)
+
+    result = _run_mst(master_repo, "worktree", "migrate-archive", "--apply", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["dry_run"] is False
+    assert payload["migrated"][0]["source"] == str(meta_path)
+    assert payload["migrated"][0]["target"] == str(target)
+    assert payload["migrated"][0]["lineage"] == "unknown"
+    assert not meta_path.exists()
+    archived = _read_json(target)
+    assert archived["lineage"] == "unknown"
+    assert archived["original_mtime"] == original_mtime
+    _assert_iso_utc(archived["migrated_at"])
+
+
+def test_migrate_archive_delete_requires_explicit_apply_and_reports_deleted_row(master_repo: Path) -> None:
+    meta_path = master_repo / ".gran-maestro" / "worktrees" / "REQ-801-delete.meta.json"
+    _write_json(meta_path, {"taskId": "REQ-801-delete", "state": "cleaned"})
+    _set_mtime(meta_path, "2026-04-20T01:02:03+00:00")
+    target = _lineage_unknown_archive_path(master_repo, "2026-04", meta_path.name)
+
+    dry_delete = _run_mst(master_repo, "worktree", "migrate-archive", "--delete", "--json")
+
+    assert dry_delete.returncode == 0, dry_delete.stderr
+    dry_payload = json.loads(dry_delete.stdout)
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["deleted"] == []
+    assert meta_path.exists()
+    assert not target.exists()
+
+    apply_delete = _run_mst(master_repo, "worktree", "migrate-archive", "--delete", "--apply", "--json")
+
+    assert apply_delete.returncode == 0, apply_delete.stderr
+    payload = json.loads(apply_delete.stdout)
+    assert payload["migrated"][0]["target"] == str(target)
+    assert payload["deleted"] == [{"target": str(target), "source": str(meta_path), "lineage": "unknown"}]
+    assert not meta_path.exists()
+    assert not target.exists()
+
+
 def test_default_config_has_worktree_archive_retention_values() -> None:
     defaults = _read_json(REPO_ROOT / "templates" / "defaults" / "config.json")
     assert defaults["worktree"]["archive_retention_days"] == 30

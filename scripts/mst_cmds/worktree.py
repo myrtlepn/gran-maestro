@@ -477,6 +477,122 @@ def migrate_legacy_cleaned_worktree_meta(project_root: Path, *, now: datetime | 
     return {"migrated": migrated, "skipped": skipped}
 
 
+def _load_worktree_meta_json_for_migration(meta_path: Path) -> tuple[dict | None, str | None]:
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        return None, "invalid-json"
+    except OSError as exc:
+        return None, f"read-error: {exc}"
+    if not isinstance(data, dict):
+        return None, "invalid-json"
+    return data, None
+
+
+def _has_worktree_lineage(meta_data: dict) -> bool:
+    return bool(_coerce_nonempty_str(meta_data.get("session_id")) or _coerce_nonempty_str(meta_data.get("owner_session_id")))
+
+
+def _lineage_unknown_archive_target_for_mtime(project_root: Path, meta_path: Path, original_mtime: float) -> Path:
+    target_time = datetime.fromtimestamp(original_mtime, timezone.utc)
+    return _worktree_meta_archive_target(project_root, meta_path, {"lineage": "unknown"}, target_time)
+
+
+def _archived_unknown_meta_is_valid(target: Path) -> bool:
+    data, error = _load_worktree_meta_json_for_migration(target)
+    if error or not isinstance(data, dict):
+        return False
+    return data.get("lineage") == "unknown"
+
+
+def _migrate_archive_empty_payload(*, apply: bool, delete: bool) -> dict:
+    dry_run = not apply
+    return {
+        "dry_run": dry_run,
+        "apply": apply,
+        "delete": delete,
+        "candidates": [],
+        "migrated": [],
+        "deleted": [],
+        "skipped": [],
+        "candidate_count": 0,
+        "migrated_count": 0,
+        "deleted_count": 0,
+        "skipped_count": 0,
+    }
+
+
+def inspect_lineage_unknown_worktree_meta(project_root: Path, *, now: datetime | None = None) -> dict:
+    """Return read-only migrate-archive diagnostic counts for lineage=unknown meta files."""
+    return migrate_lineage_unknown_worktree_meta(project_root, apply=False, delete=False, now=now)
+
+
+def migrate_lineage_unknown_worktree_meta(
+    project_root: Path,
+    *,
+    apply: bool = False,
+    delete: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    worktrees_dir = _common.worktrees_dir(project_root)
+    payload = _migrate_archive_empty_payload(apply=apply, delete=delete)
+    if not worktrees_dir.is_dir():
+        return payload
+
+    migrated_at_dt = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+    migrated_at = migrated_at_dt.isoformat().replace("+00:00", "Z")
+
+    for meta_path in sorted(worktrees_dir.glob("*.meta.json")):
+        meta_data, error = _load_worktree_meta_json_for_migration(meta_path)
+        if error:
+            payload["skipped"].append({"source": str(meta_path), "path": str(meta_path), "reason": error})
+            continue
+        if not isinstance(meta_data, dict):
+            payload["skipped"].append({"source": str(meta_path), "path": str(meta_path), "reason": "invalid-json"})
+            continue
+        if _has_worktree_lineage(meta_data):
+            payload["skipped"].append({"source": str(meta_path), "path": str(meta_path), "reason": "has-lineage"})
+            continue
+
+        try:
+            original_mtime = meta_path.stat().st_mtime
+        except FileNotFoundError:
+            continue
+        target = _lineage_unknown_archive_target_for_mtime(project_root, meta_path, original_mtime)
+        row = {"source": str(meta_path), "target": str(target), "lineage": "unknown"}
+        payload["candidates"].append(row)
+        if not apply:
+            continue
+
+        canonical_target = worktrees_dir / ".archive" / "lineage-unknown" / datetime.fromtimestamp(original_mtime, timezone.utc).strftime("%Y-%m") / meta_path.name
+        if canonical_target.exists() and _archived_unknown_meta_is_valid(canonical_target):
+            meta_path.unlink(missing_ok=True)
+            row = {"source": str(meta_path), "target": str(canonical_target), "lineage": "unknown"}
+            payload["migrated"].append(row)
+            if delete:
+                canonical_target.unlink(missing_ok=True)
+                payload["deleted"].append(row)
+            continue
+
+        next_data = dict(meta_data)
+        next_data["lineage"] = "unknown"
+        next_data.setdefault("original_mtime", original_mtime)
+        next_data["migrated_at"] = migrated_at
+        _write_worktree_meta_atomic(meta_path, next_data)
+        _move_meta_to_archive(meta_path, target)
+        payload["migrated"].append(row)
+        if delete:
+            target.unlink(missing_ok=True)
+            payload["deleted"].append(row)
+
+    payload["candidate_count"] = len(payload["candidates"])
+    payload["migrated_count"] = len(payload["migrated"])
+    payload["deleted_count"] = len(payload["deleted"])
+    payload["skipped_count"] = len(payload["skipped"])
+    return payload
+
+
 def _mark_worktree_meta_cleaned(project_root: Path, path_value) -> None:
     task_id = _worktree_task_id_from_path(path_value)
     if not task_id:
@@ -1071,6 +1187,29 @@ def cmd_worktree_migrate_cleaned_meta(args):
         print(f"[worktree-migrate-cleaned-meta] migrated={len(payload['migrated'])} skipped={len(payload['skipped'])}")
         for item in payload["migrated"]:
             print(f"migrated {item['source']} -> {item['target']}")
+    return 0
+
+
+def cmd_worktree_migrate_archive(args):
+    project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
+    apply = bool(getattr(args, "apply", False))
+    delete = bool(getattr(args, "delete", False))
+    payload = migrate_lineage_unknown_worktree_meta(project_root, apply=apply, delete=delete)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        mode = "apply" if apply else "dry-run"
+        print(
+            f"[worktree-migrate-archive] mode={mode} delete={delete} "
+            f"candidates={payload['candidate_count']} migrated={payload['migrated_count']} "
+            f"deleted={payload['deleted_count']} skipped={payload['skipped_count']}"
+        )
+        for item in payload["candidates"]:
+            print(f"candidate lineage={item['lineage']} {item['source']} -> {item['target']}")
+        for item in payload["migrated"]:
+            print(f"migrated lineage={item['lineage']} {item['source']} -> {item['target']}")
+        for item in payload["deleted"]:
+            print(f"deleted lineage={item['lineage']} {item['target']}")
     return 0
 
 
@@ -1683,9 +1822,16 @@ def register(subparsers):
     worktree_migrate_cleaned_meta = worktree_sub.add_parser("migrate-cleaned-meta")
     worktree_migrate_cleaned_meta.add_argument("--json", action="store_true")
 
+    worktree_migrate_archive = worktree_sub.add_parser("migrate-archive")
+    worktree_migrate_archive.add_argument("--dry-run", action="store_true")
+    worktree_migrate_archive.add_argument("--apply", action="store_true")
+    worktree_migrate_archive.add_argument("--delete", action="store_true")
+    worktree_migrate_archive.add_argument("--json", action="store_true")
+
     _register_worktree_dispatch("path", cmd_worktree_path)
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
     _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)
     _register_worktree_dispatch("classify-collision", cmd_worktree_classify_collision)
     _register_worktree_dispatch("archive-retention", cmd_worktree_archive_retention)
     _register_worktree_dispatch("migrate-cleaned-meta", cmd_worktree_migrate_cleaned_meta)
+    _register_worktree_dispatch("migrate-archive", cmd_worktree_migrate_archive)
