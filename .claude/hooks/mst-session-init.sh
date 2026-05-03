@@ -97,6 +97,14 @@ mkdir -p "$MST_TMP"
 echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
+is_structured_mst_session_id() {
+  local value="${1:-}"
+  case "$value" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
+}
+
 extract_stdin_mst_session_id_literal() {
   local raw="$1" rest value
   case "$raw" in
@@ -111,11 +119,16 @@ extract_stdin_mst_session_id_literal() {
       case "$value" in
         ""|*[!A-Za-z0-9_-]*) return 0 ;;
       esac
-      printf '%s\n' "$value"
+      if is_structured_mst_session_id "$value"; then
+        printf '%s\n' "$value"
+      fi
       ;;
   esac
 }
 
+if [ -n "${MST_SESSION_ID:-}" ] && ! is_structured_mst_session_id "$MST_SESSION_ID"; then
+  MST_SESSION_ID=""
+fi
 if [ -z "${MST_SESSION_ID:-}" ]; then
   MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ROOT_SESSION_ID="mst-root-REQ-804-T02"
-LEGACY_SESSION_ID="claude-legacy-REQ-804-T02"
+ROOT_SESSION_ID="MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+LEGACY_SESSION_ID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 TEST_TMP_ROOT="$(mktemp -d)"
 
 cleanup() {

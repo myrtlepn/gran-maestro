@@ -14,9 +14,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 PRE_TOOL_HOOK = REPO_ROOT / "hooks" / "mst-pre-tool-use.sh"
-ROOT_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
-STALE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ROOT_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+STALE_SESSION_ID = "MST-REQ-805-20260503T131853000Z-r4n8vd1c"
 LEGACY_SESSION_ID = "claude-legacy-REQ-804-T04"
+LEGACY_TRANSCRIPT_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 LEGACY_PPID = "80404"
 REQUIRED_POINTS = {
     "workflow_state",
@@ -40,6 +41,7 @@ REQUIRED_SCENARIOS = {
     "stale_handoff",
 }
 PATH_SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+STRUCTURED_SESSION_RE = re.compile(r"^MST-AGI-030-20260503T130813382Z-[a-z0-9]{8,}$")
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -213,7 +215,7 @@ def _missing_parent_no_write(workspace: Path) -> int:
                 "MST_HOOK_STDIN_RAW": json.dumps(
                     {
                         "session_id": LEGACY_SESSION_ID,
-                        "transcript_path": f"/tmp/{STALE_SESSION_ID}.jsonl",
+                        "transcript_path": f"/tmp/{LEGACY_TRANSCRIPT_SESSION_ID}.jsonl",
                     }
                 ),
                 "MST_STATE_PPID": LEGACY_PPID,
@@ -226,7 +228,7 @@ def _missing_parent_no_write(workspace: Path) -> int:
     combined = f"{result.stdout}\n{result.stderr}"
     assert "missing MST_SESSION_ID" in combined
     assert LEGACY_SESSION_ID not in combined
-    assert STALE_SESSION_ID not in combined
+    assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
     return _mutation_delta(before, _files(workspace))
 
 
@@ -278,13 +280,24 @@ def _assert_root_init_path_safe() -> None:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
         before = _files(workspace)
-        result = _run_mst(workspace, "session", "resolve", "--json", env=_clean_env())
+        result = _run_mst(
+            workspace,
+            "session",
+            "resolve",
+            "--json",
+            "--root-mst-id",
+            "AGI-030",
+            "--started-at",
+            "20260503T130813382Z",
+            env=_clean_env(),
+        )
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         generated = payload.get("mst_session_id")
         assert isinstance(generated, str) and generated
-        assert payload.get("source") == "generated"
+        assert payload.get("source") == "generated:root_mst_id"
         assert PATH_SAFE_RE.fullmatch(generated)
+        assert STRUCTURED_SESSION_RE.fullmatch(generated)
         assert _files(workspace) == before
 
 

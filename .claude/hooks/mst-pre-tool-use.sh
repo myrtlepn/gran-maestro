@@ -112,6 +112,7 @@ parse_hook_payload() {
 import hashlib
 import json
 import os
+import re
 
 raw = os.environ.get("MST_HOOK_STDIN_RAW", "")
 try:
@@ -130,7 +131,19 @@ def clean(value):
         return ""
     return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
 
-session_id = clean(os.environ.get("MST_SESSION_ID")) or clean(payload.get("mst_session_id"))
+STRUCTURED_RE = re.compile(
+    r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$"
+)
+
+
+def structured_session_id(value):
+    text = clean(value)
+    if not text or "/" in text or ".." in text:
+        return ""
+    return text if STRUCTURED_RE.match(text) else ""
+
+
+session_id = structured_session_id(os.environ.get("MST_SESSION_ID")) or structured_session_id(payload.get("mst_session_id"))
 claude_session_id = clean(payload.get("session_id"))
 tool_name = clean(payload.get("tool_name"))
 file_path = clean(tool_input.get("file_path") or tool_input.get("path"))

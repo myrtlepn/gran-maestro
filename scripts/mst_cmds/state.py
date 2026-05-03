@@ -112,6 +112,12 @@ def _load_snapshot_for_session(base_dir: Path, session_id: str) -> Optional[dict
 
 
 def _validate_existing_snapshot_for_write(base_dir: Path, session_id: str) -> tuple[bool, str]:
+    try:
+        from scripts.mst_cmds.session import validate_mst_session_metadata_consistency
+
+        validate_mst_session_metadata_consistency(base_dir, session_id)
+    except ValueError as exc:
+        return False, str(exc)
     snapshot = _load_snapshot_for_session(base_dir, session_id)
     if not isinstance(snapshot, dict):
         return True, ""
@@ -136,8 +142,12 @@ def _require_args_session_matches_env(args_session_id: str) -> tuple[Optional[st
         session_id = _common.require_mst_session_id_for_mutation("recover/resume state write")
     except ValueError as exc:
         return None, str(exc)
-    if not _common.is_path_safe_mst_session_id(args_session_id):
-        return None, "invalid --session-id path segment"
+    try:
+        from scripts.mst_cmds.session import validate_mst_session_id
+
+        validate_mst_session_id(args_session_id)
+    except ValueError as exc:
+        return None, str(exc)
     if args_session_id != session_id:
         return None, f"mst_session_id mismatch: env={session_id} arg={args_session_id}"
     return session_id, None

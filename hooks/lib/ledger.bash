@@ -65,6 +65,13 @@ _mst_ledger_path_safe_id() {
   printf '%s\n' "$value"
 }
 
+_mst_ledger_structured_mst_session_id() {
+  local value="${1:-}"
+  _mst_ledger_path_safe_id "$value" >/dev/null 2>&1 || return 1
+  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]] || return 1
+  printf '%s\n' "$value"
+}
+
 _mst_ledger_json_string_field() {
   local key="$1" payload="${2:-}"
   if [[ "$payload" =~ \"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
@@ -78,7 +85,7 @@ _mst_ledger_mst_session_id() {
   if [ -z "$candidate" ]; then
     candidate="$(_mst_ledger_json_string_field "mst_session_id" "$payload")"
   fi
-  _mst_ledger_path_safe_id "$candidate" 2>/dev/null || true
+  _mst_ledger_structured_mst_session_id "$candidate" 2>/dev/null || true
 }
 
 _mst_ledger_claude_session_id() {

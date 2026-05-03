@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import tarfile
 import tempfile
 import time
 import unicodedata
-import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -25,16 +26,429 @@ from scripts.mst_cmds._common import (
     load_json,
 )
 
+MST_SESSION_ID_PREFIX = "MST-"
+MST_SESSION_ID_RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+MST_SESSION_ID_RANDOM_MIN_LENGTH = 8
+MST_SESSION_ID_RANDOM_DEFAULT_LENGTH = 8
+ALLOWED_ROOT_MST_NAMESPACES = frozenset(
+    {
+        "AGI",
+        "PLN",
+        "REQ",
+        "DBG",
+        "EXP",
+        "DSC",
+        "IDN",
+        "DES",
+        "INTENT",
+        "CAP",
+        "FC",
+        "REF",
+    }
+)
+_ROOT_MST_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*)-\d+$")
+_STARTED_AT_COMPACT_RE = re.compile(r"^\d{8}T\d{9}Z$")
+_RANDOM_SEGMENT_RE = re.compile(r"^[a-z0-9]+$")
 
-def _canonical_uuid4(value: str) -> str | None:
+
+class MstSessionIdValidationError(ValueError):
+    def __init__(self, reason: str):
+        super().__init__(f"invalid structured mst_session_id: {reason}")
+        self.reason = reason
+
+
+class RootSessionCreateError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class StructuredMstSessionId:
+    mst_session_id: str
+    root_mst_id: str
+    started_at: datetime
+    started_at_compact: str
+    random: str
+
+
+def _structured_failure(reason: str) -> MstSessionIdValidationError:
+    return MstSessionIdValidationError(reason)
+
+
+def format_mst_session_started_at(started_at: datetime) -> str:
+    if started_at.tzinfo is None:
+        raise _structured_failure("started_at must be timezone-aware UTC")
+    started_at_utc = started_at.astimezone(timezone.utc)
+    if started_at_utc.microsecond % 1000 != 0:
+        raise _structured_failure("started_at precision must be milliseconds")
+    return (
+        started_at_utc.strftime("%Y%m%dT%H%M%S")
+        + f"{started_at_utc.microsecond // 1000:03d}Z"
+    )
+
+
+def parse_mst_session_started_at_compact(value: str) -> datetime:
+    text = str(value)
+    if not _STARTED_AT_COMPACT_RE.fullmatch(text):
+        raise _structured_failure("started_at_compact must be UTC milliseconds in YYYYMMDDTHHMMSSmmmZ form")
+    main = text[:-1]
     try:
-        parsed = uuid.UUID(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-    canonical = str(parsed)
-    if parsed.variant != uuid.RFC_4122 or parsed.version != 4 or canonical != str(value).strip():
-        return None
-    return canonical
+        base = datetime.strptime(main[:15], "%Y%m%dT%H%M%S")
+        started_at = base.replace(microsecond=int(main[15:18]) * 1000, tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise _structured_failure("started_at_compact is not a valid UTC timestamp") from exc
+    if format_mst_session_started_at(started_at) != text:
+        raise _structured_failure("started_at_compact does not round-trip")
+    return started_at
+
+
+def format_mst_session_started_at_iso(started_at: datetime) -> str:
+    if started_at.tzinfo is None:
+        raise _structured_failure("started_at must be timezone-aware UTC")
+    return started_at.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def parse_mst_session_started_at_metadata(value: str) -> datetime:
+    text = str(value).strip()
+    if not text:
+        raise _structured_failure("started_at metadata must not be empty")
+    if _STARTED_AT_COMPACT_RE.fullmatch(text):
+        return parse_mst_session_started_at_compact(text)
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise _structured_failure("started_at metadata is not a valid UTC timestamp") from exc
+    if parsed.tzinfo is None:
+        raise _structured_failure("started_at metadata must be timezone-aware UTC")
+    parsed_utc = parsed.astimezone(timezone.utc)
+    if parsed_utc.microsecond % 1000 != 0:
+        raise _structured_failure("started_at metadata precision must be milliseconds")
+    return parsed_utc
+
+
+def validate_root_mst_id(root_mst_id: str) -> str:
+    root = str(root_mst_id).strip()
+    if root != str(root_mst_id):
+        raise _structured_failure("root_mst_id must not require normalization")
+    match = _ROOT_MST_ID_RE.fullmatch(root)
+    if not match:
+        raise _structured_failure("root_mst_id must be an allowed MST resource id")
+    namespace = match.group(1)
+    if namespace not in ALLOWED_ROOT_MST_NAMESPACES:
+        raise _structured_failure(f"root namespace is not allowed: {namespace}")
+    if not _common.is_path_safe_mst_session_id(root):
+        raise _structured_failure("root_mst_id must be path-safe")
+    return root
+
+
+def _validate_random_segment(value: str) -> str:
+    random_segment = str(value)
+    if len(random_segment) < MST_SESSION_ID_RANDOM_MIN_LENGTH:
+        raise _structured_failure("random segment is too short")
+    if not _RANDOM_SEGMENT_RE.fullmatch(random_segment):
+        raise _structured_failure("random segment contains characters outside [a-z0-9]")
+    return random_segment
+
+
+def _new_random_segment(length: int = MST_SESSION_ID_RANDOM_DEFAULT_LENGTH) -> str:
+    if length < MST_SESSION_ID_RANDOM_MIN_LENGTH:
+        raise ValueError(f"random length must be >= {MST_SESSION_ID_RANDOM_MIN_LENGTH}")
+    return "".join(secrets.choice(MST_SESSION_ID_RANDOM_ALPHABET) for _ in range(length))
+
+
+def parse_mst_session_id(value: str) -> StructuredMstSessionId:
+    if not isinstance(value, str):
+        raise _structured_failure("value must be a string")
+    session_id = value.strip()
+    if session_id != value:
+        raise _structured_failure("value must not require normalization")
+    if not _common.is_path_safe_mst_session_id(session_id):
+        raise _structured_failure("value must be path-safe and must not contain traversal")
+    if not session_id.startswith(MST_SESSION_ID_PREFIX):
+        raise _structured_failure("missing MST- prefix")
+
+    body = session_id[len(MST_SESSION_ID_PREFIX):]
+    try:
+        root_mst_id, started_at_compact, random_segment = body.rsplit("-", 2)
+    except ValueError as exc:
+        raise _structured_failure("expected root, started_at, and random segments") from exc
+
+    root_mst_id = validate_root_mst_id(root_mst_id)
+    started_at = parse_mst_session_started_at_compact(started_at_compact)
+    random_segment = _validate_random_segment(random_segment)
+    return StructuredMstSessionId(
+        mst_session_id=session_id,
+        root_mst_id=root_mst_id,
+        started_at=started_at,
+        started_at_compact=started_at_compact,
+        random=random_segment,
+    )
+
+
+def validate_mst_session_id(
+    value: str,
+    *,
+    expected_root_mst_id: str | None = None,
+    expected_started_at: datetime | str | None = None,
+    expected_random: str | None = None,
+) -> StructuredMstSessionId:
+    parsed = parse_mst_session_id(value)
+    if expected_root_mst_id is not None and parsed.root_mst_id != validate_root_mst_id(expected_root_mst_id):
+        raise _structured_failure("root_mst_id metadata mismatch")
+    if expected_started_at is not None:
+        expected_compact = (
+            format_mst_session_started_at(parse_mst_session_started_at_metadata(expected_started_at))
+            if isinstance(expected_started_at, str)
+            else format_mst_session_started_at(expected_started_at)
+        )
+        if parsed.started_at_compact != expected_compact:
+            raise _structured_failure("started_at metadata mismatch")
+    if expected_random is not None and parsed.random != _validate_random_segment(expected_random):
+        raise _structured_failure("random metadata mismatch")
+    return parsed
+
+
+def generate_mst_session_id(
+    root_mst_id: str,
+    *,
+    started_at: datetime | None = None,
+    random_segment: str | None = None,
+) -> str:
+    root = validate_root_mst_id(root_mst_id)
+    if started_at is None:
+        now = datetime.now(timezone.utc)
+        started_at = now.replace(microsecond=(now.microsecond // 1000) * 1000)
+    started_at_compact = format_mst_session_started_at(started_at)
+    random_value = _validate_random_segment(random_segment) if random_segment is not None else _new_random_segment()
+    session_id = f"{MST_SESSION_ID_PREFIX}{root}-{started_at_compact}-{random_value}"
+    validate_mst_session_id(session_id, expected_root_mst_id=root, expected_started_at=started_at)
+    return session_id
+
+
+def mst_session_metadata(parsed: StructuredMstSessionId) -> dict:
+    return {
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "started_at": format_mst_session_started_at_iso(parsed.started_at),
+        "random": parsed.random,
+    }
+
+
+def load_json_object(path: Path) -> dict | None:
+    data = load_json(path)
+    return data if isinstance(data, dict) else None
+
+
+def _root_type_key(root_mst_id: str) -> str:
+    root = validate_root_mst_id(root_mst_id)
+    namespace = root.split("-", 1)[0]
+    for type_key, (_subdir, prefix) in _common.TYPE_DIRS.items():
+        if prefix == namespace:
+            return type_key
+    raise _structured_failure(f"root namespace is not mapped: {namespace}")
+
+
+def root_artifact_metadata_path(base_dir: Path, root_mst_id: str) -> Path:
+    type_key = _root_type_key(root_mst_id)
+    subdir, prefix = _common.TYPE_DIRS[type_key]
+    filename = _common.JSON_FILE_MAP.get(type_key, "session.json")
+    if prefix == "AGI":
+        filename = "session.json"
+    return Path(base_dir) / subdir / validate_root_mst_id(root_mst_id) / filename
+
+
+def session_metadata_path(base_dir: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return Path(base_dir) / "sessions" / parsed.mst_session_id / "session.json"
+
+
+def session_history_path(base_dir: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return Path(base_dir) / "sessions" / parsed.mst_session_id / "history.ndjson"
+
+
+def _fsync_parent_dir(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.tmp.", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _cleanup_empty_dirs(path: Path, stop: Path) -> None:
+    stop = stop.resolve(strict=False)
+    current = path.resolve(strict=False)
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def _metadata_mismatch(source: str, field: str) -> MstSessionIdValidationError:
+    return _structured_failure(f"{source} {field} metadata mismatch")
+
+
+def _validate_metadata_payload(
+    parsed: StructuredMstSessionId,
+    payload: dict,
+    *,
+    source: str,
+) -> None:
+    raw_session_id = payload.get("mst_session_id")
+    if isinstance(raw_session_id, str) and raw_session_id.strip() and raw_session_id.strip() != parsed.mst_session_id:
+        raise _metadata_mismatch(source, "mst_session_id")
+    raw_root = payload.get("root_mst_id")
+    if isinstance(raw_root, str) and raw_root.strip() and validate_root_mst_id(raw_root.strip()) != parsed.root_mst_id:
+        raise _metadata_mismatch(source, "root_mst_id")
+    raw_started_at = payload.get("started_at")
+    if isinstance(raw_started_at, str) and raw_started_at.strip():
+        compact = format_mst_session_started_at(parse_mst_session_started_at_metadata(raw_started_at))
+        if compact != parsed.started_at_compact:
+            raise _metadata_mismatch(source, "started_at")
+    raw_random = payload.get("random")
+    if isinstance(raw_random, str) and raw_random.strip() and _validate_random_segment(raw_random.strip()) != parsed.random:
+        raise _metadata_mismatch(source, "random")
+
+
+def validate_mst_session_metadata_consistency(
+    base_dir: Path,
+    mst_session_id: str,
+    *,
+    require_root_metadata: bool = False,
+    require_session_metadata: bool = False,
+) -> StructuredMstSessionId:
+    parsed = validate_mst_session_id(mst_session_id)
+    root_path = root_artifact_metadata_path(base_dir, parsed.root_mst_id)
+    session_path = session_metadata_path(base_dir, parsed.mst_session_id)
+
+    root_payload = load_json_object(root_path)
+    session_payload = load_json_object(session_path)
+    if require_root_metadata and root_payload is None:
+        raise _structured_failure(f"missing root metadata: {root_path}")
+    if require_session_metadata and session_payload is None:
+        raise _structured_failure(f"missing session metadata: {session_path}")
+    if isinstance(root_payload, dict):
+        _validate_metadata_payload(parsed, root_payload, source="root")
+    if isinstance(session_payload, dict):
+        _validate_metadata_payload(parsed, session_payload, source="session")
+    return parsed
+
+
+def create_root_session_artifacts(
+    base_dir: Path,
+    root_mst_id: str,
+    *,
+    root_payload: dict | None = None,
+    started_at: datetime | None = None,
+    random_segment: str | None = None,
+    commit_order: str = "root-first",
+    failure_stage: str | None = None,
+) -> dict:
+    root = validate_root_mst_id(root_mst_id)
+    mst_session_id = generate_mst_session_id(root, started_at=started_at, random_segment=random_segment)
+    parsed = validate_mst_session_id(mst_session_id, expected_root_mst_id=root, expected_started_at=started_at)
+    metadata = mst_session_metadata(parsed)
+    base = Path(base_dir)
+    root_path = root_artifact_metadata_path(base, root)
+    session_path = session_metadata_path(base, parsed.mst_session_id)
+
+    if commit_order not in {"root-first", "session-first"}:
+        raise ValueError("commit_order must be root-first or session-first")
+    if root_path.exists():
+        raise RootSessionCreateError(f"root artifact already exists: {root_path}")
+    if session_path.exists():
+        raise RootSessionCreateError(f"session metadata already exists: {session_path}")
+
+    root_data = dict(root_payload or {})
+    root_data.setdefault("id", root)
+    root_data.update(metadata)
+    session_data = {
+        **metadata,
+        "root_artifact_path": str(root_path.relative_to(base)),
+        "schema_version": 1,
+    }
+
+    created_paths: list[Path] = []
+
+    def _commit(path: Path, payload: dict, stage_name: str) -> None:
+        _atomic_write_json(path, payload)
+        created_paths.append(path)
+        if failure_stage == stage_name:
+            raise RootSessionCreateError(f"injected failure: {stage_name}")
+
+    try:
+        if commit_order == "root-first":
+            _commit(root_path, root_data, "after_root_artifact_commit")
+            _commit(session_path, session_data, "after_session_metadata_commit")
+        else:
+            _commit(session_path, session_data, "after_session_metadata_commit")
+            _commit(root_path, root_data, "after_root_artifact_commit")
+        validate_mst_session_metadata_consistency(
+            base,
+            parsed.mst_session_id,
+            require_root_metadata=True,
+            require_session_metadata=True,
+        )
+    except Exception as exc:
+        for path in reversed(created_paths):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        _cleanup_empty_dirs(root_path.parent, base)
+        _cleanup_empty_dirs(session_path.parent, base)
+        if isinstance(exc, RootSessionCreateError):
+            raise
+        raise RootSessionCreateError(str(exc)) from exc
+
+    return {
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "root_artifact_path": root_path,
+        "session_metadata_path": session_path,
+        **metadata,
+    }
+
+
+def write_session_history_event(base_dir: Path, mst_session_id: str, payload: dict) -> Path:
+    parsed = validate_mst_session_metadata_consistency(base_dir, mst_session_id)
+    path = session_history_path(base_dir, parsed.mst_session_id)
+    row = dict(payload)
+    row["mst_session_id"] = parsed.mst_session_id
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", buffering=1) as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    _fsync_parent_dir(path)
+    return path
 
 
 def _session_id_from_payload(raw: str) -> str | None:
@@ -72,28 +486,16 @@ def _session_id_from_stdin_or_env_payload() -> str | None:
         return None
 
 
-def _session_id_from_bridge() -> str | None:
-    base_dir = _common.BASE_DIR
-    if base_dir is None:
-        env_base = os.environ.get("MST_BASE_DIR", "").strip()
-        base_dir = Path(env_base) if env_base else None
-    if base_dir is None:
-        return None
-    bridge_path = base_dir / "tmp" / f"claude-session-{os.getppid()}.id"
-    try:
-        return _canonical_uuid4(bridge_path.read_text(encoding="utf-8").strip())
-    except Exception:
-        return None
-
-
 def _validate_session_id(value: str) -> str:
-    session_id = value.strip()
-    if not _common.is_path_safe_mst_session_id(session_id):
-        raise ValueError("invalid mst_session_id path segment")
-    return session_id
+    return validate_mst_session_id(value).mst_session_id
 
 
-def resolve_session_id_identity(*, allow_generate: bool = True) -> dict:
+def resolve_session_id_identity(
+    *,
+    allow_generate: bool = True,
+    root_mst_id: str | None = None,
+    started_at: datetime | None = None,
+) -> dict:
     env_value = canonical_session_id_from_env()
     payload_value = _session_id_from_stdin_or_env_payload()
     if env_value and payload_value and env_value != payload_value:
@@ -116,9 +518,13 @@ def resolve_session_id_identity(*, allow_generate: bool = True) -> dict:
     if not allow_generate:
         raise ValueError("missing MST_SESSION_ID")
 
+    if not root_mst_id:
+        raise ValueError("missing MST_SESSION_ID and root_mst_id for structured mst_session_id generation")
+
+    generated = generate_mst_session_id(root_mst_id, started_at=started_at)
     return {
-        "mst_session_id": str(uuid.uuid4()),
-        "source": "generated",
+        "mst_session_id": generated,
+        "source": "generated:root_mst_id",
         "legacy_diagnostics": _common.legacy_session_diagnostics(),
     }
 
@@ -147,8 +553,15 @@ def child_env_with_session_id() -> dict[str, str]:
 
 
 def child_env_with_required_session_context() -> dict[str, str]:
-    identity = resolve_session_id_identity(allow_generate=False)
-    session_id = identity["mst_session_id"]
+    env_value = canonical_session_id_from_env()
+    if not env_value:
+        raise ValueError("missing MST_SESSION_ID")
+
+    payload_value = _session_id_from_stdin_or_env_payload()
+    if payload_value and env_value != payload_value:
+        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+
+    session_id = _validate_session_id(env_value)
     child_env = os.environ.copy()
     child_env["MST_SESSION_ID"] = session_id
 
@@ -169,7 +582,12 @@ def child_env_with_required_session_context() -> dict[str, str]:
 
 def cmd_session_resolve(args):
     try:
-        identity = resolve_session_id_identity(allow_generate=True)
+        started_at = _parse_started_at_arg(args.started_at) if args.started_at else None
+        identity = resolve_session_id_identity(
+            allow_generate=True,
+            root_mst_id=args.root_mst_id,
+            started_at=started_at,
+        )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -189,6 +607,20 @@ def cmd_session_resolve(args):
     else:
         print(session_id)
     return 0
+
+
+def _parse_started_at_arg(value: str) -> datetime:
+    text = value.strip()
+    if not text:
+        raise ValueError("--started-at must not be empty")
+    if _STARTED_AT_COMPACT_RE.fullmatch(text):
+        return parse_mst_session_started_at_compact(text)
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("--started-at must be ISO-8601 UTC or compact UTC milliseconds") from exc
+    return parsed
 
 def cmd_session_split_prompts(args):
     if not args.prompts_dir:
@@ -306,6 +738,8 @@ def register(subparsers):
 
     sess_resolve = sess_sub.add_parser("resolve")
     sess_resolve.add_argument("--json", action="store_true")
+    sess_resolve.add_argument("--root-mst-id", help="explicit root MST artifact id for new structured session issuance")
+    sess_resolve.add_argument("--started-at", help="UTC start time for deterministic structured session issuance")
 
     sess_split = sess_sub.add_parser("split-prompts", help="combined-prompts.txt를 개별 프롬프트 파일로 분리")
     sess_split.add_argument("--dir", dest="prompts_dir", required=False, help="prompts 디렉토리 경로")

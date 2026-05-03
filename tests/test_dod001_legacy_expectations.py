@@ -31,6 +31,10 @@ FORBIDDEN_DOC_PATTERNS = [
 
 FORBIDDEN_TEST_PATTERNS = [
     (
+        "DOD-001 canonical fixture is not structured mst_session_id",
+        re.compile(r"\b(?:ROOT|STALE)_SESSION_ID\s*=\s*[\"'](?!MST-)"),
+    ),
+    (
         "legacy key used in canonical_id_set",
         re.compile(
             r"canonical_id_set[^=\n]*=.*(?:\bsession_id\b|owner_session_id|owner_ppid|MST_STATE_PPID)",
@@ -45,7 +49,9 @@ FORBIDDEN_TEST_PATTERNS = [
 
 REQUIRED_DOC_PHRASES = [
     "AGI-030 DOD-001",
+    "AGI-030 DOD-002",
     "`MST_SESSION_ID` / `mst_session_id`",
+    "root MST ID, compact UTC start timestamp, and path-safe random segment",
     "diagnostic-only",
     "legacy compatibility",
     "canonical source, fallback, path partition, or equality input",

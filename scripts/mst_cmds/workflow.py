@@ -15,7 +15,6 @@ import tarfile
 import tempfile
 import time
 import unicodedata
-import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional

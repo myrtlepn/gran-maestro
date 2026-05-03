@@ -12,7 +12,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 PATH_SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-ROOT_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+STRUCTURED_SESSION_RE = re.compile(r"^MST-AGI-030-20260503T130813382Z-[a-z0-9]{8,}$")
+ROOT_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
 LEGACY_HOOK_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 LEGACY_TRANSCRIPT_SESSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
@@ -80,15 +81,25 @@ def test_root_session_resolve_generates_one_path_safe_canonical_id() -> None:
         _init_workspace(workspace)
         before = _files(workspace)
 
-        result = _run_mst(workspace, "session", "resolve", "--json")
+        result = _run_mst(
+            workspace,
+            "session",
+            "resolve",
+            "--json",
+            "--root-mst-id",
+            "AGI-030",
+            "--started-at",
+            "20260503T130813382Z",
+        )
 
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         mst_session_id = payload.get("mst_session_id")
         assert isinstance(mst_session_id, str) and mst_session_id
         assert payload.get("session_id") == mst_session_id
-        assert payload.get("source") == "generated"
+        assert payload.get("source") == "generated:root_mst_id"
         assert PATH_SAFE_RE.fullmatch(mst_session_id)
+        assert STRUCTURED_SESSION_RE.fullmatch(mst_session_id)
         assert ".." not in mst_session_id
         assert _files(workspace) == before
 

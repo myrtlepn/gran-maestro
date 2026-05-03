@@ -2,7 +2,9 @@
 
 ## 1. Context (MST_SESSION_ID canonical 전환)
 
-AGI-030 DOD-001 이후 신규 사용자와 신규 hook/statusline 예시는 `MST_SESSION_ID` / `mst_session_id`를 canonical session identity로 사용한다. `MST_STATE_PPID`와 `MST_SNAPSHOT_SESSION_ID`는 0.60.x에서만 읽히는 deprecated alias이며, legacy compatibility 문맥에서 기존 상태를 읽거나 migration 안내를 출력하기 위해 남아 있다.
+AGI-030 DOD-001 이후 신규 사용자와 신규 hook/statusline 예시는 `MST_SESSION_ID` / `mst_session_id`를 canonical session identity로 사용한다. AGI-030 DOD-002 이후 새 canonical issuance는 `MST-{root_mst_id}-{started_at_compact}-{random}` 형식이며 root MST ID, compact UTC start timestamp, and path-safe random segment를 포함한다. `MST_STATE_PPID`와 `MST_SNAPSHOT_SESSION_ID`는 0.60.x에서만 읽히는 deprecated alias이며, legacy compatibility 문맥에서 기존 상태를 읽거나 migration 안내를 출력하기 위해 남아 있다.
+
+Structured `mst_session_id`는 `mst.py`의 root-aware creation path에서만 발급된다. Diagnostic-only 또는 legacy compatibility evidence로 남는 값은 Claude hook `session_id`, transcript basename UUID, `owner_session_id`, `owner_ppid`, `MST_STATE_PPID`, `MST_SNAPSHOT_SESSION_ID`다. 이 값들은 새 ID를 만들거나 state/session path를 선택하는 canonical source, fallback, path partition, or equality input이 아니다. `session resolve --json` 같은 compatibility 출력의 `session_id` alias가 남아 있으면 같은 structured `mst_session_id` 값만 반복해서 보여주는 진단 alias이며 generator input이 아니다.
 
 Gran Maestro의 기존 owner 식별은 OS 프로세스 계층의 PPID를 중심으로 동작했다. 이 모델은 단일 터미널에서 짧게 실행되는 세션에는 충분하지만, Claude Code 대화의 의미론적 수명과 일치하지 않는다. AGI-018의 DOD-013/018/019/020은 이 불일치를 줄이기 위해 Claude hook 값과 durable ownership 값을 함께 기록하려던 historical migration plan이다. AGI-030 DOD-001에서는 이 계획을 canonical identity contract로 해석하지 않는다.
 

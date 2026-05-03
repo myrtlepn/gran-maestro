@@ -16,8 +16,8 @@ from scripts.mst_cmds import _common
 from scripts.mst_cmds import workflow
 
 
-ROOT_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
-STALE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ROOT_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+STALE_SESSION_ID = "MST-REQ-805-20260503T131853000Z-r4n8vd1c"
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:

@@ -172,8 +172,13 @@ def canonical_mst_session_id_from_env_or_context() -> str | None:
     if env_value and context_value and env_value != context_value:
         raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
     value = env_value or context_value
-    if value and not is_path_safe_mst_session_id(value):
-        raise ValueError("invalid mst_session_id path segment")
+    if value:
+        from scripts.mst_cmds.session import validate_mst_session_id
+
+        try:
+            return validate_mst_session_id(value).mst_session_id
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
     return value
 
 

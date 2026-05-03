@@ -10,9 +10,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
-ROOT_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
-STALE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ROOT_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+STALE_SESSION_ID = "MST-REQ-805-20260503T131853000Z-r4n8vd1c"
 LEGACY_HOOK_SESSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+LEGACY_TRANSCRIPT_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -144,7 +145,7 @@ def test_child_dispatch_missing_parent_fails_without_uuid_or_legacy_fallback() -
             "MST_HOOK_STDIN_RAW": json.dumps(
                 {
                     "session_id": LEGACY_HOOK_SESSION_ID,
-                    "transcript_path": f"/tmp/{STALE_SESSION_ID}.jsonl",
+                    "transcript_path": f"/tmp/{LEGACY_TRANSCRIPT_SESSION_ID}.jsonl",
                 }
             ),
             "MST_STATE_PPID": "818181",
@@ -157,7 +158,7 @@ def test_child_dispatch_missing_parent_fails_without_uuid_or_legacy_fallback() -
         combined = f"{result.stdout}\n{result.stderr}"
         assert "missing MST_SESSION_ID" in combined
         assert LEGACY_HOOK_SESSION_ID not in combined
-        assert STALE_SESSION_ID not in combined
+        assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
         assert "818181" not in combined
 
 

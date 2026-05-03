@@ -160,6 +160,14 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+is_structured_mst_session_id() {
+  local value="${1:-}"
+  case "$value" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
+}
+
 extract_stdin_mst_session_id_literal() {
   local raw="$1" rest value
   case "$raw" in
@@ -174,11 +182,16 @@ extract_stdin_mst_session_id_literal() {
       case "$value" in
         ""|*[!A-Za-z0-9_-]*) return 0 ;;
       esac
-      printf '%s\n' "$value"
+      if is_structured_mst_session_id "$value"; then
+        printf '%s\n' "$value"
+      fi
       ;;
   esac
 }
 
+if [ -n "${MST_SESSION_ID:-}" ] && ! is_structured_mst_session_id "$MST_SESSION_ID"; then
+  MST_SESSION_ID=""
+fi
 if [ -z "${MST_SESSION_ID:-}" ]; then
   MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi
@@ -673,8 +686,12 @@ wait_for_judge_timeout_emit_done() {
 }
 
 resolve_timeout_session_id() {
-  if [ -n "${SESSION_ID:-}" ] && [ "${SESSION_ID:-unknown}" != "unknown" ]; then
+  if [ -n "${SESSION_ID:-}" ] && [ "${SESSION_ID:-unknown}" != "unknown" ] && is_structured_mst_session_id "$SESSION_ID"; then
     printf '%s\n' "$SESSION_ID"
+    return 0
+  fi
+  if [ -n "${MST_SESSION_ID:-}" ] && is_structured_mst_session_id "$MST_SESSION_ID"; then
+    printf '%s\n' "$MST_SESSION_ID"
     return 0
   fi
 
@@ -682,22 +699,11 @@ resolve_timeout_session_id() {
 import json
 import os
 import re
-import sys
-from pathlib import Path
 
-UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+
+STRUCTURED_RE = re.compile(
+    r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$"
 )
-
-
-def safe_session_id(value):
-    cleaned = []
-    for char in str(value or ""):
-        if char.isalnum() or char in ("-", "_"):
-            cleaned.append(char)
-        else:
-            cleaned.append("_")
-    return "".join(cleaned) or "unknown"
 
 
 try:
@@ -708,17 +714,19 @@ except Exception:
 if not isinstance(payload, dict):
     payload = {}
 
-direct = payload.get("session_id")
-if isinstance(direct, str) and direct.strip():
-    print(safe_session_id(direct.strip()))
-    raise SystemExit(0)
+direct = payload.get("mst_session_id")
+if isinstance(direct, str):
+    value = direct.strip()
+    if value and "/" not in value and ".." not in value and STRUCTURED_RE.match(value):
+        print(value)
+        raise SystemExit(0)
 
-transcript_path = payload.get("transcript_path")
-if isinstance(transcript_path, str) and transcript_path.strip():
-    basename = Path(transcript_path).name
-    stem = basename[:-6] if basename.endswith(".jsonl") else Path(basename).stem
-    if UUID_RE.match(stem):
-        print(stem)
+core = payload.get("core_rehydration")
+if isinstance(core, dict):
+    direct = core.get("mst_session_id")
+    value = direct.strip() if isinstance(direct, str) else ""
+    if value and "/" not in value and ".." not in value and STRUCTURED_RE.match(value):
+        print(value)
         raise SystemExit(0)
 
 print("unknown")
