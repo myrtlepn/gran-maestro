@@ -18,6 +18,7 @@
     "src/config.ts",
     "src/flow-watcher.ts",
     "src/middleware.ts",
+    "src/core/paths.test.ts",
     "src/spa.ts",
     "src/sse.ts",
     "src/types.ts",
