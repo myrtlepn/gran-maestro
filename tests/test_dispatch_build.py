@@ -59,7 +59,8 @@ def test_dispatch_build_codex_includes_required_fragments(tmp_path):
     assert "EXIT_CODE:" in command
     assert "< /dev/null" in command
     assert "export MST_SESSION_ID" in command
-    assert "session resolve" in command
+    assert "MST_CONTEXT_JSON" in command
+    assert "session resolve" not in command
 
 
 def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
@@ -101,7 +102,8 @@ def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
     assert "EXIT_CODE:" in command
     assert "< /dev/null" in command
     assert "export MST_SESSION_ID" in command
-    assert "session resolve" in command
+    assert "MST_CONTEXT_JSON" in command
+    assert "session resolve" not in command
 
 
 def test_dispatch_build_claude_not_supported(tmp_path):

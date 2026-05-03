@@ -4,15 +4,19 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import agile, worktree
 
 
-ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_PATTERNS = (
     re.compile(r"git checkout -b \"\$REQ_BRANCH\""),
     re.compile(r"git checkout -b gran-maestro/REQ-NNN"),

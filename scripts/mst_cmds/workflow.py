@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds._common import (
     WORKFLOW_MAX_ITERATIONS,
     WORKFLOW_STALL_LIMIT,
@@ -30,18 +31,27 @@ from scripts.mst_cmds._common import (
     next_action,
 )
 
-def _run_claude(cmd):
+def _run_claude(cmd, env: dict[str, str] | None = None):
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         cwd=str(_common.BASE_DIR.parent),
+        env=env,
     )
     if result.stdout:
         print(result.stdout.rstrip("\n"))
     if result.stderr:
         print(result.stderr.rstrip("\n"), file=sys.stderr)
     return result.returncode
+
+
+def _validated_claude_child_env() -> dict[str, str] | None:
+    try:
+        return session_mod.child_env_with_required_session_context()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return None
 
 def _run_req_workflow(req_id: str, max_iterations: int = WORKFLOW_MAX_ITERATIONS) -> int:
     unchanged_count = 0
@@ -64,7 +74,10 @@ def _run_req_workflow(req_id: str, max_iterations: int = WORKFLOW_MAX_ITERATIONS
             )
             return 1
 
-        _run_claude(["claude", f"/{action}", req_id, "-a"])
+        child_env = _validated_claude_child_env()
+        if child_env is None:
+            return 1
+        _run_claude(["claude", f"/{action}", req_id, "-a"], env=child_env)
 
         after = _load_request(req_id)
         if not after:
@@ -162,7 +175,10 @@ def cmd_workflow_run(args):
     pending = _incomplete_requests(linked)
 
     if not pending:
-        _run_claude(["claude", "/mst:request", "--plan", target, "-a"])
+        child_env = _validated_claude_child_env()
+        if child_env is None:
+            return 1
+        _run_claude(["claude", "/mst:request", "--plan", target, "-a"], env=child_env)
         linked = _plan_linked_requests(target)
         pending = _incomplete_requests(linked)
         if not pending:

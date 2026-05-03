@@ -57,21 +57,41 @@ _mst_ledger_json_escape() {
   printf '%s' "$value"
 }
 
-_mst_ledger_session_id() {
-  local payload="${1:-}" session_id
-  if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
-    printf '%s\n' "$CLAUDE_SESSION_ID"
-    return 0
-  fi
-  if [[ "$payload" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+_mst_ledger_path_safe_id() {
+  local value="${1:-}"
+  case "$value" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  printf '%s\n' "$value"
+}
+
+_mst_ledger_json_string_field() {
+  local key="$1" payload="${2:-}"
+  if [[ "$payload" =~ \"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}"
-  else
-    printf 'pid-%s\n' "$$"
   fi
 }
 
+_mst_ledger_mst_session_id() {
+  local payload="${1:-}" candidate
+  candidate="${MST_SESSION_ID:-}"
+  if [ -z "$candidate" ]; then
+    candidate="$(_mst_ledger_json_string_field "mst_session_id" "$payload")"
+  fi
+  _mst_ledger_path_safe_id "$candidate" 2>/dev/null || true
+}
+
+_mst_ledger_claude_session_id() {
+  local payload="${1:-}" candidate
+  candidate="${CLAUDE_SESSION_ID:-}"
+  if [ -z "$candidate" ]; then
+    candidate="$(_mst_ledger_json_string_field "session_id" "$payload")"
+  fi
+  printf '%s\n' "$candidate"
+}
+
 _mst_ledger_append() {
-  local hook_event="$1" phase="$2" exit_code="${3:-}" root ledger_dir ledger lock payload digest row acquired i ts session_id source exit_json
+  local hook_event="$1" phase="$2" exit_code="${3:-}" root ledger_dir ledger lock payload digest row acquired i ts mst_session_id claude_session_id source exit_json
   root="$(_mst_ledger_project_root)"
   ledger_dir="${root}/.gran-maestro"
   ledger="${ledger_dir}/hooks-ledger.ndjson"
@@ -83,8 +103,10 @@ _mst_ledger_append() {
     digest="$(printf '%s' "$payload" | _mst_ledger_digest)"
     MST_LEDGER_PAYLOAD_DIGEST="$digest"
   fi
-  session_id="${MST_LEDGER_SESSION_ID:-$(_mst_ledger_session_id "$payload")}"
-  MST_LEDGER_SESSION_ID="$session_id"
+  mst_session_id="${MST_LEDGER_MST_SESSION_ID:-$(_mst_ledger_mst_session_id "$payload")}"
+  MST_LEDGER_MST_SESSION_ID="$mst_session_id"
+  claude_session_id="${MST_LEDGER_CLAUDE_SESSION_ID:-$(_mst_ledger_claude_session_id "$payload")}"
+  MST_LEDGER_CLAUDE_SESSION_ID="$claude_session_id"
   source="${MST_LEDGER_INVOCATION_SOURCE:-$(_mst_ledger_source)}"
   MST_LEDGER_INVOCATION_SOURCE="$source"
   ts="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u '+%FT%TZ')"
@@ -92,13 +114,14 @@ _mst_ledger_append() {
     ''|*[!0-9]*) exit_json=null ;;
     *) exit_json="$exit_code" ;;
   esac
-  row="$(printf '{"ts":"%s","hook_event":"%s","phase":"%s","exit_code":%s,"payload_digest":"%s","session_id":"%s","invocation_source":"%s","pid":%s}' \
+  row="$(printf '{"ts":"%s","hook_event":"%s","phase":"%s","exit_code":%s,"payload_digest":"%s","mst_session_id":"%s","claude_session_id":"%s","invocation_source":"%s","pid":%s}' \
     "$(_mst_ledger_json_escape "$ts")" \
     "$(_mst_ledger_json_escape "$hook_event")" \
     "$(_mst_ledger_json_escape "$phase")" \
     "$exit_json" \
     "$(_mst_ledger_json_escape "$digest")" \
-    "$(_mst_ledger_json_escape "$session_id")" \
+    "$(_mst_ledger_json_escape "$mst_session_id")" \
+    "$(_mst_ledger_json_escape "$claude_session_id")" \
     "$(_mst_ledger_json_escape "$source")" \
     "$$")"
   mkdir -p "$ledger_dir" 2>/dev/null || return 0

@@ -160,11 +160,11 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
-extract_stdin_session_id_literal() {
+extract_stdin_mst_session_id_literal() {
   local raw="$1" rest value
   case "$raw" in
-    *\"session_id\"*)
-      rest="${raw#*\"session_id\"}"
+    *\"mst_session_id\"*)
+      rest="${raw#*\"mst_session_id\"}"
       rest="${rest#*:}"
       rest="${rest#*\"}"
       value="${rest%%\"*}"
@@ -180,10 +180,7 @@ extract_stdin_session_id_literal() {
 }
 
 if [ -z "${MST_SESSION_ID:-}" ]; then
-  MST_SESSION_ID="$(extract_stdin_session_id_literal "$STDIN_RAW" || true)"
-  if [ -z "${MST_SESSION_ID:-}" ] && [ -f "${PROJECT_ROOT}/scripts/mst.py" ]; then
-    MST_SESSION_ID="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 "${PROJECT_ROOT}/scripts/mst.py" session resolve 2>/dev/null || true)"
-  fi
+  MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi
 export MST_SESSION_ID
 MST_LEDGER_HOOK_EVENT="Stop"
@@ -1088,6 +1085,86 @@ if [ "${MST_STOP_HOOK_TEST_INJECT_FAILURE:-}" = "after_snapshot_probe" ]; then
   python3 -c 'raise SystemExit("REQ-692 injected failure after_snapshot_probe")'
 fi
 
+refresh_snapshot_from_canonical_session() {
+  local canonical="${MST_SESSION_ID:-}" exports
+  [ -n "$canonical" ] || return 0
+  case "$canonical" in
+    */*|*'..'*|*[!A-Za-z0-9._-]*) return 0 ;;
+  esac
+
+  exports="$(python3 - "$PROJECT_ROOT" "$canonical" "$STDIN_RAW" <<'PY'
+import hashlib
+import json
+import shlex
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+session_id = sys.argv[2]
+raw_stdin = sys.argv[3]
+snapshot_path = project_root / ".gran-maestro" / "state" / session_id / "snapshot.json"
+snapshot = {}
+snapshot_digest = ""
+if snapshot_path.is_file():
+    try:
+        snapshot_digest = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+        loaded = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            snapshot = loaded
+    except Exception:
+        snapshot = {}
+
+def emit(name, value):
+    print(f"{name}={shlex.quote(str(value))}")
+
+return_to = snapshot.get("returnTo")
+return_to_skill = ""
+return_to_step = ""
+if isinstance(return_to, dict):
+    return_to_skill = str(return_to.get("skill") or "")
+    return_to_step = str(return_to.get("step") or "")
+elif isinstance(return_to, str):
+    skill, sep, step = return_to.partition("/")
+    return_to_skill = skill
+    return_to_step = step if sep else ""
+
+emit("SESSION_ID", session_id)
+emit("SESSION_ID_SOURCE", "env:MST_SESSION_ID")
+emit("SESSION_ID_RESOLUTION_FAILED", "false")
+emit("SNAPSHOT_PATH", snapshot_path)
+emit("SNAPSHOT_PRESENT", "true" if snapshot_path.is_file() else "false")
+emit("SNAPSHOT_DIGEST", snapshot_digest)
+emit("STDIN_DIGEST", hashlib.sha256(raw_stdin.encode("utf-8", errors="replace")).hexdigest())
+emit("SNAPSHOT_CURRENT_SKILL", snapshot.get("currentSkill") or snapshot.get("current_skill") or "")
+emit("SNAPSHOT_CURRENT_STEP", snapshot.get("currentStep", snapshot.get("current_step", "")))
+emit("SNAPSHOT_TOTAL_STEPS", snapshot.get("totalSteps", snapshot.get("total_steps", "")))
+emit("SNAPSHOT_STATUS", "" if snapshot.get("status") is None else snapshot.get("status") or "")
+emit("SNAPSHOT_RETURN_TO_SKILL", return_to_skill)
+emit("SNAPSHOT_RETURN_TO_STEP", return_to_step)
+emit("SNAPSHOT_MST_SESSION_ID", snapshot.get("mst_session_id") or "")
+PY
+)" || return 0
+  eval "$exports"
+}
+
+fail_closed_canonical_mismatch_if_any() {
+  local reason=""
+  [ -n "${MST_SESSION_ID:-}" ] || return 0
+  case "${SNAPSHOT_MST_SESSION_ID:-}" in
+    "")
+      ;;
+    "${MST_SESSION_ID}")
+      ;;
+    *)
+      reason="mst_session_id mismatch: env=${MST_SESSION_ID} snapshot=${SNAPSHOT_MST_SESSION_ID}"
+      ;;
+  esac
+  [ -n "$reason" ] || return 0
+  printf '[mst-stop-hook] fail-closed: %s\n' "$(sanitize_log_value "$reason")" >&2
+  emit_block_decision "$reason"
+  exit 0
+}
+
 append_audit_entry() {
   local classification="${1:-}"
   local declared_reason="${2:-}"
@@ -1433,112 +1510,7 @@ PY
 }
 
 warn_session_id_mismatch_if_any() {
-  local durable_session_id durable_exit check_output check_status verdict stdin_sid snapshot_sid durable_sid data
-
-  durable_exit=0
-  trap - ERR
-  set +e
-  durable_session_id="$(resolve_durable_owner_session_id)"
-  durable_exit=$?
-  set -e
-  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-  if [ "$durable_exit" -ne 0 ]; then
-    return 0
-  fi
-
-  check_status=0
-  trap - ERR
-  set +e
-  check_output="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - "${SNAPSHOT_PATH:-}" "$durable_session_id" "mst-stop-hook" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-snapshot_path = Path(sys.argv[1]) if sys.argv[1] else None
-durable_sid = str(sys.argv[2] or "").strip()
-hook_name = str(sys.argv[3] or "").strip()
-
-
-def emit_skip():
-    print("SKIP")
-
-
-try:
-    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-
-stdin_sid = payload.get("session_id")
-stdin_sid = stdin_sid.strip() if isinstance(stdin_sid, str) else ""
-if not stdin_sid or not durable_sid or snapshot_path is None or not snapshot_path.is_file():
-    emit_skip()
-    raise SystemExit(0)
-
-snapshot_sid = ""
-try:
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-except Exception:
-    snapshot = {}
-if isinstance(snapshot, dict):
-    for key in ("session_id", "sessionId"):
-        value = snapshot.get(key)
-        if isinstance(value, str) and value.strip():
-            snapshot_sid = value.strip()
-            break
-if not snapshot_sid:
-    snapshot_sid = snapshot_path.parent.name.strip()
-
-if not snapshot_sid:
-    emit_skip()
-    raise SystemExit(0)
-
-if len({stdin_sid, snapshot_sid, durable_sid}) == 1:
-    emit_skip()
-    raise SystemExit(0)
-
-data = {
-    "stdin_sid": stdin_sid,
-    "snapshot_sid": snapshot_sid,
-    "durable_sid": durable_sid,
-    "hook": hook_name,
-}
-print(
-    "MISMATCH\t{}\t{}\t{}\t{}".format(
-        stdin_sid,
-        snapshot_sid,
-        durable_sid,
-        json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-    )
-)
-PY
-)"
-  check_status=$?
-  set -e
-  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-
-  if [ "$check_status" -ne 0 ]; then
-    printf '[mst-stop-hook] warn: session_id_mismatch_check_failed exit=%s\n' "$(sanitize_log_value "$check_status")" >&2
-    return 0
-  fi
-
-  verdict="$(printf '%s' "$check_output" | cut -f1)"
-  if [ "$verdict" != "MISMATCH" ]; then
-    return 0
-  fi
-
-  stdin_sid="$(printf '%s' "$check_output" | cut -f2)"
-  snapshot_sid="$(printf '%s' "$check_output" | cut -f3)"
-  durable_sid="$(printf '%s' "$check_output" | cut -f4)"
-  data="$(printf '%s' "$check_output" | cut -f5-)"
-
-  printf '[session-id mismatch] stdin=%s snapshot=%s durable=%s hook=mst-stop-hook\n' \
-    "$(sanitize_log_value "$stdin_sid")" \
-    "$(sanitize_log_value "$snapshot_sid")" \
-    "$(sanitize_log_value "$durable_sid")" >&2
-  append_flow_event "session_id_mismatch" "$data"
+  return 0
 }
 
 is_request_terminal_status() {
@@ -1563,6 +1535,7 @@ is_plan_terminal_status() {
 
 has_active_workflow_session() {
   local requests_root plans_root status_file status owner_session_id_value owner_session_id_exit owner_ppid_value owner_ppid_exit
+  MST_STOP_OWNER_PPID_ONLY_FALLBACK="0"
   requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
   plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
 
@@ -1608,12 +1581,13 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
+        printf '[mst-stop-hook] warn: legacy owner_ppid diagnostic for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
-          debug_log "warn" "active_request_legacy_owner_ppid_fallback status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          return 0
+          MST_STOP_OWNER_PPID_ONLY_FALLBACK="1"
+          debug_log "warn" "active_request_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          return 1
         else
-          debug_log "info" "skipping_foreign_session_request_legacy_owner_ppid status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          debug_log "info" "skipping_foreign_session_request_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
           continue
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
@@ -1669,12 +1643,13 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] warn: legacy owner_ppid fallback for %s; owner_session_id missing\n' "$status_file" >&2
+        printf '[mst-stop-hook] warn: legacy owner_ppid diagnostic for %s; owner_session_id missing\n' "$status_file" >&2
         if [ "$owner_ppid_value" = "$PPID" ]; then
-          debug_log "warn" "active_plan_legacy_owner_ppid_fallback status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          return 0
+          MST_STOP_OWNER_PPID_ONLY_FALLBACK="1"
+          debug_log "warn" "active_plan_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          return 1
         else
-          debug_log "info" "skipping_foreign_session_plan_legacy_owner_ppid status=$status file=$status_file owner_ppid=$owner_ppid_value"
+          debug_log "info" "skipping_foreign_session_plan_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
           continue
         fi
       elif [ "$owner_ppid_exit" -eq 2 ]; then
@@ -2078,6 +2053,23 @@ EOF
 }
 
 warn_session_id_mismatch_if_any
+refresh_snapshot_from_canonical_session
+fail_closed_canonical_mismatch_if_any
+
+if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
+  if has_active_workflow_session; then
+    REASON="active workflow session detected but PPID state missing; continue workflow"
+    emit_block_decision "$REASON"
+    debug_log "block" "reason=state_missing_active_session_detected_pre_snapshot"
+    exit 0
+  fi
+  if [ "${MST_STOP_OWNER_PPID_ONLY_FALLBACK:-0}" = "1" ]; then
+    REASON="canonical mst_session_id required; owner_ppid-only workflow state ignored"
+    emit_block_decision "$REASON"
+    debug_log "block" "reason=owner_ppid_only_state_rejected_pre_snapshot"
+    exit 0
+  fi
+fi
 
 run_snapshot_guard
 
@@ -2274,6 +2266,12 @@ if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
     append_block_audit_entry "$REASON"
     emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected"
+    exit 0
+  fi
+  if [ "${MST_STOP_OWNER_PPID_ONLY_FALLBACK:-0}" = "1" ]; then
+    REASON="canonical mst_session_id required; owner_ppid-only workflow state ignored"
+    emit_block_decision "$REASON"
+    debug_log "block" "reason=owner_ppid_only_state_rejected"
     exit 0
   fi
   append_audit_entry "pass_through" "" "workflow_inactive"

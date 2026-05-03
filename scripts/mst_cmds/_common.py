@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from scripts.mst_cmds.env_alias_compat import canonical_session_id_from_env
 from scripts._state_schema import TERMINAL
 from scripts._state_normalize import migrate_legacy_status
 
@@ -31,6 +32,7 @@ else:
 
 BASE_DIR_NAME = ".gran-maestro"
 BASE_DIR: Path = None
+_MST_SESSION_ID_SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def set_base_dir(base_dir: Path | None) -> Path | None:
@@ -128,6 +130,80 @@ def run_dir_no_create() -> Path:
 
 def state_dir(base_dir: Path | None = None) -> Path:
     return (base_dir or BASE_DIR) / "state"
+
+
+def is_path_safe_mst_session_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(text and _MST_SESSION_ID_SAFE_RE.fullmatch(text) and ".." not in text)
+
+
+def _json_object_from_env(name: str) -> dict | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def structured_mst_session_id_from_env() -> str | None:
+    for env_name in ("MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW"):
+        payload = _json_object_from_env(env_name)
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("mst_session_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        core = payload.get("core_rehydration")
+        if isinstance(core, dict):
+            value = core.get("mst_session_id")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def canonical_mst_session_id_from_env_or_context() -> str | None:
+    env_value = canonical_session_id_from_env()
+    context_value = structured_mst_session_id_from_env()
+    if env_value and context_value and env_value != context_value:
+        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+    value = env_value or context_value
+    if value and not is_path_safe_mst_session_id(value):
+        raise ValueError("invalid mst_session_id path segment")
+    return value
+
+
+def require_mst_session_id_for_mutation(subject: str = "state write") -> str:
+    value = canonical_mst_session_id_from_env_or_context()
+    if not value:
+        raise ValueError(f"missing MST_SESSION_ID for {subject}")
+    return value
+
+
+def legacy_session_diagnostics() -> dict:
+    diagnostics: dict[str, object] = {}
+    ppid = os.environ.get("MST_STATE_PPID", "").strip()
+    if ppid:
+        diagnostics["MST_STATE_PPID"] = ppid
+    snapshot_alias = os.environ.get("MST_SNAPSHOT_SESSION_ID", "").strip()
+    if snapshot_alias:
+        diagnostics["MST_SNAPSHOT_SESSION_ID"] = snapshot_alias
+    for env_name in ("MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW"):
+        payload = _json_object_from_env(env_name)
+        if not isinstance(payload, dict):
+            continue
+        hook_session_id = payload.get("session_id")
+        if isinstance(hook_session_id, str) and hook_session_id.strip():
+            diagnostics["hook_session_id"] = hook_session_id.strip()
+        transcript_path = payload.get("transcript_path")
+        if isinstance(transcript_path, str) and transcript_path.strip():
+            stem = Path(transcript_path).name
+            diagnostics["hook_transcript_stem"] = stem[:-6] if stem.endswith(".jsonl") else Path(stem).stem
+    return diagnostics
 
 
 def sessions_dir(project_root: Path) -> Path:
@@ -239,15 +315,12 @@ def next_action(current_phase, status):
 def _skill_state_base_dir() -> Path:
     local_base_dir = Path.cwd().resolve() / ".gran-maestro"
     try:
-        from scripts.mst_cmds.env_alias_compat import resolve_session_id_from_env
-
-        session_id, _source = resolve_session_id_from_env(warn_legacy=True)
+        session_id = canonical_mst_session_id_from_env_or_context()
     except Exception:
         session_id = None
-    session_id = session_id or str(os.getppid())
 
     def has_session_state(base_dir: Path | None) -> bool:
-        if not base_dir:
+        if not base_dir or not session_id:
             return False
         return (
             (base_dir / "tmp" / f"mst-state-{session_id}.json").exists()
@@ -299,10 +372,8 @@ def _workflow_state_default_payload(now: str):
     }
 
 def _workflow_state_file(base_dir: Path) -> Path:
-    parent_pid = os.getenv("MST_STATE_PPID")
-    if not (isinstance(parent_pid, str) and parent_pid.isdigit()):
-        parent_pid = str(os.getppid())
-    return base_dir / "tmp" / f"mst-state-{parent_pid}.json"
+    session_id = require_mst_session_id_for_mutation("workflow state path")
+    return base_dir / "tmp" / f"mst-state-{session_id}.json"
 
 def _workflow_state_load(path: Path):
     payload = load_json(path)
@@ -382,7 +453,7 @@ def read_workflow_state_auto_mode(
     ttl_minutes: int = 30,
 ) -> Optional[bool]:
     """
-    Returns auto_mode value from tmp/mst-state-{PPID}.json IFF all authoritative
+    Returns auto_mode value from tmp/mst-state-{mst_session_id}.json IFF all authoritative
     conditions pass. Returns None when state should be treated as absent
     (caller must fall back to config/default).
 
@@ -392,10 +463,8 @@ def read_workflow_state_auto_mode(
       3) when expected_source_id is provided:
          payload.next_action.source_id == expected_source_id
       4) payload.updated_at within ttl_minutes of now (UTC)
-      5) PPID liveness: is_pid_alive(pid) == True
-
     On ANY failure (missing file, JSON parse error, key missing, gate fail,
-    liveness fail) -> return None (never raise).
+    stale state) -> return None (never raise).
     """
     try:
         state_path = _workflow_state_file(_skill_state_base_dir())
@@ -436,10 +505,6 @@ def read_workflow_state_auto_mode(
         now_utc = datetime.now(timezone.utc)
         age = now_utc - updated_at_utc
         if age < timedelta(0) or age > ttl_delta:
-            return None
-
-        state_pid = int(state_path.stem.rsplit("-", 1)[1])
-        if state_pid not in (0, os.getpid()) and not is_pid_alive(state_pid):
             return None
 
         if "auto_mode" not in next_action:

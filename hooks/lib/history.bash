@@ -379,7 +379,7 @@ PY
       "$session_id" \
       "$(mst_history_read_head_value "$local_head" "$MST_HISTORY_ZERO_HASH")" \
       "$history_file" \
-      "$(wc -l < "$history_file" 2>/dev/null | tr -d ' ' || printf '0')" >/dev/null 2>&1 || true
+      "$([ -f "$history_file" ] && wc -l < "$history_file" 2>/dev/null | tr -d ' ' || printf '0')" >/dev/null 2>&1 || true
     return 0
   fi
   return 1
@@ -437,7 +437,8 @@ seq = int(sys.argv[1])
 prev_hash = sys.argv[2]
 event = json.loads(sys.argv[3])
 session_id = sys.argv[4]
-event["session_id"] = session_id
+event.pop("session_id", None)
+event["mst_session_id"] = session_id
 canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
 event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
 row = {
@@ -445,7 +446,7 @@ row = {
     "prev_hash": prev_hash,
     "event_hash": event_hash,
     "event": event,
-    "session_id": session_id,
+    "mst_session_id": session_id,
 }
 for key in ("tool", "args_sha256", "timestamp"):
     if key in event:
@@ -577,7 +578,8 @@ session_id = sys.argv[3]
 
 for raw_event in sys.argv[4:]:
     event = json.loads(raw_event)
-    event["session_id"] = session_id
+    event.pop("session_id", None)
+    event["mst_session_id"] = session_id
     canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
     event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
     seq += 1
@@ -586,7 +588,7 @@ for raw_event in sys.argv[4:]:
         "prev_hash": prev_hash,
         "event_hash": event_hash,
         "event": event,
-        "session_id": session_id,
+        "mst_session_id": session_id,
     }
     for key in ("tool", "args_sha256", "timestamp"):
         if key in event:

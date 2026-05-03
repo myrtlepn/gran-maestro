@@ -3,19 +3,22 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
-def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:
+def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(MST_SCRIPT), *args],
         cwd=workspace,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -23,6 +26,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
     workspace = tmp_path / "workspace"
     base = workspace / ".gran-maestro"
     base.mkdir(parents=True, exist_ok=True)
+    env = {"MST_SESSION_ID": SESSION_ID}
 
     task_id = "task-state-001"
     register = _run_mst(
@@ -39,6 +43,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
         "gpt-test",
         "--worktree-dir",
         str(workspace),
+        env=env,
     )
     assert register.returncode == 0, register.stderr
 
@@ -47,6 +52,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
 
     data = json.loads(run_file.read_text(encoding="utf-8"))
     assert data["pid"] == 12345
+    assert data["mst_session_id"] == SESSION_ID
     assert data["phase"] == "running"
     assert data["provider"] == "codex"
     assert data["model"] == "gpt-test"
@@ -65,6 +71,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
         task_id,
         "--phase",
         "running",
+        env=env,
     )
     assert heartbeat.returncode == 0, heartbeat.stderr
 
@@ -81,6 +88,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
         "--final",
         "--exit-code",
         "0",
+        env=env,
     )
     assert final.returncode == 0, final.stderr
 

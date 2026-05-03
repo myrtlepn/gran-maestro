@@ -54,10 +54,7 @@ def _resolve_owner_ppid() -> int:
 
 
 def _snapshot_session_id() -> str:
-    session_env, _source = resolve_session_id_from_env()
-    if session_env:
-        return session_env
-    return str(os.getppid())
+    return _common.require_mst_session_id_for_mutation("state snapshot")
 
 
 def _session_id_from_hook_stdin() -> Optional[str]:
@@ -87,16 +84,63 @@ def _session_id_from_hook_stdin() -> Optional[str]:
 def _current_uuid_session_id() -> Optional[str]:
     from scripts._skill_state import UUID_RE
 
-    env_session_id, _source = resolve_session_id_from_env()
-    candidates = [
-        env_session_id or "",
-        _resolve_owner_session_id(_resolve_owner_ppid()) or "",
-        _session_id_from_hook_stdin() or "",
-    ]
-    for candidate in candidates:
-        if UUID_RE.match(candidate):
-            return candidate
+    try:
+        candidate = _common.canonical_mst_session_id_from_env_or_context() or ""
+    except ValueError:
+        return None
+    if UUID_RE.match(candidate):
+        return candidate
     return None
+
+
+def _validate_existing_workflow_payload(payload: dict, session_id: str) -> bool:
+    existing = payload.get("mst_session_id")
+    return not (isinstance(existing, str) and existing.strip() and existing.strip() != session_id)
+
+
+def _snapshot_path_for_session(base_dir: Path, session_id: str) -> Path:
+    from scripts._skill_state import snapshot_path
+
+    return snapshot_path(base_dir, session_id)
+
+
+def _load_snapshot_for_session(base_dir: Path, session_id: str) -> Optional[dict]:
+    from scripts._skill_state import load_snapshot
+
+    payload = load_snapshot(base_dir, session_id=session_id)
+    return payload if isinstance(payload, dict) else None
+
+
+def _validate_existing_snapshot_for_write(base_dir: Path, session_id: str) -> tuple[bool, str]:
+    snapshot = _load_snapshot_for_session(base_dir, session_id)
+    if not isinstance(snapshot, dict):
+        return True, ""
+    existing = snapshot.get("mst_session_id")
+    if isinstance(existing, str) and existing.strip() and existing.strip() != session_id:
+        return False, f"snapshot mst_session_id mismatch: path={session_id} payload={existing.strip()}"
+    return True, ""
+
+
+def _write_canonical_snapshot_payload(base_dir: Path, session_id: str, payload: dict) -> dict:
+    payload["mst_session_id"] = session_id
+    payload["sessionId"] = session_id
+    diagnostics = _common.legacy_session_diagnostics()
+    if diagnostics:
+        payload["legacy_diagnostics"] = diagnostics
+    _common.save_json(_snapshot_path_for_session(base_dir, session_id), payload)
+    return payload
+
+
+def _require_args_session_matches_env(args_session_id: str) -> tuple[Optional[str], Optional[str]]:
+    try:
+        session_id = _common.require_mst_session_id_for_mutation("recover/resume state write")
+    except ValueError as exc:
+        return None, str(exc)
+    if not _common.is_path_safe_mst_session_id(args_session_id):
+        return None, "invalid --session-id path segment"
+    if args_session_id != session_id:
+        return None, f"mst_session_id mismatch: env={session_id} arg={args_session_id}"
+    return session_id, None
 
 
 def _canonical_uuid4(value: object) -> Optional[str]:
@@ -902,13 +946,17 @@ def migrate(args: argparse.Namespace) -> int:
 
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
-    state_path = _workflow_state_file(state_base_dir)
     now = _workflow_state_timestamp()
 
     try:
+        session_id = _common.require_mst_session_id_for_mutation("workflow state write")
+        state_path = _workflow_state_file(state_base_dir)
         payload = _workflow_state_load(state_path)
         if not isinstance(payload, dict):
             payload = _workflow_state_default_payload(now)
+        elif not _validate_existing_workflow_payload(payload, session_id):
+            print("Error: workflow mst_session_id mismatch", file=sys.stderr)
+            return 1
 
         next_action = payload.get("next_action")
         if not isinstance(next_action, dict):
@@ -983,6 +1031,10 @@ def cmd_state_set_workflow(args):
             )
 
         payload["next_action"] = next_action
+        payload["mst_session_id"] = session_id
+        diagnostics = _common.legacy_session_diagnostics()
+        if diagnostics:
+            payload["legacy_diagnostics"] = diagnostics
         _workflow_state_atomic_write(state_path, payload)
 
         if args.active:
@@ -1013,9 +1065,12 @@ def cmd_state_set_workflow(args):
                     print(f"[mst] warning: failed to enqueue next_action: {queue_exc}", file=sys.stderr)
 
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     except Exception as exc:
-        print(f"[mst] warning: failed to update workflow state: {exc}", file=sys.stderr)
-        return 0
+        print(f"[mst] error: failed to update workflow state: {exc}", file=sys.stderr)
+        return 1
 
     return 0
 
@@ -1025,7 +1080,15 @@ def cmd_state_set(args):
 
     state_base_dir = _skill_state_base_dir()
     project_root = state_base_dir.parent
-    session_id = _snapshot_session_id()
+    try:
+        session_id = _snapshot_session_id()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    valid_snapshot, validation_error = _validate_existing_snapshot_for_write(state_base_dir, session_id)
+    if not valid_snapshot:
+        print(f"Error: {validation_error}", file=sys.stderr)
+        return 1
     data = set_snapshot(
         state_base_dir,
         skill=args.skill,
@@ -1034,6 +1097,7 @@ def cmd_state_set(args):
         return_to=args.return_to,
         session_id=session_id,
     )
+    data = _write_canonical_snapshot_payload(state_base_dir, session_id, data)
     try:
         parent_skill, parent_step = _parse_return_to_parent(args.return_to)
         flow_path = flow_log_path(project_root, rotate=True)
@@ -1076,7 +1140,12 @@ def cmd_state_set(args):
 def cmd_state_get(args):
     from scripts._skill_state import get_snapshot
 
-    data = get_snapshot(_skill_state_base_dir(), session_id=_snapshot_session_id())
+    try:
+        session_id = _common.require_mst_session_id_for_mutation("state snapshot read")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    data = get_snapshot(_skill_state_base_dir(), session_id=session_id)
     if data is None:
         print("스냅샷 없음")
         return 0
@@ -1086,7 +1155,16 @@ def cmd_state_get(args):
 def cmd_state_clear(args):
     from scripts._skill_state import clear_snapshot
 
-    clear_snapshot(_skill_state_base_dir(), session_id=_snapshot_session_id())
+    try:
+        session_id = _snapshot_session_id()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    valid_snapshot, validation_error = _validate_existing_snapshot_for_write(_skill_state_base_dir(), session_id)
+    if not valid_snapshot:
+        print(f"Error: {validation_error}", file=sys.stderr)
+        return 1
+    clear_snapshot(_skill_state_base_dir(), session_id=session_id)
     print("스냅샷 초기화 완료")
     return 0
 
@@ -1112,19 +1190,29 @@ def cmd_state_recover(args):
 
     previous_owner = session_payload.get("owner_session_id")
     previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
-    session_id = _current_uuid_session_id()
-    if not session_id:
-        explicit_session_env, _source = resolve_session_id_from_env()
-        restored_owner = _canonical_uuid4(previous_owner)
-        if explicit_session_env or not restored_owner:
-            print("Error: current session_id is required (MST_SESSION_ID or MST_SNAPSHOT_SESSION_ID UUID v4)", file=sys.stderr)
-            return 1
-        session_id = restored_owner
-        os.environ["MST_SESSION_ID"] = session_id
+    try:
+        session_id = _common.require_mst_session_id_for_mutation("recover state write")
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    payload_session_id = session_payload.get("mst_session_id")
+    if isinstance(payload_session_id, str) and payload_session_id.strip() and payload_session_id.strip() != session_id:
+        print(f"Error: mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}", file=sys.stderr)
+        return 1
+    if previous_owner and previous_owner != session_id:
+        print(f"Error: mst_session_id mismatch: env={session_id} owner_session_id={previous_owner}", file=sys.stderr)
+        return 1
 
     state_base_dir = _skill_state_base_dir()
     existing = load_snapshot(state_base_dir, session_id=session_id)
     if existing is not None:
+        existing_session_id = existing.get("mst_session_id")
+        if isinstance(existing_session_id, str) and existing_session_id.strip() and existing_session_id.strip() != session_id:
+            print(
+                f"Error: snapshot mst_session_id mismatch: path={session_id} payload={existing_session_id.strip()}",
+                file=sys.stderr,
+            )
+            return 1
         print(json.dumps(existing, ensure_ascii=False, indent=2))
         return 0
 
@@ -1162,6 +1250,7 @@ def cmd_state_recover(args):
     if snapshot is None:
         print(f"[cross-session recover] warning: durable session not found: {session_path}", file=sys.stderr)
         return 0
+    snapshot = _write_canonical_snapshot_payload(state_base_dir, session_id, snapshot)
 
     flow_path = _append_cross_session_recover_event(
         session_id,
@@ -1184,10 +1273,20 @@ def cmd_state_recover(args):
 def cmd_state_mark_paused(args):
     from scripts._skill_state import mark_paused
 
-    data = mark_paused(_skill_state_base_dir(), session_id=args.session_id)
+    session_id, error = _require_args_session_matches_env(args.session_id)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    state_base_dir = _skill_state_base_dir()
+    valid_snapshot, validation_error = _validate_existing_snapshot_for_write(state_base_dir, session_id)
+    if not valid_snapshot:
+        print(f"Error: {validation_error}", file=sys.stderr)
+        return 1
+    data = mark_paused(state_base_dir, session_id=session_id)
     if data is None:
         print("스냅샷 없음")
         return 0
+    data = _write_canonical_snapshot_payload(state_base_dir, session_id, data)
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
@@ -1195,10 +1294,20 @@ def cmd_state_mark_paused(args):
 def cmd_state_resume_paused(args):
     from scripts._skill_state import resume_paused
 
-    data = resume_paused(_skill_state_base_dir(), session_id=args.session_id)
+    session_id, error = _require_args_session_matches_env(args.session_id)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    state_base_dir = _skill_state_base_dir()
+    valid_snapshot, validation_error = _validate_existing_snapshot_for_write(state_base_dir, session_id)
+    if not valid_snapshot:
+        print(f"Error: {validation_error}", file=sys.stderr)
+        return 1
+    data = resume_paused(state_base_dir, session_id=session_id)
     if data is None:
         print("스냅샷 없음")
         return 0
+    data = _write_canonical_snapshot_payload(state_base_dir, session_id, data)
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 

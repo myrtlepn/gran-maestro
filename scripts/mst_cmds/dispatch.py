@@ -193,11 +193,13 @@ def cmd_dispatch_build(args):
     mst_script = _common._mst_script_path().resolve()
     q = shlex.quote
     session_bootstrap_cmd = (
-        f'MST_SESSION_ID="${{MST_SESSION_ID:-$(python3 {q(str(mst_script))} session resolve < /dev/null)}}"; '
+        'MST_SESSION_ID="${MST_SESSION_ID:-}"; '
         "export MST_SESSION_ID; "
         'if [ -z "$MST_SESSION_ID" ]; then '
-        'echo "Error: MST_SESSION_ID could not be resolved before dispatch spawn" >&2; exit 2; '
-        "fi"
+        'echo "Error: missing MST_SESSION_ID before dispatch spawn" >&2; exit 2; '
+        "fi; "
+        'MST_CONTEXT_JSON="{\\"mst_session_id\\":\\"$MST_SESSION_ID\\"}"; '
+        "export MST_CONTEXT_JSON"
     )
 
     register_cmd = (
@@ -267,12 +269,20 @@ def cmd_dispatch_preflight(args):
 
 
 def cmd_dispatch_register(args):
-    session_id = session_mod.ensure_session_id_in_env()
+    try:
+        child_env = session_mod.child_env_with_required_session_context()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    session_id = child_env["MST_SESSION_ID"]
+    os.environ["MST_SESSION_ID"] = session_id
+    os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
     now = _now_iso()
     task_id = str(args.task_id).strip()
     marker_pid = int(args.pid)
     payload = {
         "task_id": task_id,
+        "mst_session_id": session_id,
         "pid": marker_pid,
         "started_at": now,
         "phase": "running",
@@ -301,6 +311,7 @@ def cmd_dispatch_register(args):
             extra={
                 "entrypoint": "dispatch",
                 "task_id": task_id,
+                "mst_session_id": session_id,
                 "provider": payload["provider"],
                 "worktree_dir": payload["worktree_dir"],
             },
@@ -313,14 +324,30 @@ def cmd_dispatch_register(args):
 
 
 def cmd_dispatch_heartbeat(args):
+    try:
+        child_env = session_mod.child_env_with_required_session_context()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    session_id = child_env["MST_SESSION_ID"]
+    os.environ["MST_SESSION_ID"] = session_id
+    os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
     task_id = str(args.task_id).strip()
     now = _now_iso()
     state_path = _dispatch_state_path(task_id)
     payload = load_json(state_path)
     if not isinstance(payload, dict):
         payload = {"task_id": task_id}
+    existing_session_id = payload.get("mst_session_id")
+    if isinstance(existing_session_id, str) and existing_session_id.strip() and existing_session_id.strip() != session_id:
+        print(
+            f"Error: dispatch mst_session_id mismatch: env={session_id} payload={existing_session_id.strip()}",
+            file=sys.stderr,
+        )
+        return 1
 
     payload["task_id"] = task_id
+    payload["mst_session_id"] = session_id
     payload["last_heartbeat"] = now
     if args.phase:
         payload["phase"] = str(args.phase).strip()

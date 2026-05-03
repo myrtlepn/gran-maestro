@@ -10,6 +10,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -53,6 +54,7 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["MST_SESSION_ID"] = SESSION_ID
 
     task_id = "dispatch-e2e-task-001"
     prompt_file = workspace / "prompt.md"
@@ -105,6 +107,7 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
                 task_id,
                 "--phase",
                 "running",
+                env=env,
             )
             assert heartbeat.returncode == 0, heartbeat.stderr
             updated_state = json.loads(state_file.read_text(encoding="utf-8"))

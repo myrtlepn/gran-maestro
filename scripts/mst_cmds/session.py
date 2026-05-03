@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
-from scripts.mst_cmds.env_alias_compat import resolve_session_id_from_env
+from scripts.mst_cmds.env_alias_compat import canonical_session_id_from_env
 from scripts.mst_cmds._common import (
     load_json,
 )
@@ -46,20 +46,24 @@ def _session_id_from_payload(raw: str) -> str | None:
         return None
     if not isinstance(payload, dict):
         return None
-    direct = payload.get("session_id")
+    direct = payload.get("mst_session_id")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
-    transcript_path = payload.get("transcript_path")
-    if isinstance(transcript_path, str) and transcript_path.strip():
-        stem = Path(transcript_path).name
-        return stem[:-6] if stem.endswith(".jsonl") else Path(stem).stem
+    core = payload.get("core_rehydration")
+    if isinstance(core, dict):
+        direct = core.get("mst_session_id")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
     return None
 
 
 def _session_id_from_stdin_or_env_payload() -> str | None:
-    raw = os.environ.get("MST_HOOK_STDIN_RAW", "")
-    if raw:
-        return _session_id_from_payload(raw)
+    for env_name in ("MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW"):
+        raw = os.environ.get(env_name, "")
+        if raw:
+            value = _session_id_from_payload(raw)
+            if value:
+                return value
     try:
         if sys.stdin is None or sys.stdin.isatty():
             return None
@@ -82,19 +86,49 @@ def _session_id_from_bridge() -> str | None:
         return None
 
 
-def resolve_session_id_value() -> str:
-    env_value, _env_source = resolve_session_id_from_env()
+def _validate_session_id(value: str) -> str:
+    session_id = value.strip()
+    if not _common.is_path_safe_mst_session_id(session_id):
+        raise ValueError("invalid mst_session_id path segment")
+    return session_id
+
+
+def resolve_session_id_identity(*, allow_generate: bool = True) -> dict:
+    env_value = canonical_session_id_from_env()
+    payload_value = _session_id_from_stdin_or_env_payload()
+    if env_value and payload_value and env_value != payload_value:
+        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+
+    if env_value:
+        return {
+            "mst_session_id": _validate_session_id(env_value),
+            "source": "env:MST_SESSION_ID",
+            "legacy_diagnostics": _common.legacy_session_diagnostics(),
+        }
+
+    if payload_value:
+        return {
+            "mst_session_id": _validate_session_id(payload_value),
+            "source": "payload:mst_session_id",
+            "legacy_diagnostics": _common.legacy_session_diagnostics(),
+        }
+
+    if not allow_generate:
+        raise ValueError("missing MST_SESSION_ID")
+
+    return {
+        "mst_session_id": str(uuid.uuid4()),
+        "source": "generated",
+        "legacy_diagnostics": _common.legacy_session_diagnostics(),
+    }
+
+
+def resolve_session_id_value(*, allow_generate: bool = True) -> str:
+    identity = resolve_session_id_identity(allow_generate=allow_generate)
+    env_value = identity["mst_session_id"]
     if env_value:
         return env_value
-
-    for candidate in (
-        _session_id_from_bridge(),
-        _session_id_from_stdin_or_env_payload(),
-    ):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-
-    return str(uuid.uuid4())
+    raise RuntimeError("MST_SESSION_ID could not be resolved")
 
 
 def ensure_session_id_in_env() -> str:
@@ -112,10 +146,46 @@ def child_env_with_session_id() -> dict[str, str]:
     return child_env
 
 
+def child_env_with_required_session_context() -> dict[str, str]:
+    identity = resolve_session_id_identity(allow_generate=False)
+    session_id = identity["mst_session_id"]
+    child_env = os.environ.copy()
+    child_env["MST_SESSION_ID"] = session_id
+
+    context_payload: dict = {}
+    raw_context = child_env.get("MST_CONTEXT_JSON", "").strip()
+    if raw_context:
+        try:
+            parsed = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+        context_payload = dict(parsed)
+    context_payload["mst_session_id"] = session_id
+    child_env["MST_CONTEXT_JSON"] = json.dumps(context_payload, ensure_ascii=False, separators=(",", ":"))
+    return child_env
+
+
 def cmd_session_resolve(args):
-    session_id = resolve_session_id_value()
+    try:
+        identity = resolve_session_id_identity(allow_generate=True)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    session_id = identity["mst_session_id"]
     if args.json:
-        print(json.dumps({"session_id": session_id}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "mst_session_id": session_id,
+                    "session_id": session_id,
+                    "source": identity.get("source"),
+                    "legacy_diagnostics": identity.get("legacy_diagnostics", {}),
+                },
+                ensure_ascii=False,
+            )
+        )
     else:
         print(session_id)
     return 0

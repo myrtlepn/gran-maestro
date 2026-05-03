@@ -97,11 +97,11 @@ mkdir -p "$MST_TMP"
 echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
-extract_stdin_session_id_literal() {
+extract_stdin_mst_session_id_literal() {
   local raw="$1" rest value
   case "$raw" in
-    *\"session_id\"*)
-      rest="${raw#*\"session_id\"}"
+    *\"mst_session_id\"*)
+      rest="${raw#*\"mst_session_id\"}"
       rest="${rest#*:}"
       rest="${rest#*\"}"
       value="${rest%%\"*}"
@@ -117,10 +117,7 @@ extract_stdin_session_id_literal() {
 }
 
 if [ -z "${MST_SESSION_ID:-}" ]; then
-  MST_SESSION_ID="$(extract_stdin_session_id_literal "$STDIN_RAW" || true)"
-  if [ -z "${MST_SESSION_ID:-}" ] && [ -f "${PROJECT_ROOT}/scripts/mst.py" ]; then
-    MST_SESSION_ID="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 "${PROJECT_ROOT}/scripts/mst.py" session resolve 2>/dev/null || true)"
-  fi
+  MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi
 export MST_SESSION_ID
 MST_LEDGER_HOOK_EVENT="SessionStart"
@@ -192,7 +189,7 @@ except Exception:
 if not isinstance(payload, dict):
     payload = {}
 
-session_id = payload.get("session_id")
+session_id = payload.get("mst_session_id")
 if isinstance(session_id, str) and session_id.strip():
     print(session_id.strip())
 PY
