@@ -75,19 +75,80 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
+STDIN_RAW="$(cat || true)"
 mst_auto_chain_session_id() {
-  local value="${MST_SESSION_ID:-}"
+  local value="${1:-}"
   case "$value" in
     ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
   esac
+  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]] || return 1
   printf '%s\n' "$value"
 }
 
-if ! CURRENT_MST_SESSION_ID="$(mst_auto_chain_session_id)"; then
+extract_stdin_mst_session_id_literal() {
+  local raw="$1" rest value
+  case "$raw" in
+    *\"mst_session_id\"*)
+      rest="${raw#*\"mst_session_id\"}"
+      rest="${rest#*:}"
+      rest="${rest#*\"}"
+      value="${rest%%\"*}"
+      value="${value//$'\n'/}"
+      value="${value//$'\r'/}"
+      value="${value//$'\t'/}"
+      case "$value" in
+        ""|*[!A-Za-z0-9_-]*) return 0 ;;
+      esac
+      if mst_auto_chain_session_id "$value" >/dev/null; then
+        printf '%s\n' "$value"
+      fi
+      ;;
+  esac
+}
+
+resolve_canonical_mst_session_id_or_exit() {
+  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
+  if env_id="$(mst_auto_chain_session_id "$env_raw" 2>/dev/null)"; then
+    :
+  else
+    env_id=""
+  fi
+  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+
+  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
+    echo "[mst-auto-chain-context] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
+    return 1
+  fi
+  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
+    echo "[mst-auto-chain-context] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
+    return 2
+  fi
+  if [ -n "$env_id" ]; then
+    MST_CANONICAL_SESSION_ID="$env_id"
+    return 0
+  fi
+  if [ -n "$stdin_id" ]; then
+    MST_CANONICAL_SESSION_ID="$stdin_id"
+    return 0
+  fi
+  return 2
+}
+
+MST_CANONICAL_SESSION_ID=""
+if resolve_canonical_mst_session_id_or_exit; then
+  MST_SESSION_RESOLUTION_STATUS=0
+else
+  MST_SESSION_RESOLUTION_STATUS=$?
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
   exit 0
 fi
+CURRENT_MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
+export MST_SESSION_ID="$CURRENT_MST_SESSION_ID"
 STATE_FILE="${MST_TMP}/mst-state-${CURRENT_MST_SESSION_ID}.json"
-STDIN_RAW="$(cat || true)"
 MST_LEDGER_HOOK_EVENT="UserPromptSubmit"
 if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null

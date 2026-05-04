@@ -78,9 +78,80 @@ MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
-mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+is_structured_mst_session_id() {
+  local value="${1:-}"
+  case "$value" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
+}
+
+extract_stdin_mst_session_id_literal() {
+  local raw="$1" rest value
+  case "$raw" in
+    *\"mst_session_id\"*)
+      rest="${raw#*\"mst_session_id\"}"
+      rest="${rest#*:}"
+      rest="${rest#*\"}"
+      value="${rest%%\"*}"
+      value="${value//$'\n'/}"
+      value="${value//$'\r'/}"
+      value="${value//$'\t'/}"
+      case "$value" in
+        ""|*[!A-Za-z0-9_-]*) return 0 ;;
+      esac
+      if is_structured_mst_session_id "$value"; then
+        printf '%s\n' "$value"
+      fi
+      ;;
+  esac
+}
+
+resolve_canonical_mst_session_id_or_exit() {
+  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
+  if [ -n "$env_raw" ] && is_structured_mst_session_id "$env_raw"; then
+    env_id="$env_raw"
+  fi
+  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+
+  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
+    echo "[mst-pre-tool-use] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
+    return 1
+  fi
+  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
+    echo "[mst-pre-tool-use] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
+    return 2
+  fi
+  if [ -n "$env_id" ]; then
+    MST_CANONICAL_SESSION_ID="$env_id"
+    return 0
+  fi
+  if [ -n "$stdin_id" ]; then
+    MST_CANONICAL_SESSION_ID="$stdin_id"
+    return 0
+  fi
+
+  echo "[mst-pre-tool-use] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2
+  return 2
+}
+
+MST_CANONICAL_SESSION_ID=""
+if resolve_canonical_mst_session_id_or_exit; then
+  MST_SESSION_RESOLUTION_STATUS=0
+else
+  MST_SESSION_RESOLUTION_STATUS=$?
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  exit 0
+fi
+MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
+export MST_SESSION_ID
+mkdir -p "$MST_TMP"
 MST_LEDGER_HOOK_EVENT="PreToolUse"
 if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null

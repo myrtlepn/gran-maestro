@@ -153,11 +153,10 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-STATE_FILE="${MST_TMP}/mst-state-unknown.json"
+STATE_FILE=""
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
-mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
 is_structured_mst_session_id() {
@@ -189,16 +188,51 @@ extract_stdin_mst_session_id_literal() {
   esac
 }
 
-if [ -n "${MST_SESSION_ID:-}" ] && ! is_structured_mst_session_id "$MST_SESSION_ID"; then
-  MST_SESSION_ID=""
+resolve_canonical_mst_session_id_or_exit() {
+  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
+  if [ -n "$env_raw" ] && is_structured_mst_session_id "$env_raw"; then
+    env_id="$env_raw"
+  fi
+  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+
+  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
+    echo "[mst-stop-hook] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
+    return 1
+  fi
+  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
+    echo "[mst-stop-hook] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
+    return 2
+  fi
+  if [ -n "$env_id" ]; then
+    MST_CANONICAL_SESSION_ID="$env_id"
+    return 0
+  fi
+  if [ -n "$stdin_id" ]; then
+    MST_CANONICAL_SESSION_ID="$stdin_id"
+    return 0
+  fi
+
+  echo "[mst-stop-hook] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2
+  return 2
+}
+
+MST_CANONICAL_SESSION_ID=""
+if resolve_canonical_mst_session_id_or_exit; then
+  MST_SESSION_RESOLUTION_STATUS=0
+else
+  MST_SESSION_RESOLUTION_STATUS=$?
 fi
-if [ -z "${MST_SESSION_ID:-}" ]; then
-  MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
 fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  emit_approve_json "no canonical mst_session_id" ""
+  exit 0
+fi
+MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
 export MST_SESSION_ID
-if [ -n "${MST_SESSION_ID:-}" ]; then
-  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
-fi
+STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
+mkdir -p "$MST_TMP"
 MST_LEDGER_HOOK_EVENT="Stop"
 if [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null

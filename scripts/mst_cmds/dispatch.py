@@ -32,8 +32,80 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _dispatch_session_bootstrap_cmd() -> str:
+    normalize_context_py = """
+import json
+import os
+import sys
+
+sid = os.environ.get("MST_SESSION_ID", "").strip()
+raw = os.environ.get("MST_CONTEXT_JSON", "").strip()
+payload = {}
+if raw:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"Error: MST_CONTEXT_JSON must be a JSON object: {exc}", file=sys.stderr)
+        sys.exit(2)
+    if not isinstance(parsed, dict):
+        print("Error: MST_CONTEXT_JSON must be a JSON object", file=sys.stderr)
+        sys.exit(2)
+    existing = parsed.get("mst_session_id")
+    if "mst_session_id" in parsed and (
+        not isinstance(existing, str) or not existing.strip() or existing.strip() != sid
+    ):
+        print("Error: MST_SESSION_ID and structured mst_session_id mismatch", file=sys.stderr)
+        sys.exit(2)
+    payload = dict(parsed)
+payload["mst_session_id"] = sid
+print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+""".strip()
+    q = shlex.quote
+    return (
+        'MST_SESSION_ID="${MST_SESSION_ID:-}"; '
+        "export MST_SESSION_ID; "
+        'if [ -z "$MST_SESSION_ID" ]; then '
+        'echo "Error: missing MST_SESSION_ID before dispatch spawn" >&2; exit 2; '
+        "fi; "
+        f'MST_CONTEXT_JSON="$(python3 -c {q(normalize_context_py)})" || exit 2; '
+        "export MST_CONTEXT_JSON"
+    )
+
+
 def _dispatch_state_path(task_id: str) -> Path:
     return run_dir() / f"{task_id}.json"
+
+
+def _canonical_dispatch_fields(session_id: str) -> dict:
+    return _common.canonical_state_payload_fields(session_id)
+
+
+def _dispatch_payload_error(payload: dict, session_id: str) -> str | None:
+    canonical_fields = _canonical_dispatch_fields(session_id)
+    existing_session_id = payload.get("mst_session_id")
+    if (
+        isinstance(existing_session_id, str)
+        and existing_session_id.strip()
+        and existing_session_id.strip() != canonical_fields["mst_session_id"]
+    ):
+        return (
+            "dispatch mst_session_id mismatch: "
+            f"env={canonical_fields['mst_session_id']} payload={existing_session_id.strip()}"
+        )
+    existing_schema_version = payload.get("schema_version")
+    if existing_schema_version is not None and existing_schema_version != canonical_fields["schema_version"]:
+        return "dispatch schema_version mismatch"
+    existing_root_mst_id = payload.get("root_mst_id")
+    if (
+        isinstance(existing_root_mst_id, str)
+        and existing_root_mst_id.strip()
+        and existing_root_mst_id.strip() != canonical_fields["root_mst_id"]
+    ):
+        return (
+            "dispatch root_mst_id mismatch: "
+            f"session={canonical_fields['root_mst_id']} payload={existing_root_mst_id.strip()}"
+        )
+    return None
 
 
 def _coerce_positive_int(value, fallback: int) -> int:
@@ -192,15 +264,7 @@ def cmd_dispatch_build(args):
 
     mst_script = _common._mst_script_path().resolve()
     q = shlex.quote
-    session_bootstrap_cmd = (
-        'MST_SESSION_ID="${MST_SESSION_ID:-}"; '
-        "export MST_SESSION_ID; "
-        'if [ -z "$MST_SESSION_ID" ]; then '
-        'echo "Error: missing MST_SESSION_ID before dispatch spawn" >&2; exit 2; '
-        "fi; "
-        'MST_CONTEXT_JSON="{\\"mst_session_id\\":\\"$MST_SESSION_ID\\"}"; '
-        "export MST_CONTEXT_JSON"
-    )
+    session_bootstrap_cmd = _dispatch_session_bootstrap_cmd()
 
     register_cmd = (
         f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch register '
@@ -280,9 +344,17 @@ def cmd_dispatch_register(args):
     now = _now_iso()
     task_id = str(args.task_id).strip()
     marker_pid = int(args.pid)
+    state_path = _dispatch_state_path(task_id)
+    existing_payload = load_json(state_path)
+    if isinstance(existing_payload, dict):
+        payload_error = _dispatch_payload_error(existing_payload, session_id)
+        if payload_error is not None:
+            print(f"Error: {payload_error}", file=sys.stderr)
+            return 1
+    canonical_fields = _canonical_dispatch_fields(session_id)
     payload = {
+        **canonical_fields,
         "task_id": task_id,
-        "mst_session_id": session_id,
         "pid": marker_pid,
         "started_at": now,
         "phase": "running",
@@ -311,14 +383,14 @@ def cmd_dispatch_register(args):
             extra={
                 "entrypoint": "dispatch",
                 "task_id": task_id,
-                "mst_session_id": session_id,
+                **canonical_fields,
                 "provider": payload["provider"],
                 "worktree_dir": payload["worktree_dir"],
             },
         )
     except Exception as exc:
         print(f"[dispatch] warning: failed to write active-flow marker ({exc})", file=sys.stderr)
-    save_json(_dispatch_state_path(task_id), payload)
+    save_json(state_path, payload)
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 
@@ -338,16 +410,13 @@ def cmd_dispatch_heartbeat(args):
     payload = load_json(state_path)
     if not isinstance(payload, dict):
         payload = {"task_id": task_id}
-    existing_session_id = payload.get("mst_session_id")
-    if isinstance(existing_session_id, str) and existing_session_id.strip() and existing_session_id.strip() != session_id:
-        print(
-            f"Error: dispatch mst_session_id mismatch: env={session_id} payload={existing_session_id.strip()}",
-            file=sys.stderr,
-        )
+    payload_error = _dispatch_payload_error(payload, session_id)
+    if payload_error is not None:
+        print(f"Error: {payload_error}", file=sys.stderr)
         return 1
 
+    payload.update(_canonical_dispatch_fields(session_id))
     payload["task_id"] = task_id
-    payload["mst_session_id"] = session_id
     payload["last_heartbeat"] = now
     if args.phase:
         payload["phase"] = str(args.phase).strip()

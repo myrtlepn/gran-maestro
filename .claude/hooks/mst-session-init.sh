@@ -90,11 +90,9 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-STATE_FILE="${MST_TMP}/mst-state-unknown.json"
+STATE_FILE=""
 SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
-mkdir -p "$MST_TMP"
-echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 
 STDIN_RAW="$(cat || true)"
 is_structured_mst_session_id() {
@@ -126,16 +124,51 @@ extract_stdin_mst_session_id_literal() {
   esac
 }
 
-if [ -n "${MST_SESSION_ID:-}" ] && ! is_structured_mst_session_id "$MST_SESSION_ID"; then
-  MST_SESSION_ID=""
+resolve_canonical_mst_session_id_or_exit() {
+  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
+  if [ -n "$env_raw" ] && is_structured_mst_session_id "$env_raw"; then
+    env_id="$env_raw"
+  fi
+  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+
+  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
+    echo "[mst-session-init] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
+    return 1
+  fi
+  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
+    echo "[mst-session-init] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
+    return 2
+  fi
+  if [ -n "$env_id" ]; then
+    MST_CANONICAL_SESSION_ID="$env_id"
+    return 0
+  fi
+  if [ -n "$stdin_id" ]; then
+    MST_CANONICAL_SESSION_ID="$stdin_id"
+    return 0
+  fi
+
+  echo "[mst-session-init] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2
+  return 2
+}
+
+MST_CANONICAL_SESSION_ID=""
+if resolve_canonical_mst_session_id_or_exit; then
+  MST_SESSION_RESOLUTION_STATUS=0
+else
+  MST_SESSION_RESOLUTION_STATUS=$?
 fi
-if [ -z "${MST_SESSION_ID:-}" ]; then
-  MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
 fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  exit 0
+fi
+MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
 export MST_SESSION_ID
-if [ -n "${MST_SESSION_ID:-}" ]; then
-  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
-fi
+STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
+mkdir -p "$MST_TMP"
+echo "$PPID" > "${MST_TMP}/mst-session-anchor-${PPID}.pid" 2>/dev/null || true
 MST_LEDGER_HOOK_EVENT="SessionStart"
 if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null
@@ -189,29 +222,7 @@ debug_log() {
 }
 
 stdin_session_id() {
-  if [ "${MST_STDIN_SESSION_ID_READY:-0}" = "1" ]; then
-    printf '%s\n' "${MST_STDIN_SESSION_ID:-}"
-    return 0
-  fi
-
-  MST_STDIN_SESSION_ID="$(MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' 2>/dev/null || true
-import json
-import os
-
-try:
-    payload = json.loads(os.environ.get("MST_HOOK_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-
-session_id = payload.get("mst_session_id")
-if isinstance(session_id, str) and session_id.strip():
-    print(session_id.strip())
-PY
-)"
-  MST_STDIN_SESSION_ID_READY=1
-  printf '%s\n' "${MST_STDIN_SESSION_ID:-}"
+  printf '%s\n' "${MST_SESSION_ID:-}"
 }
 
 utc_timestamp() {

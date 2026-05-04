@@ -574,6 +574,10 @@ def child_env_with_required_session_context() -> dict[str, str]:
             raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+        if "mst_session_id" in parsed:
+            existing = parsed["mst_session_id"]
+            if not isinstance(existing, str) or not existing.strip() or existing.strip() != session_id:
+                raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
         context_payload = dict(parsed)
     context_payload["mst_session_id"] = session_id
     child_env["MST_CONTEXT_JSON"] = json.dumps(context_payload, ensure_ascii=False, separators=(",", ":"))
