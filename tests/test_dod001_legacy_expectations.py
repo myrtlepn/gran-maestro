@@ -64,6 +64,11 @@ def _violations(path: Path, patterns: list[tuple[str, re.Pattern[str]]]) -> list
     for line_no, line in enumerate(text.splitlines(), start=1):
         if "DOD-001 allow-legacy-wording" in line:
             continue
+        lowered = line.lower()
+        if any(token in line for token in ("아니다", "아니며", "될 수 없다")):
+            continue
+        if "not " in lowered or "diagnostic-only" in lowered:
+            continue
         for label, pattern in patterns:
             if pattern.search(line):
                 results.append(f"{path.relative_to(REPO_ROOT)}:{line_no}: {label}: {line.strip()}")

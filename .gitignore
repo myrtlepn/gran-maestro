@@ -10,3 +10,4 @@ frontend/node_modules/
 /.claude/
 .pytest_cache/
 *.backup-*.json
+/.claude/hooks/

@@ -375,6 +375,8 @@ def cmd_dispatch_register(args):
     try:
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("dispatch register")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     session_id = child_env["MST_SESSION_ID"]
@@ -438,6 +440,8 @@ def cmd_dispatch_heartbeat(args):
     try:
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("dispatch heartbeat")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     session_id = child_env["MST_SESSION_ID"]

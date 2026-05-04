@@ -75,6 +75,11 @@ def _legacy_env() -> dict[str, str]:
     }
 
 
+def _read_json_stdout(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 def test_root_session_resolve_generates_one_path_safe_canonical_id() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -138,11 +143,18 @@ def test_missing_parent_mutating_state_writes_fail_without_legacy_or_uuid_fallba
         assert workflow.returncode != 0
         assert snapshot.returncode != 0
         assert _files(workspace) == before
+        for result in (workflow, snapshot):
+            payload = _read_json_stdout(result)
+            assert payload["status"] == "error"
+            assert payload["code"] == "legacy_identity_not_canonical_source"
+            assert payload["created_new_session"] is False
+            assert payload["canonical_mst_session_id"] is None
+            diagnostics = payload["legacy_diagnostics"]
+            assert diagnostics["MST_STATE_PPID"] == "424242"
+            assert diagnostics["hook_session_id"] == LEGACY_HOOK_SESSION_ID
+            assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION_ID
         combined = f"{workflow.stdout}\n{workflow.stderr}\n{snapshot.stdout}\n{snapshot.stderr}"
-        assert "missing MST_SESSION_ID" in combined
-        assert LEGACY_HOOK_SESSION_ID not in combined
-        assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
-        assert "424242" not in combined
+        assert ROOT_SESSION_ID not in combined
 
 
 def test_legacy_values_are_diagnostic_only_not_canonical_sources() -> None:

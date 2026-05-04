@@ -79,6 +79,15 @@ def _combined(result: subprocess.CompletedProcess[str]) -> str:
     return f"{result.stdout}\n{result.stderr}"
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def test_session_resolve_without_root_or_parent_fails_without_uuid_generation() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -88,8 +97,10 @@ def test_session_resolve_without_root_or_parent_fails_without_uuid_generation() 
         result = _run_mst(workspace, "session", "resolve", "--json")
 
         assert result.returncode != 0
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "missing_canonical_mst_session_id"
+        assert payload["legacy_diagnostics"] == {}
         combined = _combined(result)
-        assert "root_mst_id" in combined
         assert not UUID_V4_RE.search(combined)
         assert _files(workspace) == before
 
@@ -100,16 +111,18 @@ def test_legacy_runtime_values_are_not_canonical_fallback_sources() -> None:
         _init_workspace(workspace)
         before = _files(workspace)
 
-        result = _run_mst(workspace, "session", "resolve", env=_legacy_env())
+        result = _run_mst(workspace, "session", "resolve", "--json", env=_legacy_env())
 
         assert result.returncode != 0
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "legacy_identity_not_canonical_source"
+        diagnostics = payload["legacy_diagnostics"]
+        assert diagnostics["MST_STATE_PPID"] == "424242"
+        assert diagnostics["MST_SNAPSHOT_SESSION_ID"] == "pid-legacy-snapshot"
+        assert diagnostics["hook_session_id"] == LEGACY_HOOK_SESSION_ID
+        assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION_ID
         combined = _combined(result)
-        assert "root_mst_id" in combined
-        assert "424242" not in combined
-        assert "pid-legacy-snapshot" not in combined
-        assert LEGACY_HOOK_SESSION_ID not in combined
-        assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
-        assert not UUID_V4_RE.search(combined)
+        assert "generated" not in combined
         assert _files(workspace) == before
 
 
@@ -157,11 +170,15 @@ def test_missing_parent_mutating_state_write_fails_without_legacy_or_uuid_fallba
         )
 
         assert result.returncode != 0
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "legacy_identity_not_canonical_source"
+        diagnostics = payload["legacy_diagnostics"]
+        assert diagnostics["MST_STATE_PPID"] == "424242"
+        assert diagnostics["MST_SNAPSHOT_SESSION_ID"] == "pid-legacy-snapshot"
+        assert diagnostics["hook_session_id"] == LEGACY_HOOK_SESSION_ID
+        assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION_ID
         combined = _combined(result)
-        assert "missing MST_SESSION_ID" in combined
-        assert not UUID_V4_RE.search(combined)
-        assert LEGACY_HOOK_SESSION_ID not in combined
-        assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
+        assert "generated" not in combined
         assert _files(workspace) == before
 
 

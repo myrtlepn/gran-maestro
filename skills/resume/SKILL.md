@@ -20,6 +20,8 @@ argument-hint: "[--wakeup-hint stop-recover]"
 
 resume 경로는 **queue entry를 SSoT**로 사용합니다. plan.json 또는 tmp/mst-state-{PPID}.json의 `next_action.auto_mode` 등을 fallback으로 읽어 args를 재조합하지 **않습니다**. 자율 모드 의도는 enqueue 시점에 queue entry의 `auto` 필드와 `args` 내 `-a` 토큰으로 함께 표현되어야 하며, 이 불변 계약은 `scripts/mst_cmds/_common.py::queue_enqueue`가 강제합니다 (REQ-639 T01 참조).
 
+DOD-007 canonical identity boundary: `MST_SESSION_ID` / `mst_session_id`만 canonical identity source다. Legacy-only input(`MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`)은 diagnostic-only이며 canonical source, fallback, alias, migration requirement가 아니다. Legacy-only input은 session/state/history/snapshot/recovery/lock mutation 없이 structured non-success로 종료해야 한다. Canonical `MST_SESSION_ID`/`mst_session_id`와 legacy 값이 충돌하면 canonical identity가 우선하고 legacy 값은 override/repair/merge/persist source가 될 수 없다.
+
 ### Exit
 
 - 한 action의 Skill 호출이 완료되면 `complete` 또는 `fail`로 queue 상태를 확정한 뒤 **정상 종료**한다.

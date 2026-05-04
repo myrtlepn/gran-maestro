@@ -80,6 +80,15 @@ def _run_mst(workspace: Path, *args: str, env: dict[str, str] | None = None) -> 
     )
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def test_entrypoint_generation_matrix_has_required_allowed_and_forbidden_rows() -> None:
     allowed = [row for row in ENTRYPOINT_GENERATION_MATRIX if row["generation"] == "allowed"]
     child_forbidden = [
@@ -148,7 +157,8 @@ def test_child_entrypoint_generation_forbidden_without_parent_env() -> None:
 
         combined = f"{result.stdout}\n{result.stderr}"
         assert result.returncode != 0
-        assert "missing MST_SESSION_ID" in combined
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "missing_canonical_mst_session_id"
         assert "REQ-805-child" not in combined
         assert not UUID_V4_RE.search(combined)
         assert _files(workspace) == before
@@ -183,11 +193,13 @@ def test_missing_context_mutation_generation_forbidden_without_legacy_fallback()
 
         combined = f"{result.stdout}\n{result.stderr}"
         assert result.returncode != 0
-        assert "missing MST_SESSION_ID" in combined
-        assert LEGACY_CLAUDE_SESSION not in combined
-        assert LEGACY_TRANSCRIPT_SESSION not in combined
-        assert "818181" not in combined
-        assert not UUID_V4_RE.search(combined)
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "legacy_identity_not_canonical_source"
+        diagnostics = payload["legacy_diagnostics"]
+        assert diagnostics["MST_STATE_PPID"] == "818181"
+        assert diagnostics["hook_session_id"] == LEGACY_CLAUDE_SESSION
+        assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION
+        assert "generated" not in combined
         assert _files(workspace) == before
 
 

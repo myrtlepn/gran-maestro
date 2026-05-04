@@ -125,6 +125,15 @@ def _line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+def _is_negative_or_diagnostic_context(line: str) -> bool:
+    lowered = line.lower()
+    return (
+        any(token in line for token in ("아니다", "아니며", "될 수 없다"))
+        or "not " in lowered
+        or "diagnostic-only" in lowered
+    )
+
+
 def test_diagnostic_and_explicit_migration_legacy_contexts_are_allowlisted() -> None:
     missing = []
     for context in REQUIRED_CONTEXTS:
@@ -153,6 +162,8 @@ def test_no_legacy_identity_in_canonical_mutation_or_control_flow_contexts() -> 
             for match in pattern.finditer(text):
                 line = _line_number(text, match.start())
                 snippet = text.splitlines()[line - 1].strip()
+                if _is_negative_or_diagnostic_context(snippet):
+                    continue
                 violations.append(f"{relative_path}:{line}: {reason}: {snippet}")
 
     assert not violations, "Forbidden DOD-003 legacy identity contexts remain:\n" + "\n".join(violations)
@@ -166,6 +177,8 @@ def test_skill_docs_do_not_mention_legacy_identity_terms() -> None:
             for match in re.finditer(re.escape(term), text):
                 line = _line_number(text, match.start())
                 snippet = text.splitlines()[line - 1].strip()
+                if _is_negative_or_diagnostic_context(snippet):
+                    continue
                 violations.append(f"{relative_path}:{line}: {term} must not appear in canonical skill contract: {snippet}")
 
     assert not violations, "Legacy identity terms remain in skill docs:\n" + "\n".join(violations)

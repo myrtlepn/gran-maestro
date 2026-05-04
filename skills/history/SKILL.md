@@ -23,6 +23,8 @@ no legacy fallback 원칙을 공유합니다.
 - `mst.py hook log`는 hook event 확인용 backward-compatible subset입니다. canonical query는 `mst.py history ... --session`입니다.
 - DOD-005는 event row 조회와 head/verify 관찰 가능성까지만 포함합니다. DOD-006 recover bundle restoration과 DOD-017 dashboard/execution-flow projection 완료를 암시하지 않습니다.
 
+DOD-007 canonical identity boundary: `MST_SESSION_ID` / `mst_session_id`만 canonical identity source다. Legacy-only input(`MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`)은 diagnostic-only이며 canonical source, fallback, alias, migration requirement가 아니다. Legacy-only input은 session/state/history/snapshot/recovery/lock mutation 없이 structured non-success로 종료해야 한다. Canonical `MST_SESSION_ID`/`mst_session_id`와 legacy 값이 충돌하면 canonical identity가 우선하고 legacy 값은 override/repair/merge/persist source가 될 수 없다.
+
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->

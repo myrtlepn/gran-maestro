@@ -1392,6 +1392,8 @@ def cmd_state_set_workflow(args):
 
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("workflow state write")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
@@ -1409,6 +1411,8 @@ def cmd_state_set(args):
     try:
         session_id = _snapshot_session_id()
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("state set")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     valid_snapshot, validation_error = _validate_existing_snapshot_for_write(state_base_dir, session_id)
@@ -1503,6 +1507,8 @@ def cmd_state_get(args):
     try:
         session_id = _common.require_mst_session_id_for_mutation("state snapshot read")
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("state get")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     data = load_snapshot(_skill_state_base_dir(), session_id=session_id)
@@ -1522,6 +1528,8 @@ def cmd_state_clear(args):
     try:
         session_id = _snapshot_session_id()
     except ValueError as exc:
+        if _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("state clear")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     valid_snapshot, validation_error = _validate_existing_snapshot_for_write(_skill_state_base_dir(), session_id)

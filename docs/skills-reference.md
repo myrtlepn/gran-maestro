@@ -425,6 +425,10 @@ python3 scripts/mst.py history head --session {mst_session_id}
 
 `recover/resume`는 canonical `mst_session_id`, root MST ID, state snapshot, history context를 복원해 다음 실행에 전달한다. 다음 실행에는 동일 `MST_SESSION_ID` env와 structured `mst_session_id` context를 전달한다. 복구 source of truth는 validated history ledger와 validated state snapshot이며, prompt summary는 diagnostic-only 보조 정보다. `MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`는 diagnostic-only이며 canonical fallback source가 아니다.
 
+#### DOD-007 canonical identity boundary
+
+`MST_SESSION_ID` / `mst_session_id`만 canonical identity source다. Legacy-only input(`MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`)은 diagnostic-only이며 canonical source, fallback, alias, migration requirement가 아니다. Legacy-only input은 session/state/history/snapshot/recovery/lock mutation 없이 structured non-success로 종료해야 한다. Canonical `MST_SESSION_ID`/`mst_session_id`와 legacy 값이 충돌하면 canonical identity가 우선하고 legacy 값은 override/repair/merge/persist source가 될 수 없다.
+
 #### 사용 시점
 
 - 과거에 완료한 작업을 되돌아볼 때

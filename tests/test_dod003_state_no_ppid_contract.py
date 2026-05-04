@@ -73,6 +73,15 @@ def _combined(*results: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(f"{result.stdout}\n{result.stderr}" for result in results)
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def test_ppid_only_state_boundaries_fail_without_selecting_legacy_paths() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -118,8 +127,11 @@ def test_ppid_only_state_boundaries_fail_without_selecting_legacy_paths() -> Non
         assert snapshot.returncode != 0
         assert read.returncode != 0
         assert _hashes(workspace) == before
+        for result in (workflow, snapshot, read):
+            payload = _read_non_success_payload(result)
+            assert payload["code"] == "legacy_identity_not_canonical_source"
+            assert payload["legacy_diagnostics"]["MST_STATE_PPID"] == LEGACY_PPID
         combined = _combined(workflow, snapshot, read)
-        assert "missing MST_SESSION_ID" in combined
         assert "legacy:ppid" not in combined
         assert "legacy:default" not in combined
         assert not (workspace / ".gran-maestro" / "state" / ROOT_SESSION_ID).exists()

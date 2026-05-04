@@ -59,6 +59,15 @@ def _files(workspace: Path) -> set[str]:
     return {str(path.relative_to(base)) for path in base.rglob("*") if path.is_file()}
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def _register_child(workspace: Path, task_id: str, env: dict[str, str] | None) -> subprocess.CompletedProcess[str]:
     return _run_mst(
         workspace,
@@ -155,11 +164,12 @@ def test_child_dispatch_missing_parent_fails_without_uuid_or_legacy_fallback() -
 
         assert result.returncode != 0
         assert _files(workspace) == before
-        combined = f"{result.stdout}\n{result.stderr}"
-        assert "missing MST_SESSION_ID" in combined
-        assert LEGACY_HOOK_SESSION_ID not in combined
-        assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
-        assert "818181" not in combined
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "legacy_identity_not_canonical_source"
+        diagnostics = payload["legacy_diagnostics"]
+        assert diagnostics["MST_STATE_PPID"] == "818181"
+        assert diagnostics["hook_session_id"] == LEGACY_HOOK_SESSION_ID
+        assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION_ID
 
 
 def test_dispatch_build_requires_existing_parent_session_without_resolve_fallback() -> None:

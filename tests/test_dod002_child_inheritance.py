@@ -87,6 +87,15 @@ def _register_child(workspace: Path, task_id: str, env: dict[str, str] | None) -
     )
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def _init_request(workspace: Path) -> None:
     req_dir = workspace / ".gran-maestro" / "requests" / "REQ-805"
     req_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +195,8 @@ def test_child_context_payload_without_parent_env_fails_closed() -> None:
 
         assert result.returncode != 0
         assert _files(workspace) == before
-        assert "missing MST_SESSION_ID" in f"{result.stdout}\n{result.stderr}"
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "missing_canonical_mst_session_id"
 
 
 def test_child_missing_parent_does_not_generate_from_child_or_legacy_ids() -> None:
@@ -207,15 +217,15 @@ def test_child_missing_parent_does_not_generate_from_child_or_legacy_ids() -> No
 
         result = _register_child(workspace, "REQ-805-child-artifact", env)
 
-        combined = f"{result.stdout}\n{result.stderr}"
         assert result.returncode != 0
         assert _files(workspace) == before
-        assert "missing MST_SESSION_ID" in combined
-        assert "REQ-805-child-artifact" not in combined
-        assert LEGACY_CLAUDE_SESSION not in combined
-        assert LEGACY_TRANSCRIPT_SESSION not in combined
-        assert "818181" not in combined
-        assert not UUID_V4_RE.search(combined)
+        payload = _read_non_success_payload(result)
+        assert payload["code"] == "legacy_identity_not_canonical_source"
+        diagnostics = payload["legacy_diagnostics"]
+        assert diagnostics["MST_STATE_PPID"] == "818181"
+        assert diagnostics["hook_session_id"] == LEGACY_CLAUDE_SESSION
+        assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION
+        assert "REQ-805-child-artifact" not in f"{result.stdout}\n{result.stderr}"
 
 
 def test_child_env_payload_mismatch_fails_without_replacement_generation() -> None:

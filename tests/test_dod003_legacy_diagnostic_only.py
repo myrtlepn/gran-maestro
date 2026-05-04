@@ -17,6 +17,7 @@ FAST_PRE_TOOL = REPO_ROOT / "hooks" / "lib" / "pre_tool_use_fast.py"
 ROOT_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
 OTHER_SESSION_ID = "MST-AGI-030-20260503T130813382Z-z9y8x7w6"
 LEGACY_PPID = "424242"
+ZERO_HASH = "0" * 64
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -37,6 +38,8 @@ def _clean_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "MST_SNAPSHOT_SESSION_ID",
         "MST_CONTEXT_JSON",
         "MST_HOOK_STDIN_RAW",
+        "MST_POLICY_HOME",
+        "MST_CLAUDE_HOME",
     ):
         env.pop(key, None)
     if extra:
@@ -57,6 +60,19 @@ def _hashes_under(path: Path) -> dict[str, str]:
         for child in sorted(path.rglob("*"))
         if child.is_file()
     }
+
+
+def _canonical_event(event: dict) -> str:
+    return json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _event_hash(prev_hash: str, event: dict) -> str:
+    return hashlib.sha256((prev_hash + "\n" + _canonical_event(event)).encode("utf-8")).hexdigest()
+
+
+def _fingerprint(path: Path) -> str:
+    stat = path.stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}"
 
 
 def _run_mst(workspace: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -261,6 +277,8 @@ def _write_recover_agile_fixture(workspace: Path, mst_session_id: str | None, ow
         "current_sprint": 1,
         "owner_ppid": 12345,
         "owner_session_id": owner_session_id,
+        "schema_version": 1,
+        "root_mst_id": "AGI-030",
     }
     if mst_session_id is not None:
         payload["mst_session_id"] = mst_session_id
@@ -268,13 +286,74 @@ def _write_recover_agile_fixture(workspace: Path, mst_session_id: str | None, ow
     _write_json(agi_dir / "sprints" / "S01" / "result.json", {"status": "success", "target_dod": "DOD-003"})
 
 
+def _seed_recover_session_history_and_snapshot(workspace: Path, policy_home: Path, mst_session_id: str) -> str:
+    session_dir = workspace / ".gran-maestro" / "sessions" / mst_session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        session_dir / "session.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": mst_session_id,
+            "root_mst_id": "AGI-030",
+        },
+    )
+    history_file = session_dir / "history.ndjson"
+    event = {
+        "schema_version": 1,
+        "mst_session_id": mst_session_id,
+        "root_mst_id": "AGI-030",
+        "event_type": "skill.step",
+        "type": "skill.step",
+        "created_at": "2026-05-03T13:08:13.382Z",
+        "timestamp": "2026-05-03T13:08:13.382Z",
+        "idempotency_key": f"{mst_session_id}:skill.step:dod003-seed",
+    }
+    head = _event_hash(ZERO_HASH, event)
+    row = {"seq": 1, "prev_hash": ZERO_HASH, "event_hash": head, "event": event, "mst_session_id": mst_session_id}
+    history_file.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    (session_dir / "history.head").write_text(head + "\n", encoding="utf-8")
+    (session_dir / "history.verify").write_text(f"{head}\t{_fingerprint(history_file)}\t1\n", encoding="utf-8")
+    mirror = policy_home / "ledger-heads" / f"{mst_session_id}.head"
+    mirror.parent.mkdir(parents=True, exist_ok=True)
+    mirror.write_text(head + "\n", encoding="utf-8")
+    _write_json(
+        workspace / ".gran-maestro" / "state" / mst_session_id / "snapshot.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": mst_session_id,
+            "root_mst_id": "AGI-030",
+            "sessionId": mst_session_id,
+            "currentSkill": "mst:agile",
+            "currentStep": 1,
+            "totalSteps": 3,
+            "status": "active",
+            "workflow": {
+                "current_skill": "mst:agile",
+                "current_step": 1,
+                "total_steps": 3,
+                "status": "active",
+            },
+            "history": {"last_event_id": head, "head_hash": head},
+        },
+    )
+    return head
+
+
 def test_state_recover_ignores_owner_session_id_mismatch_diagnostically() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
+        policy_home = workspace / "policy"
         _write_recover_agile_fixture(workspace, ROOT_SESSION_ID, OTHER_SESSION_ID)
+        _seed_recover_session_history_and_snapshot(workspace, policy_home, ROOT_SESSION_ID)
 
-        result = _run_mst(workspace, "state", "recover", "AGI-030", env={"MST_SESSION_ID": ROOT_SESSION_ID})
+        result = _run_mst(
+            workspace,
+            "state",
+            "recover",
+            "AGI-030",
+            env={"MST_SESSION_ID": ROOT_SESSION_ID, "MST_POLICY_HOME": str(policy_home)},
+        )
 
         assert result.returncode == 0, result.stderr
         assert "owner_session_id ignored" in result.stderr
@@ -291,13 +370,21 @@ def test_state_recover_mst_session_id_mismatch_fails_without_mutation() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
+        policy_home = workspace / "policy"
         _write_recover_agile_fixture(workspace, OTHER_SESSION_ID, ROOT_SESSION_ID)
+        _seed_recover_session_history_and_snapshot(workspace, policy_home, ROOT_SESSION_ID)
         before = _hashes_under(workspace / ".gran-maestro" / "state")
 
-        result = _run_mst(workspace, "state", "recover", "AGI-030", env={"MST_SESSION_ID": ROOT_SESSION_ID})
+        result = _run_mst(
+            workspace,
+            "state",
+            "recover",
+            "AGI-030",
+            env={"MST_SESSION_ID": ROOT_SESSION_ID, "MST_POLICY_HOME": str(policy_home)},
+        )
 
         assert result.returncode != 0
-        assert f"mst_session_id mismatch: env={ROOT_SESSION_ID} payload={OTHER_SESSION_ID}" in result.stderr
+        assert "root mst_session_id metadata mismatch" in result.stderr
         assert _hashes_under(workspace / ".gran-maestro" / "state") == before
 
 
@@ -311,7 +398,7 @@ def test_state_recover_missing_mst_session_id_fails_without_mutation() -> None:
         result = _run_mst(workspace, "state", "recover", "AGI-030", env={"MST_SESSION_ID": ROOT_SESSION_ID})
 
         assert result.returncode != 0
-        assert "missing mst_session_id in durable session" in result.stderr
+        assert "missing session metadata" in result.stderr
         assert _hashes_under(workspace / ".gran-maestro" / "state") == before
 
 

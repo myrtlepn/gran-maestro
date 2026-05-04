@@ -252,6 +252,31 @@ def legacy_session_diagnostics() -> dict:
     return diagnostics
 
 
+def session_identity_non_success_payload(subject: str, message: str | None = None) -> dict:
+    diagnostics = legacy_session_diagnostics()
+    code = "legacy_identity_not_canonical_source" if diagnostics else "missing_canonical_mst_session_id"
+    return {
+        "status": "error",
+        "code": code,
+        "message": message or f"{subject} requires canonical MST_SESSION_ID or structured mst_session_id",
+        "created_new_session": False,
+        "canonical_mst_session_id": None,
+        "legacy_diagnostics": diagnostics,
+    }
+
+
+def emit_session_identity_non_success(subject: str, message: str | None = None) -> int:
+    payload = session_identity_non_success_payload(subject, message)
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(f"{payload['code']}: {payload['message']}", file=sys.stderr)
+    return 1
+
+
+def is_missing_canonical_session_error(error: object) -> bool:
+    text = str(error)
+    return "missing MST_SESSION_ID" in text or "missing canonical MST_SESSION_ID" in text
+
+
 def sessions_dir(project_root: Path) -> Path:
     return base_dir_from_project(project_root) / "sessions"
 

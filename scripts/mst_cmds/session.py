@@ -844,6 +844,8 @@ def cmd_session_resolve(args):
             started_at=started_at,
         )
     except ValueError as exc:
+        if args.json and _common.is_missing_canonical_session_error(exc):
+            return _common.emit_session_identity_non_success("session resolve")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     session_id = identity["mst_session_id"]

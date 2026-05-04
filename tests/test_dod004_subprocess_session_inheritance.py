@@ -95,6 +95,15 @@ def _assert_canonical_payload(payload: dict) -> None:
     assert payload["root_mst_id"] == "AGI-030"
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def test_state_set_and_set_workflow_create_only_parent_keyed_artifacts() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -255,11 +264,15 @@ def test_missing_parent_with_legacy_only_env_fails_without_new_session_artifacts
         assert workflow.returncode != 0
         assert dispatch.returncode != 0
         assert _hashes(workspace) == before
-        assert "missing MST_SESSION_ID" in combined
-        assert not UUID_V4_RE.search(combined)
-        assert CLAUDE_SESSION_ID not in combined
-        assert TRANSCRIPT_SESSION_ID not in combined
-        assert "818181" not in combined
+        for result in (snapshot, workflow, dispatch):
+            payload = _read_non_success_payload(result)
+            assert payload["code"] == "legacy_identity_not_canonical_source"
+            diagnostics = payload["legacy_diagnostics"]
+            assert diagnostics["MST_STATE_PPID"] == "818181"
+            assert diagnostics["MST_SNAPSHOT_SESSION_ID"] == "legacy-snapshot-alias"
+            assert diagnostics["hook_session_id"] == CLAUDE_SESSION_ID
+            assert diagnostics["hook_transcript_stem"] == TRANSCRIPT_SESSION_ID
+        assert "generated" not in combined
         assert not (workspace / ".gran-maestro" / "sessions").exists()
 
 

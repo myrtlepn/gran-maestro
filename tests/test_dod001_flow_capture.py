@@ -198,6 +198,15 @@ def _mutation_delta(before: dict[str, str] | set[str], after: dict[str, str] | s
     return 0 if before == after else 1
 
 
+def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "error"
+    assert payload["created_new_session"] is False
+    assert payload["canonical_mst_session_id"] is None
+    return payload
+
+
 def _missing_parent_no_write(workspace: Path) -> int:
     before = _files(workspace)
     result = _run_mst(
@@ -225,10 +234,12 @@ def _missing_parent_no_write(workspace: Path) -> int:
         ),
     )
     assert result.returncode != 0
-    combined = f"{result.stdout}\n{result.stderr}"
-    assert "missing MST_SESSION_ID" in combined
-    assert LEGACY_SESSION_ID not in combined
-    assert LEGACY_TRANSCRIPT_SESSION_ID not in combined
+    payload = _read_non_success_payload(result)
+    assert payload["code"] == "legacy_identity_not_canonical_source"
+    diagnostics = payload["legacy_diagnostics"]
+    assert diagnostics["MST_STATE_PPID"] == LEGACY_PPID
+    assert diagnostics["hook_session_id"] == LEGACY_SESSION_ID
+    assert diagnostics["hook_transcript_stem"] == LEGACY_TRANSCRIPT_SESSION_ID
     return _mutation_delta(before, _files(workspace))
 
 

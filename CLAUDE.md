@@ -7,6 +7,8 @@
 
 `.claude/hooks/` 파일은 **직접 수정 금지**. `/mst:on` 실행 시 `hooks/` 원본에서 덮어씌워집니다.
 
+이 플러그인의 hook을 수정하려면 최종 source of truth는 `/Users/brandev/mygit/gran-maestro/hooks/` 하위 파일입니다.
+
 Hook 수정이 필요할 때는 반드시 아래 순서를 따릅니다:
 
 1. **`hooks/` 원본 수정**: 프로젝트 루트의 `hooks/` 디렉토리 파일을 수정
@@ -78,7 +80,11 @@ docs/                # 문서
 2. **config 변경**: `config.json`/`config.resolved.json`에 키 추가·변경·삭제가 필요한지 확인
    - config 키가 변경되면 대시보드 Settings의 해당 탭 UI도 반드시 동기화
    - 기본값이 필요한 경우 `templates/defaults/config.json`도 함께 수정
-3. **README 업데이트**: 사용자 대면 기능이 변경된 경우 `README.md`의 관련 섹션 수정
+3. **상태머신 영향**: `mst.py`, `scripts/mst_cmds/`, `scripts/_skill_state.py`, `hooks/`, `skills/`의 continuation/auto/resume/stop/session/history/snapshot 동작이 바뀌면 소스만 수정하지 말고 상태머신 계약도 함께 갱신합니다.
+   - 가능한 state/transition/guard/evidence/on_reject가 바뀌면 machine-readable transition graph(YAML/JSON)와 D2/dashboard generated view 갱신 필요 여부를 확인합니다.
+   - `auto=true`, Stop hook, PreToolUse, context compaction, skill 종료, resume/recover, `MST_SESSION_ID` 전파 규칙이 바뀌면 AGI-030 objective/details의 state-history-recovery 계약과 관련 테스트를 함께 맞춥니다.
+   - 정상 경로에서는 full state를 LLM prompt에 매번 주입하지 않고 hook/validator가 로컬에서 상태머신 계약 이탈만 검사하며, 이탈 시에만 structured continuation block을 전달한다는 원칙을 유지합니다.
+4. **README 업데이트**: 사용자 대면 기능이 변경된 경우 `README.md`의 관련 섹션 수정
 
 ## 커밋 & 푸시 체크리스트
 
