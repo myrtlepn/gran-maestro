@@ -41,6 +41,27 @@ import sys
 sid = os.environ.get("MST_SESSION_ID", "").strip()
 raw = os.environ.get("MST_CONTEXT_JSON", "").strip()
 payload = {}
+
+def _root_from_session(session_id):
+    if not session_id.startswith("MST-"):
+        return ""
+    try:
+        root, _started_at, _random = session_id[4:].rsplit("-", 2)
+    except ValueError:
+        return ""
+    return root
+
+def _require_matching_session(candidate, source):
+    if isinstance(candidate, str) and candidate.strip() and candidate.strip() != sid:
+        print(f"Error: MST_SESSION_ID and structured mst_session_id mismatch ({source})", file=sys.stderr)
+        sys.exit(2)
+
+def _require_matching_root(candidate, source):
+    root = _root_from_session(sid)
+    if isinstance(candidate, str) and candidate.strip() and candidate.strip() != root:
+        print(f"Error: MST_CONTEXT_JSON root_mst_id mismatch ({source})", file=sys.stderr)
+        sys.exit(2)
+
 if raw:
     try:
         parsed = json.loads(raw)
@@ -50,14 +71,32 @@ if raw:
     if not isinstance(parsed, dict):
         print("Error: MST_CONTEXT_JSON must be a JSON object", file=sys.stderr)
         sys.exit(2)
-    existing = parsed.get("mst_session_id")
-    if "mst_session_id" in parsed and (
-        not isinstance(existing, str) or not existing.strip() or existing.strip() != sid
-    ):
-        print("Error: MST_SESSION_ID and structured mst_session_id mismatch", file=sys.stderr)
+    if parsed.get("schema_version") is not None and parsed.get("schema_version") != 1:
+        print("Error: MST_CONTEXT_JSON schema_version mismatch", file=sys.stderr)
         sys.exit(2)
+    _require_matching_session(parsed.get("mst_session_id"), "context")
+    _require_matching_root(parsed.get("root_mst_id"), "context")
+    core = parsed.get("core_rehydration")
+    if isinstance(core, dict):
+        if core.get("schema_version") is not None and core.get("schema_version") != 1:
+            print("Error: MST_CONTEXT_JSON core_rehydration schema_version mismatch", file=sys.stderr)
+            sys.exit(2)
+        _require_matching_session(core.get("mst_session_id"), "core_rehydration")
+        _require_matching_root(core.get("root_mst_id"), "core_rehydration")
+        next_execution = core.get("next_execution")
+        if isinstance(next_execution, dict):
+            env = next_execution.get("env")
+            if isinstance(env, dict):
+                _require_matching_session(env.get("MST_SESSION_ID"), "next_execution.env")
+                env["MST_SESSION_ID"] = sid
+            context = next_execution.get("context")
+            if isinstance(context, dict):
+                _require_matching_session(context.get("mst_session_id"), "next_execution.context")
+                context["mst_session_id"] = sid
     payload = dict(parsed)
+payload.setdefault("schema_version", 1)
 payload["mst_session_id"] = sid
+payload.setdefault("root_mst_id", _root_from_session(sid))
 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 """.strip()
     q = shlex.quote

@@ -144,8 +144,8 @@ resolve_canonical_mst_session_id_or_exit() {
     return 0
   fi
   if [ -n "$stdin_id" ]; then
-    MST_CANONICAL_SESSION_ID="$stdin_id"
-    return 0
+    echo "[mst-session-init] diagnostic: structured hook stdin mst_session_id ignored without inherited MST_SESSION_ID." >&2
+    return 2
   fi
 
   echo "[mst-session-init] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2

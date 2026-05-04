@@ -584,6 +584,273 @@ def _append_skill_history_event(
     return True
 
 
+def _json_object_env(name: str) -> dict:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _recover_non_success(
+    code: str,
+    message: str,
+    *,
+    session_id: Optional[str] = None,
+    root_mst_id: Optional[str] = None,
+    details: Optional[dict] = None,
+) -> dict:
+    payload = {
+        "status": "error",
+        "code": code,
+        "message": message,
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+        "legacy_diagnostics": _common.legacy_session_diagnostics(),
+    }
+    if session_id:
+        payload["mst_session_id"] = session_id
+    else:
+        payload["canonical_mst_session_id"] = None
+    if root_mst_id:
+        payload["root_mst_id"] = root_mst_id
+    if details:
+        payload.update(details)
+    return payload
+
+
+def _emit_recover_non_success(payload: dict) -> int:
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(f"{payload.get('code')}: {payload.get('message')}", file=sys.stderr)
+    return 1
+
+
+def _read_canonical_recover_session_id() -> tuple[Optional[str], Optional[dict]]:
+    raw_context = os.environ.get("MST_CONTEXT_JSON", "").strip()
+    if raw_context:
+        try:
+            context_payload = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            return None, _recover_non_success("invalid_mst_context_json", f"MST_CONTEXT_JSON must be a JSON object: {exc}")
+        if not isinstance(context_payload, dict):
+            return None, _recover_non_success("invalid_mst_context_json", "MST_CONTEXT_JSON must be a JSON object")
+    try:
+        session_id = _common.canonical_mst_session_id_from_env_or_context()
+    except ValueError as exc:
+        return None, _recover_non_success("invalid_mst_session_id", str(exc))
+    if session_id:
+        return session_id, None
+    diagnostics = _common.legacy_session_diagnostics()
+    code = "legacy_identity_not_canonical_source" if diagnostics else "missing_canonical_mst_session_id"
+    return None, _recover_non_success(
+        code,
+        "recover requires canonical MST_SESSION_ID or structured mst_session_id",
+    )
+
+
+def _load_recover_history(base_dir: Path, session_id: str):
+    from scripts.mst_cmds import hook as hook_cmds
+
+    try:
+        return hook_cmds._load_validated_history(
+            project_root=base_dir.parent,
+            policy_home=hook_cmds._policy_home(),
+            raw_session_id=session_id,
+        ), None
+    except hook_cmds.HistoryValidationError as exc:
+        return None, _recover_non_success(
+            exc.code,
+            exc.message,
+            session_id=session_id,
+            details=exc.details,
+        )
+
+
+def _history_ref_from_snapshot(snapshot: dict) -> dict:
+    history = snapshot.get("history")
+    return dict(history) if isinstance(history, dict) else {}
+
+
+def _snapshot_history_refs(snapshot: dict) -> set[str]:
+    history = _history_ref_from_snapshot(snapshot)
+    refs = set()
+    for key in ("head_hash", "last_event_id", "event_hash"):
+        value = history.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
+            refs.add(value.strip())
+    return refs
+
+
+def _validate_recover_snapshot(snapshot: dict, session_id: str, root_mst_id: str, history_result) -> Optional[dict]:
+    validation_error = _common.canonical_state_payload_error(snapshot, session_id)
+    if validation_error is not None:
+        code = "snapshot_root_mismatch" if "root_mst_id mismatch" in validation_error else "state_history_linkage_mismatch"
+        return _recover_non_success(
+            code,
+            f"snapshot {validation_error}",
+            session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    refs = _snapshot_history_refs(snapshot)
+    if not refs:
+        return _recover_non_success(
+            "missing_history_linkage",
+            "snapshot history head or last event reference is required",
+            session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    if history_result.tail_hash not in refs:
+        return _recover_non_success(
+            "stale_history_head",
+            "snapshot history reference does not match validated ledger head",
+            session_id=session_id,
+            root_mst_id=root_mst_id,
+            details={"expected_history_head": history_result.tail_hash, "snapshot_history_refs": sorted(refs)},
+        )
+    return None
+
+
+def _workflow_from_snapshot(snapshot: Optional[dict], root_payload: Optional[dict]) -> dict:
+    if isinstance(snapshot, dict):
+        workflow = snapshot.get("workflow")
+        if isinstance(workflow, dict):
+            return {
+                "current_skill": workflow.get("current_skill") or snapshot.get("currentSkill") or "",
+                "current_step": workflow.get("current_step", snapshot.get("currentStep", 0)),
+                "total_steps": workflow.get("total_steps", snapshot.get("totalSteps", 0)),
+                "status": workflow.get("status") or snapshot.get("status") or "",
+            }
+        return {
+            "current_skill": snapshot.get("currentSkill") or "",
+            "current_step": snapshot.get("currentStep", 0),
+            "total_steps": snapshot.get("totalSteps", 0),
+            "status": snapshot.get("status") or "",
+        }
+    return {
+        "current_skill": "",
+        "current_step": 0,
+        "total_steps": 0,
+        "status": root_payload.get("status") if isinstance(root_payload, dict) else "",
+    }
+
+
+def _next_skill_from_snapshot(snapshot: Optional[dict]) -> dict:
+    next_action_value = snapshot.get("next_action") if isinstance(snapshot, dict) else None
+    next_action_payload = next_action_value if isinstance(next_action_value, dict) else {}
+    name = (
+        next_action_payload.get("expected_skill")
+        or next_action_payload.get("skill")
+        or next_action_payload.get("next_skill")
+        or ""
+    )
+    source_id = next_action_payload.get("source_id") or next_action_payload.get("source") or ""
+    return {
+        "name": name,
+        "source_id": source_id,
+        "auto": bool(next_action_payload.get("auto") or next_action_payload.get("auto_mode")),
+        "metadata": next_action_payload,
+    }
+
+
+def _recovery_fingerprint(agi_id: str, session_id: str) -> str:
+    context = _json_object_env("MST_CONTEXT_JSON")
+    direct = context.get("recovery_fingerprint")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    core = context.get("core_rehydration")
+    if isinstance(core, dict):
+        nested = core.get("recovery_fingerprint")
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+    material = f"{session_id}:{agi_id}:recover"
+    return "recover:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def _append_recover_history_event(base_dir: Path, session_id: str, agi_id: str, recovery_fingerprint: str) -> None:
+    from scripts.mst_cmds import session as session_mod
+
+    session_mod.write_session_history_event(
+        base_dir,
+        session_id,
+        {
+            "event_type": "skill.recover",
+            "skill": "mst:recover",
+            "resource_id": agi_id,
+            "artifact_id": agi_id,
+            "status": "rehydrated",
+            "recovery_fingerprint": recovery_fingerprint,
+            "idempotency_key": f"{session_id}:skill.recover:{recovery_fingerprint}",
+        },
+    )
+
+
+def _update_snapshot_history_head(state_base_dir: Path, session_id: str, snapshot: Optional[dict], previous_head: str, current_head: str) -> None:
+    if not isinstance(snapshot, dict):
+        return
+    history = _history_ref_from_snapshot(snapshot)
+    changed = False
+    if history.get("head_hash") != current_head:
+        history["head_hash"] = current_head
+        changed = True
+    if not isinstance(history.get("last_event_id"), str) or not history.get("last_event_id"):
+        history["last_event_id"] = previous_head
+        changed = True
+    if changed:
+        updated = dict(snapshot)
+        updated["history"] = history
+        _atomic_json_write(_snapshot_path_for_session(state_base_dir, session_id), updated)
+
+
+def _recover_rehydration_bundle(
+    *,
+    session_id: str,
+    root_mst_id: str,
+    snapshot: Optional[dict],
+    root_payload: Optional[dict],
+    history_result,
+    previous_history_head: str,
+    recovery_fingerprint: str,
+) -> dict:
+    workflow = _workflow_from_snapshot(snapshot, root_payload)
+    next_skill = _next_skill_from_snapshot(snapshot)
+    context = {
+        "mst_session_id": session_id,
+        "root_mst_id": root_mst_id,
+        "recovery_fingerprint": recovery_fingerprint,
+    }
+    return {
+        "schema_version": 1,
+        "mst_session_id": session_id,
+        "root_mst_id": root_mst_id,
+        "workflow": workflow,
+        "current_skill": {
+            "name": workflow.get("current_skill") or "",
+            "step": workflow.get("current_step", 0),
+            "total_steps": workflow.get("total_steps", 0),
+            "status": workflow.get("status") or "",
+        },
+        "skill_stack": snapshot.get("skillStack", []) if isinstance(snapshot, dict) and isinstance(snapshot.get("skillStack"), list) else [],
+        "next_skill": next_skill,
+        "history": {
+            "head_hash": history_result.tail_hash,
+            "last_event_id": previous_history_head,
+            "seq": history_result.tail_seq,
+            "path": str(history_result.history_file),
+        },
+        "next_execution": {
+            "env": {"MST_SESSION_ID": session_id},
+            "context": context,
+        },
+        "source_precedence": ["validated_history_ledger", "validated_state_snapshot", "prompt_summary_diagnostic_only"],
+        "prompt_summary_used_as_source": False,
+        "recovery_fingerprint": recovery_fingerprint,
+        "created_new_session": False,
+    }
+
+
 def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
     try:
         if not flow_path.exists():
@@ -1269,64 +1536,80 @@ def cmd_state_clear(args):
 def cmd_state_recover(args):
     from scripts._skill_state import (
         load_snapshot,
-        recover_agile_snapshot_from_durable_state,
-        snapshot_path,
     )
+    from scripts.mst_cmds import session as session_mod
 
+    strict_rehydration = getattr(args, "command", "") == "recover"
     try:
         agi_id = _normalize_agi_id_for_recover(args.agi_id)
     except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return _emit_recover_non_success(_recover_non_success("invalid_root_mst_id", str(exc)))
+
+    session_id, source_error = _read_canonical_recover_session_id()
+    if source_error is not None:
+        return _emit_recover_non_success(source_error)
+    assert session_id is not None
+
+    try:
+        parsed = session_mod.validate_mst_session_metadata_consistency(
+            _common.BASE_DIR,
+            session_id,
+            require_root_metadata=True,
+            require_session_metadata=True,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if not strict_rehydration and "mst_session_id mismatch" not in message:
+            message = f"mst_session_id mismatch: {message}"
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "state_history_linkage_mismatch",
+                message,
+                session_id=session_id,
+            )
+        )
+    if parsed.root_mst_id != agi_id:
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "state_history_linkage_mismatch",
+                f"recover root mismatch: arg={agi_id} session={parsed.root_mst_id}",
+                session_id=session_id,
+                root_mst_id=parsed.root_mst_id,
+            )
+        )
 
     session_path = _agile_session_path(agi_id)
     session_payload = _load_json_object(session_path)
     if session_payload is None:
-        print(f"[cross-session recover] warning: durable session not found: {session_path}", file=sys.stderr)
-        return 0
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "missing_root_metadata",
+                f"durable root session not found: {session_path}",
+                session_id=session_id,
+                root_mst_id=parsed.root_mst_id,
+            )
+        )
 
     previous_owner = session_payload.get("owner_session_id")
     previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
-    try:
-        session_id = _common.require_mst_session_id_for_mutation("recover state write")
-    except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    payload_session_id = session_payload.get("mst_session_id")
-    if not isinstance(payload_session_id, str) or not payload_session_id.strip():
-        print(f"Error: missing mst_session_id in durable session: {session_path}", file=sys.stderr)
-        return 1
-    if payload_session_id.strip() != session_id:
-        print(f"Error: mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}", file=sys.stderr)
-        return 1
     if previous_owner and previous_owner != session_id:
         print(
             f"[cross-session recover] diagnostic: owner_session_id ignored: "
             f"previous={previous_owner} current={session_id}",
             file=sys.stderr,
         )
-    try:
-        _append_skill_history_event(
-            _common.BASE_DIR,
-            session_id,
-            event_type="skill.recover",
-            skill="mst:recover",
-            resource_id=agi_id,
-            status="diagnostic",
-        )
-    except Exception as exc:
-        print(f"Error: failed to append skill recover history: {exc}", file=sys.stderr)
-        return 1
 
     state_base_dir = _skill_state_base_dir()
+    history_result, history_error = _load_recover_history(_common.BASE_DIR, session_id)
+    if history_error is not None:
+        return _emit_recover_non_success(history_error)
+    assert history_result is not None
+
     existing = load_snapshot(state_base_dir, session_id=session_id)
     if existing is not None:
-        validation_error = _common.canonical_state_payload_error(existing, session_id)
-        if validation_error is not None:
-            print(f"Error: snapshot {validation_error}", file=sys.stderr)
-            return 1
-        print(json.dumps(existing, ensure_ascii=False, indent=2))
-        return 0
+        snapshot_error = _validate_recover_snapshot(existing, session_id, parsed.root_mst_id, history_result)
+        if snapshot_error is not None and (strict_rehydration or snapshot_error.get("code") != "missing_history_linkage"):
+            return _emit_recover_non_success(snapshot_error)
 
     if previous_owner and previous_owner != session_id and getattr(args, "takeover", False):
         def _mutate_owner(payload: dict) -> dict:
@@ -1338,40 +1621,47 @@ def cmd_state_recover(args):
             _check_takeover_storm(agi_id)
             _with_locked_json_update(session_path, _mutate_owner)
         except TakeoverStormError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
+            return _emit_recover_non_success(
+                _recover_non_success("recover_takeover_blocked", str(exc), session_id=session_id, root_mst_id=parsed.root_mst_id)
+            )
         except TimeoutError as exc:
-            print(f"[cross-session recover] error: {exc}", file=sys.stderr)
-            return 1
+            return _emit_recover_non_success(
+                _recover_non_success("recover_takeover_failed", str(exc), session_id=session_id, root_mst_id=parsed.root_mst_id)
+            )
         except Exception as exc:
-            print(f"[cross-session recover] error: failed to takeover owner: {exc}", file=sys.stderr)
-            return 1
+            return _emit_recover_non_success(
+                _recover_non_success("recover_takeover_failed", f"failed to takeover owner: {exc}", session_id=session_id, root_mst_id=parsed.root_mst_id)
+            )
 
+    previous_history_head = history_result.tail_hash
+    recovery_fingerprint = _recovery_fingerprint(agi_id, session_id)
     try:
-        snapshot = recover_agile_snapshot_from_durable_state(
-            state_base_dir,
-            agi_id,
-            session_id=session_id,
-        )
+        _append_recover_history_event(_common.BASE_DIR, session_id, agi_id, recovery_fingerprint)
+        updated_history, history_error = _load_recover_history(_common.BASE_DIR, session_id)
     except Exception as exc:
-        print(f"[cross-session recover] warning: failed durable fallback: {exc}", file=sys.stderr)
-        return 0
-    if snapshot is None:
-        print(f"[cross-session recover] warning: durable session not found: {session_path}", file=sys.stderr)
-        return 0
-    snapshot = _write_canonical_snapshot_payload(state_base_dir, session_id, snapshot)
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "recover_history_append_failed",
+                str(exc),
+                session_id=session_id,
+                root_mst_id=parsed.root_mst_id,
+            )
+        )
+    if history_error is not None:
+        return _emit_recover_non_success(history_error)
+    assert updated_history is not None
 
-    flow_path = _append_cross_session_recover_event(
-        session_id,
-        agi_id,
-        previous_owner,
-        takeover=bool(getattr(args, "takeover", False)),
+    _update_snapshot_history_head(state_base_dir, session_id, existing, previous_history_head, updated_history.tail_hash)
+    envelope = _recover_rehydration_bundle(
+        session_id=session_id,
+        root_mst_id=parsed.root_mst_id,
+        snapshot=existing,
+        root_payload=session_payload,
+        history_result=updated_history,
+        previous_history_head=previous_history_head,
+        recovery_fingerprint=recovery_fingerprint,
     )
-    for warning in snapshot.get("warnings", []) if isinstance(snapshot.get("warnings"), list) else []:
-        print(f"[cross-session recover] warning: {warning}", file=sys.stderr)
-    print(f"[cross-session recover] snapshot={snapshot_path(state_base_dir, session_id)}")
-    print(f"[cross-session recover] flow-detail={flow_path}")
-    print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+    print(json.dumps({"status": "ok", "core_rehydration": envelope}, ensure_ascii=False, indent=2))
     return 0
 
 

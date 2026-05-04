@@ -83,6 +83,10 @@ def _invocation_command(args) -> str:
 def _invocation_history_session_id() -> str | None:
     if os.environ.get("MST_INVOCATION_HISTORY_ACTIVE") == "1":
         return None
+    if len(sys.argv) > 1 and sys.argv[1] in {"recover"}:
+        return None
+    if len(sys.argv) > 2 and sys.argv[1:3] == ["state", "recover"]:
+        return None
     if BASE_DIR is None:
         return None
     try:

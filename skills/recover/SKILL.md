@@ -156,6 +156,8 @@ DOD-005 경계: history source of truth는
 `history.head`/`history.verify` 조회다. recover bundle restoration은 DOD-006 범위이며,
 `mst:recover` 문구는 DOD-005 완료를 dashboard/execution-flow projection(DOD-017) 완료로 해석하지 않는다.
 
+DOD-006 경계: `recover/resume`는 canonical `mst_session_id`, root MST ID, state snapshot, history context를 복원해 다음 실행에 전달한다. 다음 실행에는 동일 `MST_SESSION_ID` env와 structured `mst_session_id` context를 전달한다. 복구 source of truth는 validated history ledger와 validated state snapshot이며, prompt summary는 diagnostic-only 보조 정보다. `MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`는 diagnostic-only이며 canonical fallback source가 아니다.
+
 동작:
 - 현재 session snapshot이 있으면 기존 snapshot 복구 경로를 유지한다.
 - 현재 session snapshot이 없으면 `.gran-maestro/agile/{AGI_ID}/session.json`과

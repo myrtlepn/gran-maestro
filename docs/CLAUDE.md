@@ -445,6 +445,13 @@ python3 scripts/mst.py history head --session {mst_session_id}
 - `mst.py hook log`는 hook event 확인용 backward-compatible subset입니다. canonical history query는 `mst.py history ... --session {mst_session_id}`입니다.
 - DOD-005는 event row 조회와 head/verify 관찰 가능성까지입니다. DOD-006 recover bundle restoration과 DOD-017 dashboard/execution-flow projection 완료를 의미하지 않습니다.
 
+## recover/resume context restoration
+
+- `recover/resume`는 canonical `mst_session_id`, root MST ID, state snapshot, history context를 복원해 다음 실행에 전달한다.
+- 다음 실행에는 동일 `MST_SESSION_ID` env와 structured `mst_session_id` context를 전달한다.
+- 복구 source of truth는 validated history ledger와 validated state snapshot이며, prompt summary는 diagnostic-only 보조 정보다.
+- `MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, Claude hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, legacy aliases `sessionId`/`session_id`는 diagnostic-only이며 canonical fallback source가 아니다.
+
 </history_policy>
 
 ---
