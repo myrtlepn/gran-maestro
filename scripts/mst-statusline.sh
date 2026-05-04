@@ -7,7 +7,8 @@ STATUSLINE_SOURCE_ROOT="$(cd "${STATUSLINE_SCRIPT_DIR}/.." && pwd)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 BACKUP_FILE="${HOME}/.claude/mst-statusline-backup.json"
 INPUT_JSON="$(cat || true)"
-CURRENT_STATUSLINE_PPID="${MST_STATE_PPID:-$PPID}" # deprecated alias: PPID-scoped compatibility only
+CURRENT_STATUSLINE_PPID="$PPID"
+LEGACY_STATUSLINE_PPID="${MST_STATE_PPID:-}" # deprecated alias: PPID-scoped compatibility only, diagnostic only
 
 DEFAULT_HUD_COMMAND="$(cat <<'CMD'
 bash -c 'plugin_dir=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null | sort -t/ -k$(echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/claude-hud/claude-hud/" | tr "/" "\n" | wc -l)n | tail -1); exec "/opt/homebrew/bin/node" "${plugin_dir}/dist/index.js"'
@@ -67,18 +68,21 @@ if path:
 ' 2>/dev/null || true
 }
 
-extract_session_id() {
-  printf '%s' "$INPUT_JSON" | python3 -c 'import json, sys
+extract_mst_session_id() {
+  printf '%s' "$INPUT_JSON" | python3 -c 'import json, re, sys
 try:
     data = json.loads(sys.stdin.read() or "{}")
 except Exception:
     data = {}
 
+STRUCTURED_RE = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
 session_id = ""
 if isinstance(data, dict):
-    value = data.get("session_id")
+    value = data.get("mst_session_id")
     if isinstance(value, str):
-        session_id = value.strip()
+        value = value.strip()
+        if "/" not in value and ".." not in value and STRUCTURED_RE.match(value):
+            session_id = value
 
 if session_id:
     print(session_id)
@@ -86,17 +90,16 @@ if session_id:
 }
 
 resolve_canonical_session_id() {
-  local input_session_id="${1:-}"
+  local input_mst_session_id="${1:-}"
   if [ -n "${MST_SESSION_ID:-}" ]; then
     printf '%s\n' "$MST_SESSION_ID"
-  elif [ -n "$input_session_id" ]; then
-    printf '%s\n' "$input_session_id"
+  elif [ -n "$input_mst_session_id" ]; then
+    printf '%s\n' "$input_mst_session_id"
   fi
 }
 
 resolve_snapshot_path() {
   local canonical_session_id="${1:-}"
-  local legacy_ppid="${2:-}"
   local candidate
   if [ -n "$canonical_session_id" ]; then
     candidate="${PROJECT_ROOT}/.gran-maestro/state/${canonical_session_id}/snapshot.json"
@@ -105,17 +108,7 @@ resolve_snapshot_path() {
       return 0
     fi
   fi
-  # compatibility only: legacy PPID state directory remains readable until 0.61.0.
-  candidate="${PROJECT_ROOT}/.gran-maestro/state/${legacy_ppid}/snapshot.json"
-  if [ -f "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  if [ -f "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json" ]; then
-    printf '%s\n' "${PROJECT_ROOT}/.gran-maestro/state/default/snapshot.json"
-    return 0
-  fi
-  printf '%s\n' "$candidate"
+  printf '%s\n' ""
 }
 
 save_transcript_bridge() {
@@ -359,7 +352,7 @@ def render_from_snapshot(path):
 
 def current_session_id_from_input(raw_input):
     env_session = clean_text(os.environ.get("MST_SESSION_ID"))
-    if env_session:
+    if env_session and re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", env_session):
         return env_session
     if not isinstance(raw_input, str) or not raw_input.strip():
         return ""
@@ -369,7 +362,10 @@ def current_session_id_from_input(raw_input):
         return ""
     if not isinstance(payload, dict):
         return ""
-    return clean_text(payload.get("session_id"))
+    input_session = clean_text(payload.get("mst_session_id"))
+    if input_session and re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", input_session):
+        return input_session
+    return ""
 
 
 def load_flow_window_lines(base_dir):
@@ -520,76 +516,18 @@ def flow_session_values(entry):
     event = _flow_nested_dict(entry, "event")
     values = []
     for source in (entry, event, extras):
-        for key in ("owner_session_id", "session_id"):
+        for key in ("mst_session_id",):
             value = clean_text(source.get(key))
             if value:
                 values.append(value)
     return values
 
 
-def _resource_metadata_path(base_dir, resource_id):
-    if not base_dir or not resource_id:
-        return ""
-    if resource_id.startswith("AGI-"):
-        return os.path.join(base_dir, "agile", resource_id, "session.json")
-    if resource_id.startswith("REQ-"):
-        return os.path.join(base_dir, "requests", resource_id, "request.json")
-    if resource_id.startswith("PLN-"):
-        return os.path.join(base_dir, "plans", resource_id, "plan.json")
-    return ""
-
-
-def _load_resource_metadata(base_dir, resource_id, cache):
-    if resource_id in cache:
-        return cache[resource_id]
-    path = _resource_metadata_path(base_dir, resource_id)
-    payload = None
-    if path and os.path.isfile(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-            if isinstance(loaded, dict):
-                payload = loaded
-        except Exception:
-            payload = None
-    cache[resource_id] = payload
-    return payload
-
-
-def metadata_owner_session_matches(base_dir, resource_id, current_session_id, cache):
-    if not current_session_id:
-        return False
-    payload = _load_resource_metadata(base_dir, resource_id, cache)
-    if not isinstance(payload, dict):
-        return False
-    return clean_text(payload.get("owner_session_id")) == current_session_id
-
-
-def metadata_owner_ppid_matches(base_dir, resource_id, cache):
-    payload = _load_resource_metadata(base_dir, resource_id, cache)
-    if not isinstance(payload, dict):
-        return False
-    owner_ppid = payload.get("owner_ppid")
-    if isinstance(owner_ppid, bool):
-        return False
-    try:
-        owner_ppid = int(owner_ppid)
-    except (TypeError, ValueError):
-        return False
-    return CURRENT_PPID is not None and owner_ppid == CURRENT_PPID
-
-
-def flow_has_explicit_session_scope(entry):
-    return bool(flow_session_values(entry))
-
-
 def flow_matches_current_session(entry, base_dir, resource_id, current_session_id, metadata_cache):
     if not current_session_id:
         return False
     session_values = flow_session_values(entry)
-    if session_values:
-        return current_session_id in session_values
-    return metadata_owner_session_matches(base_dir, resource_id, current_session_id, metadata_cache)
+    return current_session_id in session_values
 
 
 def render_from_flow(base_dir, raw_input):
@@ -598,7 +536,6 @@ def render_from_flow(base_dir, raw_input):
         return None
 
     current_session_id = current_session_id_from_input(raw_input)
-    metadata_cache = {}
     parsed = []
     for order, line in enumerate(lines):
         if not line.strip():
@@ -637,17 +574,10 @@ def render_from_flow(base_dir, raw_input):
             base_dir,
             item["resource_id"],
             current_session_id,
-            metadata_cache,
+            {},
         )
     ]
-    if session_scoped:
-        scoped = session_scoped
-    else:
-        scoped = [
-            item for item in parsed
-            if not flow_has_explicit_session_scope(item["entry"])
-            and metadata_owner_ppid_matches(base_dir, item["resource_id"], metadata_cache)
-        ]
+    scoped = session_scoped
 
     if not scoped:
         return None
@@ -884,10 +814,10 @@ print(render_output("MST idle"))
 HUD_COMMAND="$(resolve_hud_command)"
 HUD_OUTPUT="$(printf '%s' "$INPUT_JSON" | sh -c "$HUD_COMMAND" 2>/dev/null || true)"
 TRANSCRIPT_PATH="$(extract_transcript_path)"
-SESSION_ID_FROM_INPUT="$(extract_session_id)"
-CANONICAL_STATUSLINE_SESSION_ID="$(resolve_canonical_session_id "$SESSION_ID_FROM_INPUT")"
+MST_SESSION_ID_FROM_INPUT="$(extract_mst_session_id)"
+CANONICAL_STATUSLINE_SESSION_ID="$(resolve_canonical_session_id "$MST_SESSION_ID_FROM_INPUT")"
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
-SNAPSHOT_PATH="$(resolve_snapshot_path "${MST_SESSION_ID:-}" "$CURRENT_STATUSLINE_PPID")"
+SNAPSHOT_PATH="$(resolve_snapshot_path "$CANONICAL_STATUSLINE_SESSION_ID")"
 save_transcript_bridge "$TRANSCRIPT_PATH"
 MST_LINE="$(build_mst_line "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
 

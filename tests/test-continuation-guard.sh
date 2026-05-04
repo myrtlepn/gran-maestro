@@ -16,8 +16,10 @@ ERRFILE="/tmp/mst-stop-hook-err-$$.txt"
 INFILE="/tmp/mst-stop-hook-in-$$.txt"
 
 MY_PID="$$"
+ROOT_MST_SESSION_ID="MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+OTHER_MST_SESSION_ID="MST-AGI-030-20260503T130813382Z-z9y8x7w6"
 MST_TMP="${SCRIPT_DIR}/.gran-maestro/tmp"
-STATE_FILE="${MST_TMP}/mst-state-${MY_PID}.json"
+STATE_FILE="${MST_TMP}/mst-state-${ROOT_MST_SESSION_ID}.json"
 REQUEST_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/requests/REQ-TEST-CONTINUATION-GUARD"
 REQUEST_FIXTURE_FILE="${REQUEST_FIXTURE_DIR}/request.json"
 PLAN_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/plans/PLN-TEST-CONTINUATION-GUARD"
@@ -102,14 +104,20 @@ run_stop() {
   local input="$1"
   printf '%s' "$input" > "$INFILE"
   set +e
-  bash "$STOP_SCRIPT" < "$INFILE" > "$OUTFILE" 2> "$ERRFILE"
+  (
+    cd "$SCRIPT_DIR" || exit 1
+    MST_SESSION_ID="$ROOT_MST_SESSION_ID" bash "$STOP_SCRIPT" < "$INFILE"
+  ) > "$OUTFILE" 2> "$ERRFILE"
   STOP_EXIT=$?
   set -e
 }
 
 run_session_init() {
   set +e
-  bash "$SESSION_INIT_SCRIPT" > "$OUTFILE" 2> "$ERRFILE"
+  (
+    cd "$SCRIPT_DIR" || exit 1
+    MST_SESSION_ID="$ROOT_MST_SESSION_ID" bash "$SESSION_INIT_SCRIPT"
+  ) > "$OUTFILE" 2> "$ERRFILE"
   SESSION_EXIT=$?
   set -e
 }
@@ -118,7 +126,7 @@ run_set_workflow() {
   set +e
   (
     cd "$SCRIPT_DIR" || exit 1
-    MST_STATE_PPID="$MY_PID" python3 "$MST_SCRIPT" state set-workflow "$@"
+    MST_SESSION_ID="$ROOT_MST_SESSION_ID" python3 "$MST_SCRIPT" state set-workflow "$@"
   ) > "$OUTFILE" 2> "$ERRFILE"
   SET_WORKFLOW_EXIT=$?
   set -e
@@ -136,13 +144,13 @@ cleanup
 run_stop '{"stop_hook_active":true}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_active=true exits 0" "0" "$STOP_EXIT"
-assert_empty "stop_hook_active=true -> empty stdout" "$output"
+assert_contains "stop_hook_active=true -> approve" '"decision": "approve"' "$output"
 
 cleanup
 run_stop '{"stop_hook_active":false,"last_assistant_message":"AskUserQuestion"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "explicit allow pattern exits 0" "0" "$STOP_EXIT"
-assert_empty "AskUserQuestion -> empty stdout" "$output"
+assert_contains "AskUserQuestion -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":1,"updated_at":"2026-03-31T00:00:00Z"}'
@@ -157,28 +165,28 @@ write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"R
 run_stop '{"stop_hook_active":false,"last_assistant_message":"[스티어링 체크포인트] {\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion([스티어링 체크포인트]) exits 0" "0" "$STOP_EXIT"
-assert_empty "agile + AskUserQuestion([스티어링 체크포인트]) -> allow" "$output"
+assert_contains "agile + AskUserQuestion([스티어링 체크포인트]) -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":3,"updated_at":"2026-03-31T00:00:00Z"}'
 run_stop '{"stop_hook_active":false,"last_assistant_message":"[비상 스티어링] {\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion([비상 스티어링]) exits 0" "0" "$STOP_EXIT"
-assert_empty "agile + AskUserQuestion([비상 스티어링]) -> allow" "$output"
+assert_contains "agile + AskUserQuestion([비상 스티어링]) -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":4,"updated_at":"2026-03-31T00:00:00Z"}'
 run_stop '{"stop_hook_active":false,"last_assistant_message":"[Sprint 0] {\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion([Sprint 0]) exits 0" "0" "$STOP_EXIT"
-assert_empty "agile + AskUserQuestion([Sprint 0]) -> allow" "$output"
+assert_contains "agile + AskUserQuestion([Sprint 0]) -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-541","iteration":5,"updated_at":"2026-03-31T00:00:00Z"}'
 run_stop '{"stop_hook_active":false,"last_assistant_message":"[자동 중단] {\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile + AskUserQuestion([자동 중단]) exits 0" "0" "$STOP_EXIT"
-assert_empty "agile + AskUserQuestion([자동 중단]) -> allow" "$output"
+assert_contains "agile + AskUserQuestion([자동 중단]) -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:agile","active_req":"REQ-577","iteration":6,"updated_at":"2026-04-05T00:00:00Z","agile_loop_active":true,"next_action":{"auto":true}}'
@@ -219,7 +227,7 @@ write_state '{"workflow_active":true,"current_skill":"mst:request","active_req":
 run_stop '{"stop_hook_active":false,"last_assistant_message":"{\"tool_name\":\"AskUserQuestion\"}"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "non-agile + AskUserQuestion exits 0" "0" "$STOP_EXIT"
-assert_empty "non-agile + AskUserQuestion keeps existing allow" "$output"
+assert_contains "non-agile + AskUserQuestion keeps existing allow" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:plan","active_req":"REQ-496","iteration":3,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"mst:request","source":"PLN-364","auto":true}}'
@@ -242,12 +250,12 @@ write_state '{"workflow_active":false,"agile_loop_active":false,"current_skill":
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "workflow_inactive_agile_loop_false exits 0" "0" "$STOP_EXIT"
-assert_empty "workflow_inactive_agile_loop_false -> allow pass_through" "$output"
+assert_contains "workflow_inactive_agile_loop_false -> approve pass_through" '"decision": "approve"' "$output"
 
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID},\"owner_session_id\":\"123e4567-e89b-42d3-a456-426614174000\"}" > "$REQUEST_FIXTURE_FILE"
-run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\"}" > "$REQUEST_FIXTURE_FILE"
+run_stop "{\"stop_hook_active\":false,\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\",\"last_assistant_message\":\"status update\"}"
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_blocks_when_state_missing_and_active_request_exists exits 0" "0" "$STOP_EXIT"
 assert_contains "stop_hook_blocks_when_state_missing_and_active_request_exists -> block" '"decision": "block"' "$output"
@@ -260,7 +268,7 @@ printf '%s\n' '{"id":"PLN-TEST-CONTINUATION-GUARD","status":"completed"}' > "$PL
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_allows_when_only_terminal_requests_exist exits 0" "0" "$STOP_EXIT"
-assert_empty "stop_hook_allows_when_only_terminal_requests_exist -> allow pass_through" "$output"
+assert_contains "stop_hook_allows_when_only_terminal_requests_exist -> approve pass_through" '"decision": "approve"' "$output"
 
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR/tasks/06"
@@ -269,7 +277,7 @@ printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD-T06","status":"pending"}' > "$
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "terminal_request_with_stale_pending_task_does_not_block exits 0" "0" "$STOP_EXIT"
-assert_empty "terminal_request_with_stale_pending_task_does_not_block -> allow pass_through" "$output"
+assert_contains "terminal_request_with_stale_pending_task_does_not_block -> approve pass_through" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":false,"current_skill":"mst:agile","agile_loop_active":true,"active_req":"REQ-xxx","iteration":5,"updated_at":"2026-04-14T00:00:00Z"}'
@@ -284,14 +292,14 @@ write_state '{"workflow_active":false,"agile_loop_active":false,"current_skill":
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "standalone_accept_simulation exits 0" "0" "$STOP_EXIT"
-assert_empty "standalone_accept_simulation -> allow" "$output"
+assert_contains "standalone_accept_simulation -> approve" '"decision": "approve"' "$output"
 
 cleanup
 write_state '{"workflow_active":false,"current_skill":"","active_req":"","iteration":0,"updated_at":"2026-03-28T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
 run_stop '{"stop_hook_active":false}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "workflow_active=false exits 0" "0" "$STOP_EXIT"
-assert_empty "workflow_active=false -> allow" "$output"
+assert_contains "workflow_active=false -> approve" '"decision": "approve"' "$output"
 
 # ------------------------------------------------------------
 echo ""
@@ -358,35 +366,35 @@ echo ""
 echo "=== Test Suite: session isolation (AC-001, AC-002, AC-003) ==="
 
 # AC-001: other_session_req_does_not_block
-# 다른 PPID owner(99999)의 non-terminal REQ가 있어도 현재 세션 stop은 pass-through
+# 다른 canonical mst_session_id의 non-terminal REQ가 있어도 현재 세션 stop은 pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_ppid":99999,"owner_session_id":"123e4567-e89b-42d3-a456-426614174000"}' > "$REQUEST_FIXTURE_FILE"
-run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"mst_session_id\":\"${OTHER_MST_SESSION_ID}\"}" > "$REQUEST_FIXTURE_FILE"
+run_stop "{\"stop_hook_active\":false,\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\",\"last_assistant_message\":\"status update\"}"
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "other_session_req_does_not_block exits 0" "0" "$STOP_EXIT"
-assert_empty "other_session_req_does_not_block -> no block JSON" "$output"
+assert_contains "other_session_req_does_not_block -> approve JSON" '"decision": "approve"' "$output"
 
 # AC-002: same_session_req_still_blocks
-# 현재 PPID owner의 non-terminal REQ가 있으면 PPID state 파일 유실 시에도 block
+# 현재 canonical mst_session_id의 non-terminal REQ가 있으면 canonical state 파일 유실 시에도 block
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
-printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"owner_ppid\":${MY_PID},\"owner_session_id\":\"123e4567-e89b-42d3-a456-426614174000\"}" > "$REQUEST_FIXTURE_FILE"
-run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
+printf '%s\n' "{\"id\":\"REQ-TEST-CONTINUATION-GUARD\",\"status\":\"phase1_analysis\",\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\"}" > "$REQUEST_FIXTURE_FILE"
+run_stop "{\"stop_hook_active\":false,\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\",\"last_assistant_message\":\"status update\"}"
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "same_session_req_still_blocks exits 0" "0" "$STOP_EXIT"
 assert_contains "same_session_req_still_blocks -> block" '"decision": "block"' "$output"
 assert_contains "same_session_req_still_blocks reason" 'active workflow session detected' "$output"
 
-# AC-003: legacy_request_without_owner_ppid_does_not_block
-# owner_ppid 없는 레거시 파일은 최근 mtime이어도 stale prevention only로 처리 → pass-through
+# AC-003: legacy_request_without_canonical_session_does_not_block
+# canonical mst_session_id 없는 레거시 파일은 최근 mtime이어도 diagnostic-only로 처리 → pass-through
 cleanup
 mkdir -p "$REQUEST_FIXTURE_DIR"
 printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","owner_session_id":null}' > "$REQUEST_FIXTURE_FILE"
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "legacy_request_without_owner_ppid_does_not_block exits 0" "0" "$STOP_EXIT"
-assert_empty "legacy_request_without_owner_ppid_does_not_block -> no block JSON" "$output"
+assert_contains "legacy_request_without_owner_ppid_does_not_block -> approve JSON" '"decision": "approve"' "$output"
 
 # AC-001 (T03): malformed_owner_ppid_true_graceful_skip
 # owner_ppid가 JSON bool true이면 parse failure → graceful skip → pass-through
@@ -396,7 +404,7 @@ printf '%s\n' '{"id":"REQ-TEST-CONTINUATION-GUARD","status":"phase1_analysis","o
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "malformed_owner_ppid_true_graceful_skip exits 0" "0" "$STOP_EXIT"
-assert_empty "malformed_owner_ppid_true_graceful_skip -> no block JSON" "$output"
+assert_contains "malformed_owner_ppid_true_graceful_skip -> approve JSON" '"decision": "approve"' "$output"
 
 # AC-002 (T03): plan_isolation_other_session_does_not_block
 # 다른 PPID(99999) owner의 non-terminal plan이 있어도 현재 세션 stop은 pass-through
@@ -406,7 +414,7 @@ printf '%s\n' '{"id":"PLN-TEST","status":"active","owner_ppid":99999,"owner_sess
 run_stop '{"stop_hook_active":false,"last_assistant_message":"status update"}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "plan_isolation_other_session_does_not_block exits 0" "0" "$STOP_EXIT"
-assert_empty "plan_isolation_other_session_does_not_block -> no block JSON" "$output"
+assert_contains "plan_isolation_other_session_does_not_block -> approve JSON" '"decision": "approve"' "$output"
 
 cleanup
 

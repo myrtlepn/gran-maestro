@@ -89,7 +89,9 @@ def test_workflow_and_snapshot_paths_use_mst_session_id_only() -> None:
         assert workflow_path.exists()
         assert not ppid_path.exists()
         workflow_payload = json.loads(workflow_path.read_text(encoding="utf-8"))
+        assert workflow_payload["schema_version"] == 1
         assert workflow_payload["mst_session_id"] == ROOT_SESSION_ID
+        assert workflow_payload["root_mst_id"] == "AGI-030"
         assert workflow_payload["legacy_diagnostics"]["MST_STATE_PPID"] == LEGACY_PPID
 
         snapshot = _run_mst(

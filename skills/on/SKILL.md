@@ -56,8 +56,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 모드 활성화 시작 시, Step 1 전에 현재 세션의 paused snapshot을 확인한다. 이 단계에서는 사용자에게 질문하지 않고 안내만 출력한다.
 
 ```bash
-SESSION_OWNER_PPID="${MST_STATE_PPID:-$PPID}"
-SESSION_ID="$(cat "{PROJECT_ROOT}/.gran-maestro/tmp/claude-session-${SESSION_OWNER_PPID}.id" 2>/dev/null || printf '%s' "$SESSION_OWNER_PPID")"
+SESSION_ID="${MST_SESSION_ID:?MST_SESSION_ID is required for paused snapshot resume}"
 PAUSED_COUNT="$(python3 {PLUGIN_ROOT}/scripts/mst.py state paused-count --session-id "$SESSION_ID" 2>/dev/null || printf '0')"
 case "$PAUSED_COUNT" in ''|*[!0-9]*) PAUSED_COUNT=0 ;; esac
 if [ "$PAUSED_COUNT" -gt 0 ]; then
@@ -69,7 +68,7 @@ if [ "$PAUSED_COUNT" -gt 0 ]; then
 fi
 ```
 
-`AUTO_MODE=false`에서는 추가 확인 없이 안내만 출력한다. 다음 skill 호출 시 기존 continuation/resume 경로가 자연스럽게 이어진다.
+`AUTO_MODE=false`에서는 추가 확인 없이 안내만 출력한다. 다음 skill 호출 시 기존 continuation/resume 경로가 자연스럽게 이어진다. Paused snapshot state commands inherit the canonical `MST_SESSION_ID` structured context.
 <!-- paused-resume:end -->
 
 

@@ -1639,12 +1639,9 @@ def parse_utc(value: str) -> Optional[datetime]:
 
 
 def workflow_state_file(project_root: Path) -> Path:
-    # MST_STATE_PPID is a deprecated alias retained for tmp workflow-state compatibility only.
-    # Canonical conversation identity is MST_SESSION_ID; remove this PPID helper in 0.61.0
-    # with the remaining legacy alias allowlist/tests/docs.
-    parent_pid = os.environ.get("MST_STATE_PPID")
-    if not (isinstance(parent_pid, str) and parent_pid.isdigit()):
-        parent_pid = str(os.getppid())
+    # MST_STATE_PPID is a deprecated diagnostic alias only; it must not select
+    # workflow state or alter pre-tool-use block/allow return codes.
+    parent_pid = str(os.getppid())
     return project_root / ".gran-maestro" / "tmp" / f"mst-state-{parent_pid}.json"
 
 

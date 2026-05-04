@@ -46,6 +46,8 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 <!-- @end-include -->
 
+State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
+
 <!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
@@ -168,7 +170,7 @@ PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다.
 
 ```bash
 # RESOLVED(PLN-509): agile_loop_active 보존 — plan/agile 맥락은 Step 4b 브리프 변수(PLAN_JSON_META/PAC_LIST/OBJECTIVE_SECTION)로 주입됨 (PLN-469 → PLN-509)
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:approve \
   --req "{REQ-ID}" \

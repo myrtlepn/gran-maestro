@@ -153,7 +153,7 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
+STATE_FILE="${MST_TMP}/mst-state-unknown.json"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
@@ -196,6 +196,9 @@ if [ -z "${MST_SESSION_ID:-}" ]; then
   MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi
 export MST_SESSION_ID
+if [ -n "${MST_SESSION_ID:-}" ]; then
+  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
+fi
 MST_LEDGER_HOOK_EVENT="Stop"
 if [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null
@@ -254,7 +257,10 @@ mst_script = Path(sys.argv[4]).resolve()
 repo_root = mst_script.parents[1]
 sys.path.insert(0, str(repo_root))
 
-from scripts.mst_cmds import cleanup
+try:
+    from scripts.mst_cmds import cleanup
+except Exception:
+    raise SystemExit(0)
 
 
 active_dir = project_root / ".gran-maestro" / "active-flow"
@@ -474,7 +480,7 @@ DECISION_EMITTED="false"
 SESSION_ID="unknown"
 SESSION_ID_SOURCE=""
 SESSION_ID_RESOLUTION_FAILED="true"
-HOOK_EVENT_NAME=""
+HOOK_EVENT_NAME="Stop"
 TRANSCRIPT_PATH=""
 SNAPSHOT_PRESENT="false"
 SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/unknown/snapshot.json"
@@ -1089,6 +1095,10 @@ else
   debug_log "warn" "reason=snapshot_probe_missing path=$SNAPSHOT_PROBE_SCRIPT"
 fi
 
+if [ -z "${HOOK_EVENT_NAME:-}" ]; then
+  HOOK_EVENT_NAME="Stop"
+fi
+
 if [ "${MST_STOP_HOOK_TEST_INJECT_FAILURE:-}" = "after_snapshot_probe" ]; then
   python3 -c 'raise SystemExit("REQ-692 injected failure after_snapshot_probe")'
 fi
@@ -1541,9 +1551,28 @@ is_plan_terminal_status() {
   return 1
 }
 
+read_mst_session_id_field() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+value = payload.get("mst_session_id")
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+    raise SystemExit(0)
+raise SystemExit(2)
+PY
+}
+
 has_active_workflow_session() {
-  local requests_root plans_root status_file status owner_session_id_value owner_session_id_exit owner_ppid_value owner_ppid_exit
-  MST_STOP_OWNER_PPID_ONLY_FALLBACK="0"
+  local requests_root plans_root status_file status owner_session_id_value owner_session_id_exit owner_ppid_value owner_ppid_exit resource_session_id resource_session_id_exit
   requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
   plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
 
@@ -1558,7 +1587,27 @@ has_active_workflow_session() {
       if is_request_terminal_status "$status"; then
         continue
       fi
-      # Non-terminal: owner_session_id is authoritative for session isolation.
+
+      resource_session_id_exit=0
+      trap - ERR
+      set +e
+      resource_session_id="$(read_mst_session_id_field "$status_file")"
+      resource_session_id_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+      if [ "$resource_session_id_exit" -eq 0 ]; then
+        if [ -n "${MST_SESSION_ID:-}" ] && [ "$resource_session_id" = "$MST_SESSION_ID" ]; then
+          debug_log "info" "canonical_active_request_detected status=$status file=$status_file mst_session_id=$resource_session_id"
+          return 0
+        fi
+        debug_log "info" "canonical_request_session_ignored status=$status file=$status_file resource_mst_session_id=$resource_session_id current_mst_session_id=${MST_SESSION_ID:-unknown}"
+        continue
+      elif [ "$resource_session_id_exit" -ne 2 ]; then
+        printf '[mst-stop-hook] warn: failed to parse mst_session_id from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=request_mst_session_id_parse_failed file=$status_file"
+        continue
+      fi
+
       owner_session_id_exit=0
       trap - ERR
       set +e
@@ -1567,20 +1616,14 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_session_id_exit" -eq 0 ]; then
-        if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
-          debug_log "info" "active_request_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
-          return 0
-        else
-          debug_log "info" "skipping_foreign_session_request status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
-          continue
-        fi
+        debug_log "info" "diagnostic_owner_session_id_ignored status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
+        continue
       elif [ "$owner_session_id_exit" -ne 2 ]; then
         printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
         debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
         continue
       fi
 
-      # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
       trap - ERR
       set +e
@@ -1589,17 +1632,11 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] warn: legacy owner_ppid diagnostic for %s; owner_session_id missing\n' "$status_file" >&2
-        if [ "$owner_ppid_value" = "$PPID" ]; then
-          MST_STOP_OWNER_PPID_ONLY_FALLBACK="1"
-          debug_log "warn" "active_request_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          return 1
-        else
-          debug_log "info" "skipping_foreign_session_request_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          continue
-        fi
+        printf '[mst-stop-hook] diagnostic: owner_ppid-only workflow state ignored for %s\n' "$status_file" >&2
+        debug_log "info" "diagnostic_owner_ppid_ignored status=$status file=$status_file owner_ppid=$owner_ppid_value"
+        continue
       elif [ "$owner_ppid_exit" -eq 2 ]; then
-        debug_log "info" "skipping_legacy_request_without_owner status=$status file=$status_file"
+        debug_log "info" "skipping_legacy_request_without_canonical_session status=$status file=$status_file"
         continue
       else
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
@@ -1620,7 +1657,27 @@ has_active_workflow_session() {
       if is_plan_terminal_status "$status"; then
         continue
       fi
-      # Non-terminal: owner_session_id is authoritative for session isolation.
+
+      resource_session_id_exit=0
+      trap - ERR
+      set +e
+      resource_session_id="$(read_mst_session_id_field "$status_file")"
+      resource_session_id_exit=$?
+      set -e
+      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+      if [ "$resource_session_id_exit" -eq 0 ]; then
+        if [ -n "${MST_SESSION_ID:-}" ] && [ "$resource_session_id" = "$MST_SESSION_ID" ]; then
+          debug_log "info" "canonical_active_plan_detected status=$status file=$status_file mst_session_id=$resource_session_id"
+          return 0
+        fi
+        debug_log "info" "canonical_plan_session_ignored status=$status file=$status_file resource_mst_session_id=$resource_session_id current_mst_session_id=${MST_SESSION_ID:-unknown}"
+        continue
+      elif [ "$resource_session_id_exit" -ne 2 ]; then
+        printf '[mst-stop-hook] warn: failed to parse mst_session_id from %s\n' "$status_file" >&2
+        debug_log "warn" "reason=plan_mst_session_id_parse_failed file=$status_file"
+        continue
+      fi
+
       owner_session_id_exit=0
       trap - ERR
       set +e
@@ -1629,20 +1686,14 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_session_id_exit" -eq 0 ]; then
-        if [ "$owner_session_id_value" = "${SESSION_ID:-}" ]; then
-          debug_log "info" "active_plan_session_detected status=$status file=$status_file owner_session_id=$owner_session_id_value"
-          return 0
-        else
-          debug_log "info" "skipping_foreign_session_plan status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
-          continue
-        fi
+        debug_log "info" "diagnostic_owner_session_id_ignored status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
+        continue
       elif [ "$owner_session_id_exit" -ne 2 ]; then
         printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
         debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
         continue
       fi
 
-      # Legacy fallback: owner_ppid-only files are accepted with a warning.
       owner_ppid_exit=0
       trap - ERR
       set +e
@@ -1651,17 +1702,11 @@ has_active_workflow_session() {
       set -e
       trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
       if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] warn: legacy owner_ppid diagnostic for %s; owner_session_id missing\n' "$status_file" >&2
-        if [ "$owner_ppid_value" = "$PPID" ]; then
-          MST_STOP_OWNER_PPID_ONLY_FALLBACK="1"
-          debug_log "warn" "active_plan_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          return 1
-        else
-          debug_log "info" "skipping_foreign_session_plan_legacy_owner_ppid_diagnostic status=$status file=$status_file owner_ppid=$owner_ppid_value"
-          continue
-        fi
+        printf '[mst-stop-hook] diagnostic: owner_ppid-only workflow state ignored for %s\n' "$status_file" >&2
+        debug_log "info" "diagnostic_owner_ppid_ignored status=$status file=$status_file owner_ppid=$owner_ppid_value"
+        continue
       elif [ "$owner_ppid_exit" -eq 2 ]; then
-        debug_log "info" "skipping_legacy_plan_without_owner status=$status file=$status_file"
+        debug_log "info" "skipping_legacy_plan_without_canonical_session status=$status file=$status_file"
         continue
       else
         printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
@@ -1775,22 +1820,13 @@ run_snapshot_guard() {
   local reason persisted_block_count
 
   if [ "${SESSION_ID_RESOLUTION_FAILED:-false}" = "true" ]; then
-    if [ "${HOOK_EVENT_NAME:-}" = "Stop" ]; then
-      debug_log "allow" "reason=session_id_resolution_failed"
-      emit_approve_decision "session_id_resolution_failed"
-      exit 0
-    fi
+    debug_log "info" "reason=session_id_resolution_failed_fallthrough hook_event=${HOOK_EVENT_NAME:-unknown}"
     return 0
   fi
 
   if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
-    if [ "${HOOK_EVENT_NAME:-}" != "Stop" ]; then
-      debug_log "info" "reason=no_mst_session_fallthrough session_id=${SESSION_ID:-unknown}"
-      return 0
-    fi
-    debug_log "allow" "reason=no-mst-session session_id=${SESSION_ID:-unknown}"
-    emit_approve_decision "no-mst-session"
-    exit 0
+    debug_log "info" "reason=no_mst_session_fallthrough session_id=${SESSION_ID:-unknown} hook_event=${HOOK_EVENT_NAME:-unknown}"
+    return 0
   fi
 
   if ! is_mst_snapshot_skill "${SNAPSHOT_CURRENT_SKILL:-}"; then
@@ -2024,12 +2060,6 @@ run_exit_boundary_guard() {
       log_boundary_event "detected" "$req_id" "$boundary_violation" "exit boundary violation detected"
     fi
 
-    if [ "$boundary_violation" = "session_mismatch" ]; then
-      printf '[boundary] session_mismatch ppid=%s owner=%s, skip enforcement\n' "${current_ppid:-$PPID}" "${owner_ppid:-unknown}" >&2
-      debug_log "boundary_session_mismatch" "phase=exit req=$req_id owner=$owner_ppid current=$current_ppid"
-      continue
-    fi
-
     if [ "$boundary_ok" = "true" ]; then
       debug_log "boundary_exit_pass" "req=$req_id"
       continue
@@ -2066,15 +2096,9 @@ fail_closed_canonical_mismatch_if_any
 
 if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
   if has_active_workflow_session; then
-    REASON="active workflow session detected but PPID state missing; continue workflow"
+    REASON="active workflow session detected but canonical state missing; continue workflow"
     emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected_pre_snapshot"
-    exit 0
-  fi
-  if [ "${MST_STOP_OWNER_PPID_ONLY_FALLBACK:-0}" = "1" ]; then
-    REASON="canonical mst_session_id required; owner_ppid-only workflow state ignored"
-    emit_block_decision "$REASON"
-    debug_log "block" "reason=owner_ppid_only_state_rejected_pre_snapshot"
     exit 0
   fi
 fi
@@ -2270,16 +2294,10 @@ fi
 
 if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
   if has_active_workflow_session; then
-    REASON="active workflow session detected but PPID state missing; continue workflow"
+    REASON="active workflow session detected but canonical state missing; continue workflow"
     append_block_audit_entry "$REASON"
     emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected"
-    exit 0
-  fi
-  if [ "${MST_STOP_OWNER_PPID_ONLY_FALLBACK:-0}" = "1" ]; then
-    REASON="canonical mst_session_id required; owner_ppid-only workflow state ignored"
-    emit_block_decision "$REASON"
-    debug_log "block" "reason=owner_ppid_only_state_rejected"
     exit 0
   fi
   append_audit_entry "pass_through" "" "workflow_inactive"

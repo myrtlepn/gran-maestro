@@ -189,6 +189,47 @@ def require_mst_session_id_for_mutation(subject: str = "state write") -> str:
     return value
 
 
+def canonical_state_payload_fields(mst_session_id: str) -> dict:
+    from scripts.mst_cmds.session import validate_mst_session_id
+
+    parsed = validate_mst_session_id(mst_session_id)
+    return {
+        "schema_version": 1,
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+    }
+
+
+def canonical_state_payload_error(payload: dict, mst_session_id: str) -> str | None:
+    if not isinstance(payload, dict):
+        return "state payload must be a JSON object"
+
+    from scripts.mst_cmds.session import validate_mst_session_id, validate_root_mst_id
+
+    parsed = validate_mst_session_id(mst_session_id)
+    raw_session_id = payload.get("mst_session_id")
+    if not isinstance(raw_session_id, str) or not raw_session_id.strip():
+        return "state payload missing mst_session_id"
+    if raw_session_id.strip() != parsed.mst_session_id:
+        return f"state payload mst_session_id mismatch: path={parsed.mst_session_id} payload={raw_session_id.strip()}"
+
+    raw_schema_version = payload.get("schema_version")
+    if raw_schema_version != 1:
+        return "state payload schema_version missing or unsupported"
+
+    raw_root = payload.get("root_mst_id")
+    if not isinstance(raw_root, str) or not raw_root.strip():
+        return "state payload missing root_mst_id"
+    try:
+        payload_root = validate_root_mst_id(raw_root.strip())
+    except ValueError as exc:
+        return str(exc)
+    if payload_root != parsed.root_mst_id:
+        return f"state payload root_mst_id mismatch: session={parsed.root_mst_id} payload={payload_root}"
+
+    return None
+
+
 def legacy_session_diagnostics() -> dict:
     diagnostics: dict[str, object] = {}
     ppid = os.environ.get("MST_STATE_PPID", "").strip()
@@ -472,9 +513,12 @@ def read_workflow_state_auto_mode(
     stale state) -> return None (never raise).
     """
     try:
+        session_id = require_mst_session_id_for_mutation("workflow state read")
         state_path = _workflow_state_file(_skill_state_base_dir())
         payload = _workflow_state_load(state_path)
         if not isinstance(payload, dict):
+            return None
+        if canonical_state_payload_error(payload, session_id) is not None:
             return None
 
         if payload.get("workflow_active") is not True:

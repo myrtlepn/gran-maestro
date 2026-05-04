@@ -5,6 +5,7 @@ hooks/mst-stop-hook.sh를 실제 bash 서브프로세스로 호출하여
 """
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +16,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
 STOP_GATE_REASONS = REPO_ROOT / "hooks" / "stop-agile-gate-reasons.json"
+ROOT_MST_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
 
 NEW_PATTERNS = [
     "자연스러운 단락을 둡니다",
@@ -74,7 +76,6 @@ def _run_hook(tmp_path: Path, last_msg: str, agile_auto_mode: bool = True,
             encoding="utf-8",
         )
 
-    ppid = "99999"
     state = {
         "workflow_active": workflow_active,
         "current_skill": current_skill,
@@ -84,7 +85,7 @@ def _run_hook(tmp_path: Path, last_msg: str, agile_auto_mode: bool = True,
     }
     if extra_state:
         state.update(extra_state)
-    state_file = project_root / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    state_file = project_root / ".gran-maestro" / "tmp" / f"mst-state-{ROOT_MST_SESSION_ID}.json"
     state_file.write_text(json.dumps(state))
 
     # hooks 디렉토리도 프로젝트 루트에 복사 — resolve_project_root가 찾기 위함
@@ -97,21 +98,15 @@ def _run_hook(tmp_path: Path, last_msg: str, agile_auto_mode: bool = True,
         "stop_hook_active": False,
     })
 
-    # PPID를 PPID env로 주입할 수 없으므로 hook을 bash로 실행하되 state_file 이름을 맞춘다.
-    # hook은 $PPID를 참조하므로 python subprocess가 부모가 되어 PPID는 python pid.
-    # 대신 wrapper 스크립트를 사용해 명시적 PPID 주입.
-    # 간단히: PPID를 현재 python pid로 삼고, state 파일명도 그에 맞춘다.
-    import os
-    actual_ppid = os.getpid()
-    state_file_correct = project_root / ".gran-maestro" / "tmp" / f"mst-state-{actual_ppid}.json"
-    state_file.rename(state_file_correct)
-
+    env = os.environ.copy()
+    env["MST_SESSION_ID"] = ROOT_MST_SESSION_ID
     result = subprocess.run(
         ["bash", str(HOOK)],
         input=stdin_payload,
         capture_output=True,
         text=True,
         cwd=str(project_root),
+        env=env,
     )
     return result
 

@@ -1705,17 +1705,10 @@ def cmd_worktree_check_boundary(args):
     detected_base = _coerce_nonempty_str(request_data.get("detected_base"))
     owner_ppid = _coerce_int(request_data.get("owner_ppid"))
     if current_ppid is not None and owner_ppid is not None and current_ppid != owner_ppid:
-        payload = _boundary_payload(
-            False,
-            "session_mismatch",
-            False,
-            detected_base,
-            f"owner_ppid={owner_ppid} does not match current_ppid={current_ppid}",
-            owner_ppid,
-            current_ppid,
+        print(
+            f"[boundary] diagnostic: owner_ppid ignored: owner_ppid={owner_ppid} current_ppid={current_ppid}",
+            file=sys.stderr,
         )
-        _print_boundary_payload(payload)
-        return 0
 
     task_ids = _boundary_task_ids(request_data, getattr(args, "task_id", None))
     if not task_ids:

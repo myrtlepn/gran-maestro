@@ -3,14 +3,15 @@
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
-SID_A = "123e4567-e89b-42d3-a456-426614174000"
-SID_B = "123e4567-e89b-42d3-a456-426614174001"
+SID_A = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+SID_B = "MST-AGI-030-20260503T130813382Z-z9y8x7w6"
 
 
 def _init_project_root(tmp_path: Path) -> Path:
@@ -19,8 +20,8 @@ def _init_project_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _write_inactive_state(project_root: Path) -> None:
-    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{os.getpid()}.json"
+def _write_inactive_state(project_root: Path, session_id: str) -> None:
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{session_id}.json"
     state_path.write_text(
         json.dumps(
             {
@@ -46,7 +47,7 @@ def _run_hook(project_root: Path, session_id: str) -> subprocess.CompletedProces
         pytest.skip(f"hook not found: {HOOK}")
     return subprocess.run(
         ["bash", str(HOOK)],
-        input=json.dumps({"session_id": session_id, "last_assistant_message": ""}),
+        input=json.dumps({"mst_session_id": session_id, "session_id": "claude-diagnostic", "last_assistant_message": ""}),
         cwd=project_root,
         capture_output=True,
         text=True,
@@ -57,12 +58,12 @@ def _run_hook(project_root: Path, session_id: str) -> subprocess.CompletedProces
 def _stdout_json(result: subprocess.CompletedProcess) -> dict:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip(), "hook must emit a decision JSON"
-    return json.loads(result.stdout)
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def test_owner_session_id_match_blocks_missing_local_state(tmp_path):
+def test_owner_session_id_match_is_diagnostic_only(tmp_path):
     project_root = _init_project_root(tmp_path)
-    _write_inactive_state(project_root)
+    _write_inactive_state(project_root, SID_A)
     _write_request(
         project_root,
         "REQ-SID-A",
@@ -77,13 +78,13 @@ def test_owner_session_id_match_blocks_missing_local_state(tmp_path):
     result = _run_hook(project_root, SID_A)
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "block"
-    assert "active workflow session detected" in payload["reason"]
+    assert payload["decision"] == "approve"
+    assert "active workflow session detected" not in payload["reason"]
 
 
 def test_owner_session_id_foreign_session_allows(tmp_path):
     project_root = _init_project_root(tmp_path)
-    _write_inactive_state(project_root)
+    _write_inactive_state(project_root, SID_B)
     _write_request(
         project_root,
         "REQ-SID-A",
@@ -102,9 +103,9 @@ def test_owner_session_id_foreign_session_allows(tmp_path):
     assert "workflow_inactive" in payload["reason"]
 
 
-def test_legacy_owner_ppid_fallback_warns_and_blocks(tmp_path):
+def test_legacy_owner_ppid_is_diagnostic_only(tmp_path):
     project_root = _init_project_root(tmp_path)
-    _write_inactive_state(project_root)
+    _write_inactive_state(project_root, SID_A)
     _write_request(
         project_root,
         "REQ-LEGACY",
@@ -118,6 +119,23 @@ def test_legacy_owner_ppid_fallback_warns_and_blocks(tmp_path):
     result = _run_hook(project_root, SID_A)
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "block"
-    assert "active workflow session detected" in payload["reason"]
-    assert "legacy owner_ppid fallback" in result.stderr
+    assert payload["decision"] == "approve"
+    assert "active workflow session detected" not in payload["reason"]
+    assert "owner_ppid-only workflow state ignored" in result.stderr
+
+
+def main() -> int:
+    tests = [
+        test_owner_session_id_match_is_diagnostic_only,
+        test_owner_session_id_foreign_session_allows,
+        test_legacy_owner_ppid_is_diagnostic_only,
+    ]
+    for test in tests:
+        with tempfile.TemporaryDirectory() as raw:
+            test(Path(raw))
+        print(f"PASS {test.__name__}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

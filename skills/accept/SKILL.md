@@ -52,6 +52,8 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 감지된 base 브�
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 <!-- @end-include -->
 
+State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
+
 ### Step 0.1: 자율 모드 감지
 
 1. args 전체 토큰에서 `-a` 또는 `--auto` 존재 여부 검사:
@@ -343,7 +345,7 @@ cleanup_task_safely() {
 - `agile_loop_active=true`이면, 워크플로우를 끄지 말고 agile 복귀 상태로 복원:
 
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:agile \
   --req "{ACTIVE_REQ}" \
@@ -359,7 +361,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 - `agile_loop_active!=true`이면, 기존처럼 워크플로우 비활성:
 
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active false \
   --auto false \
 || echo "[mst:accept] warning: failed to clear workflow state" >&2

@@ -18,8 +18,7 @@ Gran Maestro 모드를 비활성화합니다.
 5. `mode.json` 업데이트: `active:false`, `activated_at` 유지, `deactivated_at` 현재 timestamp, `auto_deactivate:true`
 6. 모드 전환 직후 현재 세션 snapshot pause 마크:
    ```bash
-   SESSION_OWNER_PPID="${MST_STATE_PPID:-$PPID}"
-   SESSION_ID="$(cat "{PROJECT_ROOT}/.gran-maestro/tmp/claude-session-${SESSION_OWNER_PPID}.id" 2>/dev/null || printf '%s' "$SESSION_OWNER_PPID")"
+   SESSION_ID="${MST_SESSION_ID:?MST_SESSION_ID is required for paused snapshot mark}"
    python3 {PLUGIN_ROOT}/scripts/mst.py state mark-paused --session-id "$SESSION_ID" >/dev/null 2>&1 || true
    PAUSED_COUNT="$(python3 {PLUGIN_ROOT}/scripts/mst.py state paused-count --session-id "$SESSION_ID" 2>/dev/null || printf '0')"
    case "$PAUSED_COUNT" in ''|*[!0-9]*) PAUSED_COUNT=0 ;; esac
@@ -37,7 +36,7 @@ Gran Maestro 모드를 비활성화합니다.
 ## 출력/경고
 
 비활성화 완료 시: "Gran Maestro 모드가 비활성화되었습니다."
-진행 중 snapshot pause 마크 후: "진행 중 체인 N건 일시 정지. /mst:on으로 재개하세요."
+진행 중 snapshot pause 마크 후: "진행 중 체인 N건 일시 정지. /mst:on으로 재개하세요." Paused snapshot state commands inherit the canonical `MST_SESSION_ID` structured context.
 활성 요청 존재 시: 요청 목록 표시 + "계속하시겠습니까? `/mst:off --force`로 강제 전환하거나 요청을 먼저 완료해주세요."
 
 ## 쉘에서 상태 확인

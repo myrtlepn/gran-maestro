@@ -91,6 +91,8 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 - 파일이 존재하면 다음 단계로 계속 진행한다.
 - 파일이 여전히 없으면 `"[warn] stop hook 미설치 — 자발 정지 가드가 동작하지 않을 수 있음"` 경고를 출력하되 agile 진입은 계속 허용한다 (graceful fallback, 에러 아님).
 
+State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
+
 ---
 
 ### Step 0: 세션 초기화
@@ -120,7 +122,7 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 2. session.json 로드 성공 시: `AGI_ID`, `CURRENT_SPRINT`, `STEERING_EVERY`를 메모리에 보관
 3. 아래 workflow state를 활성화한다 (non-blocking):
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:agile \
   --auto {AUTO_MODE} \
@@ -137,7 +139,7 @@ MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow
 2. 사용자 입력 목표(`PROJECT_GOAL`)와 선택 플래그(`DOC_PATH`, `STEERING_EVERY`)를 메모리에 보관한다.
 3. `[신규 세션 준비] agile-plan 위임 예정 (steering-every: {STEERING_EVERY})` 출력
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --active true \
   --skill mst:agile \
   --auto {AUTO_MODE} \
@@ -306,7 +308,7 @@ Skill(skill: "mst:plan", args: "-a 프로젝트에 최소한의 smoke test 1개�
 반복 시작 전 매번 공통 게이트를 아래 순서로 수행한다:
 
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --agile-loop-active true \
   --active true \
   --skill mst:agile \
@@ -830,7 +832,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status completed --
 ```
 
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --agile-loop-active false \
   --active false \
 || echo "[mst:agile] warning: failed to update workflow state" >&2
@@ -1016,7 +1018,7 @@ objective 변경 시 영향 범위에 따라 아래 정합성 정책을 적용�
 ```
 
 ```bash
-MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
   --agile-loop-active false \
   --active false \
 || echo "[mst:agile] warning: failed to update workflow state" >&2

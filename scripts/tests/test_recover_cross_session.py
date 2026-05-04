@@ -11,8 +11,8 @@ MST = REPO_ROOT / "scripts" / "mst.py"
 
 AGI_ID = "AGI-725"
 DOD_ID = "DOD-XXX"
-SID_A = "11111111-1111-4111-8111-111111111111"
-SID_B = "22222222-2222-4222-9222-222222222222"
+SID_A = "MST-AGI-725-20260503T130813382Z-k7f3q9x2"
+SID_B = "MST-AGI-725-20260503T130813382Z-z9y8x7w6"
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -24,18 +24,23 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_agile_fixture(root: Path, *, owner_session_id: str = SID_A) -> Path:
+def write_agile_fixture(
+    root: Path,
+    *,
+    mst_session_id: str | None = SID_B,
+    owner_session_id: str = SID_A,
+) -> Path:
     agi_dir = root / ".gran-maestro" / "agile" / AGI_ID
-    write_json(
-        agi_dir / "session.json",
-        {
-            "id": AGI_ID,
-            "status": "executing",
-            "current_sprint": 2,
-            "owner_ppid": 12345,
-            "owner_session_id": owner_session_id,
-        },
-    )
+    payload = {
+        "id": AGI_ID,
+        "status": "executing",
+        "current_sprint": 2,
+        "owner_ppid": 12345,
+        "owner_session_id": owner_session_id,
+    }
+    if mst_session_id is not None:
+        payload["mst_session_id"] = mst_session_id
+    write_json(agi_dir / "session.json", payload)
     write_json(
         agi_dir / "sprints" / "S01" / "result.json",
         {
@@ -90,7 +95,7 @@ def test_durable_fallback_reconstructs_skillstack(tmp_path: Path, monkeypatch) -
 
     assert result.returncode == 0, result.stderr
     assert "cross-session recover" in result.stdout
-    assert "read-only" in result.stdout
+    assert "read-only" not in result.stdout
     snapshot = read_json(snapshot_path(tmp_path))
     assert snapshot["skillStack"]
     assert snapshot["skillStack"][0]["skill"] == "agile"
@@ -111,15 +116,16 @@ def test_new_session_snapshot_created(tmp_path: Path, monkeypatch) -> None:
     assert snapshot["skillStack"]
 
 
-def test_readonly_on_owner_mismatch(tmp_path: Path, monkeypatch) -> None:
+def test_owner_mismatch_is_diagnostic_only(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     agi_dir = write_agile_fixture(tmp_path, owner_session_id=SID_A)
 
     result = recover(tmp_path)
 
     assert result.returncode == 0, result.stderr
+    assert "owner_session_id ignored" in result.stderr
     assert read_json(agi_dir / "session.json")["owner_session_id"] == SID_A
-    assert read_json(snapshot_path(tmp_path))["read_only"] is True
+    assert read_json(snapshot_path(tmp_path)).get("read_only") is not True
 
     mutation = run_mst(
         tmp_path,
@@ -132,8 +138,7 @@ def test_readonly_on_owner_mismatch(tmp_path: Path, monkeypatch) -> None:
         "done",
     )
 
-    assert mutation.returncode != 0
-    assert "read-only" in mutation.stderr
+    assert mutation.returncode == 0, mutation.stderr
     assert read_json(agi_dir / "session.json")["owner_session_id"] == SID_A
 
 
@@ -190,17 +195,37 @@ def test_invalid_session_id_rejected(tmp_path: Path, monkeypatch) -> None:
     result = recover(tmp_path, session_id="invalid-format")
 
     assert result.returncode != 0
-    assert "current session_id is required" in result.stderr
+    assert "invalid structured mst_session_id" in result.stderr
 
 
-def test_recover_restores_owner_session_id_when_env_missing(tmp_path: Path, monkeypatch) -> None:
+def test_recover_requires_canonical_mst_session_id(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    agi_dir = write_agile_fixture(tmp_path, owner_session_id=SID_A)
+    write_agile_fixture(tmp_path)
 
     result = recover(tmp_path, session_id=None)
 
-    assert result.returncode == 0, result.stderr
-    assert read_json(agi_dir / "session.json")["owner_session_id"] == SID_A
-    snapshot = read_json(snapshot_path(tmp_path, SID_A))
-    assert snapshot["sessionId"] == SID_A
-    assert snapshot.get("read_only") is not True
+    assert result.returncode != 0
+    assert "missing MST_SESSION_ID" in result.stderr
+    assert not (tmp_path / ".gran-maestro" / "state").exists()
+
+
+def test_durable_mst_session_id_mismatch_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    write_agile_fixture(tmp_path, mst_session_id=SID_A)
+
+    result = recover(tmp_path, session_id=SID_B)
+
+    assert result.returncode != 0
+    assert f"mst_session_id mismatch: env={SID_B} payload={SID_A}" in result.stderr
+    assert not snapshot_path(tmp_path).exists()
+
+
+def test_missing_durable_mst_session_id_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    write_agile_fixture(tmp_path, mst_session_id=None)
+
+    result = recover(tmp_path, session_id=SID_B)
+
+    assert result.returncode != 0
+    assert "missing mst_session_id in durable session" in result.stderr
+    assert not snapshot_path(tmp_path).exists()

@@ -73,12 +73,12 @@ SYNCED_HASH="$(sha256_file "$TMP_PROJECT/.claude/hooks/mst-stop-hook.sh")"
 printf '%s\n' "$SYNC_OUTPUT" | grep -Eiq 'resynced|hash' || fail "CAUSE-1 sync output missing hash/resynced signal"
 
 mkdir -p "$TMP_PROJECT/.gran-maestro/requests/REQ-TEST-INT"
-printf '%s\n' '{"status":"phase1_analysis"}' > "$TMP_PROJECT/.gran-maestro/requests/REQ-TEST-INT/request.json"
+printf '%s\n' '{"status":"phase1_analysis","mst_session_id":"MST-AGI-030-20260503T130813382Z-k7f3q9x2"}' > "$TMP_PROJECT/.gran-maestro/requests/REQ-TEST-INT/request.json"
 rm -f "$TMP_PROJECT/.gran-maestro/tmp"/mst-state-*.json 2>/dev/null || true
 
 (
   cd "$TMP_PROJECT"
-  printf '%s' '{"stop_hook_active":false,"last_assistant_message":"integration"}' \
+  printf '%s' '{"stop_hook_active":false,"mst_session_id":"MST-AGI-030-20260503T130813382Z-k7f3q9x2","last_assistant_message":"integration"}' \
     | bash hooks/mst-stop-hook.sh > out.txt
 )
 

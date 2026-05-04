@@ -160,14 +160,10 @@ AGI 세션은 Claude Code 대화가 바뀌어 현재 `session_id`의
 - 복구 완료 시 current session의 `flow-detail.ndjson`에
   `event: "cross_session_recover"`가 기록된다.
 
-소유권 guard:
-- `session.json.owner_session_id`가 현재 session과 다르면 recover는 성공하지만
-  read-only mode로 진입한다.
-- read-only mode에서는 snapshot에 `read_only: true`가 기록되고, mutation CLI는
-  non-zero로 중단한다.
-- 소유권을 현재 session으로 이전하려면 `--takeover`를 명시한다. takeover는
-  `session.json`을 파일 락으로 직렬화한 뒤 `owner_session_id`를 현재 session으로
-  갱신한다.
+복구 identity guard:
+- `session.json.mst_session_id`가 현재 `MST_SESSION_ID`와 다르면 recover는 canonical mismatch로 실패하고 snapshot을 생성하지 않는다.
+- legacy owner metadata는 compatibility diagnostic field이며 recover 성공, read-only 전환, mutation permission, takeover 필요 여부를 결정하지 않는다.
+- `--takeover`는 legacy owner diagnostics를 현재 structured `MST_SESSION_ID`로 갱신하는 명시적 cleanup 옵션일 뿐, canonical recovery equality input이 아니다.
 
 예시:
 

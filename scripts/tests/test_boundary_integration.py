@@ -262,31 +262,42 @@ def test_pre_tool_hook_maps_non_retryable_boundary_violations_to_block_json(
     )
 
 
-def test_pre_tool_hook_skips_foreign_session_mismatch(tmp_path: Path) -> None:
+def test_pre_tool_hook_ignores_owner_ppid_mismatch_diagnostically(tmp_path: Path) -> None:
     req_id = "REQ-683"
+    init_git_project(tmp_path)
     write_request(tmp_path, req_id, detected_base="main", owner_ppid=1)
 
     result = run_hook(PRE_TOOL_HOOK, tmp_path, approve_payload(req_id))
+    meta_path = tmp_path / ".gran-maestro" / "worktrees" / f"{req_id}-T01.meta.json"
 
     assert result.returncode == 0
     assert result.stdout == ""
-    assert "session_mismatch" in result.stderr
+    assert "owner_ppid ignored" in result.stderr
+    assert meta_path.exists()
     assert_boundary_log(
         tmp_path,
         hook_name="mst-pre-tool-use.sh",
-        event_type="detected",
+        event_type="retry_success",
         task_id=req_id,
-        result="session_mismatch",
-        message="entry boundary violation detected",
+        result="ok",
+        message="entry repair succeeded",
     )
 
 
 @pytest.mark.parametrize("status", ["executing", "pending", "review", "feedback"])
 def test_stop_hook_keeps_active_workflow_session_block(status: str, tmp_path: Path) -> None:
     req_id = "REQ-684"
-    write_request(tmp_path, req_id, status=status, owner_ppid=os.getpid())
+    write_request(tmp_path, req_id, status=status)
+    request_path = tmp_path / ".gran-maestro" / "requests" / req_id / "request.json"
+    request_data = json.loads(request_path.read_text(encoding="utf-8"))
+    request_data["mst_session_id"] = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+    write_json(request_path, request_data)
 
-    result = run_hook(STOP_HOOK, tmp_path, {})
+    result = run_hook(
+        STOP_HOOK,
+        tmp_path,
+        {"mst_session_id": "MST-AGI-030-20260503T130813382Z-k7f3q9x2"},
+    )
     payload = parse_stdout_json(result)
 
     assert result.returncode == 0

@@ -117,15 +117,15 @@ Hook 실행 자체가 실패(예: `mst.py state get` crash, JSON 파싱 오류, 
 
 ## {#takeover} Takeover 프로토콜 (Advisory Ownership, AD-004)
 
-Durable 리소스(AGI/REQ/PLN)의 `owner_session_id`는 **advisory 필드**입니다. 읽기는 소유자와 무관하게 허용되나, 뮤테이션은 아래 규칙을 따릅니다.
+Durable 리소스(AGI/REQ/PLN)의 `owner_session_id`는 **diagnostic-only advisory 필드**입니다. 읽기와 canonical 뮤테이션 권한은 `owner_session_id`가 아니라 현재 `MST_SESSION_ID`와 durable payload의 `mst_session_id` equality로 결정됩니다.
 
 **뮤테이션 규칙**:
 1. `fcntl.flock` 직렬화로 동시성 제어.
-2. owner 불일치 시 경고 + `--takeover` 플래그 필수.
-3. Takeover 실행 시 단일 atomic JSON write (`temp + fsync + rename + dir fsync`, flock 전체 기간 유지).
-4. `takeover_log`에 시간/대상/old_owner/new_owner 기록.
+2. payload `mst_session_id`와 현재 `MST_SESSION_ID`가 불일치하면 non-zero fail-closed.
+3. `owner_session_id` 불일치는 warning/audit diagnostic으로만 기록하며 mutation permission, recovery equality, takeover 필요 여부를 결정하지 않는다.
+4. 명시적 cleanup/takeover가 실행되면 단일 atomic JSON write (`temp + fsync + rename + dir fsync`, flock 전체 기간 유지)로 diagnostic owner field와 `takeover_log`만 갱신한다.
 
-**Takeover Storm 감지**: 최근 5분 내 동일 AGI에 대해 양방향 takeover >= 2회 감지 시 `takeover_storm` 판정 → 뮤테이션 차단 + 대시보드 경고.
+**Takeover Storm 감지**: 최근 5분 내 동일 AGI에 대해 양방향 diagnostic owner cleanup >= 2회 감지 시 `takeover_storm` 판정 → cleanup 차단 + 대시보드 경고.
 
 **사용자 인터페이스**:
 - 대시보드 헤더에 owner pill 지속 표시 (클릭 시 banner 재오픈).

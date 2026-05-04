@@ -43,6 +43,21 @@ if payload.get("decision") != "block":
 PY
 }
 
+assert_approved() {
+  local name="$1" stdout_file="$2"
+  python3 - "$name" "$stdout_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+name = sys.argv[1]
+text = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
+payload = json.loads(text)
+if payload.get("decision") != "approve":
+    raise SystemExit(f"{name}: expected approve, got {payload}")
+PY
+}
+
 assert_no_mutation_paths() {
   local name="$1" project_root="$2"
   [ ! -e "$project_root/.gran-maestro/state/$ROOT_SESSION_ID" ] || fail "$name mutated canonical state"
@@ -87,6 +102,7 @@ bash -c '
 {"hook_event_name":"Stop","mst_session_id":"$3","session_id":"claude-diagnostic"}
 JSON
 ' _ "$owner_project" "$TEST_TMP_ROOT/home" "$ROOT_SESSION_ID" "$REPO_ROOT" "$owner_stdout" "$owner_stderr"
-assert_blocked "owner_ppid_only" "$owner_stdout"
+assert_approved "owner_ppid_only" "$owner_stdout"
 assert_no_mutation_paths "owner_ppid_only" "$owner_project"
-printf 'PASS: stop hook fail-closed mismatch and owner_ppid-only cases without canonical mutation\n'
+grep -F 'owner_ppid-only workflow state ignored' "$owner_stderr" >/dev/null || fail "owner_ppid diagnostic missing"
+printf 'PASS: stop hook fail-closed mismatch and owner_ppid-only diagnostic-only cases without canonical mutation\n'

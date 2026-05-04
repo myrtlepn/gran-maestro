@@ -90,7 +90,7 @@ resolve_project_root() {
 
 PROJECT_ROOT="$(resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
+STATE_FILE="${MST_TMP}/mst-state-unknown.json"
 SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 mkdir -p "$MST_TMP"
@@ -133,6 +133,9 @@ if [ -z "${MST_SESSION_ID:-}" ]; then
   MST_SESSION_ID="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
 fi
 export MST_SESSION_ID
+if [ -n "${MST_SESSION_ID:-}" ]; then
+  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
+fi
 MST_LEDGER_HOOK_EVENT="SessionStart"
 if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null
@@ -618,25 +621,34 @@ cleanup_stale_markers() {
     2>/dev/null || true
 
   # PLN-479 T02: multi-terminal 시 타 세션 state 파괴 방지
-  # 자기 PPID 및 liveness 없는 PPID의 state만 삭제, 살아있는 타 PPID는 보존
+  # DOD-003: structured MST_SESSION_ID state는 canonical 세션별 파일이므로 삭제하지 않는다.
   my_ppid="${PPID}"
   for state_file in "${tmp_dir}/mst-state-"*.json; do
     [ -e "$state_file" ] || continue
 
-    # 파일명에서 PID 추출: mst-state-12345.json -> 12345
+    # 파일명에서 PID 또는 structured session ID 추출
     pid_str="${state_file##*mst-state-}"
     pid_str="${pid_str%.json}"
+
+    case "$pid_str" in
+      MST-*)
+        if [ -n "${MST_SESSION_ID:-}" ] && [ "$pid_str" = "$MST_SESSION_ID" ]; then
+          rm -f "$state_file" 2>/dev/null || true
+        fi
+        continue
+        ;;
+    esac
 
     # 숫자 검증
     case "$pid_str" in
       ''|*[!0-9]*)
-        # 비정상 파일명은 안전하게 삭제
+        # 비정상 legacy 파일명은 안전하게 삭제
         rm -f "$state_file" 2>/dev/null || true
         continue
         ;;
     esac
 
-    # 자기 PPID면 삭제 (새 세션 시작이므로 이전 마커 정리)
+    # 자기 PPID면 삭제 (새 세션 시작이므로 이전 legacy 마커 정리)
     if [ "$pid_str" = "$my_ppid" ]; then
       rm -f "$state_file" 2>/dev/null || true
       continue

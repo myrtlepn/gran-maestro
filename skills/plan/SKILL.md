@@ -188,13 +188,15 @@ Step 0.5 처리 완료 후, 사용자 입력 텍스트 전체에서 `/\[?CAP-\d{
 
 ### Step 1: 초기화
 
+State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
+
 1. `{PROJECT_ROOT}/.gran-maestro/plans/` 디렉토리 확인, 없으면 생성
 2. PLN 번호 채번: **스크립트 우선** `python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type pln` → PLN-NNN ID 사용. **Fallback**: `plans/PLN-*/plan.json` 스캔 → 최대 번호 `+1` (최초: `001`)
 3. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/` 디렉토리 생성
 3.5. `AUTO_MODE=true`이면 워크플로우 state를 즉시 기록한다 (non-blocking):
 
    ```bash
-   MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+   python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
      --active true --skill mst:plan --req "" --next-skill mst:request \
      --next-source PLN-NNN --source-skill mst:plan --auto true \
    || echo "[mst:plan] warning: failed to update workflow state" >&2

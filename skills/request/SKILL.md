@@ -72,6 +72,8 @@ Maestro 모드 비활성 시 자동 활성화:
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 <!-- @end-include -->
 
+State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
+
 <!-- @include _shared/user-profile-read.md -->
 ### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
 
@@ -186,7 +188,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
    - `AUTO_APPROVE=true`이면 workflow state를 기록한다 (non-blocking):
      - `ACTIVE_REQ_ID`는 재개 분기에서는 `RESUME_REQ_ID`, 신규 생성 분기에서는 `REQ-NNN`
      ```bash
-     MST_STATE_PPID="${PPID}" python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+     python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
        --active true \
        --skill mst:request \
        --req "${ACTIVE_REQ_ID}" \

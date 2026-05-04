@@ -81,21 +81,20 @@ def _session_id_from_hook_stdin() -> Optional[str]:
     return None
 
 
-def _current_uuid_session_id() -> Optional[str]:
-    from scripts._skill_state import UUID_RE
-
+def _current_mst_session_id() -> Optional[str]:
     try:
-        candidate = _common.canonical_mst_session_id_from_env_or_context() or ""
+        return _common.canonical_mst_session_id_from_env_or_context()
     except ValueError:
         return None
-    if UUID_RE.match(candidate):
-        return candidate
-    return None
 
 
-def _validate_existing_workflow_payload(payload: dict, session_id: str) -> bool:
-    existing = payload.get("mst_session_id")
-    return not (isinstance(existing, str) and existing.strip() and existing.strip() != session_id)
+def _validate_existing_workflow_payload(payload: dict, session_id: str) -> tuple[bool, str]:
+    error = _common.canonical_state_payload_error(payload, session_id)
+    if error is not None:
+        if error.startswith("state payload mst_session_id mismatch: "):
+            return False, error.removeprefix("state payload ")
+        return False, error
+    return True, ""
 
 
 def _snapshot_path_for_session(base_dir: Path, session_id: str) -> Path:
@@ -121,18 +120,40 @@ def _validate_existing_snapshot_for_write(base_dir: Path, session_id: str) -> tu
     snapshot = _load_snapshot_for_session(base_dir, session_id)
     if not isinstance(snapshot, dict):
         return True, ""
-    existing = snapshot.get("mst_session_id")
-    if isinstance(existing, str) and existing.strip() and existing.strip() != session_id:
-        return False, f"snapshot mst_session_id mismatch: path={session_id} payload={existing.strip()}"
+    error = _common.canonical_state_payload_error(snapshot, session_id)
+    if error is not None:
+        if "mst_session_id mismatch" in error:
+            existing = snapshot.get("mst_session_id")
+            return False, f"snapshot mst_session_id mismatch: path={session_id} payload={str(existing).strip()}"
+        return False, f"snapshot {error}"
     return True, ""
 
 
 def _write_canonical_snapshot_payload(base_dir: Path, session_id: str, payload: dict) -> dict:
-    payload["mst_session_id"] = session_id
+    canonical_fields = _common.canonical_state_payload_fields(session_id)
+    payload.update(canonical_fields)
     payload["sessionId"] = session_id
+    payload.pop("session_id", None)
+    payload.pop("owner_ppid", None)
+    payload.pop("owner_session_id", None)
+    payload["workflow"] = {
+        "current_skill": payload.get("currentSkill", ""),
+        "current_step": payload.get("currentStep", 0),
+        "total_steps": payload.get("totalSteps", 0),
+        "status": payload.get("status", ""),
+    }
+    stack = payload.get("skillStack")
+    payload["continuation"] = {
+        "stack_depth": len(stack) if isinstance(stack, list) else 0,
+        "return_to": payload.get("returnTo"),
+        "paused": payload.get("paused") is True,
+    }
     diagnostics = _common.legacy_session_diagnostics()
     if diagnostics:
         payload["legacy_diagnostics"] = diagnostics
+    error = _common.canonical_state_payload_error(payload, session_id)
+    if error is not None:
+        raise ValueError(error)
     _common.save_json(_snapshot_path_for_session(base_dir, session_id), payload)
     return payload
 
@@ -383,53 +404,34 @@ def cmd_takeover_plan(args) -> int:
     return _takeover_json_owner(pln_id, _plan_json_path(pln_id))
 
 
-def _read_snapshot_read_only(session_id: str) -> bool:
-    from scripts._skill_state import load_snapshot
-
-    snapshot = load_snapshot(_skill_state_base_dir(), session_id=session_id)
-    return isinstance(snapshot, dict) and snapshot.get("read_only") is True
-
-
-def _owner_mismatch_read_only(agi_id: str, session_id: str) -> tuple[bool, Optional[str]]:
-    session_payload = _load_json_object(_agile_session_path(agi_id))
-    if session_payload is None:
-        return False, None
-    owner = session_payload.get("owner_session_id")
-    if not isinstance(owner, str) or not owner.strip():
-        return False, None
-    owner = owner.strip()
-    if owner == session_id:
-        return False, owner
-    return True, owner
-
-
-def _resource_owner_mismatch(resource_id: str, session_id: str) -> tuple[bool, Optional[str]]:
+def _resource_json_path(resource_id: str) -> Optional[Path]:
     token = (resource_id or "").strip().upper()
     if token.startswith("AGI-"):
-        return _owner_mismatch_read_only(token, session_id)
+        return _agile_session_path(token)
     if token.startswith("REQ-"):
-        request_payload = _load_json_object(_request_json_path(token))
-        if request_payload is None:
-            return False, None
-        owner = request_payload.get("owner_session_id")
-        if not isinstance(owner, str) or not owner.strip():
-            return False, None
-        owner = owner.strip()
-        if owner == session_id:
-            return False, owner
-        return True, owner
-    return False, None
+        return _request_json_path(token)
+    if token.startswith("PLN-"):
+        return _plan_json_path(token)
+    return None
 
 
 def _check_read_only(req_or_agi_id: str) -> int:
-    """Return non-zero when current session must not mutate durable state."""
-    token = (req_or_agi_id or "").strip().upper()
-    session_id = _current_uuid_session_id()
+    """Return non-zero when canonical session identity does not match durable state."""
+    session_id = _current_mst_session_id()
     if not session_id:
         return 0
-    mismatch, _ = _resource_owner_mismatch(token, session_id)
-    if mismatch or _read_snapshot_read_only(session_id):
-        print("[read-only] 현재 session이 owner가 아님. --takeover로 소유권 이전 후 재시도", file=sys.stderr)
+    resource_path = _resource_json_path(req_or_agi_id)
+    if resource_path is None:
+        return 0
+    payload = _load_json_object(resource_path)
+    if payload is None:
+        return 0
+    payload_session_id = payload.get("mst_session_id")
+    if isinstance(payload_session_id, str) and payload_session_id.strip() and payload_session_id.strip() != session_id:
+        print(
+            f"Error: mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}",
+            file=sys.stderr,
+        )
         return 1
     return 0
 
@@ -964,9 +966,11 @@ def cmd_state_set_workflow(args):
         payload = _workflow_state_load(state_path)
         if not isinstance(payload, dict):
             payload = _workflow_state_default_payload(now)
-        elif not _validate_existing_workflow_payload(payload, session_id):
-            print("Error: workflow mst_session_id mismatch", file=sys.stderr)
-            return 1
+        else:
+            valid_workflow, workflow_error = _validate_existing_workflow_payload(payload, session_id)
+            if not valid_workflow:
+                print(f"Error: workflow {workflow_error}", file=sys.stderr)
+                return 1
 
         next_action = payload.get("next_action")
         if not isinstance(next_action, dict):
@@ -1041,14 +1045,11 @@ def cmd_state_set_workflow(args):
             )
 
         payload["next_action"] = next_action
-        payload["mst_session_id"] = session_id
+        payload.update(_common.canonical_state_payload_fields(session_id))
         diagnostics = _common.legacy_session_diagnostics()
         if diagnostics:
             payload["legacy_diagnostics"] = diagnostics
         _workflow_state_atomic_write(state_path, payload)
-
-        if args.active:
-            _inject_owner_metadata_if_missing(args)
 
         if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
             na = payload.get("next_action", {})
@@ -1148,17 +1149,21 @@ def cmd_state_set(args):
     return 0
 
 def cmd_state_get(args):
-    from scripts._skill_state import get_snapshot
+    from scripts._skill_state import load_snapshot
 
     try:
         session_id = _common.require_mst_session_id_for_mutation("state snapshot read")
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    data = get_snapshot(_skill_state_base_dir(), session_id=session_id)
+    data = load_snapshot(_skill_state_base_dir(), session_id=session_id)
     if data is None:
         print("스냅샷 없음")
         return 0
+    validation_error = _common.canonical_state_payload_error(data, session_id)
+    if validation_error is not None:
+        print(f"Error: snapshot {validation_error}", file=sys.stderr)
+        return 1
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
@@ -1206,27 +1211,28 @@ def cmd_state_recover(args):
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     payload_session_id = session_payload.get("mst_session_id")
-    if isinstance(payload_session_id, str) and payload_session_id.strip() and payload_session_id.strip() != session_id:
+    if not isinstance(payload_session_id, str) or not payload_session_id.strip():
+        print(f"Error: missing mst_session_id in durable session: {session_path}", file=sys.stderr)
+        return 1
+    if payload_session_id.strip() != session_id:
         print(f"Error: mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}", file=sys.stderr)
         return 1
     if previous_owner and previous_owner != session_id:
-        print(f"Error: mst_session_id mismatch: env={session_id} owner_session_id={previous_owner}", file=sys.stderr)
-        return 1
+        print(
+            f"[cross-session recover] diagnostic: owner_session_id ignored: "
+            f"previous={previous_owner} current={session_id}",
+            file=sys.stderr,
+        )
 
     state_base_dir = _skill_state_base_dir()
     existing = load_snapshot(state_base_dir, session_id=session_id)
     if existing is not None:
-        existing_session_id = existing.get("mst_session_id")
-        if isinstance(existing_session_id, str) and existing_session_id.strip() and existing_session_id.strip() != session_id:
-            print(
-                f"Error: snapshot mst_session_id mismatch: path={session_id} payload={existing_session_id.strip()}",
-                file=sys.stderr,
-            )
+        validation_error = _common.canonical_state_payload_error(existing, session_id)
+        if validation_error is not None:
+            print(f"Error: snapshot {validation_error}", file=sys.stderr)
             return 1
         print(json.dumps(existing, ensure_ascii=False, indent=2))
         return 0
-
-    read_only = bool(previous_owner and previous_owner != session_id and not getattr(args, "takeover", False))
 
     if previous_owner and previous_owner != session_id and getattr(args, "takeover", False):
         def _mutate_owner(payload: dict) -> dict:
@@ -1252,7 +1258,6 @@ def cmd_state_recover(args):
             state_base_dir,
             agi_id,
             session_id=session_id,
-            read_only=read_only,
         )
     except Exception as exc:
         print(f"[cross-session recover] warning: failed durable fallback: {exc}", file=sys.stderr)
@@ -1266,12 +1271,8 @@ def cmd_state_recover(args):
         session_id,
         agi_id,
         previous_owner,
-        takeover=bool(getattr(args, "takeover", False) and not read_only),
+        takeover=bool(getattr(args, "takeover", False)),
     )
-    if read_only:
-        print(
-            f"[cross-session recover] read-only (owner mismatch: previous={previous_owner}, current={session_id})"
-        )
     for warning in snapshot.get("warnings", []) if isinstance(snapshot.get("warnings"), list) else []:
         print(f"[cross-session recover] warning: {warning}", file=sys.stderr)
     print(f"[cross-session recover] snapshot={snapshot_path(state_base_dir, session_id)}")

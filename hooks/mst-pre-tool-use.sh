@@ -794,12 +794,6 @@ if [ "$BOUNDARY_OK" != "true" ]; then
   log_boundary_event "detected" "$REQ_ID" "$BOUNDARY_VIOLATION" "entry boundary violation detected"
 fi
 
-if [ "$BOUNDARY_VIOLATION" = "session_mismatch" ]; then
-  printf '[boundary] session_mismatch ppid=%s owner=%s, skip enforcement\n' "${CURRENT_PPID:-$PPID}" "${OWNER_PPID:-unknown}" >&2
-  debug_log "boundary_session_mismatch" "req=$REQ_ID owner=$OWNER_PPID current=$CURRENT_PPID"
-  exit 0
-fi
-
 if [ "$BOUNDARY_OK" = "true" ]; then
   debug_log "boundary_entry_pass" "req=$REQ_ID"
   exit 0

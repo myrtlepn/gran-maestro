@@ -406,14 +406,14 @@ def recover_agile_snapshot_from_durable_state(
     agi_id: str,
     *,
     session_id: str,
-    read_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Create current-session snapshot from durable AGI session state."""
     safe_agi_id = str(agi_id or "").strip().upper()
     if not re.fullmatch(r"AGI-\d+", safe_agi_id):
         raise ValueError(f"Invalid AGI id: {agi_id}")
-    if not UUID_RE.match(str(session_id or "")):
-        raise ValueError(f"Invalid session id: {session_id}")
+    from scripts.mst_cmds.session import validate_mst_session_id
+
+    validate_mst_session_id(str(session_id or ""))
 
     agi_dir = base_dir / "agile" / safe_agi_id
     session_path = agi_dir / "session.json"
@@ -442,8 +442,6 @@ def recover_agile_snapshot_from_durable_state(
         "agile_status": session_payload.get("status"),
         "updatedAt": now,
     }
-    if read_only:
-        snapshot["read_only"] = True
     if sprint_id:
         snapshot["recovered_sprint"] = sprint_id
     if warnings_out:
