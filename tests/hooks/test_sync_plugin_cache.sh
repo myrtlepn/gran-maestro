@@ -3,7 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SESSION_INIT_SCRIPT="$REPO_ROOT/hooks/mst-session-init.sh"
-SESSION_ID="123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID="MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+CLAUDE_SESSION_ID="123e4567-e89b-42d3-a456-426614174000"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -169,12 +170,13 @@ run_session_init() {
 
   (
     cd "$project_root"
-    MST_CLAUDE_HOME="$claude_home" \
+    MST_SESSION_ID="$SESSION_ID" \
+      MST_CLAUDE_HOME="$claude_home" \
       HOME="$claude_home" \
       MST_DEBUG=1 \
       PLUGIN_ROOT="$REPO_ROOT" \
       bash "$SESSION_INIT_SCRIPT" >"$stdout_file" 2>"$stderr_file" <<JSON
-{"session_id":"$SESSION_ID"}
+{"mst_session_id":"$SESSION_ID","session_id":"$CLAUDE_SESSION_ID"}
 JSON
   )
 }
@@ -202,19 +204,13 @@ assert_state_and_bridge_created() {
   local name="$1"
   local project_root="$2"
   local tmp_dir="$project_root/.gran-maestro/tmp"
-  local state_file bridge_file anchor_file pid session_content
+  local state_file anchor_file
 
-  state_file="$(require_single_file_match "$name state file" "$tmp_dir/mst-state-*.json")"
-  pid="${state_file##*mst-state-}"
-  pid="${pid%.json}"
-  bridge_file="$tmp_dir/claude-session-${pid}.id"
-  anchor_file="$tmp_dir/mst-session-anchor-${pid}.pid"
+  state_file="$tmp_dir/mst-state-${SESSION_ID}.json"
+  anchor_file="$(require_single_file_match "$name session anchor file" "$tmp_dir/mst-session-anchor-*.pid")"
 
-  assert_file_exists "$name bridge file" "$bridge_file"
-  session_content="$(tr -d '\n' < "$bridge_file")"
-  assert_eq "$name bridge session id" "$SESSION_ID" "$session_content"
+  assert_file_exists "$name state file" "$state_file"
   assert_file_exists "$name session anchor file" "$anchor_file"
-  assert_file_content "$name session anchor content" "$pid" "$anchor_file"
 }
 
 json_field() {
@@ -303,8 +299,8 @@ test_act08_002_sync_hooks_lib_to_plugin_cache() {
   set +e
   (
     cd "$project_root" || exit 1
-    HOME="$claude_home" bash "$claude_home/.claude/plugins/cache/gran-maestro/mst/TEST/hooks/mst-pre-tool-use.sh" >"$case_dir/copied-hook.stdout" 2>"$case_dir/copied-hook.stderr" <<'JSON'
-{"tool_name":"Read","tool_input":{"file_path":"README.md"}}
+    MST_SESSION_ID="$SESSION_ID" HOME="$claude_home" bash "$claude_home/.claude/plugins/cache/gran-maestro/mst/TEST/hooks/mst-pre-tool-use.sh" >"$case_dir/copied-hook.stdout" 2>"$case_dir/copied-hook.stderr" <<JSON
+{"mst_session_id":"$SESSION_ID","session_id":"$CLAUDE_SESSION_ID","tool_name":"Read","tool_input":{"file_path":"README.md"}}
 JSON
   )
   status=$?
@@ -687,12 +683,13 @@ import time
 project_root, claude_home, script, session_id, repo_root = sys.argv[1:]
 env = os.environ.copy()
 env.update({
+    "MST_SESSION_ID": session_id,
     "MST_CLAUDE_HOME": claude_home,
     "HOME": claude_home,
     "MST_DEBUG": "1",
     "PLUGIN_ROOT": repo_root,
 })
-payload = f'{{"session_id":"{session_id}"}}\n'
+payload = f'{{"mst_session_id":"{session_id}","session_id":"123e4567-e89b-42d3-a456-426614174000"}}\n'
 elapsed = []
 
 for _ in range(3):

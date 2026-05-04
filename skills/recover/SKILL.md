@@ -147,9 +147,14 @@ Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 
 
 ## Cross-session Recovery
 
-AGI 세션은 Claude Code 대화가 바뀌어 현재 `session_id`의
-`.gran-maestro/state/{session_id}/snapshot.json`이 없을 수 있다. 이 경우
-`mst:recover`는 durable state를 fallback source로 사용한다.
+AGI 세션은 Claude Code 대화가 바뀌어 현재 `MST_SESSION_ID`의
+`.gran-maestro/state/{mst_session_id}/snapshot.json`이 없을 수 있다. 이 경우
+`mst:recover`는 durable state를 recovery source로 사용한다.
+
+DOD-005 경계: history source of truth는
+`.gran-maestro/sessions/{mst_session_id}/history.*` 단일 ledger와 append-only
+`history.head`/`history.verify` 조회다. recover bundle restoration은 DOD-006 범위이며,
+`mst:recover` 문구는 DOD-005 완료를 dashboard/execution-flow projection(DOD-017) 완료로 해석하지 않는다.
 
 동작:
 - 현재 session snapshot이 있으면 기존 snapshot 복구 경로를 유지한다.

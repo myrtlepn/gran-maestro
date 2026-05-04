@@ -110,7 +110,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 | `/mst:archive` | 세션 아카이브 타입별 세밀 관리 |
 | `/mst:dashboard` | 대시보드 서버 시작/열기 |
 | `/mst:priority` | 태스크 우선순위/실행 순서 변경 |
-| `/mst:history` | 완료된 요청 이력 조회 |
+| `/mst:history` | 완료된 요청 이력 조회. 실행 중 PM flow event ledger는 `mst.py history log|verify|head --session {mst_session_id}`로 확인 |
 | `/mst:settings` | 설정 조회/변경 |
 
 ### 모드 전환 스킬
@@ -427,6 +427,24 @@ RV-001                     # 리뷰 회차 (REQ 하위)
 - 아카이브 시: `request.json`, `summary.md`만 보존, 나머지 삭제
 - 수동 조회: `/mst:history`
 
+## `mst_session_id` history ledger 조회
+
+DOD-005의 event source of truth는 완료 요청 요약이 아니라
+`.gran-maestro/sessions/{mst_session_id}/history.*` 단일 ledger입니다.
+
+```bash
+python3 scripts/mst.py history log --session {mst_session_id}
+python3 scripts/mst.py history verify --session {mst_session_id}
+python3 scripts/mst.py history head --session {mst_session_id}
+```
+
+- `history log`는 같은 `mst_session_id` ledger의 event row를 seq 순서로 읽고 `schema_version`, `mst_session_id`, `root_mst_id`, `event_type`, `created_at`, `seq`, `prev_hash`, `event_hash`, `idempotency_key`를 read-time validation합니다.
+- `history verify`와 `history head`는 append-only ledger tail, local `history.head`, active policy mirror head, `history.verify`를 같은 session key로 대조합니다.
+- 같은 PM flow correlation이 둘 이상의 valid ledger로 분기되면 split-ledger violation으로 다루며, 한쪽 ledger만 조용히 성공 처리하지 않습니다.
+- PPID, Claude hook `session_id`, `owner_session_id`, global hook ledger, default history는 canonical query fallback이 아닙니다.
+- `mst.py hook log`는 hook event 확인용 backward-compatible subset입니다. canonical history query는 `mst.py history ... --session {mst_session_id}`입니다.
+- DOD-005는 event row 조회와 head/verify 관찰 가능성까지입니다. DOD-006 recover bundle restoration과 DOD-017 dashboard/execution-flow projection 완료를 의미하지 않습니다.
+
 </history_policy>
 
 ---
@@ -462,6 +480,7 @@ Claude Code 세션이 종료된 후 미완료 워크플로우를 복구하려면
 ```
 
 복구 시 파일 기반 상태(`.gran-maestro/requests/`)에서 마지막 활성 Phase를 자동 감지합니다.
+복구 bundle restoration은 DOD-006 범위이며, DOD-005의 단일 history ledger 조회 계약과 구분합니다.
 
 </session_recovery>
 

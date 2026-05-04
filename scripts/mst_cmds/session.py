@@ -267,6 +267,16 @@ def session_history_path(base_dir: Path, mst_session_id: str) -> Path:
     return Path(base_dir) / "sessions" / parsed.mst_session_id / "history.ndjson"
 
 
+def session_history_head_path(base_dir: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return Path(base_dir) / "sessions" / parsed.mst_session_id / "history.head"
+
+
+def session_history_verify_path(base_dir: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return Path(base_dir) / "sessions" / parsed.mst_session_id / "history.verify"
+
+
 def _fsync_parent_dir(path: Path) -> None:
     if os.name == "nt":
         return
@@ -288,6 +298,24 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.tmp.", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -436,19 +464,166 @@ def create_root_session_artifacts(
     }
 
 
+ZERO_HISTORY_HASH = "0" * 64
+
+
+def _utc_now_history() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _history_policy_home(base_dir: Path) -> Path:
+    explicit = os.environ.get("MST_POLICY_HOME", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    claude_home = Path(os.environ.get("MST_CLAUDE_HOME", str(Path.home()))).expanduser()
+    default = claude_home / ".claude" / "gran-maestro-policy"
+    try:
+        default.parent.mkdir(parents=True, exist_ok=True)
+        return default
+    except OSError:
+        return Path(base_dir) / "policy" / "gran-maestro-policy"
+
+
+def _session_history_mirror_head_path(base_dir: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return _history_policy_home(base_dir) / "ledger-heads" / f"{parsed.mst_session_id}.head"
+
+
+def _canonical_history_event(event: dict) -> str:
+    return json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _history_event_hash(prev_hash: str, event: dict) -> str:
+    return hashlib.sha256((prev_hash + "\n" + _canonical_history_event(event)).encode("utf-8")).hexdigest()
+
+
+def _file_fingerprint(path: Path) -> str:
+    if not path.is_file():
+        return "missing"
+    stat = path.stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}"
+
+
+def _history_idempotency_key(mst_session_id: str, event: dict) -> str:
+    event_type = str(event.get("event_type") or event.get("type") or "event").strip()
+    explicit = event.get("idempotency_key")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    stable_parts = [
+        ("event_type", event_type),
+        ("skill", event.get("skill")),
+        ("step", event.get("step")),
+        ("total_steps", event.get("total_steps")),
+        ("command", event.get("command")),
+        ("logical_attempt_id", event.get("logical_attempt_id")),
+        ("phase", event.get("phase")),
+        ("status", event.get("status")),
+        ("exit_code", event.get("exit_code")),
+    ]
+    material = "|".join(f"{key}={value}" for key, value in stable_parts if value not in (None, ""))
+    if not material:
+        material = event_type
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+    return f"{mst_session_id}:{event_type}:{digest}"
+
+
+def _read_history_rows_unlocked(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    rows: list[dict] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError(f"history row must be object line={line_no}")
+        rows.append(row)
+    return rows
+
+
+def _history_tail_unlocked(path: Path) -> tuple[int, str, set[str]]:
+    expected_seq = 1
+    expected_prev = ZERO_HISTORY_HASH
+    idempotency_keys: set[str] = set()
+    rows = _read_history_rows_unlocked(path)
+    for row in rows:
+        if row.get("seq") != expected_seq:
+            raise ValueError(f"history seq mismatch at seq={expected_seq}")
+        if row.get("prev_hash") != expected_prev:
+            raise ValueError(f"history prev_hash mismatch at seq={expected_seq}")
+        event = row.get("event")
+        if not isinstance(event, dict):
+            raise ValueError(f"history event missing at seq={expected_seq}")
+        computed = _history_event_hash(expected_prev, event)
+        if row.get("event_hash") != computed:
+            raise ValueError(f"history event_hash mismatch at seq={expected_seq}")
+        key = event.get("idempotency_key")
+        if isinstance(key, str) and key.strip():
+            idempotency_keys.add(key.strip())
+        expected_prev = computed
+        expected_seq += 1
+    return expected_seq - 1, expected_prev, idempotency_keys
+
+
+def _write_history_heads(base_dir: Path, mst_session_id: str, head_hash: str, history_file: Path, seq: int) -> None:
+    local_head = session_history_head_path(base_dir, mst_session_id)
+    mirror_head = _session_history_mirror_head_path(base_dir, mst_session_id)
+    verify_state = session_history_verify_path(base_dir, mst_session_id)
+    _atomic_write_text(local_head, head_hash + "\n")
+    try:
+        _atomic_write_text(mirror_head, head_hash + "\n")
+    except OSError:
+        if os.environ.get("MST_POLICY_HOME", "").strip():
+            raise
+        fallback_mirror = Path(base_dir) / "policy" / "gran-maestro-policy" / "ledger-heads" / f"{mst_session_id}.head"
+        _atomic_write_text(fallback_mirror, head_hash + "\n")
+    _atomic_write_text(verify_state, f"{head_hash}\t{_file_fingerprint(history_file)}\t{seq}\n")
+
+
 def write_session_history_event(base_dir: Path, mst_session_id: str, payload: dict) -> Path:
     parsed = validate_mst_session_metadata_consistency(base_dir, mst_session_id)
     path = session_history_path(base_dir, parsed.mst_session_id)
-    row = dict(payload)
-    row["mst_session_id"] = parsed.mst_session_id
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8", buffering=1) as handle:
-        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    _fsync_parent_dir(path)
-    return path
+    lock_path = path.parent / "history.lock"
+
+    event = dict(payload)
+    event_type = str(event.get("event_type") or event.get("type") or "").strip()
+    if not event_type:
+        event_type = "event"
+    event["schema_version"] = 1
+    event["mst_session_id"] = parsed.mst_session_id
+    event["root_mst_id"] = parsed.root_mst_id
+    event["event_type"] = event_type
+    event.setdefault("type", event_type)
+    event.setdefault("created_at", event.get("timestamp") or _utc_now_history())
+    event.setdefault("timestamp", event["created_at"])
+    event["idempotency_key"] = _history_idempotency_key(parsed.mst_session_id, event)
+
+    with open(lock_path, "a+", encoding="utf-8") as lock_handle:
+        _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=5)
+        try:
+            last_seq, last_hash, idempotency_keys = _history_tail_unlocked(path)
+            if event["idempotency_key"] in idempotency_keys:
+                return path
+            event_hash = _history_event_hash(last_hash, event)
+            row = {
+                "seq": last_seq + 1,
+                "prev_hash": last_hash,
+                "event_hash": event_hash,
+                "event": event,
+                "mst_session_id": parsed.mst_session_id,
+                "timestamp": event["created_at"],
+            }
+            with open(path, "a", encoding="utf-8", buffering=1) as handle:
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_parent_dir(path)
+            _write_history_heads(base_dir, parsed.mst_session_id, event_hash, path, last_seq + 1)
+            return path
+        finally:
+            _common._unlock(lock_handle)
 
 
 def _session_id_from_payload(raw: str) -> str | None:

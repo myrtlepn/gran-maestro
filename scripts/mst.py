@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -15,6 +16,7 @@ if __package__ in (None, ""):
 
 from scripts.mst_cmds import DISPATCH, build_parser, set_base_dir
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import session as session_cmds
 from scripts.mst_cmds.extension import _dir_content_hash, _ensure_copy_impl
 from scripts.mst_cmds.agile_detail import (
     apply_chunk_append,
@@ -70,6 +72,66 @@ BASE_DIR_OPTIONAL_COMMANDS = {
 }
 
 
+def _invocation_command(args) -> str:
+    command = [str(getattr(args, "command", "") or "")]
+    subcommand = getattr(args, "subcommand", None)
+    if subcommand:
+        command.append(str(subcommand))
+    return " ".join(part for part in command if part)
+
+
+def _invocation_history_session_id() -> str | None:
+    if os.environ.get("MST_INVOCATION_HISTORY_ACTIVE") == "1":
+        return None
+    if BASE_DIR is None:
+        return None
+    try:
+        session_id = _common.canonical_mst_session_id_from_env_or_context()
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if not session_id:
+        return None
+    session_path = session_cmds.session_metadata_path(BASE_DIR, session_id)
+    if not session_path.is_file():
+        return None
+    try:
+        session_cmds.validate_mst_session_metadata_consistency(
+            BASE_DIR,
+            session_id,
+            require_session_metadata=True,
+        )
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return session_id
+
+
+def _append_invocation_event(session_id: str, event_type: str, args, **extra) -> None:
+    previous_guard = os.environ.get("MST_INVOCATION_HISTORY_ACTIVE")
+    os.environ["MST_INVOCATION_HISTORY_ACTIVE"] = "1"
+    try:
+        command = _invocation_command(args)
+        invocation_id = f"{os.getpid()}:{command}:{' '.join(sys.argv[1:])}"
+        session_cmds.write_session_history_event(
+            BASE_DIR,
+            session_id,
+            {
+                "event_type": event_type,
+                "command": command,
+                "argv": sys.argv[1:],
+                "pid": os.getpid(),
+                "ppid": os.getppid(),
+                "invocation_id": invocation_id,
+                "idempotency_key": f"{session_id}:{event_type}:pid={os.getpid()}:argv={' '.join(sys.argv[1:])}",
+                **extra,
+            },
+        )
+    finally:
+        if previous_guard is None:
+            os.environ.pop("MST_INVOCATION_HISTORY_ACTIVE", None)
+        else:
+            os.environ["MST_INVOCATION_HISTORY_ACTIVE"] = previous_guard
+
+
 def main():
     global BASE_DIR
 
@@ -88,7 +150,43 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    sys.exit(fn(args) or 0)
+    try:
+        history_session_id = _invocation_history_session_id()
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if history_session_id:
+        try:
+            _append_invocation_event(history_session_id, "mst.invocation_start", args)
+        except Exception as exc:
+            print(f"Error: failed to append invocation history: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    try:
+        exit_code = fn(args) or 0
+    except Exception as exc:
+        if history_session_id:
+            try:
+                _append_invocation_event(
+                    history_session_id,
+                    "mst.invocation_error",
+                    args,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            except Exception as append_exc:
+                print(f"Error: failed to append invocation error history: {append_exc}", file=sys.stderr)
+        raise
+
+    if history_session_id:
+        event_type = "mst.invocation_end" if int(exit_code) == 0 else "mst.invocation_error"
+        try:
+            _append_invocation_event(history_session_id, event_type, args, exit_code=int(exit_code))
+        except Exception as exc:
+            print(f"Error: failed to append invocation history: {exc}", file=sys.stderr)
+            sys.exit(1)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,64 @@ _mst_ledger_structured_mst_session_id() {
   printf '%s\n' "$value"
 }
 
+_mst_ledger_history_lib() {
+  local lib_dir candidate
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || printf '')"
+  for candidate in \
+    "${lib_dir}/history.bash" \
+    "${lib_dir}/../lib/history.bash" \
+    "${PROJECT_ROOT:-$(_mst_ledger_project_root)}/hooks/lib/history.bash"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+_mst_ledger_should_append_session_history() {
+  local root="$1" mst_session_id="$2" hook_event="$3"
+  if [ "$hook_event" = "Stop" ]; then
+    [ -f "${root}/.gran-maestro/state/${mst_session_id}/snapshot.json" ] && return 0
+    [ -f "${root}/.gran-maestro/tmp/mst-state-${mst_session_id}.json" ] && return 0
+    [ -f "${root}/.gran-maestro/active-flow/${mst_session_id}.json" ] && return 0
+    return 1
+  fi
+  return 0
+}
+
+_mst_ledger_append_session_history() {
+  local root="$1" mst_session_id="$2" hook_event="$3" phase="$4" exit_code="${5:-}" digest="$6" source="$7" ts="$8" history_lib event_type event_json exit_json
+  [ -n "${mst_session_id:-}" ] || return 0
+  _mst_ledger_structured_mst_session_id "$mst_session_id" >/dev/null 2>&1 || return 0
+  _mst_ledger_should_append_session_history "$root" "$mst_session_id" "$hook_event" || return 0
+  history_lib="$(_mst_ledger_history_lib 2>/dev/null || true)"
+  [ -n "$history_lib" ] || return 0
+  # shellcheck source=/dev/null
+  source "$history_lib" 2>/dev/null || return 0
+  declare -F mst_history_append_event >/dev/null 2>&1 || return 0
+  event_type="hook.${hook_event}.${phase}"
+  case "$exit_code" in
+    ''|*[!0-9]*) exit_json=null ;;
+    *) exit_json="$exit_code" ;;
+  esac
+  event_json="$(printf '{"type":"%s","event_type":"%s","hook_event":"%s","phase":"%s","exit_code":%s,"payload_digest":"%s","invocation_source":"%s","pid":%s,"timestamp":"%s","idempotency_key":"%s:%s:%s:%s"}' \
+    "$(_mst_ledger_json_escape "$event_type")" \
+    "$(_mst_ledger_json_escape "$event_type")" \
+    "$(_mst_ledger_json_escape "$hook_event")" \
+    "$(_mst_ledger_json_escape "$phase")" \
+    "$exit_json" \
+    "$(_mst_ledger_json_escape "$digest")" \
+    "$(_mst_ledger_json_escape "$source")" \
+    "$$" \
+    "$(_mst_ledger_json_escape "$ts")" \
+    "$(_mst_ledger_json_escape "$mst_session_id")" \
+    "$(_mst_ledger_json_escape "$event_type")" \
+    "$(_mst_ledger_json_escape "$digest")" \
+    "$(_mst_ledger_json_escape "${exit_code:-none}")")"
+  mst_history_append_event "$root" "$mst_session_id" "$event_json" >/dev/null 2>&1 || true
+}
+
 _mst_ledger_json_string_field() {
   local key="$1" payload="${2:-}"
   if [[ "$payload" =~ \"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
@@ -117,6 +175,7 @@ _mst_ledger_append() {
   source="${MST_LEDGER_INVOCATION_SOURCE:-$(_mst_ledger_source)}"
   MST_LEDGER_INVOCATION_SOURCE="$source"
   ts="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u '+%FT%TZ')"
+  _mst_ledger_append_session_history "$root" "$mst_session_id" "$hook_event" "$phase" "$exit_code" "$digest" "$source" "$ts"
   case "$exit_code" in
     ''|*[!0-9]*) exit_json=null ;;
     *) exit_json="$exit_code" ;;

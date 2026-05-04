@@ -396,13 +396,30 @@ PM이 자동으로 결정한 태스크 실행 순서를 사용자가 오버라�
 
 ### /mst:history
 
-**한 줄 설명**: 완료된 요청의 이력을 조회합니다.
+**한 줄 설명**: 완료된 요청의 이력을 조회합니다. 실행 중 PM flow의 canonical event ledger는 `mst.py history log|verify|head --session {mst_session_id}`로 조회합니다.
 
 **인자**: `[{REQ-ID}] [--limit {N}]`
 
 #### 목적
 
 `status: completed` 또는 `status: cancelled` 요청의 이력을 조회합니다. 요청별 요약, 소요 시간, 에이전트 사용량, 피드백 라운드 수 등을 확인할 수 있습니다.
+
+#### DOD-005 history ledger
+
+MST 호출, skill lifecycle event, hook event의 source of truth는
+`.gran-maestro/sessions/{mst_session_id}/history.*` 단일 ledger입니다.
+
+```
+python3 scripts/mst.py history log --session {mst_session_id}
+python3 scripts/mst.py history verify --session {mst_session_id}
+python3 scripts/mst.py history head --session {mst_session_id}
+```
+
+- `history log`: 같은 `mst_session_id` ledger의 event row를 seq 순서로 읽고 핵심 필드를 read-time validation합니다.
+- `history verify` / `history head`: append-only ledger tail, local `history.head`, active policy mirror head, `history.verify`를 같은 session key로 대조합니다.
+- split-ledger violation은 structured non-success로 다루며, PPID, Claude hook `session_id`, `owner_session_id`, global hook ledger, default history로 fallback하지 않습니다.
+- `mst.py hook log`는 hook event 확인용 backward-compatible subset입니다. canonical query는 `mst.py history ... --session {mst_session_id}`입니다.
+- 이 범위는 DOD-005 event row 조회와 head/verify에 한정됩니다. DOD-006 recover bundle restoration과 DOD-017 dashboard/execution-flow projection 완료를 의미하지 않습니다.
 
 #### 사용 시점
 

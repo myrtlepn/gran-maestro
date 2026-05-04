@@ -148,6 +148,21 @@ python3 scripts/mst.py archive purge
 
 **진행 중 요청 보호**: cleanup/gardening은 `phase1_analysis`, `phase2_execution`, `phase3_review`, `merging`, `merge_conflict` 같은 active phase 요청을 오래되었다는 이유만으로 stale 후보에 넣지 않습니다. 보호 건수는 gardening scan 요약의 `protected_active_requests`에서 확인할 수 있습니다.
 
+**MST session history ledger 조회**: 실행 중 PM flow의 MST 호출, skill lifecycle event, hook event는
+`.gran-maestro/sessions/{mst_session_id}/history.*` 단일 ledger를 source of truth로 사용합니다.
+
+```bash
+python3 scripts/mst.py history log --session {mst_session_id}
+python3 scripts/mst.py history verify --session {mst_session_id}
+python3 scripts/mst.py history head --session {mst_session_id}
+```
+
+`history log`는 event row를 seq 순서로 검증해 표시하고, `history verify`/`history head`는 append-only
+ledger tail과 `history.head`, policy mirror head, `history.verify`를 같은 `mst_session_id` 기준으로 대조합니다.
+PPID, Claude hook `session_id`, `owner_session_id`, global hook ledger, default history는 fallback이 아닙니다.
+`mst.py hook log`는 hook event 확인용 subset이며 canonical query는 `mst.py history ... --session`입니다.
+이 조회 범위는 recover bundle restoration이나 dashboard/execution-flow projection 완료를 의미하지 않습니다.
+
 ## 라이선스
 
 MIT License — 자세한 내용은 [LICENSE](LICENSE)를 참조하세요.

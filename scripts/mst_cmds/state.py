@@ -536,6 +536,54 @@ def _current_flow_resource_id() -> str:
     return ""
 
 
+def _append_skill_history_event(
+    base_dir: Path,
+    session_id: str,
+    *,
+    event_type: str,
+    skill: str,
+    step: int | None = None,
+    total_steps: int | None = None,
+    resource_id: str = "",
+    status: str = "",
+) -> bool:
+    from scripts.mst_cmds import session as session_mod
+
+    session_path = session_mod.session_metadata_path(base_dir, session_id)
+    if not session_path.is_file():
+        return True
+    session_mod.validate_mst_session_metadata_consistency(
+        base_dir,
+        session_id,
+        require_session_metadata=True,
+    )
+    logical_attempt_id = os.environ.get("MST_LOGICAL_ATTEMPT_ID", "").strip() or "default"
+    key_parts = [
+        f"skill={skill}",
+        f"step={step}" if step is not None else "",
+        f"total={total_steps}" if total_steps is not None else "",
+        f"attempt={logical_attempt_id}",
+    ]
+    idempotency_key = f"{session_id}:{event_type}:" + ":".join(part for part in key_parts if part)
+    payload = {
+        "event_type": event_type,
+        "skill": skill,
+        "logical_attempt_id": logical_attempt_id,
+        "idempotency_key": idempotency_key,
+    }
+    if step is not None:
+        payload["step"] = step
+    if total_steps is not None:
+        payload["total_steps"] = total_steps
+    if resource_id:
+        payload["artifact_id"] = resource_id
+        payload["resource_id"] = resource_id
+    if status:
+        payload["status"] = status
+    session_mod.write_session_history_event(base_dir, session_id, payload)
+    return True
+
+
 def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
     try:
         if not flow_path.exists():
@@ -1100,6 +1148,41 @@ def cmd_state_set(args):
     if not valid_snapshot:
         print(f"Error: {validation_error}", file=sys.stderr)
         return 1
+    resource_id = _current_flow_resource_id()
+    try:
+        if args.step == 0:
+            _append_skill_history_event(
+                state_base_dir,
+                session_id,
+                event_type="skill.enter",
+                skill=args.skill,
+                step=args.step,
+                total_steps=args.total,
+                resource_id=resource_id,
+            )
+        _append_skill_history_event(
+            state_base_dir,
+            session_id,
+            event_type="skill.step",
+            skill=args.skill,
+            step=args.step,
+            total_steps=args.total,
+            resource_id=resource_id,
+        )
+        if args.step == args.total:
+            _append_skill_history_event(
+                state_base_dir,
+                session_id,
+                event_type="skill.exit",
+                skill=args.skill,
+                step=args.step,
+                total_steps=args.total,
+                resource_id=resource_id,
+                status="completed",
+            )
+    except Exception as exc:
+        print(f"Error: failed to append skill history: {exc}", file=sys.stderr)
+        return 1
     data = set_snapshot(
         state_base_dir,
         skill=args.skill,
@@ -1114,7 +1197,6 @@ def cmd_state_set(args):
         flow_path = flow_log_path(project_root, rotate=True)
         log_session_id = safe_session_id(session_id)
         duration_ms = _previous_enter_duration_ms(flow_path, log_session_id, args.skill)
-        resource_id = _current_flow_resource_id()
         extras = {"resource_id": resource_id} if resource_id else None
         append_skill_event(
             project_root,
@@ -1223,6 +1305,18 @@ def cmd_state_recover(args):
             f"previous={previous_owner} current={session_id}",
             file=sys.stderr,
         )
+    try:
+        _append_skill_history_event(
+            _common.BASE_DIR,
+            session_id,
+            event_type="skill.recover",
+            skill="mst:recover",
+            resource_id=agi_id,
+            status="diagnostic",
+        )
+    except Exception as exc:
+        print(f"Error: failed to append skill recover history: {exc}", file=sys.stderr)
+        return 1
 
     state_base_dir = _skill_state_base_dir()
     existing = load_snapshot(state_base_dir, session_id=session_id)

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import session as session_cmds
 from scripts.mst_cmds._provenance import require_user_tty
 
 
@@ -30,6 +31,28 @@ class LedgerDiagnosis:
     last_valid_hash: str
     valid_lines: list[str]
     total_lines: int
+
+
+@dataclass
+class HistoryValidationError(Exception):
+    code: str
+    message: str
+    details: dict
+
+
+@dataclass
+class HistoryReadResult:
+    session_id: str
+    root_mst_id: str
+    history_file: Path
+    local_head: Path
+    mirror_head: Path
+    verify_state: Path
+    rows: list[dict]
+    projections: list[dict]
+    tail_hash: str
+    tail_seq: int
+    verify: dict
 
 
 def _project_root() -> Path:
@@ -98,6 +121,422 @@ def _history_paths(project_root: Path, policy_home: Path, session_id: str) -> tu
     mirror_head = policy_home / "ledger-heads" / f"{session_id}.head"
     verify_state = session_dir / "history.verify"
     return history_file, local_head, mirror_head, verify_state
+
+
+def _normalize_history_event(session_id: str, event: dict) -> dict:
+    parsed = session_cmds.validate_mst_session_id(session_id)
+    normalized = dict(event)
+    normalized.pop("session_id", None)
+    normalized["mst_session_id"] = parsed.mst_session_id
+    existing_root = normalized.get("root_mst_id")
+    if existing_root is not None and existing_root != parsed.root_mst_id:
+        raise ValueError("root_mst_id mismatch")
+    normalized["root_mst_id"] = parsed.root_mst_id
+    existing_schema = normalized.get("schema_version")
+    if existing_schema is not None and existing_schema != 1:
+        raise ValueError("schema_version mismatch")
+    normalized["schema_version"] = 1
+
+    event_type = normalized.get("event_type") or normalized.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        raise ValueError("event_type is required")
+    normalized["event_type"] = event_type.strip()
+
+    created_at = normalized.get("created_at") or normalized.get("timestamp")
+    if not isinstance(created_at, str) or not created_at.strip():
+        created_at = _utc_now()
+    normalized["created_at"] = created_at.strip()
+
+    idempotency_key = normalized.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        stable_event = {
+            key: value
+            for key, value in normalized.items()
+            if key not in {"timestamp", "created_at", "idempotency_key"}
+        }
+        stable_json = json.dumps(stable_event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        idempotency_key = f"{parsed.mst_session_id}:{normalized['event_type']}:{_sha256_text(stable_json)}"
+    normalized["idempotency_key"] = idempotency_key.strip()
+    return normalized
+
+
+def _history_has_idempotency_key(history_file: Path, idempotency_key: str) -> bool:
+    if not idempotency_key or not history_file.is_file():
+        return False
+    for line in history_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event = row.get("event") if isinstance(row, dict) else None
+        if isinstance(event, dict) and event.get("idempotency_key") == idempotency_key:
+            return True
+    return False
+
+
+def append_history_event(project_root: Path, policy_home: Path, session_id: str, event: dict) -> Path:
+    parsed = session_cmds.validate_mst_session_id(session_id)
+    history_file, local_head, mirror_head, verify_state = _history_paths(project_root, policy_home, parsed.mst_session_id)
+    diagnosis = _diagnose_ledger(history_file, local_head, mirror_head)
+    if not diagnosis.ok:
+        raise RuntimeError(f"cannot append event to unhealthy ledger: {diagnosis.reason}")
+    normalized = _normalize_history_event(parsed.mst_session_id, event)
+    if _history_has_idempotency_key(history_file, normalized["idempotency_key"]):
+        return history_file
+    event_hash = _sha256_text(diagnosis.last_valid_hash + "\n" + _canonical_event(normalized))
+    row = {
+        "schema_version": normalized["schema_version"],
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "event_type": normalized["event_type"],
+        "created_at": normalized["created_at"],
+        "idempotency_key": normalized["idempotency_key"],
+        "event": normalized,
+        "event_hash": event_hash,
+        "prev_hash": diagnosis.last_valid_hash,
+        "seq": diagnosis.last_valid_seq + 1,
+    }
+    for key in ("timestamp", "tool", "args_sha256"):
+        if key in normalized:
+            row[key] = normalized[key]
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    mirror_head.parent.mkdir(parents=True, exist_ok=True)
+    with history_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+    _write_heads(local_head, mirror_head, event_hash)
+    _write_verify_state(verify_state, event_hash, history_file, diagnosis.last_valid_seq + 1)
+    return history_file
+
+
+def _history_error(code: str, message: str, *, session_id: str | None = None, **details: object) -> HistoryValidationError:
+    payload = {key: value for key, value in details.items() if value is not None}
+    return HistoryValidationError(code, message, {"session_id": session_id, **payload} if session_id else payload)
+
+
+def _emit_history_error(error: HistoryValidationError, *, json_mode: bool) -> None:
+    payload = {
+        "status": "error",
+        "code": error.code,
+        "message": error.message,
+        **error.details,
+    }
+    if json_mode:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(f"{error.code}: {error.message}", file=sys.stderr)
+
+
+def _validate_history_session_id(raw_session_id: str) -> session_cmds.StructuredMstSessionId:
+    try:
+        return session_cmds.validate_mst_session_id(raw_session_id)
+    except session_cmds.MstSessionIdValidationError as exc:
+        raise _history_error("invalid_mst_session_id", str(exc), session_id=str(raw_session_id or "")) from exc
+
+
+def _require_hash(value: object, *, field: str, session_id: str, seq: int | None = None) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise _history_error(f"history_{field}_invalid", f"invalid {field}", session_id=session_id, seq=seq)
+    return value
+
+
+def _event_field(row: dict, event: dict, key: str) -> object:
+    if key in event:
+        return event.get(key)
+    return row.get(key)
+
+
+def _project_history_row(
+    row: dict,
+    event: dict,
+    *,
+    parsed: session_cmds.StructuredMstSessionId,
+    expected_seq: int,
+    expected_prev: str,
+    line_no: int,
+) -> dict:
+    session_id = parsed.mst_session_id
+    seq = row.get("seq")
+    if seq != expected_seq:
+        raise _history_error("history_seq_mismatch", "seq does not match chain order", session_id=session_id, line=line_no, expected_seq=expected_seq, actual_seq=seq)
+    prev_hash = _require_hash(row.get("prev_hash"), field="prev_hash", session_id=session_id, seq=expected_seq)
+    if prev_hash != expected_prev:
+        raise _history_error("history_prev_hash_mismatch", "prev_hash does not match previous event_hash", session_id=session_id, seq=expected_seq)
+    event_hash = _require_hash(row.get("event_hash"), field="event_hash", session_id=session_id, seq=expected_seq)
+    computed = _sha256_text(expected_prev + "\n" + _canonical_event(event))
+    if event_hash != computed:
+        raise _history_error("history_event_hash_mismatch", "event_hash does not match canonical event", session_id=session_id, seq=expected_seq)
+
+    row_session_id = row.get("mst_session_id")
+    if isinstance(row_session_id, str) and row_session_id and row_session_id != session_id:
+        raise _history_error("history_row_session_mismatch", "top-level mst_session_id does not match session key", session_id=session_id, seq=expected_seq)
+    event_session_id = _event_field(row, event, "mst_session_id")
+    if event_session_id != session_id:
+        raise _history_error("history_row_session_mismatch", "event mst_session_id does not match session key", session_id=session_id, seq=expected_seq)
+
+    root_mst_id = _event_field(row, event, "root_mst_id")
+    if root_mst_id != parsed.root_mst_id:
+        raise _history_error("history_row_root_mismatch", "event root_mst_id does not match mst_session_id root", session_id=session_id, seq=expected_seq)
+
+    schema_version = _event_field(row, event, "schema_version")
+    if schema_version != 1:
+        raise _history_error("history_schema_version_invalid", "schema_version must be 1", session_id=session_id, seq=expected_seq)
+
+    event_type = _event_field(row, event, "event_type") or event.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        raise _history_error("history_event_type_missing", "event_type is required", session_id=session_id, seq=expected_seq)
+    created_at = _event_field(row, event, "created_at") or event.get("timestamp") or row.get("timestamp")
+    if not isinstance(created_at, str) or not created_at.strip():
+        raise _history_error("history_created_at_missing", "created_at is required", session_id=session_id, seq=expected_seq)
+    idempotency_key = _event_field(row, event, "idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        raise _history_error("history_idempotency_key_missing", "idempotency_key is required", session_id=session_id, seq=expected_seq)
+
+    return {
+        "schema_version": schema_version,
+        "mst_session_id": session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "event_type": event_type,
+        "created_at": created_at,
+        "seq": expected_seq,
+        "prev_hash": prev_hash,
+        "event_hash": event_hash,
+        "idempotency_key": idempotency_key,
+    }
+
+
+def _read_verify_state(path: Path, *, session_id: str) -> dict:
+    if not path.exists():
+        raise _history_error("history_verify_missing", "history.verify is missing", session_id=session_id)
+    parts = path.read_text(encoding="utf-8").strip().split("\t")
+    if len(parts) != 3:
+        raise _history_error("history_verify_invalid", "history.verify must contain head, fingerprint, and seq", session_id=session_id)
+    head, fingerprint, raw_seq = parts
+    _require_hash(head, field="verify_head", session_id=session_id)
+    try:
+        seq = int(raw_seq)
+    except ValueError as exc:
+        raise _history_error("history_verify_invalid", "history.verify seq is not an integer", session_id=session_id) from exc
+    return {"event_hash": head, "fingerprint": fingerprint, "seq": seq}
+
+
+def _load_validated_history(
+    *,
+    project_root: Path,
+    policy_home: Path,
+    raw_session_id: str,
+    check_split: bool = True,
+) -> HistoryReadResult:
+    parsed = _validate_history_session_id(raw_session_id)
+    session_id = parsed.mst_session_id
+    history_file, local_head, mirror_head, verify_state = _history_paths(project_root, policy_home, session_id)
+    session_dir = history_file.parent
+    if not session_dir.is_dir():
+        raise _history_error("history_session_missing", "session directory is missing", session_id=session_id)
+    if not history_file.is_file():
+        raise _history_error("history_file_missing", "history.ndjson is missing", session_id=session_id)
+
+    expected_prev = ZERO_HASH
+    expected_seq = 1
+    raw_rows: list[dict] = []
+    projections: list[dict] = []
+    lines = history_file.read_text(encoding="utf-8").splitlines()
+    for line_no, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise _history_error("history_json_invalid", f"invalid JSON line {line_no}: {exc}", session_id=session_id, line=line_no) from exc
+        if not isinstance(row, dict):
+            raise _history_error("history_row_invalid", "history row must be a JSON object", session_id=session_id, line=line_no)
+        event = row.get("event")
+        if not isinstance(event, dict):
+            raise _history_error("history_event_invalid", "history row event must be a JSON object", session_id=session_id, line=line_no)
+        projection = _project_history_row(
+            row,
+            event,
+            parsed=parsed,
+            expected_seq=expected_seq,
+            expected_prev=expected_prev,
+            line_no=line_no,
+        )
+        raw = dict(row)
+        raw.setdefault("session_id", session_id)
+        raw_rows.append(raw)
+        projections.append(projection)
+        expected_prev = projection["event_hash"]
+        expected_seq += 1
+
+    if not projections:
+        raise _history_error("history_empty", "history.ndjson contains no events", session_id=session_id)
+
+    tail_hash = projections[-1]["event_hash"]
+    tail_seq = projections[-1]["seq"]
+    local_value = _read_head(local_head)
+    mirror_value = _read_head(mirror_head)
+    if local_value is None:
+        raise _history_error("history_head_missing", "local history.head is missing", session_id=session_id)
+    if mirror_value is None:
+        raise _history_error("history_mirror_head_missing", "policy mirror head is missing", session_id=session_id)
+    _require_hash(local_value, field="head", session_id=session_id)
+    _require_hash(mirror_value, field="mirror_head", session_id=session_id)
+    if local_value != tail_hash:
+        raise _history_error("history_head_mismatch", "local history.head does not match ledger tail", session_id=session_id, expected=tail_hash, actual=local_value)
+    if mirror_value != tail_hash:
+        raise _history_error("history_mirror_head_mismatch", "policy mirror head does not match ledger tail", session_id=session_id, expected=tail_hash, actual=mirror_value)
+
+    verify = _read_verify_state(verify_state, session_id=session_id)
+    if verify["event_hash"] != tail_hash:
+        raise _history_error("history_verify_mismatch", "history.verify head does not match ledger tail", session_id=session_id, expected=tail_hash, actual=verify["event_hash"])
+    current_fingerprint = _file_fingerprint(history_file)
+    if verify["fingerprint"] != current_fingerprint:
+        raise _history_error("history_verify_stale", "history.verify fingerprint does not match history.ndjson", session_id=session_id, expected=current_fingerprint, actual=verify["fingerprint"])
+    if verify["seq"] != tail_seq:
+        raise _history_error("history_verify_mismatch", "history.verify seq does not match ledger tail", session_id=session_id, expected=tail_seq, actual=verify["seq"])
+
+    result = HistoryReadResult(
+        session_id=session_id,
+        root_mst_id=parsed.root_mst_id,
+        history_file=history_file,
+        local_head=local_head,
+        mirror_head=mirror_head,
+        verify_state=verify_state,
+        rows=raw_rows,
+        projections=projections,
+        tail_hash=tail_hash,
+        tail_seq=tail_seq,
+        verify=verify,
+    )
+    if check_split:
+        _detect_split_ledger(project_root=project_root, policy_home=policy_home, result=result)
+    return result
+
+
+def _history_summary(result: HistoryReadResult) -> dict:
+    return {
+        "status": "ok",
+        "mst_session_id": result.session_id,
+        "root_mst_id": result.root_mst_id,
+        "tail": {"event_hash": result.tail_hash, "seq": result.tail_seq},
+        "local_head": {"path": str(result.local_head), "event_hash": _read_head(result.local_head)},
+        "mirror_head": {"path": str(result.mirror_head), "event_hash": _read_head(result.mirror_head)},
+        "verify": result.verify,
+        "history_path": str(result.history_file),
+    }
+
+
+def _history_str_field(row: dict, event: dict, *keys: str) -> str:
+    for key in keys:
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _history_flow_signatures(result: HistoryReadResult) -> set[tuple[str, ...]]:
+    signatures: set[tuple[str, ...]] = set()
+    for row in result.rows:
+        event = row.get("event")
+        if not isinstance(event, dict):
+            continue
+        flow_correlation_id = _history_str_field(row, event, "flow_correlation_id")
+        if flow_correlation_id:
+            signatures.add(("flow_correlation_id", result.root_mst_id, flow_correlation_id))
+        parent_session = _history_str_field(row, event, "parent_mst_session_id", "parent_session_id")
+        parent_invocation = _history_str_field(
+            row,
+            event,
+            "parent_invocation_id",
+            "parent_invocation",
+            "invocation_parent_id",
+        )
+        if parent_session and parent_invocation:
+            signatures.add(("parent_lineage", result.root_mst_id, parent_session, parent_invocation))
+    return signatures
+
+
+def _split_signature_details(signature: tuple[str, ...]) -> dict:
+    kind = signature[0]
+    if kind == "flow_correlation_id":
+        return {"flow_correlation_id": signature[2]}
+    if kind == "parent_lineage":
+        return {
+            "flow_correlation_id": ":".join(signature[1:]),
+            "parent_mst_session_id": signature[2],
+            "parent_invocation_id": signature[3],
+        }
+    return {"flow_correlation_id": ":".join(signature[1:])}
+
+
+def _detect_split_ledger(
+    *,
+    project_root: Path,
+    policy_home: Path,
+    result: HistoryReadResult,
+) -> None:
+    signatures = _history_flow_signatures(result)
+    if not signatures:
+        return
+    sessions_dir = _common.sessions_dir(project_root)
+    if not sessions_dir.is_dir():
+        return
+
+    split_sessions = {result.session_id}
+    matched_signature: tuple[str, ...] | None = None
+    for session_dir in sorted(path for path in sessions_dir.iterdir() if path.is_dir()):
+        if session_dir.name == result.session_id:
+            continue
+        try:
+            other = _load_validated_history(
+                project_root=project_root,
+                policy_home=policy_home,
+                raw_session_id=session_dir.name,
+                check_split=False,
+            )
+        except HistoryValidationError:
+            continue
+        if other.root_mst_id != result.root_mst_id:
+            continue
+        overlap = signatures & _history_flow_signatures(other)
+        if not overlap:
+            continue
+        matched_signature = sorted(overlap)[0]
+        split_sessions.add(other.session_id)
+
+    if len(split_sessions) > 1:
+        details = _split_signature_details(matched_signature or sorted(signatures)[0])
+        raise _history_error(
+            "history_split_ledger_violation",
+            "flow correlation is present in multiple mst_session_id ledgers",
+            session_id=result.session_id,
+            mst_session_id=result.session_id,
+            root_mst_id=result.root_mst_id,
+            split_sessions=sorted(split_sessions),
+            **details,
+        )
+
+
+def _print_history_log_table(rows: list[dict]) -> None:
+    print("seq | mst_session_id | root_mst_id | event_type | created_at | event_hash | idempotency_key")
+    for row in rows:
+        print(
+            " | ".join(
+                [
+                    str(row["seq"]),
+                    str(row["mst_session_id"]),
+                    str(row["root_mst_id"]),
+                    str(row["event_type"]),
+                    str(row["created_at"]),
+                    str(row["event_hash"]),
+                    str(row["idempotency_key"]),
+                ]
+            )
+        )
 
 
 def _read_head(path: Path) -> str | None:
@@ -319,28 +758,13 @@ def _backup_history(history_file: Path) -> Path:
 
 
 def _append_repair_event(project_root: Path, policy_home: Path, session_id: str, payload: dict) -> None:
-    history_file, local_head, mirror_head, verify_state = _history_paths(project_root, policy_home, session_id)
-    diagnosis = _diagnose_ledger(history_file, local_head, mirror_head)
-    if not diagnosis.ok:
-        raise RuntimeError(f"cannot append repair event to unhealthy ledger: {diagnosis.reason}")
     event = {
+        "event_type": "repair_executed",
         "type": "repair_executed",
-        "timestamp": _utc_now(),
+        "created_at": _utc_now(),
         **payload,
     }
-    event_hash = _sha256_text(diagnosis.last_valid_hash + "\n" + _canonical_event(event))
-    row = {
-        "event": event,
-        "event_hash": event_hash,
-        "prev_hash": diagnosis.last_valid_hash,
-        "seq": diagnosis.last_valid_seq + 1,
-        "timestamp": event["timestamp"],
-    }
-    history_file.parent.mkdir(parents=True, exist_ok=True)
-    with history_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
-    _write_heads(local_head, mirror_head, event_hash)
-    _write_verify_state(verify_state, event_hash, history_file, diagnosis.last_valid_seq + 1)
+    append_history_event(project_root, policy_home, session_id, event)
 
 
 def _repair_session(args: argparse.Namespace) -> int:
@@ -508,13 +932,29 @@ def cmd_hook_repair(args: argparse.Namespace) -> int:
 def cmd_hook_log(args: argparse.Namespace) -> int:
     sessions_dir = _common.BASE_DIR / "sessions"
     if args.session:
-        session_id = _sanitize_session_id(args.session)
-        rows = _read_session_history(sessions_dir / session_id)
+        try:
+            result = _load_validated_history(
+                project_root=_project_root(),
+                policy_home=_policy_home(),
+                raw_session_id=args.session,
+            )
+        except HistoryValidationError as exc:
+            _emit_history_error(exc, json_mode=bool(args.json))
+            return 2
+        rows = result.rows
     else:
         rows = []
         if sessions_dir.is_dir():
             for session_dir in sorted(path for path in sessions_dir.iterdir() if path.is_dir()):
-                rows.extend(_read_session_history(session_dir))
+                try:
+                    result = _load_validated_history(
+                        project_root=_project_root(),
+                        policy_home=_policy_home(),
+                        raw_session_id=session_dir.name,
+                    )
+                except HistoryValidationError:
+                    continue
+                rows.extend(result.rows)
 
     if args.type:
         rows = [row for row in rows if _event_type(row) == args.type]
@@ -531,6 +971,75 @@ def cmd_hook_log(args: argparse.Namespace) -> int:
             print(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     else:
         _print_hook_log_table(rows)
+    return 0
+
+
+def cmd_history_log(args: argparse.Namespace) -> int:
+    try:
+        result = _load_validated_history(
+            project_root=_project_root(),
+            policy_home=_policy_home(),
+            raw_session_id=args.session,
+        )
+    except HistoryValidationError as exc:
+        _emit_history_error(exc, json_mode=bool(args.json))
+        return 2
+
+    rows = sorted(result.projections, key=lambda row: row["seq"])
+    limit = max(0, int(args.limit))
+    if limit:
+        rows = rows[-limit:]
+    if args.json:
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        _print_history_log_table(rows)
+    return 0
+
+
+def cmd_history_verify(args: argparse.Namespace) -> int:
+    try:
+        result = _load_validated_history(
+            project_root=_project_root(),
+            policy_home=_policy_home(),
+            raw_session_id=args.session,
+        )
+    except HistoryValidationError as exc:
+        _emit_history_error(exc, json_mode=bool(args.json))
+        return 2
+
+    payload = _history_summary(result)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(f"ok session={result.session_id} seq={result.tail_seq} head={result.tail_hash}")
+    return 0
+
+
+def cmd_history_head(args: argparse.Namespace) -> int:
+    try:
+        result = _load_validated_history(
+            project_root=_project_root(),
+            policy_home=_policy_home(),
+            raw_session_id=args.session,
+        )
+    except HistoryValidationError as exc:
+        _emit_history_error(exc, json_mode=bool(args.json))
+        return 2
+
+    payload = {
+        "status": "ok",
+        "mst_session_id": result.session_id,
+        "root_mst_id": result.root_mst_id,
+        "head": {"event_hash": result.tail_hash, "seq": result.tail_seq},
+        "local_head": str(result.local_head),
+        "mirror_head": str(result.mirror_head),
+        "verify_state": str(result.verify_state),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(result.tail_hash)
     return 0
 
 
@@ -590,12 +1099,70 @@ def register(subparsers):
     repair.add_argument("--yes", action="store_true")
     repair.set_defaults(func=cmd_hook_repair)
 
-    log = hook_sub.add_parser("log")
-    log.add_argument("--session")
-    log.add_argument("--type")
-    log.add_argument("--limit", type=int, default=50)
-    log.add_argument("--json", action="store_true")
+    log = hook_sub.add_parser(
+        "log",
+        description=(
+            "Show hook event rows as a backward-compatible subset of canonical history. "
+            "DOD-005 source of truth is mst.py history log --session MST_SESSION_ID: "
+            "the single mst_session_id ledger under .gran-maestro/sessions/{mst_session_id}/history.*. "
+            "This command must not use PPID, Claude hook session_id, or global/default ledger fallback."
+        ),
+    )
+    log.add_argument("--session", help="Optional mst_session_id; when provided, read only that validated session ledger.")
+    log.add_argument("--type", help="Filter by hook event type.")
+    log.add_argument("--limit", type=int, default=50, help="Maximum rows to print; defaults to 50.")
+    log.add_argument("--json", action="store_true", help="Emit NDJSON rows.")
     log.set_defaults(func=cmd_hook_log)
+
+    history = subparsers.add_parser(
+        "history",
+        description=(
+            "Inspect the DOD-005 single history ledger keyed only by mst_session_id. "
+            "Queries validate append-only seq/prev_hash/event_hash rows, local history.head, "
+            "policy mirror head, and history.verify for the same session key; split-ledger "
+            "violations and legacy fallback inputs fail closed."
+        ),
+    )
+    history_sub = history.add_subparsers(dest="subcommand")
+
+    history_log = history_sub.add_parser(
+        "log",
+        description=(
+            "Read event rows from one .gran-maestro/sessions/{mst_session_id}/history.ndjson ledger. "
+            "Every returned row is read-time validated for schema_version, mst_session_id, root_mst_id, "
+            "event_type, created_at, seq, prev_hash, event_hash, and idempotency_key. "
+            "No PPID, Claude hook session_id, owner_session_id, global hook ledger, or default history fallback is used."
+        ),
+    )
+    history_log.add_argument("--session", required=True, help="Structured mst_session_id that selects the single canonical ledger.")
+    history_log.add_argument("--limit", type=int, default=0, help="Maximum rows to print; 0 prints all validated rows.")
+    history_log.add_argument("--json", action="store_true", help="Emit validated projection rows as NDJSON.")
+    history_log.set_defaults(func=cmd_history_log)
+
+    history_verify = history_sub.add_parser(
+        "verify",
+        description=(
+            "Verify append-only head state for one mst_session_id ledger. "
+            "The command compares the ledger tail seq/hash with local history.head, active policy mirror head, "
+            "and history.verify for the same session key, returning structured non-success for missing, stale, mismatch, "
+            "corrupt, or split-ledger violation states instead of repairing or falling back."
+        ),
+    )
+    history_verify.add_argument("--session", required=True, help="Structured mst_session_id whose ledger head/verify state is checked.")
+    history_verify.add_argument("--json", action="store_true", help="Emit the verification summary or error as JSON.")
+    history_verify.set_defaults(func=cmd_history_verify)
+
+    history_head = history_sub.add_parser(
+        "head",
+        description=(
+            "Show the append-only head for one mst_session_id ledger after validating history.ndjson, "
+            "local history.head, active policy mirror head, and history.verify. "
+            "The head is session-key scoped and never resolved through legacy process/session fallback."
+        ),
+    )
+    history_head.add_argument("--session", required=True, help="Structured mst_session_id whose canonical ledger head is shown.")
+    history_head.add_argument("--json", action="store_true", help="Emit the head summary or error as JSON.")
+    history_head.set_defaults(func=cmd_history_head)
 
     allow = hook_sub.add_parser("allow")
     allow.add_argument("tool", nargs="?")

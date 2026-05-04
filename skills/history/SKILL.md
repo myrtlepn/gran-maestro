@@ -9,6 +9,20 @@ argument-hint: "[{REQ-ID}] [--limit {N}]"
 
 완료된 요청의 이력을 조회합니다 (요약, 소요 시간, 에이전트 사용량, 피드백 라운드 수 등).
 
+## DOD-005 session ledger contract
+
+`/mst:history`는 완료된 요청 이력 조회 스킬이고, 실행 중 PM flow의 event source of truth는
+`python3 {PLUGIN_ROOT}/scripts/mst.py history log|verify|head --session {mst_session_id}`입니다.
+이 CLI는 `.gran-maestro/sessions/{mst_session_id}/history.*` 단일 ledger만 조회하며,
+`mst_session_id` 단위 event row, append-only `history.head`/`history.verify`, split-ledger violation,
+no legacy fallback 원칙을 공유합니다.
+
+- `mst.py history log --session {mst_session_id}`: 같은 session ledger의 검증된 event row를 seq 순서로 조회합니다.
+- `mst.py history verify --session {mst_session_id}`: ledger tail, local head, policy mirror head, verify state를 같은 session key로 대조합니다.
+- `mst.py history head --session {mst_session_id}`: 검증된 append-only head를 표시합니다.
+- `mst.py hook log`는 hook event 확인용 backward-compatible subset입니다. canonical query는 `mst.py history ... --session`입니다.
+- DOD-005는 event row 조회와 head/verify 관찰 가능성까지만 포함합니다. DOD-006 recover bundle restoration과 DOD-017 dashboard/execution-flow projection 완료를 암시하지 않습니다.
+
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->

@@ -24,6 +24,10 @@ mst_history_session_dir() {
 
 mst_history_heads_dir() {
   local claude_home
+  if [ -n "${MST_POLICY_HOME:-}" ]; then
+    printf '%s/ledger-heads\n' "$MST_POLICY_HOME"
+    return 0
+  fi
   claude_home="${MST_CLAUDE_HOME:-${HOME:-}}"
   [ -n "$claude_home" ] || return 1
   printf '%s/.claude/gran-maestro-policy/ledger-heads\n' "$claude_home"
@@ -105,7 +109,13 @@ mst_history_file_fingerprint() {
     printf 'missing\n'
     return 0
   fi
-  stat -f '%z:%m:%i' "$path" 2>/dev/null || return 1
+  python3 - "$path" <<'PY'
+import sys
+from pathlib import Path
+
+stat = Path(sys.argv[1]).stat()
+print(f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}")
+PY
 }
 
 mst_history_last_nonempty_line() {
@@ -207,6 +217,35 @@ mst_history_current_seq() {
     return 0
   fi
   printf '0\n'
+}
+
+mst_history_has_idempotency_key() {
+  local history_file="$1" idempotency_key="$2"
+  [ -n "${idempotency_key:-}" ] || return 1
+  [ -f "$history_file" ] || return 1
+  python3 - "$history_file" "$idempotency_key" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+history_path = Path(sys.argv[1])
+target = sys.argv[2]
+try:
+    lines = history_path.read_text(encoding="utf-8").splitlines()
+except Exception:
+    raise SystemExit(1)
+for line in lines:
+    if not line.strip():
+        continue
+    try:
+        row = json.loads(line)
+    except Exception:
+        continue
+    event = row.get("event") if isinstance(row, dict) else None
+    if isinstance(event, dict) and event.get("idempotency_key") == target:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
 }
 
 mst_history_locked_state_matches_token() {
@@ -323,55 +362,10 @@ if has_entries and local_head == zero_hash:
 if has_entries and mirror_head == zero_hash:
     fail("home mirror head")
 
-def head_within_ndjson(head, last_hash, history_path):
-    if head is None or head == last_hash:
-        return True
-    if head == zero_hash:
-        return True
-    if not history_path.exists():
-        return False
-    with history_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(row, dict) and row.get("event_hash") == head:
-                return True
-    return False
-
-if local_head is not None and not head_within_ndjson(local_head, last_hash, history_path):
-    fail("self-heal failed: head ahead of ndjson last_hash")
-if mirror_head is not None and not head_within_ndjson(mirror_head, last_hash, history_path):
-    fail("self-heal failed: head ahead of ndjson last_hash")
-
-if (
-    last_hash != zero_hash
-    and (
-        local_head is not None
-        and local_head != last_hash
-        or mirror_head is not None
-        and mirror_head != last_hash
-    )
-):
-    prev_local = local_head or zero_hash
-    prev_mirror = mirror_head or zero_hash
-    targets = []
-    if mirror_head != last_hash:
-        mirror_head_path.write_text(last_hash + "\n", encoding="utf-8")
-        targets.append("mirror")
-    if local_head != last_hash:
-        local_head_path.write_text(last_hash + "\n", encoding="utf-8")
-        targets.append("local")
-    print(
-        f"[mst-history-self-heal] session={session_id} restored={last_hash[:12]} "
-        f"targets={','.join(targets)} prev_local={prev_local[:12]} prev_mirror={prev_mirror[:12]}",
-        file=sys.stderr,
-        flush=True,
-    )
+if local_head is not None and local_head != last_hash:
+    fail("history.head")
+if mirror_head is not None and mirror_head != last_hash:
+    fail("home mirror head")
 PY
   if [ "$?" -eq 0 ]; then
     mst_history_write_verify_state \
@@ -432,13 +426,44 @@ mst_history_next_row() {
 import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 
 seq = int(sys.argv[1])
 prev_hash = sys.argv[2]
 event = json.loads(sys.argv[3])
 session_id = sys.argv[4]
+parts = session_id.rsplit("-", 2)
+if len(parts) != 3 or not parts[0].startswith("MST-"):
+    raise SystemExit("history ledger mismatch: invalid structured mst_session_id")
+root_mst_id = parts[0][4:]
 event.pop("session_id", None)
 event["mst_session_id"] = session_id
+existing_root = event.get("root_mst_id")
+if existing_root is not None and existing_root != root_mst_id:
+    raise SystemExit("history ledger mismatch: root_mst_id")
+event["root_mst_id"] = root_mst_id
+existing_schema = event.get("schema_version")
+if existing_schema is not None and existing_schema != 1:
+    raise SystemExit("history ledger mismatch: schema_version")
+event["schema_version"] = 1
+event_type = event.get("event_type") or event.get("type")
+if not isinstance(event_type, str) or not event_type.strip():
+    raise SystemExit("history ledger mismatch: event_type")
+event["event_type"] = event_type.strip()
+created_at = event.get("created_at") or event.get("timestamp")
+if not isinstance(created_at, str) or not created_at.strip():
+    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+event["created_at"] = created_at.strip()
+idempotency_key = event.get("idempotency_key")
+if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+    stable_event = {
+        key: value
+        for key, value in event.items()
+        if key not in {"timestamp", "created_at", "idempotency_key"}
+    }
+    stable_json = json.dumps(stable_event, sort_keys=True, separators=(",", ":"))
+    idempotency_key = f"{session_id}:{event['event_type']}:{hashlib.sha256(stable_json.encode('utf-8')).hexdigest()}"
+event["idempotency_key"] = idempotency_key.strip()
 canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
 event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
 row = {
@@ -448,7 +473,7 @@ row = {
     "event": event,
     "mst_session_id": session_id,
 }
-for key in ("tool", "args_sha256", "timestamp"):
+for key in ("schema_version", "root_mst_id", "event_type", "created_at", "idempotency_key", "tool", "args_sha256", "timestamp"):
     if key in event:
         row[key] = event[key]
 print(json.dumps(row, sort_keys=True, separators=(",", ":")))
@@ -458,7 +483,7 @@ PY
 # Write order: ndjson(append-only ledger) -> mirror_head(global index) -> local_head(commit point). 부분 실패는 항상 local <= mirror <= ndjson_last_hash로 수렴.
 mst_history_append_event() {
   local project_root="$1" session_id="$2" event_json="$3"
-  local session_dir history_file local_head mirror_head heads_dir lock prev_hash row event_hash seq status
+  local session_dir history_file local_head mirror_head heads_dir lock prev_hash row event_hash seq status idempotency_key
 
   [ -n "${session_id:-}" ] || return 0
   session_id="$(mst_history_sanitize_session_id "$session_id")" || {
@@ -499,6 +524,11 @@ mst_history_append_event() {
   if [ "$status" -ne 0 ]; then
     mst_history_release_lock "$lock"
     return "$status"
+  fi
+  idempotency_key="$(mst_history_extract_json_string "idempotency_key" "$row")"
+  if mst_history_has_idempotency_key "$history_file" "$idempotency_key"; then
+    mst_history_release_lock "$lock"
+    return 0
   fi
 
   printf '%s\n' "$row" >> "$history_file" || {
@@ -571,15 +601,46 @@ mst_history_append_events_batch() {
 import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 
 prev_hash = sys.argv[1]
 seq = int(sys.argv[2])
 session_id = sys.argv[3]
+parts = session_id.rsplit("-", 2)
+if len(parts) != 3 or not parts[0].startswith("MST-"):
+    raise SystemExit("history ledger mismatch: invalid structured mst_session_id")
+root_mst_id = parts[0][4:]
 
 for raw_event in sys.argv[4:]:
     event = json.loads(raw_event)
     event.pop("session_id", None)
     event["mst_session_id"] = session_id
+    existing_root = event.get("root_mst_id")
+    if existing_root is not None and existing_root != root_mst_id:
+        raise SystemExit("history ledger mismatch: root_mst_id")
+    event["root_mst_id"] = root_mst_id
+    existing_schema = event.get("schema_version")
+    if existing_schema is not None and existing_schema != 1:
+        raise SystemExit("history ledger mismatch: schema_version")
+    event["schema_version"] = 1
+    event_type = event.get("event_type") or event.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        raise SystemExit("history ledger mismatch: event_type")
+    event["event_type"] = event_type.strip()
+    created_at = event.get("created_at") or event.get("timestamp")
+    if not isinstance(created_at, str) or not created_at.strip():
+        created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    event["created_at"] = created_at.strip()
+    idempotency_key = event.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        stable_event = {
+            key: value
+            for key, value in event.items()
+            if key not in {"timestamp", "created_at", "idempotency_key"}
+        }
+        stable_json = json.dumps(stable_event, sort_keys=True, separators=(",", ":"))
+        idempotency_key = f"{session_id}:{event['event_type']}:{hashlib.sha256(stable_json.encode('utf-8')).hexdigest()}"
+    event["idempotency_key"] = idempotency_key.strip()
     canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
     event_hash = hashlib.sha256((prev_hash + "\n" + canonical_event).encode("utf-8")).hexdigest()
     seq += 1
@@ -590,7 +651,7 @@ for raw_event in sys.argv[4:]:
         "event": event,
         "mst_session_id": session_id,
     }
-    for key in ("tool", "args_sha256", "timestamp"):
+    for key in ("schema_version", "root_mst_id", "event_type", "created_at", "idempotency_key", "tool", "args_sha256", "timestamp"):
         if key in event:
             row[key] = event[key]
     print(json.dumps(row, sort_keys=True, separators=(",", ":")))
@@ -694,7 +755,7 @@ PY
 # Write order: ndjson(append-only ledger) -> mirror_head(global index) -> local_head(commit point). 부분 실패는 항상 local <= mirror <= ndjson_last_hash로 수렴.
 mst_history_append_tool_call() {
   local project_root="$1" session_id="$2" stdin_raw="$3"
-  local session_dir history_file local_head mirror_head heads_dir lock prev_hash event_json event_hash row status
+  local session_dir history_file local_head mirror_head heads_dir lock prev_hash event_json event_hash row status idempotency_key
   local timestamp args_json args_sha tool tool_escaped
   [ -n "${session_id:-}" ] || return 0
   session_id="$(mst_history_sanitize_session_id "$session_id")" || {
@@ -771,6 +832,11 @@ PY
   }
   status="$(mst_history_extract_json_number "seq" "$row")"
   [ -n "$status" ] || status="$(mst_history_current_seq "$history_file" "$session_id")"
+  idempotency_key="$(mst_history_extract_json_string "idempotency_key" "$row")"
+  if mst_history_has_idempotency_key "$history_file" "$idempotency_key"; then
+    mst_history_release_lock "$lock"
+    return 0
+  fi
 
   printf '%s\n' "$row" >> "$history_file" || {
     mst_history_release_lock "$lock"

@@ -28,3 +28,15 @@ def test_plugin_manifest_hooks_file_exposes_expected_events() -> None:
 
     assert hooks_path == HOOKS_JSON
     assert set(hooks_payload["hooks"]) == EXPECTED_HOOK_EVENTS
+
+
+def main() -> int:
+    test_plugin_manifest_declares_hooks_file()
+    print("PASS test_plugin_manifest_declares_hooks_file")
+    test_plugin_manifest_hooks_file_exposes_expected_events()
+    print("PASS test_plugin_manifest_hooks_file_exposes_expected_events")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
