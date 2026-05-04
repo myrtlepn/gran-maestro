@@ -17,6 +17,7 @@ STALE_SESSION_ID = "MST-REQ-807-20260503T131853000Z-r4n8vd1c"
 CLAUDE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 TRANSCRIPT_SESSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 UUID_V4_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b")
+RESOURCE_IDS = {"AGI-030", "PLN-638", "REQ-811"}
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -69,7 +70,16 @@ def _run_mst(workspace: Path, *args: str, env: dict[str, str] | None = None) -> 
 def _parent_env() -> dict[str, str]:
     return {
         "MST_SESSION_ID": PARENT_SESSION_ID,
-        "MST_CONTEXT_JSON": json.dumps({"mst_session_id": PARENT_SESSION_ID, "preserve": "yes"}),
+        "MST_CONTEXT_JSON": json.dumps(
+            {
+                "schema_version": 1,
+                "mst_session_id": PARENT_SESSION_ID,
+                "root_mst_id": "AGI-030",
+                "resource_id": "REQ-811",
+                "plan_id": "PLN-638",
+                "preserve": "yes",
+            }
+        ),
         "MST_STATE_PPID": "424242",
     }
 
@@ -93,6 +103,11 @@ def _assert_canonical_payload(payload: dict) -> None:
     assert payload["schema_version"] == 1
     assert payload["mst_session_id"] == PARENT_SESSION_ID
     assert payload["root_mst_id"] == "AGI-030"
+
+
+def _assert_resource_ids_are_not_session_identity(values: set[str]) -> None:
+    assert PARENT_SESSION_ID in values
+    assert values.isdisjoint(RESOURCE_IDS)
 
 
 def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
@@ -151,7 +166,13 @@ def test_state_set_and_set_workflow_create_only_parent_keyed_artifacts() -> None
         )
         _assert_canonical_payload(snapshot_payload)
         _assert_canonical_payload(workflow_payload)
+        _assert_resource_ids_are_not_session_identity(
+            {snapshot_payload["mst_session_id"], workflow_payload["mst_session_id"]}
+        )
         assert not (workspace / ".gran-maestro" / "state" / "424242").exists()
+        for resource_id in RESOURCE_IDS:
+            assert not (workspace / ".gran-maestro" / "state" / resource_id).exists()
+            assert not (workspace / ".gran-maestro" / "tmp" / f"mst-state-{resource_id}.json").exists()
         assert not (workspace / ".gran-maestro" / "tmp" / "mst-state-424242.json").exists()
         assert not (workspace / ".gran-maestro" / "state" / "default").exists()
 
@@ -211,6 +232,13 @@ def test_dispatch_register_and_heartbeat_keep_single_canonical_parent_session() 
             marker_payload["session_id"],
         }
         assert canonical == {PARENT_SESSION_ID}
+        _assert_resource_ids_are_not_session_identity(canonical)
+        assert register_payload["root_mst_id"] == "AGI-030"
+        assert heartbeat_payload["root_mst_id"] == "AGI-030"
+        assert run_payload["root_mst_id"] == "AGI-030"
+        for resource_id in RESOURCE_IDS:
+            assert not (workspace / ".gran-maestro" / "run" / f"{resource_id}.json").exists()
+            assert not (workspace / ".gran-maestro" / "active-flow" / f"{resource_id}.json").exists()
 
 
 def test_missing_parent_with_legacy_only_env_fails_without_new_session_artifacts() -> None:

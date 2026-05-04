@@ -18,6 +18,7 @@ STALE_SESSION_ID = "MST-REQ-807-20260503T131853000Z-r4n8vd1c"
 CLAUDE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 TRANSCRIPT_SESSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 UUID_V4_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b")
+RESOURCE_IDS = {"AGI-030", "PLN-638", "REQ-811"}
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -110,11 +111,22 @@ def _read_non_success_payload(result: subprocess.CompletedProcess[str]) -> dict:
     return payload
 
 
+def _assert_resource_ids_are_not_session_identity(values: set[str]) -> None:
+    assert PARENT_SESSION_ID in values
+    assert values.isdisjoint(RESOURCE_IDS)
+
+
 def test_parent_env_context_run_payload_and_active_marker_keep_exact_session_id() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
-        context = {"mst_session_id": PARENT_SESSION_ID, "unrelated": {"keep": True}}
+        context = {
+            "mst_session_id": PARENT_SESSION_ID,
+            "root_mst_id": "AGI-030",
+            "resource_id": "REQ-811",
+            "plan_id": "PLN-638",
+            "unrelated": {"keep": True},
+        }
         env = {
             "MST_SESSION_ID": PARENT_SESSION_ID,
             "MST_CONTEXT_JSON": json.dumps(context, separators=(",", ":")),
@@ -142,10 +154,14 @@ def test_parent_env_context_run_payload_and_active_marker_keep_exact_session_id(
             active_marker["session_id"],
         }
         assert observed == {PARENT_SESSION_ID}
+        _assert_resource_ids_are_not_session_identity(observed)
+        assert json.loads(env["MST_CONTEXT_JSON"])["resource_id"] == "REQ-811"
+        assert stdout_payload["root_mst_id"] == "AGI-030"
+        assert run_payload["root_mst_id"] == "AGI-030"
         assert run_payload["started_by_pid"] == 424242
 
 
-def test_workflow_child_invocation_inherits_parent_context_and_preserves_unrelated_keys() -> None:
+def test_workflow_child_invocation_propagates_mst_session_id_and_does_not_treat_resource_id_as_session_identity() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
@@ -172,7 +188,24 @@ def test_workflow_child_invocation_inherits_parent_context_and_preserves_unrelat
                         "MST_SESSION_ID": PARENT_SESSION_ID,
                         "MST_CONTEXT_JSON": json.dumps(
                             {
+                                "schema_version": 1,
                                 "mst_session_id": PARENT_SESSION_ID,
+                                "root_mst_id": "AGI-030",
+                                "resource_id": "REQ-811",
+                                "plan_id": "PLN-638",
+                                "next_action": {"source_id": "REQ-811", "resource_id": "PLN-638"},
+                                "core_rehydration": {
+                                    "schema_version": 1,
+                                    "mst_session_id": PARENT_SESSION_ID,
+                                    "root_mst_id": "AGI-030",
+                                    "next_execution": {
+                                        "env": {"MST_SESSION_ID": PARENT_SESSION_ID, "RESOURCE_ID": "REQ-811"},
+                                        "context": {
+                                            "mst_session_id": PARENT_SESSION_ID,
+                                            "resource_id": "REQ-811",
+                                        },
+                                    },
+                                },
                                 "unrelated": {"keep": "value"},
                                 "list_key": [1, 2, 3],
                             }
@@ -195,6 +228,23 @@ def test_workflow_child_invocation_inherits_parent_context_and_preserves_unrelat
         child_context = json.loads(child_env["MST_CONTEXT_JSON"])
         assert child_env["MST_SESSION_ID"] == PARENT_SESSION_ID
         assert child_context["mst_session_id"] == PARENT_SESSION_ID
+        assert child_context["root_mst_id"] == "AGI-030"
+        assert child_context["resource_id"] == "REQ-811"
+        assert child_context["plan_id"] == "PLN-638"
+        assert child_context["next_action"]["source_id"] == "REQ-811"
+        assert child_context["next_action"]["resource_id"] == "PLN-638"
+        next_execution = child_context["core_rehydration"]["next_execution"]
+        assert next_execution["env"]["MST_SESSION_ID"] == PARENT_SESSION_ID
+        assert next_execution["context"]["mst_session_id"] == PARENT_SESSION_ID
+        _assert_resource_ids_are_not_session_identity(
+            {
+                child_env["MST_SESSION_ID"],
+                child_context["mst_session_id"],
+                child_context["core_rehydration"]["mst_session_id"],
+                next_execution["env"]["MST_SESSION_ID"],
+                next_execution["context"]["mst_session_id"],
+            }
+        )
         assert child_context["unrelated"] == {"keep": "value"}
         assert child_context["list_key"] == [1, 2, 3]
 
@@ -276,7 +326,7 @@ def test_workflow_env_context_mismatch_fails_closed_without_invoking_child_provi
 def main() -> int:
     tests = [
         test_parent_env_context_run_payload_and_active_marker_keep_exact_session_id,
-        test_workflow_child_invocation_inherits_parent_context_and_preserves_unrelated_keys,
+        test_workflow_child_invocation_propagates_mst_session_id_and_does_not_treat_resource_id_as_session_identity,
         test_missing_parent_with_legacy_metadata_fails_closed_without_generated_fallback,
         test_workflow_env_context_mismatch_fails_closed_without_invoking_child_provider,
     ]

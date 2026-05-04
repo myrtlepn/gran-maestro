@@ -101,6 +101,8 @@ def test_snapshot_write_enforces_canonical_path_and_payload_boundary() -> None:
 
         assert result.returncode == 0, result.stderr
         snapshot_path = workspace / ".gran-maestro" / "state" / ROOT_SESSION_ID / "snapshot.json"
+        assert snapshot_path.relative_to(workspace / ".gran-maestro") == Path("state") / ROOT_SESSION_ID / "snapshot.json"
+        assert list((workspace / ".gran-maestro" / "state").iterdir()) == [workspace / ".gran-maestro" / "state" / ROOT_SESSION_ID]
         payload = _read_json(snapshot_path)
         assert payload["schema_version"] == 1
         assert payload["mst_session_id"] == ROOT_SESSION_ID
@@ -115,6 +117,7 @@ def test_snapshot_write_enforces_canonical_path_and_payload_boundary() -> None:
         assert payload["continuation"]["stack_depth"] == 0
         assert payload["legacy_diagnostics"]["MST_STATE_PPID"] == LEGACY_PPID
         assert payload["legacy_diagnostics"]["MST_SNAPSHOT_SESSION_ID"] == "legacy-snapshot-alias"
+        assert "session_id" not in payload
         assert "owner_ppid" not in payload
         assert "owner_session_id" not in payload
         assert not (workspace / ".gran-maestro" / "state" / LEGACY_PPID).exists()

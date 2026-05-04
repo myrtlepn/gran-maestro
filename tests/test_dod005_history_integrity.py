@@ -99,6 +99,31 @@ def test_history_verify_and_head_return_matching_tail() -> None:
         assert head_payload["head"]["seq"] == 2
 
 
+def test_history_ledger_files_share_mst_session_id_namespace() -> None:
+    with _workspace() as raw:
+        workspace = Path(raw)
+        policy_home = workspace / "policy"
+        history_file, tail = _seed(workspace, policy_home)
+        session_dir = workspace / ".gran-maestro" / "sessions" / SID
+        local_head = session_dir / "history.head"
+        local_verify = session_dir / "history.verify"
+        mirror_head = policy_home / "ledger-heads" / f"{SID}.head"
+
+        assert history_file.relative_to(workspace / ".gran-maestro") == Path("sessions") / SID / "history.ndjson"
+        assert local_head.relative_to(workspace / ".gran-maestro") == Path("sessions") / SID / "history.head"
+        assert local_verify.relative_to(workspace / ".gran-maestro") == Path("sessions") / SID / "history.verify"
+        assert mirror_head.name == f"{SID}.head"
+        assert local_head.read_text(encoding="utf-8").strip() == tail
+        assert mirror_head.read_text(encoding="utf-8").strip() == tail
+        assert local_verify.read_text(encoding="utf-8").split("\t", 1)[0] == tail
+        assert not (workspace / ".gran-maestro" / "sessions" / ROOT).exists()
+        assert not (policy_home / "ledger-heads" / f"{ROOT}.head").exists()
+        for raw_line in history_file.read_text(encoding="utf-8").splitlines():
+            row = json.loads(raw_line)
+            assert row["mst_session_id"] == SID
+            assert row["event"]["mst_session_id"] == SID
+
+
 def test_history_verify_reports_mirror_head_mismatch_without_repair() -> None:
     with _workspace() as raw:
         workspace = Path(raw)
@@ -166,6 +191,7 @@ def test_bash_verify_reports_head_mismatch_without_self_heal() -> None:
 def main() -> int:
     for test in (
         test_history_verify_and_head_return_matching_tail,
+        test_history_ledger_files_share_mst_session_id_namespace,
         test_history_verify_reports_mirror_head_mismatch_without_repair,
         test_history_head_reports_missing_verify_state,
         test_bash_verify_reports_head_mismatch_without_self_heal,

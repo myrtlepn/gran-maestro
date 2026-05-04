@@ -199,9 +199,17 @@ def test_valid_recover_restores_rehydration_envelope_and_next_execution_context(
         history = envelope["history"]
         assert history.get("head_hash") or history.get("last_event_id")
         assert head in {history.get("head_hash"), history.get("last_event_id")}
-        assert envelope["next_execution"]["env"]["MST_SESSION_ID"] == SID
+        assert Path(history["path"]).resolve().relative_to((workspace / ".gran-maestro").resolve()) == Path("sessions") / SID / "history.ndjson"
+        assert envelope["next_execution"]["env"] == {"MST_SESSION_ID": SID}
         assert envelope["next_execution"]["context"]["mst_session_id"] == SID
-        assert envelope["source_precedence"][0] == "validated_history_ledger"
+        assert envelope["next_execution"]["context"]["root_mst_id"] == ROOT
+        assert "prompt_summary" not in envelope["next_execution"]["context"]
+        assert envelope["source_precedence"] == [
+            "validated_history_ledger",
+            "validated_state_snapshot",
+            "prompt_summary_diagnostic_only",
+        ]
+        assert all("legacy" not in source and "process" not in source for source in envelope["source_precedence"])
         assert envelope["prompt_summary_used_as_source"] is False
 
 

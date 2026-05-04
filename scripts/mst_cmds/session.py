@@ -230,6 +230,7 @@ def mst_session_metadata(parsed: StructuredMstSessionId) -> dict:
         "mst_session_id": parsed.mst_session_id,
         "root_mst_id": parsed.root_mst_id,
         "started_at": format_mst_session_started_at_iso(parsed.started_at),
+        "started_at_compact": parsed.started_at_compact,
         "random": parsed.random,
     }
 

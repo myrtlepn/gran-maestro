@@ -20,6 +20,7 @@ CLAUDE_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 TRANSCRIPT_SESSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 LEGACY_PPID = "818181"
 UUID_V4_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b")
+RESOURCE_IDS = {"AGI-030", "PLN-638", "REQ-811"}
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -112,6 +113,9 @@ def _parent_payload(event_name: str) -> dict:
     payload = {
         "hook_event_name": event_name,
         "mst_session_id": PARENT_SESSION_ID,
+        "root_mst_id": "AGI-030",
+        "resource_id": "REQ-811",
+        "plan_id": "PLN-638",
         "session_id": CLAUDE_SESSION_ID,
         "transcript_path": f"/tmp/{TRANSCRIPT_SESSION_ID}.jsonl",
         "owner_ppid": int(LEGACY_PPID),
@@ -135,6 +139,11 @@ def _identity_paths(workspace: Path) -> set[str]:
         if rel.startswith(prefixes) or rel.startswith("tmp/mst-state-"):
             paths.add(rel)
     return paths
+
+
+def _assert_no_resource_or_diagnostic_identity_paths(paths: set[str]) -> None:
+    forbidden = RESOURCE_IDS | {CLAUDE_SESSION_ID, TRANSCRIPT_SESSION_ID, LEGACY_PPID, "default"}
+    assert not any(any(value in path for value in forbidden) for path in paths)
 
 
 def test_session_start_pretool_stop_and_user_prompt_keep_parent_structured_session() -> None:
@@ -187,8 +196,10 @@ def test_session_start_pretool_stop_and_user_prompt_keep_parent_structured_sessi
         assert any(path.startswith(f"sessions/{PARENT_SESSION_ID}/") for path in identity_paths)
         assert f"state/{PARENT_SESSION_ID}/snapshot.json" in identity_paths
         assert f"tmp/mst-state-{PARENT_SESSION_ID}.json" in identity_paths
-        assert not any(CLAUDE_SESSION_ID in path or TRANSCRIPT_SESSION_ID in path for path in identity_paths)
-        assert not any(LEGACY_PPID in path or "/default/" in f"/{path}/" for path in identity_paths)
+        assert f"sessions/{PARENT_SESSION_ID}/history.ndjson" in identity_paths
+        _assert_no_resource_or_diagnostic_identity_paths(
+            {path for path in identity_paths if PARENT_SESSION_ID not in path}
+        )
 
 
 def test_claude_session_transcript_ppid_and_owner_metadata_are_diagnostic_only() -> None:
@@ -217,6 +228,7 @@ def test_claude_session_transcript_ppid_and_owner_metadata_are_diagnostic_only()
         assert result.returncode == 0, result.stderr
         assert _identity_paths(workspace) == before
         assert not UUID_V4_RE.search(combined)
+        _assert_no_resource_or_diagnostic_identity_paths(_identity_paths(workspace))
         assert not (workspace / ".gran-maestro" / "sessions" / CLAUDE_SESSION_ID).exists()
         assert not (workspace / ".gran-maestro" / "sessions" / TRANSCRIPT_SESSION_ID).exists()
         assert not (workspace / ".gran-maestro" / "state" / LEGACY_PPID).exists()
@@ -247,6 +259,7 @@ def test_missing_parent_hooks_produce_no_uuid_default_or_ppid_identity_mutation(
         assert session_start.returncode == 0, session_start.stderr
         assert stop.returncode == 0, stop.stderr
         assert _identity_paths(workspace) == before
+        _assert_no_resource_or_diagnostic_identity_paths(_identity_paths(workspace))
         assert not (workspace / ".gran-maestro" / "sessions" / CLAUDE_SESSION_ID).exists()
         assert not (workspace / ".gran-maestro" / "sessions" / TRANSCRIPT_SESSION_ID).exists()
         assert not (workspace / ".gran-maestro" / "state" / "default").exists()

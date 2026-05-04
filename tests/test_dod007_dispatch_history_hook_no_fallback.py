@@ -18,6 +18,8 @@ SID = "MST-AGI-030-20260504T170000000Z-dod007h1"
 OTHER_SID = "MST-AGI-030-20260504T170000000Z-dod007h2"
 LEGACY_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 TRANSCRIPT_UUID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+LEGACY_PPID = "818181"
+RESOURCE_IDS = {"AGI-030", "PLN-638", "REQ-811"}
 
 
 def _workspace() -> tempfile.TemporaryDirectory[str]:
@@ -41,8 +43,10 @@ def _legacy_payload(*, mst_session_id: str | None = None) -> dict:
         "session_id": LEGACY_UUID,
         "sessionId": "legacy-sessionId-alias",
         "transcript_path": f"/tmp/{TRANSCRIPT_UUID}.jsonl",
-        "owner_ppid": 818181,
+        "owner_ppid": int(LEGACY_PPID),
         "owner_session_id": "legacy-owner-session",
+        "resource_id": "REQ-811",
+        "plan_id": "PLN-638",
     }
     if mst_session_id is not None:
         payload["mst_session_id"] = mst_session_id
@@ -57,7 +61,7 @@ def _env(workspace: Path, extra: dict[str, str] | None = None, *, payload: dict 
     env["MST_POLICY_HOME"] = str(workspace / "policy")
     env["CLAUDE_CONFIG_DIR"] = str(workspace / "home" / ".claude")
     env["CLAUDE_CODE_SESSION_ID"] = LEGACY_UUID
-    env["MST_STATE_PPID"] = "818181"
+    env["MST_STATE_PPID"] = LEGACY_PPID
     env["MST_HOOK_STDIN_RAW"] = json.dumps(payload or _legacy_payload(), separators=(",", ":"))
     env.pop("MST_SESSION_ID", None)
     env.pop("MST_CONTEXT_JSON", None)
@@ -103,6 +107,16 @@ def _read_json_from_stdout(stdout: str) -> dict:
     raise AssertionError(f"stdout did not contain JSON object:\n{stdout}")
 
 
+def _assert_no_resource_or_diagnostic_identity_artifacts(base: Path, policy_home: Path) -> None:
+    forbidden = RESOURCE_IDS | {LEGACY_UUID, TRANSCRIPT_UUID, LEGACY_PPID, "legacy-sessionId-alias", "default"}
+    for value in forbidden:
+        assert not (base / "sessions" / value).exists()
+        assert not (base / "state" / value).exists()
+        assert not (base / "run" / f"{value}.json").exists()
+        assert not (base / "active-flow" / f"{value}.json").exists()
+        assert not (policy_home / "ledger-heads" / f"{value}.head").exists()
+
+
 def test_dispatch_legacy_only_register_and_heartbeat_are_no_mutation_non_success() -> None:
     with _workspace() as raw:
         workspace = Path(raw)
@@ -127,7 +141,7 @@ def test_dispatch_legacy_only_register_and_heartbeat_are_no_mutation_non_success
                 "--worktree-dir",
                 str(workspace),
                 "--started-by-pid",
-                "818181",
+                LEGACY_PPID,
             ),
             ("dispatch", "heartbeat", "--task-id", "dod007-task", "--final", "--exit-code", "0"),
         ]
@@ -139,11 +153,13 @@ def test_dispatch_legacy_only_register_and_heartbeat_are_no_mutation_non_success
             assert payload["status"] in {"error", "blocked", "non_success"}
             assert payload["code"] in {"missing_canonical_mst_session_id", "legacy_identity_not_canonical_source"}
             assert payload.get("created_new_session") is not True
-            assert payload.get("legacy_diagnostics")
+            diagnostics = payload.get("legacy_diagnostics")
+            assert diagnostics
+            assert diagnostics.get("MST_STATE_PPID") == LEGACY_PPID
+            assert diagnostics.get("hook_session_id") == LEGACY_UUID
 
         assert not (base / "run" / "dod007-task.json").exists()
-        assert not (base / "sessions" / LEGACY_UUID).exists()
-        assert not (policy_home / "ledger-heads").exists()
+        _assert_no_resource_or_diagnostic_identity_artifacts(base, policy_home)
 
 
 def test_history_commands_reject_legacy_session_selectors_without_fallback_or_creation() -> None:
@@ -164,10 +180,10 @@ def test_history_commands_reject_legacy_session_selectors_without_fallback_or_cr
                 payload = _read_json_from_stdout(result.stdout)
                 assert payload["status"] == "error"
                 assert payload["code"] == "invalid_mst_session_id"
+                assert payload.get("session_id") == value
                 assert _snapshot(base, policy_home) == before
 
-        assert not (base / "sessions").exists()
-        assert not (policy_home / "ledger-heads").exists()
+        _assert_no_resource_or_diagnostic_identity_artifacts(base, policy_home)
 
 
 def test_hook_legacy_only_stdin_values_are_diagnostic_only_no_mutation() -> None:
@@ -195,9 +211,9 @@ def test_hook_legacy_only_stdin_values_are_diagnostic_only_no_mutation() -> None
         assert user_prompt.returncode == 0, user_prompt.stderr
         assert _snapshot(base, policy_home) == before
         assert "ignored without inherited MST_SESSION_ID" in combined
+        _assert_no_resource_or_diagnostic_identity_artifacts(base, policy_home)
         assert not (base / "sessions" / SID).exists()
         assert not (base / "state" / SID).exists()
-        assert not (base / "sessions" / LEGACY_UUID).exists()
 
 
 def test_hook_env_stdin_mismatch_fails_closed_without_legacy_repair() -> None:
@@ -221,9 +237,9 @@ def test_hook_env_stdin_mismatch_fails_closed_without_legacy_repair() -> None:
         assert result.returncode != 0
         assert _snapshot(base, policy_home) == before
         assert "mismatch" in combined
+        _assert_no_resource_or_diagnostic_identity_artifacts(base, policy_home)
         assert not (base / "sessions" / SID).exists()
         assert not (base / "sessions" / OTHER_SID).exists()
-        assert not (base / "sessions" / LEGACY_UUID).exists()
 
 
 def main() -> int:

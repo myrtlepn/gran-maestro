@@ -77,6 +77,14 @@ def test_generator_parser_round_trip_preserves_hyphen_root() -> None:
     assert parsed.started_at == STARTED_AT
     assert parsed.started_at_compact == STARTED_AT_COMPACT
     assert parsed.random == RANDOM
+    metadata = session.mst_session_metadata(parsed)
+    assert metadata == {
+        "mst_session_id": mst_session_id,
+        "root_mst_id": "AGI-030",
+        "started_at": "2026-05-03T13:08:13.382Z",
+        "started_at_compact": STARTED_AT_COMPACT,
+        "random": RANDOM,
+    }
 
 
 def test_parser_uses_right_split_for_allowed_hyphen_namespaces() -> None:
@@ -90,6 +98,11 @@ def test_parser_uses_right_split_for_allowed_hyphen_namespaces() -> None:
 
 def test_validator_rejects_malformed_matrix_without_normalizing() -> None:
     malformed = [
+        "AGI-030",
+        "PLN-638",
+        "REQ-811",
+        "12345",
+        "123e4567-e89b-42d3-a456-426614174000",
         "AGI-030-20260503T130813382Z-k7f3q9x2",
         "MST-BAD-030-20260503T130813382Z-k7f3q9x2",
         "MST-AGI-030-20260503T130813Z-k7f3q9x2",
@@ -109,6 +122,25 @@ def test_validator_rejects_malformed_matrix_without_normalizing() -> None:
             raise AssertionError(f"malformed mst_session_id passed validation: {value!r}")
 
 
+def test_resource_id_is_root_component_not_complete_session_identity() -> None:
+    for root_mst_id in ("AGI-030", "PLN-638", "REQ-811"):
+        try:
+            session.validate_mst_session_id(root_mst_id)
+        except session.MstSessionIdValidationError:
+            pass
+        else:
+            raise AssertionError(f"resource ID was accepted as complete mst_session_id: {root_mst_id}")
+
+        mst_session_id = session.generate_mst_session_id(
+            root_mst_id,
+            started_at=STARTED_AT,
+            random_segment=RANDOM,
+        )
+        parsed = session.validate_mst_session_id(mst_session_id, expected_root_mst_id=root_mst_id)
+        assert parsed.mst_session_id == f"MST-{root_mst_id}-{STARTED_AT_COMPACT}-{RANDOM}"
+        assert parsed.root_mst_id == root_mst_id
+
+
 def test_validator_is_mutation_free() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -124,6 +156,44 @@ def test_validator_is_mutation_free() -> None:
 
         assert _files(workspace) == before
         assert sentinel.read_text(encoding="utf-8") == "unchanged\n"
+
+
+def test_env_and_payload_spellings_are_same_canonical_identity_contract() -> None:
+    mst_session_id = session.generate_mst_session_id(
+        "AGI-030",
+        started_at=STARTED_AT,
+        random_segment=RANDOM,
+    )
+    legacy_hook_session_id = "123e4567-e89b-42d3-a456-426614174000"
+
+    with _workspace() as raw_workspace:
+        workspace = Path(raw_workspace)
+        _init_workspace(workspace)
+
+        result = _run_mst(
+            workspace,
+            "session",
+            "resolve",
+            "--json",
+            env={
+                "MST_SESSION_ID": mst_session_id,
+                "MST_CONTEXT_JSON": json.dumps(
+                    {
+                        "mst_session_id": mst_session_id,
+                        "session_id": legacy_hook_session_id,
+                    }
+                ),
+            },
+        )
+
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["source"] == "env:MST_SESSION_ID"
+        assert payload["mst_session_id"] == mst_session_id
+        assert payload["session_id"] == mst_session_id
+        assert payload["session_id"] != legacy_hook_session_id
+        assert payload["legacy_diagnostics"]["hook_session_id"] == legacy_hook_session_id
+        assert session.validate_mst_session_id(payload["mst_session_id"]).mst_session_id == mst_session_id
 
 
 def test_session_resolve_json_alias_matches_structured_mst_session_id() -> None:
@@ -156,7 +226,9 @@ def main() -> int:
         test_generator_parser_round_trip_preserves_hyphen_root,
         test_parser_uses_right_split_for_allowed_hyphen_namespaces,
         test_validator_rejects_malformed_matrix_without_normalizing,
+        test_resource_id_is_root_component_not_complete_session_identity,
         test_validator_is_mutation_free,
+        test_env_and_payload_spellings_are_same_canonical_identity_contract,
         test_session_resolve_json_alias_matches_structured_mst_session_id,
     ]
     for test in tests:
