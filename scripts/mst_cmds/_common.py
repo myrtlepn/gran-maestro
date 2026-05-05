@@ -265,6 +265,77 @@ def session_identity_non_success_payload(subject: str, message: str | None = Non
     }
 
 
+class ContractValidationError(ValueError):
+    def __init__(
+        self,
+        *,
+        target: str,
+        field: str,
+        reason: str,
+        code: str = "state_contract_validation_failed",
+    ):
+        super().__init__(f"validation failed: target={target} field={field} reason={reason}")
+        self.target = target
+        self.field = field
+        self.reason = reason
+        self.code = code
+
+
+def validation_failure_payload(
+    *,
+    target: str,
+    field: str,
+    reason: str,
+    code: str = "state_contract_validation_failed",
+    message: str | None = None,
+    **details,
+) -> dict:
+    payload = {
+        "status": "validation_failed",
+        "target": target,
+        "field": field,
+        "reason": reason,
+        "code": code,
+        "failure_class": "state_contract_validation",
+        "message": message or reason,
+        "created_new_session": False,
+    }
+    payload.update(details)
+    return payload
+
+
+def emit_validation_failure(
+    *,
+    target: str,
+    field: str,
+    reason: str,
+    code: str = "state_contract_validation_failed",
+    message: str | None = None,
+    **details,
+) -> int:
+    payload = validation_failure_payload(
+        target=target,
+        field=field,
+        reason=reason,
+        code=code,
+        message=message,
+        **details,
+    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(f"{payload['code']}: {payload['message']}", file=sys.stderr)
+    return 1
+
+
+def raise_validation_failure(
+    *,
+    target: str,
+    field: str,
+    reason: str,
+    code: str = "state_contract_validation_failed",
+) -> None:
+    raise ContractValidationError(target=target, field=field, reason=reason, code=code)
+
+
 def emit_session_identity_non_success(subject: str, message: str | None = None) -> int:
     payload = session_identity_non_success_payload(subject, message)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))

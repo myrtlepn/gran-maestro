@@ -1,240 +1,264 @@
 {
-  "request_id": "REQ-815",
-  "task_id": "03",
-  "plan_id": "PLN-642",
+  "request_id": "REQ-816",
+  "task_id": "04",
+  "plan_id": "PLN-643",
   "objective_id": "AGI-030",
-  "dod_id": "DOD-012",
+  "dod_id": "DOD-013",
   "cynefin_domain": "complicated",
   "overall_status": "PASS",
-  "integration_worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03",
-  "integration_head": "08fe874544c8b103ed38ca94ae8f7993b3a6714f",
-  "accepted_base_path": "/Users/brandev/mygit/gran-maestro",
-  "accepted_base_path_head": "2a48c8f2cc5c531a3101d536446f1d9886c4d5bf",
-  "path_provenance_note": "Authoritative validation used the T03 worktree absolute paths. An initial stale-root probe against /Users/brandev/mygit/gran-maestro failed because that base path had not yet been advanced to T01/T02 content; it is non-authoritative for T03 status.",
+  "checked_at": "2026-05-05T08:32:33.000Z",
+  "integration_worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04",
+  "integration_head": "ffe7178f2085f9fd455c64abeebd18eefd52d28b",
+  "validated_task_commits": {
+    "t01_commit": "b1112a0aa406e75a3a812845e85c90c475b341cb",
+    "t02_commit": "7205a4ea2b93f6f54a09fd6617d81ac4ce3dca8d",
+    "t03_commit": "fd3f0568a1f57cbf9a9112be66ddcd8e673efcf3"
+  },
   "must_unmapped_count": 0,
   "should_unmapped_count": 0,
   "pac_coverage": [
     {
       "pac_id": "PAC-1",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_auto_continuation_policy_persists_through_recover_bundle"
+        "tests/test_dod013_state_contract_validator.py::test_snapshot_required_fields_fail_closed",
+        "T04 final enforcement confirmed snapshot schema_version, mst_session_id, root_mst_id, workflow, and history.last_event_id validation remains green."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-2",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence"
+        "tests/test_dod013_state_contract_validator.py::test_snapshot_path_contract_fail_closed",
+        "T04 final enforcement confirmed path/payload mst_session_id mismatch, root mismatch, and unsupported schema_version remain fail-closed."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-3",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_user_wait_guard_redirects_without_critical_evidence"
+        "tests/test_dod013_state_contract_validator.py::test_history_event_contract_fail_closed",
+        "T04 final enforcement confirmed history event schema, identity, linkage, timestamp, and legacy identity validation remains green."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-4",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_blocker_evidence_is_structured_before_user_wait_is_allowed"
+        "tests/test_dod013_state_contract_validator.py::test_recover_bundle_contract_fail_closed",
+        "T04 final enforcement confirmed recover bundle schema, identity, auto/continuation/current skill, and stale history head validation remains green."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-5",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_security_boundary_records_confirmation_required_and_does_not_start_original_action"
+        "tests/test_dod013_state_contract_validator.py::test_dispatch_envelope_contract_fail_closed",
+        "T04 final enforcement confirmed dispatch envelope parent/context identity, legacy identity, and auto policy mismatch validation remains green."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-6",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_action_classification_precedes_blocker_declaration_from_prose"
+        "tests/test_dod013_state_contract_validator.py::test_failure_shape",
+        "Structured validation failures include target, field, failure_class/reason/code, created_new_session=false, no correction marker, and no fallback session id."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py"
       ]
     },
     {
       "pac_id": "PAC-7",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015"
-      ],
+      "mapped_ac_ids": ["AC-017", "AC-018", "AC-019"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod012_auto_continuation_contract.py::test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress"
+        "DOD-013 targeted suite passed in T04 final enforcement worktree.",
+        "DOD-012 auto continuation regression passed in T04 final enforcement worktree.",
+        "DOD-011 rehydration regression passed in T04 final enforcement worktree.",
+        "DOD-006 recovered skill lifecycle regression passed in T04 final enforcement worktree.",
+        "npm test passed in T04 final enforcement worktree.",
+        "npm exec -- tsc --noEmit passed in T04 final enforcement worktree.",
+        "git diff --check passed in T04 final enforcement worktree."
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py",
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod012_auto_continuation_contract.py",
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod011_rehydration_contract.py",
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod006_recover_skill_history.py",
+        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 test",
+        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 exec -- tsc --noEmit",
+        "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --check"
       ]
     },
     {
       "pac_id": "PAC-8",
       "grade": "MUST",
-      "mapped_ac_ids": [
-        "AC-015",
-        "AC-016",
-        "AC-017",
-        "AC-018"
-      ],
+      "mapped_ac_ids": ["AC-020"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "DOD-012 targeted suite passed in T03 worktree",
-        "DOD-011 targeted suite passed in T03 worktree",
-        "DOD-006 recovered skill lifecycle regression passed in T03 worktree",
-        "npm test passed in T03 worktree",
-        "npm exec -- tsc --noEmit passed in T03 worktree",
-        "git diff --check and coverage-matrix.json validation passed in T03 worktree"
+        "coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, and verification-report.md record PAC-1 through PAC-10 mapping and final enforcement evidence.",
+        "python3 -m json.tool coverage-matrix.json passed before and after T04 evidence refresh.",
+        "PAC evidence gate readiness script confirmed every PAC-1 through PAC-10 appears in coverage and evidence ledger."
       ],
       "commands": [
-        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py",
-        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod011_rehydration_contract.py",
-        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod006_recover_skill_history.py",
-        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 test",
-        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 exec -- tsc --noEmit",
-        "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 diff --check",
-        "python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/coverage-matrix.json"
+        "python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/coverage-matrix.json",
+        "PAC evidence gate readiness inspection over plan.ids.json, coverage-matrix.json, evidence-ledger.md, request.json, and tasks/01~04/spec.md"
       ]
     },
     {
       "pac_id": "PAC-9",
       "grade": "SHOULD",
-      "mapped_ac_ids": [
-        "AC-020"
-      ],
+      "mapped_ac_ids": ["AC-020"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "No T03 README/docs/skills diff; docs/skills impact not required."
+        "git diff --name-only HEAD -- README.md docs skills produced no output before T04 evidence refresh; runtime docs/skills contract update is not required for this enforcement-only task."
       ],
       "commands": [
-        "git diff --name-only HEAD -- README.md docs skills"
+        "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --name-only HEAD -- README.md docs skills"
       ]
     },
     {
       "pac_id": "PAC-10",
       "grade": "SHOULD",
-      "mapped_ac_ids": [
-        "AC-019"
-      ],
+      "mapped_ac_ids": ["AC-020"],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "No T03 hook diff",
+        "git diff --name-only HEAD -- hooks .claude/hooks produced no output before T04 evidence refresh; T04 made no hook edits.",
         "hooks/mst-stop-hook.sh and .claude/hooks/mst-stop-hook.sh cmp=0",
-        "active plugin cache hooks/mst-stop-hook.sh cmp=0",
-        "active plugin cache .claude/hooks/mst-stop-hook.sh cmp=0"
+        "hooks/mst-stop-hook.sh and active plugin cache hooks/mst-stop-hook.sh cmp=0",
+        "hooks/mst-stop-hook.sh and active plugin cache .claude/hooks/mst-stop-hook.sh cmp=0"
       ],
       "commands": [
-        "git diff --name-only HEAD -- hooks .claude/hooks",
+        "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --name-only HEAD -- hooks .claude/hooks",
         "cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh",
-        "cmp -s hooks/mst-stop-hook.sh \"$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh\"",
-        "cmp -s hooks/mst-stop-hook.sh \"$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh\""
+        "cmp -s hooks/mst-stop-hook.sh $HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh",
+        "cmp -s hooks/mst-stop-hook.sh $HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh"
       ]
     }
   ],
   "ac_coverage": [
     {
-      "ac_id": "AC-015",
-      "status": "PASS",
-      "pac_ids": [
-        "PAC-1",
-        "PAC-2",
-        "PAC-3",
-        "PAC-4",
-        "PAC-5",
-        "PAC-6",
-        "PAC-7",
-        "PAC-8"
-      ]
-    },
-    {
-      "ac_id": "AC-016",
-      "status": "PASS",
-      "pac_ids": [
-        "PAC-8"
-      ]
-    },
-    {
       "ac_id": "AC-017",
       "status": "PASS",
-      "pac_ids": [
-        "PAC-8"
-      ]
+      "pac_ids": ["PAC-1", "PAC-2", "PAC-3", "PAC-4", "PAC-5", "PAC-6", "PAC-7"]
     },
     {
       "ac_id": "AC-018",
       "status": "PASS",
-      "pac_ids": [
-        "PAC-8"
-      ]
+      "pac_ids": ["PAC-7"]
     },
     {
       "ac_id": "AC-019",
       "status": "PASS",
-      "pac_ids": [
-        "PAC-10"
-      ]
+      "pac_ids": ["PAC-1", "PAC-2", "PAC-3", "PAC-4", "PAC-5", "PAC-6", "PAC-7"]
     },
     {
       "ac_id": "AC-020",
       "status": "PASS",
-      "pac_ids": [
-        "PAC-9"
-      ]
+      "pac_ids": ["PAC-8", "PAC-9", "PAC-10"]
     }
   ],
-  "validated_implementation_baseline": "08fe874544c8b103ed38ca94ae8f7993b3a6714f"
+  "commands": [
+    {
+      "name": "DOD-013 targeted suite",
+      "command": "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "DOD-012 auto continuation regression",
+      "command": "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod012_auto_continuation_contract.py",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "DOD-011 rehydration regression",
+      "command": "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod011_rehydration_contract.py",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "DOD-006 recover skill history regression",
+      "command": "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod006_recover_skill_history.py",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "npm smoke",
+      "command": "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 test",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "TypeScript check",
+      "command": "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 exec -- tsc --noEmit",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "diff sanity",
+      "command": "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --check",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "coverage JSON validation",
+      "command": "python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/coverage-matrix.json",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "PAC evidence gate readiness",
+      "command": "plan.ids.json, coverage-matrix.json, evidence-ledger.md, request.json, and tasks/01~04/spec.md inspection",
+      "exit_code": 0,
+      "result": "PASS"
+    }
+  ],
+  "impact": {
+    "runtime_changes_in_t04": false,
+    "docs_skills_update_required": false,
+    "docs_skills_reason": "No T04 diff under README.md, docs, or skills before evidence refresh; T04 is enforcement-only evidence work.",
+    "hook_sync_required": false,
+    "hook_sync_reason": "No T04 diff under hooks or .claude/hooks before evidence refresh; source/copy/cache comparisons for mst-stop-hook.sh all returned cmp=0.",
+    "accept_evidence_gate_ready": true
+  }
 }

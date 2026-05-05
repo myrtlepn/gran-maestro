@@ -528,6 +528,99 @@ def _history_idempotency_key(mst_session_id: str, event: dict) -> str:
     return f"{mst_session_id}:{event_type}:{digest}"
 
 
+def _history_event_id(mst_session_id: str, event: dict) -> str:
+    explicit = event.get("event_id")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    key = _history_idempotency_key(mst_session_id, event)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return f"evt-{digest}"
+
+
+def _validate_history_event_contract(parsed: StructuredMstSessionId, event: dict) -> None:
+    if not isinstance(event, dict):
+        _common.raise_validation_failure(
+            target="history_event",
+            field="payload",
+            reason="history event must be a JSON object",
+        )
+    event_type = str(event.get("event_type") or event.get("type") or "").strip()
+    if event_type.startswith("mst.invocation_"):
+        return
+
+    if event.get("schema_version") != 1:
+        _common.raise_validation_failure(
+            target="history_event",
+            field="schema_version",
+            reason="schema_version is required and must be 1",
+        )
+    if not isinstance(event.get("event_id"), str) or not event.get("event_id", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="event_id",
+            reason="event_id is required",
+        )
+    if not isinstance(event.get("idempotency_key"), str) or not event.get("idempotency_key", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="idempotency_key",
+            reason="idempotency_key is required",
+        )
+    has_legacy_identity = any(
+        isinstance(event.get(key), str) and event.get(key, "").strip()
+        for key in ("session_id", "sessionId", "owner_session_id")
+    )
+    if has_legacy_identity:
+        _common.raise_validation_failure(
+            target="history_event",
+            field="legacy_identity",
+            reason="legacy session identity is not a canonical source",
+            code="legacy_identity_not_canonical_source",
+        )
+    if not isinstance(event.get("mst_session_id"), str) or not event.get("mst_session_id", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="mst_session_id",
+            reason="mst_session_id is required",
+        )
+    if event["mst_session_id"].strip() != parsed.mst_session_id:
+        _common.raise_validation_failure(
+            target="history_event",
+            field="mst_session_id",
+            reason="history event mst_session_id mismatch",
+        )
+    if not isinstance(event.get("root_mst_id"), str) or not event.get("root_mst_id", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="root_mst_id",
+            reason="root_mst_id is required",
+        )
+    if validate_root_mst_id(event["root_mst_id"].strip()) != parsed.root_mst_id:
+        _common.raise_validation_failure(
+            target="history_event",
+            field="root_mst_id",
+            reason="root_mst_id must match root parsed from mst_session_id",
+        )
+    if not event_type:
+        _common.raise_validation_failure(
+            target="history_event",
+            field="event_type",
+            reason="event_type is required",
+        )
+    if not isinstance(event.get("artifact_id"), str) or not event.get("artifact_id", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="artifact_id",
+            reason="artifact_id is required",
+        )
+    if not isinstance(event.get("created_at"), str) or not event.get("created_at", "").strip():
+        _common.raise_validation_failure(
+            target="history_event",
+            field="created_at",
+            reason="created_at is required",
+        )
+
+
 def _history_refs_from_mapping(payload: dict) -> set[str]:
     refs: set[str] = set()
     for key in ("head_hash", "last_event_id", "event_hash"):
@@ -673,14 +766,17 @@ def write_session_history_event(base_dir: Path, mst_session_id: str, payload: di
     event_type = str(event.get("event_type") or event.get("type") or "").strip()
     if not event_type:
         event_type = "event"
-    event["schema_version"] = 1
-    event["mst_session_id"] = parsed.mst_session_id
-    event["root_mst_id"] = parsed.root_mst_id
     event["event_type"] = event_type
     event.setdefault("type", event_type)
-    event.setdefault("created_at", event.get("timestamp") or _utc_now_history())
+    if event_type.startswith("mst.invocation_"):
+        event.setdefault("schema_version", 1)
+        event.setdefault("mst_session_id", parsed.mst_session_id)
+        event.setdefault("root_mst_id", parsed.root_mst_id)
+        event.setdefault("created_at", event.get("timestamp") or _utc_now_history())
+        event.setdefault("idempotency_key", _history_idempotency_key(parsed.mst_session_id, event))
+        event.setdefault("event_id", _history_event_id(parsed.mst_session_id, event))
+    _validate_history_event_contract(parsed, event)
     event.setdefault("timestamp", event["created_at"])
-    event["idempotency_key"] = _history_idempotency_key(parsed.mst_session_id, event)
 
     with open(lock_path, "a+", encoding="utf-8") as lock_handle:
         _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=5)
@@ -751,28 +847,93 @@ def _context_payload_session_candidates(payload: dict) -> list[str]:
 
 def _validate_context_identity(payload: dict, session_id: str) -> None:
     parsed = validate_mst_session_id(session_id)
+    has_legacy_identity = any(
+        isinstance(payload.get(key), str) and payload.get(key, "").strip()
+        for key in ("session_id", "sessionId", "owner_session_id")
+    )
+    core = payload.get("core_rehydration")
+    if isinstance(core, dict):
+        has_legacy_identity = has_legacy_identity or any(
+            isinstance(core.get(key), str) and core.get(key, "").strip()
+            for key in ("session_id", "sessionId", "owner_session_id")
+        )
+    if has_legacy_identity:
+        _common.raise_validation_failure(
+            target="dispatch_envelope",
+            field="legacy_identity",
+            reason="legacy session identity is not a canonical source",
+            code="legacy_identity_not_canonical_source",
+        )
+
+    if payload.get("schema_version") != 1:
+        _common.raise_validation_failure(
+            target="dispatch_envelope",
+            field="schema_version",
+            reason="dispatch context schema_version is required and must be 1",
+        )
+    if not isinstance(payload.get("mst_session_id"), str) or not payload.get("mst_session_id", "").strip():
+        _common.raise_validation_failure(
+            target="dispatch_envelope",
+            field="mst_session_id",
+            reason="dispatch context mst_session_id is required",
+        )
+    if not isinstance(payload.get("root_mst_id"), str) or not payload.get("root_mst_id", "").strip():
+        _common.raise_validation_failure(
+            target="dispatch_envelope",
+            field="root_mst_id",
+            reason="dispatch context root_mst_id is required",
+        )
+
     for candidate in _context_payload_session_candidates(payload):
         if validate_mst_session_id(candidate).mst_session_id != parsed.mst_session_id:
-            raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
-
-    schema_version = payload.get("schema_version")
-    if schema_version is not None and schema_version != 1:
-        raise ValueError("MST_CONTEXT_JSON schema_version mismatch")
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="mst_session_id",
+                reason="MST_SESSION_ID and structured mst_session_id mismatch",
+            )
 
     root_mst_id = payload.get("root_mst_id")
     if isinstance(root_mst_id, str) and root_mst_id.strip():
         if validate_root_mst_id(root_mst_id.strip()) != parsed.root_mst_id:
-            raise ValueError("MST_CONTEXT_JSON root_mst_id mismatch")
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="root_mst_id",
+                reason="MST_CONTEXT_JSON root_mst_id mismatch",
+            )
 
-    core = payload.get("core_rehydration")
     if isinstance(core, dict):
         core_schema_version = core.get("schema_version")
-        if core_schema_version is not None and core_schema_version != 1:
-            raise ValueError("MST_CONTEXT_JSON core_rehydration schema_version mismatch")
+        if core_schema_version != 1:
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="core_rehydration.schema_version",
+                reason="MST_CONTEXT_JSON core_rehydration schema_version must be 1",
+            )
+        if not isinstance(core.get("mst_session_id"), str) or not core.get("mst_session_id", "").strip():
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="core_rehydration.mst_session_id",
+                reason="MST_CONTEXT_JSON core_rehydration mst_session_id is required",
+            )
         core_root = core.get("root_mst_id")
-        if isinstance(core_root, str) and core_root.strip():
-            if validate_root_mst_id(core_root.strip()) != parsed.root_mst_id:
-                raise ValueError("MST_CONTEXT_JSON core_rehydration root_mst_id mismatch")
+        if not isinstance(core_root, str) or not core_root.strip():
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="core_rehydration.root_mst_id",
+                reason="MST_CONTEXT_JSON core_rehydration root_mst_id is required",
+            )
+        if validate_root_mst_id(core_root.strip()) != parsed.root_mst_id:
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="root_mst_id",
+                reason="MST_CONTEXT_JSON core_rehydration root_mst_id mismatch",
+            )
+        if ("auto" in payload or "auto" in core) and payload.get("auto") != core.get("auto"):
+            _common.raise_validation_failure(
+                target="dispatch_envelope",
+                field="auto",
+                reason="dispatch context auto policy mismatch",
+            )
 
 
 def _normalized_child_context_payload(raw_context: str, session_id: str) -> dict:

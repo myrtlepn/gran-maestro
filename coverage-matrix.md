@@ -1,56 +1,61 @@
-# REQ-815 T03 Coverage Matrix
+# REQ-816 T04 Coverage Matrix
 
-- Request: REQ-815
-- Task: T03
-- Plan: PLN-642
-- Objective: AGI-030 / DOD-012
+- Request: REQ-816
+- Task: T04
+- Plan: PLN-643
+- Objective: AGI-030 / DOD-013
 - Cynefin domain: complicated
-- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
-- Validated implementation baseline: `08fe874544c8b103ed38ca94ae8f7993b3a6714f`
-- Authoritative validation path: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
-- Non-authoritative stale-root probe: `/Users/brandev/mygit/gran-maestro` at `2a48c8f2cc5c531a3101d536446f1d9886c4d5bf` lacked the T01/T02 DOD-012 test before integration and is not used for T03 status.
-- Overall status: PASS.
+- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04`
+- Validated integration baseline: `ffe7178f2085f9fd455c64abeebd18eefd52d28b`
+- T01 commit: `b1112a0aa406e75a3a812845e85c90c475b341cb`
+- T02 commit: `7205a4ea2b93f6f54a09fd6617d81ac4ce3dca8d`
+- T03 commit: `fd3f0568a1f57cbf9a9112be66ddcd8e673efcf3`
+- Checked at: 2026-05-05T08:32:33.000Z
+- Overall status: PASS
 - MUST PAC unmapped count: 0
 - SHOULD PAC unmapped count: 0
 
 | PAC | Grade | AC | Coverage | Evidence | Status |
 |-----|-------|----|----------|----------|--------|
-| PAC-1 | MUST | AC-015 | COVERED | `tests/test_dod012_auto_continuation_contract.py::test_auto_continuation_policy_persists_through_recover_bundle` verifies `mst_session_id`, `root_mst_id`, `auto=true`, `continuation.mode=continue_unless_critical`, `next_action`, and `critical_blocker=null` in recover output. | PASS in worktree |
-| PAC-2 | MUST | AC-015 | COVERED | `test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence` verifies recoverable hook output records `continue.*` and next-action execution evidence. | PASS in worktree |
-| PAC-3 | MUST | AC-015 | COVERED | `test_user_wait_guard_redirects_without_critical_evidence` covers AskUserQuestion, confirmation wait, self-paced stop, and stop-hook preventContinuation attempts without terminal user-wait. | PASS in worktree |
-| PAC-4 | MUST | AC-015 | COVERED | `test_blocker_evidence_is_structured_before_user_wait_is_allowed` verifies structured `critical_blocker` fields: `type`, `evidence`, `attempted_recovery`, `next_safe_action`, `mst_session_id`, and `history_head`. | PASS in worktree |
-| PAC-5 | MUST | AC-015 | COVERED | `test_security_boundary_records_confirmation_required_and_does_not_start_original_action` verifies destructive/shared-state action is not started and records `terminal.security_confirmation_required` or equivalent blocker. | PASS in worktree |
-| PAC-6 | MUST | AC-015 | COVERED | `test_action_classification_precedes_blocker_declaration_from_prose` verifies queued action/tool envelope classification, classifier failure kind, safe alternatives, and no assistant-prose-only blocker. | PASS in worktree |
-| PAC-7 | MUST | AC-015 | COVERED | `test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress` verifies circuit key scope is `mst_session_id + normalized_action + normalized_error` and resets after `action.completed`. | PASS in worktree |
-| PAC-8 | MUST | AC-015, AC-016, AC-017, AC-018 | COVERED | Authoritative T03 worktree commands passed: DOD-012, DOD-011, DOD-006, `npm test`, `npm exec -- tsc --noEmit`, `git diff --check`, and `coverage-matrix.json` JSON validation. | PASS |
-| PAC-9 | SHOULD | AC-020 | COVERED | `git diff --name-only HEAD -- README.md docs skills` produced no output in T03 worktree; no docs/skills change was made in T03, so docs/skills impact is not required. | PASS |
-| PAC-10 | SHOULD | AC-019 | COVERED | `git diff --name-only HEAD -- hooks .claude/hooks` produced no output for T03 evidence changes; hook sync was also checked for T02-modified source/copy/cache files with `cmp=0`. | PASS |
+| PAC-1 | MUST | AC-017, AC-019 | COVERED | `test_snapshot_required_fields_fail_closed` stayed green in T04 final enforcement and validates snapshot `schema_version`, `mst_session_id`, `root_mst_id`, workflow, and `history.last_event_id`. | PASS |
+| PAC-2 | MUST | AC-017, AC-019 | COVERED | `test_snapshot_path_contract_fail_closed` stayed green in T04 final enforcement and validates path/payload session mismatch, root mismatch, and unsupported `schema_version`. | PASS |
+| PAC-3 | MUST | AC-017, AC-019 | COVERED | `test_history_event_contract_fail_closed` stayed green in T04 final enforcement and validates history event schema, identity, linkage, timestamp, and legacy identity rejection. | PASS |
+| PAC-4 | MUST | AC-017, AC-019 | COVERED | `test_recover_bundle_contract_fail_closed` stayed green in T04 final enforcement and validates recover bundle schema, identity, auto/continuation/current skill, and stale history head failure. | PASS |
+| PAC-5 | MUST | AC-017, AC-019 | COVERED | `test_dispatch_envelope_contract_fail_closed` stayed green in T04 final enforcement and validates dispatch envelope parent/context identity, legacy identity, and auto policy mismatch failure. | PASS |
+| PAC-6 | MUST | AC-017, AC-019 | COVERED | `test_failure_shape` stayed green in T04 final enforcement and validates structured non-success payloads with no correction or fallback session. | PASS |
+| PAC-7 | MUST | AC-017, AC-018, AC-019 | COVERED | T04 command evidence passed for DOD-013, DOD-012, DOD-011, DOD-006, `npm test`, `npm exec -- tsc --noEmit`, and `git diff --check`. | PASS |
+| PAC-8 | MUST | AC-020 | COVERED | `coverage-matrix.json`, `coverage-matrix.md`, `evidence-ledger.md`, and `verification-report.md` record PAC-1~PAC-10 final enforcement evidence; JSON validation and PAC evidence gate readiness passed. | PASS |
+| PAC-9 | SHOULD | AC-020 | COVERED | `git diff --name-only HEAD -- README.md docs skills` produced no output before T04 evidence refresh; docs/skills update is not required for this enforcement-only task. | PASS |
+| PAC-10 | SHOULD | AC-020 | COVERED | `git diff --name-only HEAD -- hooks .claude/hooks` produced no output before T04 evidence refresh; source/copy/cache hook comparisons returned `cmp=0`. | PASS |
 
 ## Commands Executed
 
-Authoritative §5 commands run in the T03 worktree:
-
 ```bash
-PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py
-PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod011_rehydration_contract.py
-PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod006_recover_skill_history.py
-npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 test
-npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 exec -- tsc --noEmit
-git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 diff --check
-python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/coverage-matrix.json
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod012_auto_continuation_contract.py
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod011_rehydration_contract.py
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod006_recover_skill_history.py
+npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 test
+npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 exec -- tsc --noEmit
+git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --check
+python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/coverage-matrix.json
 ```
 
-T03 worktree validation commands:
+## Evidence Gate Readiness
 
-```bash
-PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py
-PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py
-PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py
-npm test
-npm exec -- tsc --noEmit
-git diff --check
-git diff --name-only HEAD -- hooks .claude/hooks README.md docs skills
-cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh
-cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh"
-cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh"
+PAC evidence gate readiness inspected `plan.ids.json`, `coverage-matrix.json`, `evidence-ledger.md`, `request.json`, and `tasks/01~04/spec.md`.
+
+```json
+{
+  "status": "PASS",
+  "pac_ids": ["PAC-1", "PAC-2", "PAC-3", "PAC-4", "PAC-5", "PAC-6", "PAC-7", "PAC-8", "PAC-9", "PAC-10"],
+  "specs_checked": ["01", "02", "03", "04"]
+}
 ```
+
+## Impact Review
+
+- Runtime behavior changed in T04: no. T04 only records final enforcement evidence.
+- Docs/skills impact: no T04 diff under `README.md`, `docs`, or `skills` before evidence refresh; no user-facing docs update required in this task.
+- Hook impact: no T04 diff under `hooks` or `.claude/hooks` before evidence refresh; `hooks/mst-stop-hook.sh` matches `.claude/hooks` and both active plugin cache hook copies.
+- No-go scope respected: no DOD-014 full replay/projection, DOD-016 transition graph/D2/dashboard generated view, or DOD-017 execution-flow projection was implemented in T04.

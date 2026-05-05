@@ -394,6 +394,13 @@ def cmd_dispatch_register(args):
     try:
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
+        if isinstance(exc, _common.ContractValidationError):
+            return _common.emit_validation_failure(
+                target=exc.target,
+                field=exc.field,
+                reason=exc.reason,
+                code=exc.code,
+            )
         if _common.is_missing_canonical_session_error(exc):
             return _common.emit_session_identity_non_success("dispatch register")
         print(f"Error: {exc}", file=sys.stderr)
@@ -460,6 +467,13 @@ def cmd_dispatch_heartbeat(args):
     try:
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
+        if isinstance(exc, _common.ContractValidationError):
+            return _common.emit_validation_failure(
+                target=exc.target,
+                field=exc.field,
+                reason=exc.reason,
+                code=exc.code,
+            )
         if _common.is_missing_canonical_session_error(exc):
             return _common.emit_session_identity_non_success("dispatch heartbeat")
         print(f"Error: {exc}", file=sys.stderr)

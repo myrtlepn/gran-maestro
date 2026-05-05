@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
 import unicodedata
 import uuid
@@ -97,6 +96,116 @@ def _validate_existing_workflow_payload(payload: dict, session_id: str) -> tuple
     return True, ""
 
 
+def _state_snapshot_contract_failure(payload: dict, session_id: str) -> Optional[dict]:
+    if not isinstance(payload, dict):
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="payload",
+            reason="snapshot payload must be a JSON object",
+        )
+
+    parsed = None
+    try:
+        from scripts.mst_cmds.session import validate_mst_session_id, validate_root_mst_id
+
+        parsed = validate_mst_session_id(session_id)
+    except ValueError as exc:
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="mst_session_id",
+            reason=str(exc),
+        )
+
+    schema_version = payload.get("schema_version")
+    if schema_version != 1:
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="schema_version",
+            reason="schema_version is required and must be 1",
+        )
+
+    raw_session_id = payload.get("mst_session_id")
+    if not isinstance(raw_session_id, str) or not raw_session_id.strip():
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="mst_session_id",
+            reason="mst_session_id is required",
+        )
+    if raw_session_id.strip() != parsed.mst_session_id:
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="mst_session_id",
+            reason="snapshot path mst_session_id and payload mst_session_id mismatch",
+            mst_session_id=parsed.mst_session_id,
+        )
+
+    raw_root = payload.get("root_mst_id")
+    if not isinstance(raw_root, str) or not raw_root.strip():
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="root_mst_id",
+            reason="root_mst_id is required",
+        )
+    try:
+        payload_root = validate_root_mst_id(raw_root.strip())
+    except ValueError as exc:
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="root_mst_id",
+            reason=str(exc),
+        )
+    if payload_root != parsed.root_mst_id:
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="root_mst_id",
+            reason="root_mst_id must match root parsed from mst_session_id",
+            root_mst_id=payload_root,
+            expected_root_mst_id=parsed.root_mst_id,
+        )
+
+    workflow = payload.get("workflow")
+    if not isinstance(workflow, dict):
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="workflow",
+            reason="workflow object is required",
+        )
+    if not isinstance(workflow.get("current_skill"), str) or not workflow.get("current_skill", "").strip():
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="workflow.current_skill",
+            reason="workflow.current_skill is required",
+        )
+    if not isinstance(workflow.get("current_step"), int) or isinstance(workflow.get("current_step"), bool):
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="workflow.current_step",
+            reason="workflow.current_step must be an integer",
+        )
+    if not isinstance(workflow.get("status"), str) or not workflow.get("status", "").strip():
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="workflow.status",
+            reason="workflow.status is required",
+        )
+
+    history = payload.get("history")
+    if not isinstance(history, dict):
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="history",
+            reason="history object is required",
+        )
+    last_event_id = history.get("last_event_id")
+    if not isinstance(last_event_id, str) or not last_event_id.strip():
+        return _common.validation_failure_payload(
+            target="state_snapshot",
+            field="history.last_event_id",
+            reason="history.last_event_id is required",
+        )
+    return None
+
+
 def _snapshot_path_for_session(base_dir: Path, session_id: str) -> Path:
     from scripts._skill_state import snapshot_path
 
@@ -120,6 +229,9 @@ def _validate_existing_snapshot_for_write(base_dir: Path, session_id: str) -> tu
     snapshot = _load_snapshot_for_session(base_dir, session_id)
     if not isinstance(snapshot, dict):
         return True, ""
+    contract_failure = _state_snapshot_contract_failure(snapshot, session_id)
+    if contract_failure is not None:
+        return False, json.dumps(contract_failure, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     error = _common.canonical_state_payload_error(snapshot, session_id)
     if error is not None:
         if "mst_session_id mismatch" in error:
@@ -565,11 +677,18 @@ def _append_skill_history_event(
         f"attempt={logical_attempt_id}",
     ]
     idempotency_key = f"{session_id}:{event_type}:" + ":".join(part for part in key_parts if part)
+    parsed = session_mod.validate_mst_session_id(session_id)
+    created_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     payload = {
+        "schema_version": 1,
+        "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
         "event_type": event_type,
         "skill": skill,
         "logical_attempt_id": logical_attempt_id,
         "idempotency_key": idempotency_key,
+        "created_at": created_at,
     }
     if step is not None:
         payload["step"] = step
@@ -578,6 +697,8 @@ def _append_skill_history_event(
     if resource_id:
         payload["artifact_id"] = resource_id
         payload["resource_id"] = resource_id
+    else:
+        payload["artifact_id"] = skill
     if status:
         payload["status"] = status
     session_mod.write_session_history_event(base_dir, session_id, payload)
@@ -625,6 +746,12 @@ def _recover_non_success(
 def _emit_recover_non_success(payload: dict) -> int:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     print(f"{payload.get('code')}: {payload.get('message')}", file=sys.stderr)
+    return 1
+
+
+def _emit_validation_payload(payload: dict) -> int:
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(f"{payload.get('code')}: {payload.get('message') or payload.get('reason')}", file=sys.stderr)
     return 1
 
 
@@ -772,17 +899,24 @@ def _recovery_fingerprint(agi_id: str, session_id: str) -> str:
 def _append_recover_history_event(base_dir: Path, session_id: str, agi_id: str, recovery_fingerprint: str) -> None:
     from scripts.mst_cmds import session as session_mod
 
+    parsed = session_mod.validate_mst_session_id(session_id)
+    idempotency_key = f"{session_id}:skill.recover:{recovery_fingerprint}"
     session_mod.write_session_history_event(
         base_dir,
         session_id,
         {
+            "schema_version": 1,
+            "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+            "mst_session_id": parsed.mst_session_id,
+            "root_mst_id": parsed.root_mst_id,
             "event_type": "skill.recover",
             "skill": "mst:recover",
             "resource_id": agi_id,
             "artifact_id": agi_id,
             "status": "rehydrated",
             "recovery_fingerprint": recovery_fingerprint,
-            "idempotency_key": f"{session_id}:skill.recover:{recovery_fingerprint}",
+            "idempotency_key": idempotency_key,
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         },
     )
 
@@ -900,6 +1034,153 @@ def _context_core_history_refs() -> set[str]:
         if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
             refs.add(value.strip())
     return refs
+
+
+def _recover_context_contract_failure(
+    *,
+    session_id: str,
+    root_mst_id: str,
+    history_result,
+    snapshot: Optional[dict],
+) -> Optional[dict]:
+    context = _json_object_env("MST_CONTEXT_JSON")
+    if not context:
+        return None
+    if context.get("schema_version") is not None and context.get("schema_version") != 1:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="schema_version",
+            reason="recover bundle schema_version must be 1",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    core = context.get("core_rehydration")
+    has_legacy_identity = any(
+        isinstance(context.get(key), str) and context.get(key, "").strip()
+        for key in ("session_id", "sessionId", "owner_session_id")
+    )
+    if isinstance(core, dict):
+        has_legacy_identity = has_legacy_identity or any(
+            isinstance(core.get(key), str) and core.get(key, "").strip()
+            for key in ("session_id", "sessionId", "owner_session_id")
+        )
+    if has_legacy_identity:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="legacy_identity",
+            reason="legacy session identity is not a canonical source",
+            code="legacy_identity_not_canonical_source",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    if not isinstance(core, dict):
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration",
+            reason="core_rehydration object is required",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    if core.get("schema_version") != 1:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration.schema_version",
+            reason="core_rehydration.schema_version is required and must be 1",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    if core.get("mst_session_id") != session_id:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration.mst_session_id",
+            reason="core_rehydration.mst_session_id must match MST_SESSION_ID",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    if core.get("root_mst_id") != root_mst_id:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration.root_mst_id",
+            reason="core_rehydration.root_mst_id must match session root",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+
+    history = core.get("history")
+    if not isinstance(history, dict):
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration.history_last_event_id",
+            reason="core_rehydration.history is required",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    refs = set()
+    for key in ("head_hash", "last_event_id", "event_hash"):
+        value = history.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
+            refs.add(value.strip())
+    if history_result.tail_hash not in refs:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="core_rehydration.history_last_event_id",
+            reason="core_rehydration history reference does not match validated ledger head",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+            expected_history_head=history_result.tail_hash,
+            core_rehydration_history_refs=sorted(refs),
+        )
+
+    workflow = core.get("workflow")
+    snapshot_next = _next_skill_from_snapshot(snapshot) if isinstance(snapshot, dict) else {}
+    core_next_source = workflow.get("next_source") if isinstance(workflow, dict) else None
+    core_next_skill = workflow.get("next_skill") if isinstance(workflow, dict) else None
+    strict_current_fields = (
+        "auto" in core
+        or "continuation" in core
+        or "current_skill" in core
+        or (
+            isinstance(snapshot_next, dict)
+            and (
+                (snapshot_next.get("source_id") and core_next_source and snapshot_next.get("source_id") != core_next_source)
+                or (snapshot_next.get("name") and core_next_skill and snapshot_next.get("name") != core_next_skill)
+            )
+        )
+    )
+    if strict_current_fields:
+        auto_missing = not isinstance(core.get("auto"), bool)
+        continuation_missing = not isinstance(core.get("continuation"), dict)
+        core_current_skill = core.get("current_skill")
+        workflow_current_skill = workflow.get("current_skill") if isinstance(workflow, dict) else None
+        current_skill_missing = not (
+            (isinstance(core_current_skill, str) and core_current_skill.strip())
+            or (isinstance(workflow_current_skill, str) and workflow_current_skill.strip())
+        )
+        if auto_missing:
+            return _common.validation_failure_payload(
+                target="recover_bundle",
+                field="core_rehydration.auto",
+                reason="core_rehydration.auto is required and must be boolean",
+                mst_session_id=session_id,
+                root_mst_id=root_mst_id,
+            )
+        if continuation_missing:
+            return _common.validation_failure_payload(
+                target="recover_bundle",
+                field="core_rehydration.continuation",
+                reason="core_rehydration.continuation object is required",
+                mst_session_id=session_id,
+                root_mst_id=root_mst_id,
+            )
+        if current_skill_missing:
+            return _common.validation_failure_payload(
+                target="recover_bundle",
+                field="core_rehydration.current_skill",
+                reason="core_rehydration.current_skill is required",
+                mst_session_id=session_id,
+                root_mst_id=root_mst_id,
+            )
+    return None
 
 
 def _history_tail_is_current_invocation_start_after_refs(history_result, refs: set[str]) -> bool:
@@ -1506,6 +1787,12 @@ def cmd_state_set(args):
         return 1
     valid_snapshot, validation_error = _validate_existing_snapshot_for_write(state_base_dir, session_id)
     if not valid_snapshot:
+        try:
+            payload = json.loads(validation_error)
+        except (TypeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            return _emit_validation_payload(payload)
         print(f"Error: {validation_error}", file=sys.stderr)
         return 1
     context_head_error = _validate_context_rehydration_head_for_write(session_id)
@@ -1607,10 +1894,16 @@ def cmd_state_get(args):
     if data is None:
         print("스냅샷 없음")
         return 0
+    contract_failure = _state_snapshot_contract_failure(data, session_id)
+    if contract_failure is not None:
+        return _emit_validation_payload(contract_failure)
     validation_error = _common.canonical_state_payload_error(data, session_id)
     if validation_error is not None:
-        print(f"Error: snapshot {validation_error}", file=sys.stderr)
-        return 1
+        return _common.emit_validation_failure(
+            target="state_snapshot",
+            field="mst_session_id" if "mst_session_id" in validation_error else "state_snapshot",
+            reason=f"snapshot {validation_error}",
+        )
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
@@ -1626,6 +1919,12 @@ def cmd_state_clear(args):
         return 1
     valid_snapshot, validation_error = _validate_existing_snapshot_for_write(_skill_state_base_dir(), session_id)
     if not valid_snapshot:
+        try:
+            payload = json.loads(validation_error)
+        except (TypeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            return _emit_validation_payload(payload)
         print(f"Error: {validation_error}", file=sys.stderr)
         return 1
     clear_snapshot(_skill_state_base_dir(), session_id=session_id)
@@ -1713,6 +2012,14 @@ def cmd_state_recover(args):
         snapshot_error = _validate_recover_snapshot(existing, session_id, parsed.root_mst_id, history_result)
         if snapshot_error is not None and (strict_rehydration or snapshot_error.get("code") != "missing_history_linkage"):
             return _emit_recover_non_success(snapshot_error)
+    context_contract_error = _recover_context_contract_failure(
+        session_id=session_id,
+        root_mst_id=parsed.root_mst_id,
+        history_result=history_result,
+        snapshot=existing,
+    )
+    if context_contract_error is not None:
+        return _emit_recover_non_success(context_contract_error)
 
     if previous_owner and previous_owner != session_id and getattr(args, "takeover", False):
         def _mutate_owner(payload: dict) -> dict:
