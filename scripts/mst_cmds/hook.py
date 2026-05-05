@@ -55,6 +55,29 @@ class HistoryReadResult:
     verify: dict
 
 
+STATE_INCONSISTENCY_HISTORY_CODES = {
+    "history_head_missing",
+    "history_mirror_head_missing",
+    "history_verify_missing",
+    "history_head_mismatch",
+    "history_mirror_head_mismatch",
+    "history_verify_mismatch",
+    "history_verify_stale",
+}
+STATE_INCONSISTENCY_PAYLOAD_KEYS = {
+    "status",
+    "code",
+    "message",
+    "failure_class",
+    "terminal_event",
+    "created_new_session",
+    "prompt_summary_used_as_source",
+    "mst_session_id",
+    "root_mst_id",
+    "session_id",
+}
+
+
 def _project_root() -> Path:
     if _common.BASE_DIR is not None:
         return _common.BASE_DIR.parent.resolve()
@@ -212,16 +235,52 @@ def append_history_event(project_root: Path, policy_home: Path, session_id: str,
 
 def _history_error(code: str, message: str, *, session_id: str | None = None, **details: object) -> HistoryValidationError:
     payload = {key: value for key, value in details.items() if value is not None}
+    if code in STATE_INCONSISTENCY_HISTORY_CODES:
+        mst_session_id = None
+        root_mst_id = None
+        if session_id:
+            try:
+                parsed = session_cmds.validate_mst_session_id(session_id)
+            except session_cmds.MstSessionIdValidationError:
+                pass
+            else:
+                mst_session_id = parsed.mst_session_id
+                root_mst_id = parsed.root_mst_id
+        return HistoryValidationError(
+            code,
+            message,
+            _common.state_inconsistency_failure_payload(
+                code=code,
+                message=message,
+                mst_session_id=mst_session_id,
+                root_mst_id=root_mst_id,
+                **payload,
+            ),
+        )
     return HistoryValidationError(code, message, {"session_id": session_id, **payload} if session_id else payload)
 
 
 def _emit_history_error(error: HistoryValidationError, *, json_mode: bool) -> None:
-    payload = {
-        "status": "error",
-        "code": error.code,
-        "message": error.message,
-        **error.details,
-    }
+    if error.code in STATE_INCONSISTENCY_HISTORY_CODES:
+        details = {
+            key: value
+            for key, value in error.details.items()
+            if key not in STATE_INCONSISTENCY_PAYLOAD_KEYS
+        }
+        payload = _common.state_inconsistency_failure_payload(
+            code=error.code,
+            message=error.message,
+            mst_session_id=error.details.get("mst_session_id"),
+            root_mst_id=error.details.get("root_mst_id"),
+            **details,
+        )
+    else:
+        payload = {
+            "status": "error",
+            "code": error.code,
+            "message": error.message,
+            **error.details,
+        }
     if json_mode:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     else:

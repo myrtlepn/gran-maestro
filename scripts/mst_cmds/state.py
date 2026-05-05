@@ -724,20 +724,41 @@ def _recover_non_success(
     root_mst_id: Optional[str] = None,
     details: Optional[dict] = None,
 ) -> dict:
-    payload = {
-        "status": "error",
-        "code": code,
-        "message": message,
-        "created_new_session": False,
-        "prompt_summary_used_as_source": False,
-        "legacy_diagnostics": _common.legacy_session_diagnostics(),
+    state_inconsistency_codes = {
+        "history_head_missing",
+        "history_mirror_head_missing",
+        "history_verify_missing",
+        "history_head_mismatch",
+        "history_mirror_head_mismatch",
+        "history_verify_mismatch",
+        "history_verify_stale",
+        "stale_history_head",
+        "recursive_transition_depth_exceeded",
+        "snapshot_projection_mismatch",
+        "state_history_linkage_mismatch",
     }
-    if session_id:
-        payload["mst_session_id"] = session_id
+    if code in state_inconsistency_codes:
+        payload = _common.state_inconsistency_failure_payload(
+            code=code,
+            message=message,
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
     else:
-        payload["canonical_mst_session_id"] = None
-    if root_mst_id:
-        payload["root_mst_id"] = root_mst_id
+        payload = {
+            "status": "error",
+            "code": code,
+            "message": message,
+            "created_new_session": False,
+            "prompt_summary_used_as_source": False,
+        }
+        if session_id:
+            payload["mst_session_id"] = session_id
+        else:
+            payload["canonical_mst_session_id"] = None
+        if root_mst_id:
+            payload["root_mst_id"] = root_mst_id
+    payload["legacy_diagnostics"] = _common.legacy_session_diagnostics()
     if details:
         payload.update(details)
     return payload
@@ -811,6 +832,97 @@ def _snapshot_history_refs(snapshot: dict) -> set[str]:
     return refs
 
 
+def _ledger_replay_projection(history_result) -> dict:
+    workflow = {
+        "current_skill": "",
+        "status": "",
+        "next_skill": "",
+        "next_source": "",
+    }
+    for row in history_result.rows:
+        event = row.get("event") if isinstance(row, dict) else None
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        if event_type.startswith("skill."):
+            skill = event.get("skill")
+            if isinstance(skill, str) and skill.strip():
+                workflow["current_skill"] = skill.strip()
+            status = event.get("status")
+            workflow["status"] = status.strip() if isinstance(status, str) and status.strip() else "active"
+        next_action = event.get("next_action")
+        if isinstance(next_action, dict):
+            skill = next_action.get("expected_skill") or next_action.get("skill") or next_action.get("next_skill")
+            source = next_action.get("source_id") or next_action.get("source")
+            workflow["next_skill"] = skill.strip() if isinstance(skill, str) and skill.strip() else ""
+            workflow["next_source"] = source.strip() if isinstance(source, str) and source.strip() else ""
+    return {
+        "workflow": workflow,
+        "history": {
+            "last_event_id": history_result.tail_hash,
+            "head_hash": history_result.tail_hash,
+            "seq": history_result.tail_seq,
+        },
+    }
+
+
+def _validate_snapshot_projection_matches_replay(
+    snapshot: dict,
+    session_id: str,
+    root_mst_id: str,
+    history_result,
+) -> Optional[dict]:
+    replay = _ledger_replay_projection(history_result)
+    snapshot_workflow = snapshot.get("workflow") if isinstance(snapshot.get("workflow"), dict) else {}
+    snapshot_next = _next_skill_from_snapshot(snapshot)
+    comparisons = [
+        (
+            "workflow.current_skill",
+            replay["workflow"].get("current_skill") or "",
+            snapshot_workflow.get("current_skill") or snapshot.get("currentSkill") or "",
+        ),
+        (
+            "workflow.status",
+            replay["workflow"].get("status") or "",
+            snapshot_workflow.get("status") or snapshot.get("status") or "",
+        ),
+        (
+            "workflow.next_skill",
+            replay["workflow"].get("next_skill") or "",
+            snapshot_workflow.get("next_skill") or snapshot_next.get("name") or "",
+        ),
+        (
+            "workflow.next_source",
+            replay["workflow"].get("next_source") or "",
+            snapshot_workflow.get("next_source") or snapshot_next.get("source_id") or "",
+        ),
+    ]
+    mismatches = [
+        {"field": field, "expected": expected, "actual": actual}
+        for field, expected, actual in comparisons
+        if expected and actual and expected != actual
+    ]
+    if not mismatches:
+        return None
+    return _recover_non_success(
+        "snapshot_projection_mismatch",
+        "snapshot projection does not match validated ledger replay",
+        session_id=session_id,
+        root_mst_id=root_mst_id,
+        details={
+            "expected_history_head": history_result.tail_hash,
+            "mismatch_subject": "snapshot_projection",
+            "projection_mismatches": mismatches,
+            "ledger_replay_projection": replay,
+            "source_precedence": [
+                "validated_history_ledger",
+                "validated_state_snapshot",
+                "prompt_summary_diagnostic_only",
+            ],
+        },
+    )
+
+
 def _validate_recover_snapshot(snapshot: dict, session_id: str, root_mst_id: str, history_result) -> Optional[dict]:
     validation_error = _common.canonical_state_payload_error(snapshot, session_id)
     if validation_error is not None:
@@ -837,6 +949,9 @@ def _validate_recover_snapshot(snapshot: dict, session_id: str, root_mst_id: str
             root_mst_id=root_mst_id,
             details={"expected_history_head": history_result.tail_hash, "snapshot_history_refs": sorted(refs)},
         )
+    projection_error = _validate_snapshot_projection_matches_replay(snapshot, session_id, root_mst_id, history_result)
+    if projection_error is not None:
+        return projection_error
     return None
 
 
@@ -1216,9 +1331,75 @@ def _validate_context_rehydration_head_for_write(session_id: str) -> Optional[di
             "core rehydration history reference does not match validated ledger head",
             session_id=session_id,
             root_mst_id=history_result.root_mst_id,
-            details={"expected_history_head": history_result.tail_hash, "core_rehydration_history_refs": sorted(refs)},
+            details={
+                "expected_history_head": history_result.tail_hash,
+                "core_rehydration_history_refs": sorted(refs),
+                "attempted_recovery": "validated ledger head before automatic state write",
+                "next_safe_action": "inspect-only state/history consistency verification",
+                "write_allowed": False,
+                "mismatch_subject": "core_rehydration.history",
+            },
         )
     return None
+
+
+def _transition_depth_limit() -> int:
+    raw = os.environ.get("MST_TRANSITION_DEPTH_LIMIT", "").strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = 8
+    return parsed if parsed > 0 else 8
+
+
+def _continuation_chain_guard_for_write(session_id: str) -> Optional[dict]:
+    contexts: list[dict] = []
+    snapshot = _load_snapshot_for_session(_skill_state_base_dir(), session_id)
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("continuation"), dict):
+        contexts.append(snapshot["continuation"])
+    env_context = _json_object_env("MST_CONTEXT_JSON")
+    core = env_context.get("core_rehydration")
+    if isinstance(core, dict) and isinstance(core.get("continuation"), dict):
+        contexts.append(core["continuation"])
+    if not contexts:
+        return None
+
+    limit = _transition_depth_limit()
+    selected: dict | None = None
+    selected_depth = 0
+    for continuation in contexts:
+        raw_depth = continuation.get("transition_depth")
+        try:
+            depth = int(raw_depth)
+        except (TypeError, ValueError):
+            continue
+        if depth > selected_depth:
+            selected_depth = depth
+            selected = continuation
+
+    if selected is None or selected_depth <= limit:
+        return None
+
+    history_result, history_error = _load_recover_history(_common.BASE_DIR, session_id)
+    if history_error is not None:
+        return history_error
+    root_mst_id = history_result.root_mst_id if history_result is not None else None
+    return _recover_non_success(
+        "recursive_transition_depth_exceeded",
+        "recursive recover/compact/continuation depth exceeded safe automatic write limit",
+        session_id=session_id,
+        root_mst_id=root_mst_id,
+        details={
+            "transition_source": selected.get("transition_source") or "unknown",
+            "transition_depth": selected_depth,
+            "transition_depth_limit": limit,
+            "chain_id": selected.get("chain_id") or "",
+            "write_allowed": False,
+            "next_safe_action": "inspect-only state/history consistency verification",
+            "attempted_recovery": "downgraded automatic write after recursive transition guard",
+            "mismatch_subject": "recursive_transition_guard",
+        },
+    )
 
 
 def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
@@ -1798,6 +1979,9 @@ def cmd_state_set(args):
     context_head_error = _validate_context_rehydration_head_for_write(session_id)
     if context_head_error is not None:
         return _emit_recover_non_success(context_head_error)
+    transition_guard_error = _continuation_chain_guard_for_write(session_id)
+    if transition_guard_error is not None:
+        return _emit_recover_non_success(transition_guard_error)
     resource_id = _current_flow_resource_id()
     try:
         if args.step == 0:

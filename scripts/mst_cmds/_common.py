@@ -304,6 +304,31 @@ def validation_failure_payload(
     return payload
 
 
+def state_inconsistency_failure_payload(
+    *,
+    code: str,
+    message: str,
+    mst_session_id: str | None = None,
+    root_mst_id: str | None = None,
+    **details,
+) -> dict:
+    payload = {
+        "status": "error",
+        "code": code,
+        "message": message,
+        "failure_class": "state_inconsistency",
+        "terminal_event": "terminal.state_inconsistency",
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+    }
+    if mst_session_id:
+        payload["mst_session_id"] = mst_session_id
+    if root_mst_id:
+        payload["root_mst_id"] = root_mst_id
+    payload.update(details)
+    return payload
+
+
 def emit_validation_failure(
     *,
     target: str,

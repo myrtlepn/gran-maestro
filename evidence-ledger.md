@@ -1,154 +1,194 @@
-# REQ-816 T04 Evidence Ledger
+# REQ-817 T04 Evidence Ledger
 
-- Request: REQ-816
+- Request: REQ-817
 - Task: T04
-- Plan: PLN-643
-- Objective: AGI-030 Sprint 12 DOD-013
-- Checked at: 2026-05-05T08:32:33.000Z
-- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04`
-- Validated integration baseline: `ffe7178f2085f9fd455c64abeebd18eefd52d28b`
-- T01 commit: `b1112a0aa406e75a3a812845e85c90c475b341cb`
-- T02 commit: `7205a4ea2b93f6f54a09fd6617d81ac4ce3dca8d`
-- T03 commit: `fd3f0568a1f57cbf9a9112be66ddcd8e673efcf3`
+- Plan: PLN-644
+- Objective: AGI-030 Sprint 13 DOD-014
+- Checked at: 2026-05-05T10:17:18Z
+- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-817/t04`
+- Validated integration head: `409edce7b6fcb1f95492484d1940a93d2dd1e194`
+- T01 commit: `b889b1104886b3d807d31079e6be1e39b39d18f1`
+- T02 commit: `f243195283def22e0d53b3faf72942adc8490803`
+- T03 commit: `9f3dd391b8091a16e31f7395142f7d8dc0d16389`
 - Overall status: PASS
 
 ## Source Provenance
 
-T04 validates the REQ-816 integration branch after T01 red-first regression, T02 validator implementation, and T03 integration evidence were merged. T04 adds no production runtime behavior; intended changes are final enforcement evidence artifacts only:
+REQ-817 implements DOD-014: the history ledger is the authoritative event stream and snapshot state is only trusted as a validated projection. T04 is evidence-only. It updates only:
 
 - `coverage-matrix.json`
 - `coverage-matrix.md`
 - `evidence-ledger.md`
 - `verification-report.md`
 
-## AC-017 — Targeted validator suite is green on final integration
+No runtime code, tests, hooks, CLAUDE.md, generated graphs, dashboard files, README, skills, or docs were modified by T04.
 
-- Command: `PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/tests/test_dod013_state_contract_validator.py`
-- Expected: DOD-013 targeted suite passes after all T01~T03 task commits are present.
+## T01 Red-First Provenance
+
+- Commit: `b889b1104886b3d807d31079e6be1e39b39d18f1`
+- Integration merge: `e309375 Merge REQ-817 T01 regression`
+- File: `tests/test_dod014_ledger_projection_contract.py`
+- AC-002 valid snapshot projection: PASS before runtime changes.
+- AC-001 partial write, AC-003 ledger head mismatch, AC-004 replay mismatch, AC-005 auto continuation blocker, AC-006 recursive transition guard, and AC-007 fingerprint circuit breaker were RED before runtime implementation.
+- DOD-011, DOD-012, DOD-013 regressions, `py_compile`, and `git diff --check` passed in T01.
+
+## T02 Implementation Evidence
+
+- Commit: `f243195283def22e0d53b3faf72942adc8490803`
+- Integration merge: `b309eca Merge REQ-817 T02 runtime consistency`
+- Files: `scripts/mst_cmds/_common.py`, `scripts/mst_cmds/hook.py`, `scripts/mst_cmds/state.py`, `tests/test_dod014_ledger_projection_contract.py`
+- Scope:
+  - Runtime `state_inconsistency` payloads for history head/verify partial writes.
+  - Recover-side stale history/snapshot projection mismatch handling.
+  - Ledger replay projection comparison.
+- T02 scope tests PASS:
+  - `partial_write_state_inconsistency`
+  - `valid_snapshot_projection_matches_replay`
+  - `ledger_head_mismatch_blocks_continuation`
+  - `replay_mismatch_is_non_success`
+- T03 tests still RED at T02 were expected:
+  - `auto_continuation_state_inconsistency_blocker`
+  - `recursive_transition_guard_downgrades_write`
+  - `fingerprint_circuit_breaker_scopes_repeated_failures`
+- DOD-011, DOD-012, DOD-013 regressions, `git diff --check`, and `py_compile` passed.
+
+## T03 Recovery Guard/Circuit Breaker Evidence
+
+- Commit: `9f3dd391b8091a16e31f7395142f7d8dc0d16389`
+- Integration merge: `409edce7b6fcb1f95492484d1940a93d2dd1e194`
+- Files: `hooks/mst-stop-hook.sh`, `.claude/hooks/mst-stop-hook.sh`, `scripts/mst_cmds/session.py`, `scripts/mst_cmds/state.py`
+- Scope:
+  - Stale recover/auto continuation blockers.
+  - Recursive transition depth guard downgrade.
+  - `transition_source`-scoped repeat failure circuit breaker evidence.
+  - Terminal `terminal.repeat_failure_limit` blocker evidence.
+- PM validation PASS:
+  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod014_ledger_projection_contract.py`
+  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod012_auto_continuation_contract.py`
+  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod011_rehydration_contract.py`
+  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod013_state_contract_validator.py`
+  - `git diff --check`
+  - `PYTHONPYCACHEPREFIX=/private/tmp/gm-pycache-t03-pm python3 -m py_compile <t03-worktree>/scripts/mst_cmds/session.py <t03-worktree>/scripts/mst_cmds/state.py`
+
+## AC-020 Through AC-024 Evidence
+
+- AC-020: `coverage-matrix.json` and `coverage-matrix.md` map PAC-1 through PAC-10, DOD-014 AC IDs, responsible task IDs, test/evidence references, changed-file provenance, hook sync, and docs/skills impact.
+- AC-021: `evidence-ledger.md` includes source provenance, T01 red-first, T02 implementation, T03 recovery guard/circuit breaker, PAC-1 through PAC-10 records, hook sync evidence, docs/skills impact, and mandatory command summaries.
+- AC-022: `verification-report.md` lists DOD-014 targeted regression, DOD-013, DOD-012, DOD-011, `npm test`, `npm exec -- tsc --noEmit`, `git diff --check`, `python3 -m json.tool coverage-matrix.json`, hook comparisons, and docs/skills impact command-by-command.
+- AC-023: changed files are classified as source, tests, hooks, evidence artifacts, and docs/no-impact in `coverage-matrix.json`, `coverage-matrix.md`, and `verification-report.md`.
+- AC-024: hook sync evidence is recorded for source/project/cache paths; README/docs/skills update is not required because T04 is evidence-only and T03 hook behavior change is covered by hook sync evidence.
+
+## PAC-1 — History append/head/verify partial write state inconsistency
+
+- AC: AC-001, AC-008, AC-009, AC-020, AC-021
+- Tasks: T01, T02, T04
+- Evidence: `partial_write_state_inconsistency`
+- Expected: event append, head update, and verify metadata update must agree in one `mst_session_id` ledger; partial write produces structured non-success state inconsistency.
+- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
+
+## PAC-2 — Snapshot validated projection requires ledger head and replay match
+
+- AC: AC-002, AC-010, AC-020, AC-021
+- Tasks: T01, T02, T04
+- Evidence: `valid_snapshot_projection_matches_replay`
+- Expected: snapshot `history.last_event_id` matches ledger head and replay projection matches snapshot workflow/history fields.
 - Actual: PASS.
-- Exit code: 0
-- Red-first provenance: T01 commit `b1112a0aa406e75a3a812845e85c90c475b341cb` recorded the red-first regression with expected failure before T02.
 
-## AC-018 — Prior state/history/recovery regressions remain green
+## PAC-3 — Snapshot/recover/head mismatch blocks automatic continuation/write
 
-- DOD-012 auto continuation regression: PASS, exit 0.
-- DOD-011 rehydration regression: PASS, exit 0.
-- DOD-006 recovered skill lifecycle regression: PASS, exit 0.
+- AC: AC-003, AC-014, AC-020, AC-021
+- Tasks: T01, T02, T03, T04
+- Evidence: `ledger_head_mismatch_blocks_continuation`
+- Expected: mismatch among `history.head`, snapshot `history.last_event_id`, and recover bundle `history_last_event_id` blocks automatic continuation/write.
+- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
 
-## AC-019 — Project gates and PAC scope are complete
+## PAC-4 — Replay mismatch is not corrected by prompt summary or snapshot-only trust
 
-- `npm test`: PASS, exit 0.
-- `npm exec -- tsc --noEmit`: PASS, exit 0.
-- `git diff --check`: PASS, exit 0.
-- `python3 -m json.tool coverage-matrix.json`: PASS, exit 0 before T04 evidence refresh.
-- MUST PAC unmapped count: 0.
-- SHOULD PAC unmapped count: 0.
+- AC: AC-004, AC-011, AC-020, AC-021
+- Tasks: T01, T02, T04
+- Evidence: `replay_mismatch_is_non_success`
+- Expected: ledger replay mismatch fails through inspect-only/state inconsistency path without prompt summary or snapshot-only fallback.
+- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
 
-## AC-020 — Review evidence gate is accept-ready
+## PAC-5 — Auto=true inconsistency leaves blocker evidence and inspect-only next action
 
-- Evidence readiness inspection checked `plan.ids.json`, `coverage-matrix.json`, `evidence-ledger.md`, `request.json`, and `tasks/01~04/spec.md`.
-- PAC records present: PAC-1, PAC-2, PAC-3, PAC-4, PAC-5, PAC-6, PAC-7, PAC-8, PAC-9, PAC-10.
-- `request.json.tasks[].covers_ac` covers AC-001 through AC-020.
-- Each task spec `tasks/01/spec.md` through `tasks/04/spec.md` contains `## 3.3 PAC Mapping` and `## Test Scenarios (Pre-Impl)`.
-- Result: PASS.
+- AC: AC-005, AC-015, AC-020, AC-021
+- Tasks: T01, T02, T03, T04
+- Evidence: `auto_continuation_state_inconsistency_blocker`
+- Expected: auto continuation records critical blocker or inspect-only next action and does not report success, created new session, completed, or user wait.
+- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
 
-## PAC-1 — Snapshot required fields and type contract
+## PAC-6 — Recursive guard depth excess downgrades automatic write
 
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_snapshot_required_fields_fail_closed`
-- Expected: Missing or invalid snapshot `schema_version`, `mst_session_id`, `root_mst_id`, workflow fields, or `history.last_event_id` fails closed as `target=state_snapshot`.
-- Actual: PASS.
-- Exit code: 0
+- AC: AC-006, AC-016, AC-020, AC-021
+- Tasks: T01, T02, T03, T04
+- Evidence: `recursive_transition_guard_downgrades_write`
+- Expected: repeated recover/compact/continuation in one `mst_session_id` tracks `transition_source`, depth, or chain and downgrades automatic write on depth excess.
+- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
 
-## PAC-2 — Snapshot path/payload/root/schema mismatch
+## PAC-7 — Circuit breaker scope and terminal blocker evidence
 
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_snapshot_path_contract_fail_closed`
-- Expected: Snapshot path key and payload `mst_session_id`, root derived from `mst_session_id`, and supported `schema_version` must match; invalid payload does not create a new session.
-- Actual: PASS.
-- Exit code: 0
+- AC: AC-007, AC-017, AC-020, AC-021
+- Tasks: T01, T02, T03, T04
+- Evidence: `fingerprint_circuit_breaker_scopes_repeated_failures`
+- Expected: repeat failure scope is `mst_session_id + transition_source + normalized_action + normalized_error`, and circuit open records `terminal.repeat_failure_limit` instead of completed.
+- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
 
-## PAC-3 — History event contract
+## PAC-8 — Mandatory regression/build evidence
 
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_history_event_contract_fail_closed`
-- Expected: History append validates `schema_version`, `event_id`, `idempotency_key`, `mst_session_id`, `root_mst_id`, `event_type`, artifact linkage, `created_at`, and rejects legacy identity.
-- Actual: PASS.
-- Exit code: 0
-
-## PAC-4 — Recover bundle contract
-
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_recover_bundle_contract_fail_closed`
-- Expected: Recover validates `core_rehydration.schema_version`, canonical identity, auto/continuation/current skill, and history head linkage before recovery; stale bundle/prompt-summary fallback does not succeed.
-- Actual: PASS.
-- Exit code: 0
-
-## PAC-5 — Dispatch envelope contract
-
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_dispatch_envelope_contract_fail_closed`
-- Expected: Dispatch register validates parent `MST_SESSION_ID`, context `mst_session_id`/`root_mst_id`, schema, legacy identity, and auto policy consistency before marker creation.
-- Actual: PASS.
-- Exit code: 0
-
-## PAC-6 — Structured failure shape
-
-- AC: AC-017, AC-019
-- Command: DOD-013 targeted suite.
-- Evidence: `test_failure_shape`
-- Expected: Validator failure stdout contains structured JSON with `status=validation_failed`, `target`, `field`, `reason`/`code`/`failure_class`, `created_new_session=false`, no `corrected=true`, and no fallback session id.
-- Actual: PASS.
-- Exit code: 0
-
-## PAC-7 — Mandatory regression/build evidence
-
-- AC: AC-017, AC-018, AC-019
+- AC: AC-012, AC-013, AC-018, AC-022
 - Commands and results:
-  - DOD-013 targeted suite: PASS, exit 0.
-  - DOD-012 auto continuation regression: PASS, exit 0.
-  - DOD-011 rehydration regression: PASS, exit 0.
-  - DOD-006 recovered skill lifecycle regression: PASS, exit 0.
-  - `npm test`: PASS, exit 0.
-  - `npm exec -- tsc --noEmit`: PASS, exit 0.
-  - `git diff --check`: PASS, exit 0.
+  - DOD-014 targeted regression: PASS.
+  - DOD-013 state contract validator: PASS.
+  - DOD-012 auto continuation: PASS.
+  - DOD-011 rehydration: PASS.
+  - `npm test`: PASS.
+  - `npm exec -- tsc --noEmit`: PASS.
+  - `git diff --check`: PASS.
+  - `python3 -m json.tool coverage-matrix.json`: PASS.
 
-## PAC-8 — Coverage and evidence artifacts
+## PAC-9 — Coverage/evidence artifacts with PAC/AC/provenance
 
-- AC: AC-020
-- Commands:
-  - `python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04/coverage-matrix.json`
-  - PAC evidence gate readiness inspection.
-- Expected: PAC-1~PAC-10 and AC-017~AC-020 mapping are recorded in machine-readable and markdown evidence.
-- Actual: PASS, exit 0.
+- AC: AC-020, AC-021, AC-022, AC-023
+- Files: `coverage-matrix.json`, `coverage-matrix.md`, `evidence-ledger.md`, `verification-report.md`
+- Evidence: PAC-1 through PAC-10, AC-001 through AC-024, responsible task IDs, commands, changed-file provenance, hook sync evidence, and docs/skills no-impact rationale are recorded.
+- Actual: PASS.
 
-## PAC-9 — Docs and skill contract impact
+## PAC-10 — Hook/docs sync evidence or not-required rationale
 
-- AC: AC-020
-- Command: `git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --name-only HEAD -- README.md docs skills`
-- Expected: If docs/skills changed, term consistency evidence is recorded; otherwise a no-impact reason is recorded.
-- Actual: PASS. Command produced no output before T04 evidence refresh. T04 is enforcement-only evidence work; no docs/skills update required.
-- Exit code: 0
+- AC: AC-019, AC-024
+- Hook evidence: T03 changed hooks and PM synced active plugin cache copies.
+- Docs/skills evidence: README/docs/skills update not required because T04 is evidence-only and T03 hook behavior change is covered by hook sync evidence.
+- Actual: PASS.
 
-## PAC-10 — Hook sync evidence
+## Hook Sync Evidence
 
-- AC: AC-020
-- Commands:
-  - `git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-816/t04 diff --name-only HEAD -- hooks .claude/hooks`
-  - `cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh`
-  - `cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh"`
-  - `cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh"`
-- Expected: Hook changes are synchronized or T04 records `hook sync not required`.
-- Actual: PASS. T04 made no hook edits; source/copy/cache comparisons all returned `cmp=0`.
+- `hooks/mst-stop-hook.sh` was updated first in T03.
+- `.claude/hooks/mst-stop-hook.sh` project copy matches source: `cmp=0`.
+- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
+- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/.claude/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
+- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
+- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
 
-## Mandatory Command Output
+## Docs/Skills Impact
 
-### DOD-013 targeted suite
+README/docs/skills update is not required. T04 is evidence-only and did not change user-facing docs or skill contracts. T03 hook behavior change is covered by hook source/project/cache sync evidence above.
+
+## Mandatory Command Output Summaries
+
+### DOD-014 Targeted Regression
+
+```text
+PASS test_partial_write_state_inconsistency
+PASS test_valid_snapshot_projection_matches_replay
+PASS test_ledger_head_mismatch_blocks_continuation
+PASS test_replay_mismatch_is_non_success
+PASS test_auto_continuation_state_inconsistency_blocker
+PASS test_recursive_transition_guard_downgrades_write
+PASS test_fingerprint_circuit_breaker_scopes_repeated_failures
+```
+
+### DOD-013 State Contract Validator
 
 ```text
 PASS test_snapshot_required_fields_fail_closed
@@ -159,7 +199,7 @@ PASS test_dispatch_envelope_contract_fail_closed
 PASS test_failure_shape
 ```
 
-### DOD-012 auto continuation regression
+### DOD-012 Auto Continuation
 
 ```text
 PASS test_auto_continuation_policy_persists_through_recover_bundle
@@ -171,7 +211,7 @@ PASS test_action_classification_precedes_blocker_declaration_from_prose
 PASS test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
 ```
 
-### DOD-011 rehydration regression
+### DOD-011 Rehydration
 
 ```text
 PASS test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head
@@ -182,77 +222,23 @@ PASS test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no
 PASS test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources
 ```
 
-### DOD-006 recovered skill lifecycle regression
+### npm test
 
 ```text
-PASS test_recovered_context_skill_lifecycle_appends_to_existing_session_ledger
+gran-maestro smoke test runner executes deterministically
+tests 1
+pass 1
+fail 0
 ```
 
-### npm smoke
+### TypeScript, Diff, JSON, Grep, Hook Sync
 
 ```text
-> gran-maestro@0.59.8 test
-> node --test tests/smoke.test.mjs
-
-✔ smoke test runner executes deterministically (0.511291ms)
-ℹ tests 1
-ℹ suites 0
-ℹ pass 1
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 65.949166
+npm exec -- tsc --noEmit: PASS, no diagnostics.
+git diff --check: PASS, no whitespace errors.
+python3 -m json.tool coverage-matrix.json: PASS.
+PAC grep checks for coverage-matrix.md and evidence-ledger.md: PASS.
+verification-report.md grep check: PASS.
+hook source/project/cache cmp checks: PASS, cmp=0 for all required paths.
+git status --short: only the four allowed evidence artifact files changed.
 ```
-
-### Evidence readiness
-
-```json
-{
-  "status": "PASS",
-  "pac_ids": [
-    "PAC-1",
-    "PAC-2",
-    "PAC-3",
-    "PAC-4",
-    "PAC-5",
-    "PAC-6",
-    "PAC-7",
-    "PAC-8",
-    "PAC-9",
-    "PAC-10"
-  ],
-  "task_ac": [
-    "AC-001",
-    "AC-002",
-    "AC-003",
-    "AC-004",
-    "AC-005",
-    "AC-006",
-    "AC-007",
-    "AC-008",
-    "AC-009",
-    "AC-010",
-    "AC-011",
-    "AC-012",
-    "AC-013",
-    "AC-014",
-    "AC-015",
-    "AC-016",
-    "AC-017",
-    "AC-018",
-    "AC-019",
-    "AC-020"
-  ],
-  "specs_checked": [
-    "01",
-    "02",
-    "03",
-    "04"
-  ]
-}
-```
-
-### TypeScript, diff sanity, docs/hooks diff
-
-`npm exec -- tsc --noEmit`, `git diff --check`, and `git diff --name-only HEAD -- hooks .claude/hooks README.md docs skills` produced no stdout/stderr output and exited 0 before T04 evidence refresh.

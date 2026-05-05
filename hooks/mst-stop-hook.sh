@@ -1511,6 +1511,23 @@ def normalized_error():
         return value.strip()
     return ""
 
+def transition_source():
+    candidates = []
+    if isinstance(next_action, dict):
+        candidates.append(next_action.get("transition_source"))
+    failure = payload.get("failure")
+    if isinstance(failure, dict):
+        candidates.append(failure.get("transition_source"))
+    candidates.append(payload.get("transition_source"))
+    continuation = state.get("continuation")
+    if isinstance(continuation, dict):
+        candidates.append(continuation.get("transition_source"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            normalized = re.sub(r"[^A-Za-z0-9_.:-]+", "-", candidate.strip())
+            return normalized.strip("-") or "unknown"
+    return ""
+
 def action_scope(action):
     for key in ("scope", "scope_hint"):
         value = action.get(key) if isinstance(action, dict) else None
@@ -1680,7 +1697,8 @@ elif normalized_error():
     event_type = "continue.recoverable_issue"
     norm_action = normalize_action(next_action)
     norm_error = normalized_error()
-    circuit_key = f"{session_id}:{norm_action}:{norm_error}"
+    norm_source = transition_source()
+    circuit_key = f"{session_id}:{norm_source}:{norm_action}:{norm_error}" if norm_source else f"{session_id}:{norm_action}:{norm_error}"
     prior_count, reset_seen = prior_circuit_state(circuit_key, norm_action)
     count = prior_count + 1
     extra["circuit_breaker"] = {
@@ -1688,9 +1706,20 @@ elif normalized_error():
         "count": count,
         "limit": 3,
         "open": count >= 3,
+        "transition_source": norm_source or None,
         "normalized_action": norm_action,
         "normalized_error": norm_error,
     }
+    if count >= 3:
+        event_type = "terminal.repeat_failure_limit"
+        extra["critical_blocker"] = {
+            "type": "repeat_failure_limit",
+            "evidence": [f"repeat failure circuit opened for {circuit_key}"],
+            "attempted_recovery": ["tracked repeated normalized action/error failures"],
+            "next_safe_action": "inspect-only failure diagnosis before continuation",
+            "mst_session_id": session_id,
+            "history_head": history_head,
+        }
     if reset_seen:
         extra["circuit_breaker_reset"] = {
             "key": f"{session_id}:{norm_action}:progress-reset",

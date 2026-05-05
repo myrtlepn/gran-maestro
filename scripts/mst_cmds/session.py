@@ -684,10 +684,63 @@ def _history_has_current_invocation_start(base_dir: Path, mst_session_id: str) -
     return False
 
 
+def _history_transition_depth_limit() -> int:
+    raw = os.environ.get("MST_TRANSITION_DEPTH_LIMIT", "").strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = 8
+    return parsed if parsed > 0 else 8
+
+
+def _transition_depth_from_mapping(payload: dict) -> int:
+    continuation = payload.get("continuation")
+    if not isinstance(continuation, dict):
+        return 0
+    try:
+        depth = int(continuation.get("transition_depth"))
+    except (TypeError, ValueError):
+        return 0
+    return depth if depth > 0 else 0
+
+
+def _context_transition_depth() -> int:
+    raw_context = os.environ.get("MST_CONTEXT_JSON", "").strip()
+    if not raw_context:
+        return 0
+    try:
+        payload = json.loads(raw_context)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    depths = [_transition_depth_from_mapping(payload)]
+    core = payload.get("core_rehydration")
+    if isinstance(core, dict):
+        depths.append(_transition_depth_from_mapping(core))
+    return max(depths)
+
+
+def _snapshot_transition_depth(base_dir: Path, mst_session_id: str) -> int:
+    snapshot_path = Path(base_dir) / "state" / mst_session_id / "snapshot.json"
+    try:
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    return _transition_depth_from_mapping(payload) if isinstance(payload, dict) else 0
+
+
+def _recursive_transition_guard_exceeded(base_dir: Path, mst_session_id: str) -> bool:
+    depth = max(_context_transition_depth(), _snapshot_transition_depth(base_dir, mst_session_id))
+    return depth > _history_transition_depth_limit()
+
+
 def _should_skip_stale_invocation_history_append(base_dir: Path, mst_session_id: str, event: dict) -> bool:
     event_type = str(event.get("event_type") or event.get("type") or "").strip()
     if not event_type.startswith("mst.invocation_"):
         return False
+    if _recursive_transition_guard_exceeded(base_dir, mst_session_id):
+        return True
     refs = _core_rehydration_history_refs_from_env()
     if not refs:
         return False
