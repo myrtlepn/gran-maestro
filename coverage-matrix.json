@@ -1,122 +1,240 @@
 {
-  "request_id": "REQ-813",
+  "request_id": "REQ-815",
   "task_id": "03",
-  "plan_id": "PLN-640",
+  "plan_id": "PLN-642",
   "objective_id": "AGI-030",
-  "overall_status": "pass",
-  "integration_head": "b4c0d0c4aae99db1cf0831db527d3a9d4f72d78a",
+  "dod_id": "DOD-012",
+  "cynefin_domain": "complicated",
+  "overall_status": "PASS",
+  "integration_worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03",
+  "integration_head": "08fe874544c8b103ed38ca94ae8f7993b3a6714f",
+  "accepted_base_path": "/Users/brandev/mygit/gran-maestro",
+  "accepted_base_path_head": "2a48c8f2cc5c531a3101d536446f1d9886c4d5bf",
+  "path_provenance_note": "Authoritative validation used the T03 worktree absolute paths. An initial stale-root probe against /Users/brandev/mygit/gran-maestro failed because that base path had not yet been advanced to T01/T02 content; it is non-authoritative for T03 status.",
   "must_unmapped_count": 0,
   "should_unmapped_count": 0,
   "pac_coverage": [
     {
       "pac_id": "PAC-1",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head"
+        "tests/test_dod012_auto_continuation_contract.py::test_auto_continuation_policy_persists_through_recover_bundle"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-2",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac002_skill_switch_child_dispatch_keeps_parent_session_and_root_without_new_session"
+        "tests/test_dod012_auto_continuation_contract.py::test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-3",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac003_compaction_rehydration_write_ignores_conflicting_prompt_summary"
+        "tests/test_dod012_auto_continuation_contract.py::test_user_wait_guard_redirects_without_critical_evidence"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-4",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac004_stop_hook_continuation_uses_active_workflow_next_action_and_ledger_head_evidence"
+        "tests/test_dod012_auto_continuation_contract.py::test_blocker_evidence_is_structured_before_user_wait_is_allowed"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-5",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no_mutation"
+        "tests/test_dod012_auto_continuation_contract.py::test_security_boundary_records_confirmation_required_and_does_not_start_original_action"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-6",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_dod011_rehydration_contract.py::test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources"
+        "tests/test_dod012_auto_continuation_contract.py::test_action_classification_precedes_blocker_declaration_from_prose"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-7",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "DOD-003 through DOD-006 full regression chain",
-        "tests/test_dod006_recover_skill_history.py::test_recovered_context_skill_lifecycle_appends_to_existing_session_ledger",
-        "scripts/tests/test_agile_cross_agi_isolation.py"
+        "tests/test_dod012_auto_continuation_contract.py::test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress"
       ],
       "commands": [
-        "PYTHONPATH=$PWD python3 tests/test_dod003_state_snapshot_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_state_no_ppid_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_legacy_diagnostic_only.py && PYTHONPATH=$PWD python3 tests/test_dod004_parent_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_subprocess_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_hook_parent_session_boundary.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_cli.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_integrity.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_hook_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_invocation_history.py && PYTHONPATH=$PWD python3 tests/test_dod005_skill_lifecycle_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_resume_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_idempotency.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_dispatch_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_hook_no_fallback.py",
-        "PYTHONPATH=$PWD python3 scripts/tests/test_agile_cross_agi_isolation.py"
+        "PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py"
       ]
     },
     {
       "pac_id": "PAC-8",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-015",
+        "AC-016",
+        "AC-017",
+        "AC-018"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "npm exec -- tsc --noEmit",
-        "npm test",
-        "git diff --check"
+        "DOD-012 targeted suite passed in T03 worktree",
+        "DOD-011 targeted suite passed in T03 worktree",
+        "DOD-006 recovered skill lifecycle regression passed in T03 worktree",
+        "npm test passed in T03 worktree",
+        "npm exec -- tsc --noEmit passed in T03 worktree",
+        "git diff --check and coverage-matrix.json validation passed in T03 worktree"
       ],
       "commands": [
-        "npm exec -- tsc --noEmit",
-        "npm test",
-        "git diff --check"
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py",
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod011_rehydration_contract.py",
+        "PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod006_recover_skill_history.py",
+        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 test",
+        "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 exec -- tsc --noEmit",
+        "git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 diff --check",
+        "python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/coverage-matrix.json"
       ]
     },
     {
       "pac_id": "PAC-9",
+      "grade": "SHOULD",
+      "mapped_ac_ids": [
+        "AC-020"
+      ],
       "coverage": "COVERED",
       "status": "PASS",
       "evidence": [
-        "tests/test_sync_plugin_cache.py",
-        "tests/test_plugin_manifest_hooks.py",
-        "README.md/docs/skills diff impact check produced no output"
+        "No T03 README/docs/skills diff; docs/skills impact not required."
       ],
       "commands": [
-        "python3 tests/test_sync_plugin_cache.py && python3 tests/test_plugin_manifest_hooks.py",
-        "git diff --name-only -- README.md docs skills || true",
-        "git diff -- README.md docs skills || true"
+        "git diff --name-only HEAD -- README.md docs skills"
+      ]
+    },
+    {
+      "pac_id": "PAC-10",
+      "grade": "SHOULD",
+      "mapped_ac_ids": [
+        "AC-019"
+      ],
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "No T03 hook diff",
+        "hooks/mst-stop-hook.sh and .claude/hooks/mst-stop-hook.sh cmp=0",
+        "active plugin cache hooks/mst-stop-hook.sh cmp=0",
+        "active plugin cache .claude/hooks/mst-stop-hook.sh cmp=0"
+      ],
+      "commands": [
+        "git diff --name-only HEAD -- hooks .claude/hooks",
+        "cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh",
+        "cmp -s hooks/mst-stop-hook.sh \"$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh\"",
+        "cmp -s hooks/mst-stop-hook.sh \"$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh\""
       ]
     }
-  ]
+  ],
+  "ac_coverage": [
+    {
+      "ac_id": "AC-015",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-1",
+        "PAC-2",
+        "PAC-3",
+        "PAC-4",
+        "PAC-5",
+        "PAC-6",
+        "PAC-7",
+        "PAC-8"
+      ]
+    },
+    {
+      "ac_id": "AC-016",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-8"
+      ]
+    },
+    {
+      "ac_id": "AC-017",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-8"
+      ]
+    },
+    {
+      "ac_id": "AC-018",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-8"
+      ]
+    },
+    {
+      "ac_id": "AC-019",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-10"
+      ]
+    },
+    {
+      "ac_id": "AC-020",
+      "status": "PASS",
+      "pac_ids": [
+        "PAC-9"
+      ]
+    }
+  ],
+  "validated_implementation_baseline": "08fe874544c8b103ed38ca94ae8f7993b3a6714f"
 }

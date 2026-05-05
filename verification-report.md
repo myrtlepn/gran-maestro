@@ -1,84 +1,186 @@
-# REQ-806 T05 Verification Report
+# REQ-815 T03 Verification Report
 
-Worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-806/t05`
-Branch: `gran-maestro/master/AGI-030/REQ-806-T05`
-Base: `gran-maestro/master/AGI-030/REQ-806` after T01-T04 merge
-Date: 2026-05-04
+Worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
+Branch: `gran-maestro/master/AGI-030/REQ-815-T03`
+Validated implementation baseline: `08fe874544c8b103ed38ca94ae8f7993b3a6714f`
+Authoritative validation path: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
+Non-authoritative stale-root probe: `/Users/brandev/mygit/gran-maestro` at `2a48c8f2cc5c531a3101d536446f1d9886c4d5bf`
+Date: 2026-05-05
 
-## Integration Fix
+## Scope
 
-T05 found one integration-level regression between DOD-001 stale handoff tests and the DOD-003 canonical payload validator:
+T03 added no production implementation. The only intended changes are evidence artifacts:
 
-- `scripts/mst_cmds/state.py` still failed closed and preserved no-mutation behavior for stale workflow payloads, but the diagnostic text changed from the workflow-specific DOD-001 wording.
-- `_validate_existing_workflow_payload` now normalizes `state payload mst_session_id mismatch: ...` to `mst_session_id mismatch: ...` before `cmd_state_set_workflow` prefixes it as `Error: workflow ...`.
+- `coverage-matrix.md`
+- `coverage-matrix.json`
+- `evidence-ledger.md`
+- `verification-report.md`
 
-Behavioral result: stale workflow state remains non-mutating and non-zero, while DOD-001 and DOD-003 diagnostics share a coherent contract.
+## Verdict
 
-## Validation Commands
+T03 integration worktree validation is PASS for PAC-1 through PAC-10 and AC-015 through AC-020.
 
-| Area | Command | Exit |
-| --- | --- | --- |
-| DOD-003 targeted | `python3 tests/test_dod003_state_no_ppid_contract.py` | 0 |
-| DOD-003 targeted | `python3 tests/test_dod003_state_snapshot_contract.py` | 0 |
-| DOD-003 targeted | `python3 tests/test_dod003_legacy_diagnostic_only.py` | 0 |
-| DOD-003 targeted | `python3 tests/test_dod003_hook_statusline_diagnostic_only.py` | 0 |
-| DOD-003 targeted | `python3 tests/test_dod003_skill_contract_docs.py` | 0 |
-| DOD-003 targeted | `python3 tests/test_dod003_legacy_allowlist.py` | 0 |
-| DOD-001 regression | `python3 tests/test_dod001_flow_capture.py` | 0 |
-| DOD-001 regression | `python3 tests/test_dod001_session_state_canonical.py` | 0 |
-| DOD-001 regression | `python3 tests/test_dod001_dispatch_workflow_child.py` | 0 |
-| DOD-001 regression | `python3 tests/test_dod001_stale_handoff.py` | 0 |
-| DOD-001 regression | `bash tests/hooks/test_dod001_hook_identity.sh` | 0 |
-| DOD-001 regression | `bash tests/hooks/test_dod001_stop_fail_closed.sh` | 0 |
-| DOD-002 regression | `python3 tests/test_dod002_session_id_contract.py` | 0 |
-| DOD-002 regression | `python3 tests/test_dod002_no_uuid_fallback.py` | 0 |
-| DOD-002 regression | `python3 tests/test_dod002_metadata_consistency.py` | 0 |
-| Build | `npx tsc --noEmit` | 0 |
-| Smoke | `npm test` | 0 |
+An initial stale-root probe against `/Users/brandev/mygit/gran-maestro` failed because that checkout had not yet been advanced to REQ-815 T01/T02 content. The authoritative §5 validation was rerun with T03 worktree absolute paths and passed.
 
-Commands were executed in the required grouped suites with `&&`; final suite exit 0 means every listed command completed with exit 0.
+## Validation Summary
 
-## PAC Evidence Mapping
+| Area | Command | Exit | Result |
+| --- | --- | ---: | --- |
+| DOD-012 worktree absolute path | `PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py` | 0 | PASS |
+| Mandatory DOD-011 absolute path | `PYTHONPATH=/Users/brandev/mygit/gran-maestro python3 /Users/brandev/mygit/gran-maestro/tests/test_dod011_rehydration_contract.py` | 0 | PASS |
+| Mandatory DOD-006 absolute path | `PYTHONPATH=/Users/brandev/mygit/gran-maestro python3 /Users/brandev/mygit/gran-maestro/tests/test_dod006_recover_skill_history.py` | 0 | PASS |
+| npm smoke | `npm test` | 0 | PASS |
+| TypeScript | `npm exec -- tsc --noEmit` | 0 | PASS |
+| Mandatory diff sanity | `git -C /Users/brandev/mygit/gran-maestro diff --check` | 0 | PASS |
+| T03 DOD-012 worktree | `PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py` | 0 | PASS |
+| T03 DOD-011 worktree | `PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py` | 0 | PASS |
+| T03 DOD-006 worktree | `PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py` | 0 | PASS |
+| T03 diff sanity | `git diff --check` | 0 | PASS |
 
-| PAC | Grade | Evidence |
-| --- | --- | --- |
-| PAC-1 | MUST | `test_dod003_state_snapshot_contract.py`, `test_dod003_state_no_ppid_contract.py` verify canonical `.gran-maestro/state/{mst_session_id}/snapshot.json` selection and no PPID/default/alias path selection. |
-| PAC-2 | MUST | `test_dod003_state_snapshot_contract.py` verifies required payload fields, path/payload `mst_session_id` equality, and `root_mst_id` consistency. |
-| PAC-3 | MUST | `test_dod003_state_no_ppid_contract.py`, DOD-001 mismatch regressions verify env/context equality and no legacy fallback on missing or mismatched canonical context. |
-| PAC-4 | MUST | `test_dod003_skill_contract_docs.py` verifies skill state write examples do not inject `MST_STATE_PPID="${PPID}"` and describe inherited `MST_SESSION_ID`/structured context. |
-| PAC-5 | MUST | `test_dod003_legacy_allowlist.py`, `test_dod003_hook_statusline_diagnostic_only.py`, and `test_dod003_legacy_diagnostic_only.py` verify legacy/runtime values are diagnostic-only, not control-flow or canonical sources. |
-| PAC-6 | MUST | `test_dod003_state_snapshot_contract.py` and DOD-001 state/workflow evidence checks verify normal writes use the same full structured `mst_session_id`. |
-| PAC-7 | MUST | `test_dod003_legacy_diagnostic_only.py`, `test_dod003_hook_statusline_diagnostic_only.py`, `test_dod001_stale_handoff.py`, and `tests/hooks/test_dod001_stop_fail_closed.sh` verify stale owner/session-only workflow state does not select active workflow or mutate canonical state. |
-| PAC-8 | MUST | `test_dod003_legacy_allowlist.py` and `test_dod003_legacy_diagnostic_only.py` verify explicit migration/diagnostic legacy contexts are allowed but normal mutation/read paths do not promote them. |
-| PAC-9 | MUST | DOD-003 targeted suite covers missing `MST_SESSION_ID` with `MST_STATE_PPID`, env/context mismatch, legacy path snapshot, alias-only payload, owner_ppid-only workflow, owner_session_id-only active resource, and hook/statusline diagnostic-only cases. |
-| PAC-10 | MUST | DOD-001/DOD-002 regression suite passed: flow capture, canonical session state, dispatch child inheritance, stale handoff, hook identity, stop fail-closed, structured ID contract, no UUID fallback, and metadata consistency. |
-| PAC-11 | MUST | `test_dod003_skill_contract_docs.py` and `test_dod003_legacy_allowlist.py` verify docs/skills describe `MST_STATE_PPID` as non-canonical diagnostic/migration context. `git diff --name-only` confirms root `CLAUDE.md` is not modified. |
-| PAC-12 | MUST | Required DOD-003 suite, DOD-001/DOD-002 regression suite, `npx tsc --noEmit`, and `npm test` all exited 0. |
+## PAC Mapping
 
-PAC-13 is SHOULD coverage: `test_dod003_hook_statusline_diagnostic_only.py`, `test_dod003_legacy_allowlist.py`, and `tests/hooks/test_dod001_hook_identity.sh` verify diagnostic legacy display does not alter canonical mutation, active workflow selection, continuation decision, or recovery equality behavior.
+| PAC | Grade | Evidence | Result |
+| --- | --- | --- | --- |
+| PAC-1 | MUST | `test_auto_continuation_policy_persists_through_recover_bundle` | PASS |
+| PAC-2 | MUST | `test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence` | PASS |
+| PAC-3 | MUST | `test_user_wait_guard_redirects_without_critical_evidence` | PASS |
+| PAC-4 | MUST | `test_blocker_evidence_is_structured_before_user_wait_is_allowed` | PASS |
+| PAC-5 | MUST | `test_security_boundary_records_confirmation_required_and_does_not_start_original_action` | PASS |
+| PAC-6 | MUST | `test_action_classification_precedes_blocker_declaration_from_prose` | PASS |
+| PAC-7 | MUST | `test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress` | PASS |
+| PAC-8 | MUST | DOD-012/DOD-011/DOD-006 targeted suites, `npm test`, `npm exec -- tsc --noEmit`, `git diff --check`, and JSON validation | PASS |
+| PAC-9 | SHOULD | No T03 README/docs/skills diff; docs/skills impact not required | PASS |
+| PAC-10 | SHOULD | No T03 hook diff; T02-modified stop hook source/copy/cache comparisons `cmp=0` | PASS |
 
 ## Hook Sync Evidence
 
-T05 did not modify hook files:
+T03 did not modify hooks:
 
-- `git diff --name-only -- hooks .claude/hooks` produced no output.
-- `bash tests/hooks/test_dod001_hook_identity.sh` exited 0 and reported synced hook hashes for the source/copy hooks it can access.
-- Direct hash/copy check exited 0:
-  - `mst-session-init.sh`: source and `.claude/hooks` copy match `0fe7bd1120aec0bb878e6547ef69570e9deeb0b5b6617ffa513532d6d87a667e`
-  - `mst-pre-tool-use.sh`: source and `.claude/hooks` copy match `8b1d28ff8d86fce4ed6d71df13ea6b9dfe43ac483d32a36a408d3f7eb2b045db`
-  - `mst-stop-hook.sh`: source and `.claude/hooks` copy match `d17ab7d65d8b3e2b740d393c20f1956c530c605d0133d672f084c6251ebc420d`
-  - `mst-auto-chain-context.sh`: source and `.claude/hooks` copy match `82bbc49caf47a1029a86317438a0038d743241ca6bb25a27047cf1ad59895df0`
-  - `hooks/lib/pre_tool_use_fast.py`: no `.claude/hooks/lib` copy exists in this worktree; hook identity test skipped inaccessible plugin cache paths for 0.59.4/0.59.6/0.59.8 rather than mutating outside the worktree.
+```text
+git diff --name-only HEAD -- hooks .claude/hooks
+```
 
-## Scope Check
+Output was empty.
 
-Changed files for T05:
+T02 modified `mst-stop-hook.sh`, so source/copy/cache consistency was still checked:
 
-- `scripts/mst_cmds/state.py`
-- `verification-report.md`
+```text
+hooks ↔ .claude/hooks mst-stop-hook.sh cmp=0
+hooks/mst-stop-hook.sh ↔ /Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh cmp=0
+hooks/mst-stop-hook.sh ↔ /Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh cmp=0
+```
 
-Root `CLAUDE.md` was not modified. No unrelated feature work was introduced.
+## Docs/Skills Impact
 
-## Final Verdict
+T03 did not modify README, docs, or skills:
 
-PASS. DOD-003 integration validation, DOD-001/DOD-002 regressions, TypeScript build check, npm smoke, PAC-1 through PAC-12 MUST evidence, and hook sync/not-modified evidence are complete.
+```text
+git diff --name-only HEAD -- README.md docs skills
+```
+
+Output was empty, so docs/skills impact is not required.
+
+## Mandatory §5 Outputs
+
+### DOD-012 targeted suite
+
+```bash
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py
+```
+
+```text
+PASS test_auto_continuation_policy_persists_through_recover_bundle
+PASS test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence
+PASS test_user_wait_guard_redirects_without_critical_evidence
+PASS test_blocker_evidence_is_structured_before_user_wait_is_allowed
+PASS test_security_boundary_records_confirmation_required_and_does_not_start_original_action
+PASS test_action_classification_precedes_blocker_declaration_from_prose
+PASS test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
+```
+
+### DOD-011 targeted regression
+
+```bash
+PYTHONPATH=/Users/brandev/mygit/gran-maestro python3 /Users/brandev/mygit/gran-maestro/tests/test_dod011_rehydration_contract.py
+```
+
+```text
+PASS test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head
+PASS test_ac002_skill_switch_child_dispatch_keeps_parent_session_and_root_without_new_session
+PASS test_ac003_compaction_rehydration_write_ignores_conflicting_prompt_summary
+PASS test_ac004_stop_hook_continuation_uses_active_workflow_next_action_and_ledger_head_evidence
+PASS test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no_mutation
+PASS test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources
+```
+
+### DOD-006 recovered skill lifecycle regression
+
+```bash
+PYTHONPATH=/Users/brandev/mygit/gran-maestro python3 /Users/brandev/mygit/gran-maestro/tests/test_dod006_recover_skill_history.py
+```
+
+```text
+PASS test_recovered_context_skill_lifecycle_appends_to_existing_session_ledger
+```
+
+### npm smoke
+
+```bash
+npm test
+```
+
+```text
+
+> gran-maestro@0.59.8 test
+> node --test tests/smoke.test.mjs
+
+✔ smoke test runner executes deterministically (0.490167ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.937542
+```
+
+### TypeScript check
+
+```bash
+npm exec -- tsc --noEmit
+```
+
+```text
+```
+
+### Diff sanity
+
+```bash
+git -C /Users/brandev/mygit/gran-maestro diff --check
+```
+
+```text
+```
+
+## T03 Worktree Outputs
+
+### DOD-012 targeted suite
+
+```bash
+PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py
+```
+
+```text
+PASS test_auto_continuation_policy_persists_through_recover_bundle
+PASS test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence
+PASS test_user_wait_guard_redirects_without_critical_evidence
+PASS test_blocker_evidence_is_structured_before_user_wait_is_allowed
+PASS test_security_boundary_records_confirmation_required_and_does_not_start_original_action
+PASS test_action_classification_precedes_blocker_declaration_from_prose
+PASS test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
+```
+
+## Remaining Risk
+
+No T03 validation blocker remains. The stale-root probe is a worktree provenance artifact and is not a product/runtime failure.

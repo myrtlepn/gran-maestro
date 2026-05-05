@@ -1,35 +1,56 @@
-# REQ-813 T03 Coverage Matrix
+# REQ-815 T03 Coverage Matrix
 
-- Request: REQ-813
+- Request: REQ-815
 - Task: T03
-- Plan: PLN-640
-- Overall status: PASS
+- Plan: PLN-642
+- Objective: AGI-030 / DOD-012
+- Cynefin domain: complicated
+- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
+- Validated implementation baseline: `08fe874544c8b103ed38ca94ae8f7993b3a6714f`
+- Authoritative validation path: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03`
+- Non-authoritative stale-root probe: `/Users/brandev/mygit/gran-maestro` at `2a48c8f2cc5c531a3101d536446f1d9886c4d5bf` lacked the T01/T02 DOD-012 test before integration and is not used for T03 status.
+- Overall status: PASS.
 - MUST PAC unmapped count: 0
 - SHOULD PAC unmapped count: 0
 
-| PAC | Coverage | Evidence | Status |
-|-----|----------|----------|--------|
-| PAC-1 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head` | PASS |
-| PAC-2 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac002_skill_switch_child_dispatch_keeps_parent_session_and_root_without_new_session` | PASS |
-| PAC-3 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac003_compaction_rehydration_write_ignores_conflicting_prompt_summary` | PASS |
-| PAC-4 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac004_stop_hook_continuation_uses_active_workflow_next_action_and_ledger_head_evidence` | PASS |
-| PAC-5 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no_mutation` | PASS |
-| PAC-6 | COVERED | `tests/test_dod011_rehydration_contract.py::test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources` | PASS |
-| PAC-7 | COVERED | DOD-003~DOD-006 full regression chain and `scripts/tests/test_agile_cross_agi_isolation.py` | PASS |
-| PAC-8 | COVERED | `npm exec -- tsc --noEmit`, `npm test`, `git diff --check` | PASS |
-| PAC-9 | COVERED | `tests/test_sync_plugin_cache.py`, `tests/test_plugin_manifest_hooks.py`, README/docs/skills diff impact check | PASS |
+| PAC | Grade | AC | Coverage | Evidence | Status |
+|-----|-------|----|----------|----------|--------|
+| PAC-1 | MUST | AC-015 | COVERED | `tests/test_dod012_auto_continuation_contract.py::test_auto_continuation_policy_persists_through_recover_bundle` verifies `mst_session_id`, `root_mst_id`, `auto=true`, `continuation.mode=continue_unless_critical`, `next_action`, and `critical_blocker=null` in recover output. | PASS in worktree |
+| PAC-2 | MUST | AC-015 | COVERED | `test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence` verifies recoverable hook output records `continue.*` and next-action execution evidence. | PASS in worktree |
+| PAC-3 | MUST | AC-015 | COVERED | `test_user_wait_guard_redirects_without_critical_evidence` covers AskUserQuestion, confirmation wait, self-paced stop, and stop-hook preventContinuation attempts without terminal user-wait. | PASS in worktree |
+| PAC-4 | MUST | AC-015 | COVERED | `test_blocker_evidence_is_structured_before_user_wait_is_allowed` verifies structured `critical_blocker` fields: `type`, `evidence`, `attempted_recovery`, `next_safe_action`, `mst_session_id`, and `history_head`. | PASS in worktree |
+| PAC-5 | MUST | AC-015 | COVERED | `test_security_boundary_records_confirmation_required_and_does_not_start_original_action` verifies destructive/shared-state action is not started and records `terminal.security_confirmation_required` or equivalent blocker. | PASS in worktree |
+| PAC-6 | MUST | AC-015 | COVERED | `test_action_classification_precedes_blocker_declaration_from_prose` verifies queued action/tool envelope classification, classifier failure kind, safe alternatives, and no assistant-prose-only blocker. | PASS in worktree |
+| PAC-7 | MUST | AC-015 | COVERED | `test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress` verifies circuit key scope is `mst_session_id + normalized_action + normalized_error` and resets after `action.completed`. | PASS in worktree |
+| PAC-8 | MUST | AC-015, AC-016, AC-017, AC-018 | COVERED | Authoritative T03 worktree commands passed: DOD-012, DOD-011, DOD-006, `npm test`, `npm exec -- tsc --noEmit`, `git diff --check`, and `coverage-matrix.json` JSON validation. | PASS |
+| PAC-9 | SHOULD | AC-020 | COVERED | `git diff --name-only HEAD -- README.md docs skills` produced no output in T03 worktree; no docs/skills change was made in T03, so docs/skills impact is not required. | PASS |
+| PAC-10 | SHOULD | AC-019 | COVERED | `git diff --name-only HEAD -- hooks .claude/hooks` produced no output for T03 evidence changes; hook sync was also checked for T02-modified source/copy/cache files with `cmp=0`. | PASS |
 
-## Commands executed
+## Commands Executed
+
+Authoritative §5 commands run in the T03 worktree:
 
 ```bash
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod012_auto_continuation_contract.py
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod011_rehydration_contract.py
+PYTHONPATH=/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 python3 /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/tests/test_dod006_recover_skill_history.py
+npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 test
+npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 exec -- tsc --noEmit
+git -C /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03 diff --check
+python3 -m json.tool /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-815/t03/coverage-matrix.json
+```
+
+T03 worktree validation commands:
+
+```bash
+PYTHONPATH=$PWD python3 tests/test_dod012_auto_continuation_contract.py
 PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py
-PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_resume_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_dispatch_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_hook_no_fallback.py
-PYTHONPATH=$PWD python3 tests/test_dod003_state_snapshot_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_state_no_ppid_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_legacy_diagnostic_only.py && PYTHONPATH=$PWD python3 tests/test_dod004_parent_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_subprocess_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_hook_parent_session_boundary.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_cli.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_integrity.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_hook_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_invocation_history.py && PYTHONPATH=$PWD python3 tests/test_dod005_skill_lifecycle_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_resume_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_idempotency.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_dispatch_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_hook_no_fallback.py
-PYTHONPATH=$PWD python3 scripts/tests/test_agile_cross_agi_isolation.py
-npm exec -- tsc --noEmit
+PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py
 npm test
+npm exec -- tsc --noEmit
 git diff --check
-python3 tests/test_sync_plugin_cache.py && python3 tests/test_plugin_manifest_hooks.py
-git diff --name-only -- README.md docs skills || true
-git diff -- README.md docs skills || true
+git diff --name-only HEAD -- hooks .claude/hooks README.md docs skills
+cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh
+cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh"
+cmp -s hooks/mst-stop-hook.sh "$HOME/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh"
 ```

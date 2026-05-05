@@ -1429,6 +1429,316 @@ append_block_audit_entry() {
   append_audit_entry "blocked" "${STOP_INTENT_DECLARED_REASON:-}" "$effective_block_reason"
 }
 
+append_dod012_stop_transition_event() {
+  local fallback_event_type="${1:-continue.queued_action}"
+  MST_DOD012_STDIN_RAW="$STDIN_RAW" \
+  MST_DOD012_STATE_FILE="$STATE_FILE" \
+  MST_DOD012_FALLBACK_EVENT_TYPE="$fallback_event_type" \
+  MST_DOD012_SOURCE_ROOT="$(cd "$script_dir/.." && pwd)" \
+  python3 - "$PROJECT_ROOT" "$MST_SESSION_ID" <<'PY' || true
+import hashlib
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+session_id = sys.argv[2]
+
+if not re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", session_id or ""):
+    raise SystemExit(0)
+
+base_dir = project_root / ".gran-maestro"
+policy_home = Path(os.environ.get("MST_POLICY_HOME", "")).expanduser()
+if not str(policy_home):
+    policy_home = Path.home().expanduser() / ".claude" / "gran-maestro-policy"
+state_path = Path(os.environ.get("MST_DOD012_STATE_FILE", ""))
+stdin_raw = os.environ.get("MST_DOD012_STDIN_RAW", "")
+fallback_event_type = os.environ.get("MST_DOD012_FALLBACK_EVENT_TYPE", "continue.queued_action")
+
+def load_json_object(raw):
+    try:
+        payload = json.loads(raw or "{}")
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+def read_json_file(path):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+payload = load_json_object(stdin_raw)
+state = read_json_file(state_path) if state_path else {}
+next_action = payload.get("queued_action")
+if not isinstance(next_action, dict):
+    next_action = state.get("next_action")
+if not isinstance(next_action, dict):
+    next_action = {}
+
+head_path = base_dir / "sessions" / session_id / "history.head"
+try:
+    history_head = head_path.read_text(encoding="utf-8").strip()
+except OSError:
+    history_head = ""
+if not re.fullmatch(r"[0-9a-f]{64}", history_head or ""):
+    history_head = "0" * 64
+
+def normalize_action(action):
+    explicit = action.get("normalized_action") if isinstance(action, dict) else None
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    tool = action.get("tool") if isinstance(action, dict) else None
+    command = action.get("command") if isinstance(action, dict) else None
+    if isinstance(tool, str) and isinstance(command, str) and command.strip():
+        return f"{tool.strip().lower()}:{command.strip()}"
+    skill = action.get("expected_skill") or action.get("skill") if isinstance(action, dict) else None
+    source = action.get("source_id") or action.get("source") if isinstance(action, dict) else None
+    return ":".join(str(part).strip() for part in (skill, source) if isinstance(part, str) and part.strip()) or "unknown-action"
+
+def normalized_error():
+    failure = payload.get("failure")
+    if isinstance(failure, dict):
+        value = failure.get("normalized_error")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    value = next_action.get("normalized_error") if isinstance(next_action, dict) else None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+def action_scope(action):
+    for key in ("scope", "scope_hint"):
+        value = action.get(key) if isinstance(action, dict) else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    command = action.get("command") if isinstance(action, dict) else ""
+    command_text = command if isinstance(command, str) else ""
+    if re.search(r"\brm\s+-rf\b|/shared/|publish|remote|delete|archive", command_text, re.IGNORECASE):
+        return "destructive_external_shared_state"
+    if re.search(r"\b(pytest|npm test|tsc --noEmit|git diff --check)\b", command_text):
+        return "read_only_local_reversible"
+    return "unknown"
+
+def is_dangerous_scope(scope):
+    return any(token in scope for token in ("destructive", "external", "shared", "security_sensitive", "remote", "publish"))
+
+def classification(action, scope):
+    safe = []
+    if "read_only" in scope:
+        safe.append("run read-only verification")
+    if "local_reversible" in scope:
+        safe.append("continue local reversible sub-action")
+    if not safe:
+        safe.append("inspect queued action scope")
+    return {
+        "source": "queued_action_tool_envelope",
+        "scope": scope,
+        "classifier_failure_kind": None,
+        "safe_alternatives": safe,
+    }
+
+def blocker_from_candidate(candidate):
+    if not isinstance(candidate, dict):
+        return None
+    blocker_type = str(candidate.get("type") or "state_inconsistency").strip()
+    evidence = candidate.get("evidence")
+    attempted = candidate.get("attempted_recovery")
+    return {
+        "type": blocker_type,
+        "evidence": evidence if isinstance(evidence, list) and evidence else [str(evidence or "critical blocker evidence supplied")],
+        "attempted_recovery": attempted if isinstance(attempted, list) and attempted else [str(attempted or "inspect-only verification")],
+        "next_safe_action": str(candidate.get("next_safe_action") or "request user confirmation").strip(),
+        "mst_session_id": session_id,
+        "history_head": history_head,
+    }
+
+def security_blocker(scope):
+    return {
+        "type": "security_confirmation_required",
+        "evidence": [f"queued action scope requires explicit confirmation: {scope}"],
+        "attempted_recovery": ["classified action scope before auto continuation", "searched for read-only/local reversible alternative"],
+        "next_safe_action": "request security confirmation before original action",
+        "mst_session_id": session_id,
+        "history_head": history_head,
+    }
+
+def prior_circuit_state(key, normalized_action_value):
+    history_path = base_dir / "sessions" / session_id / "history.ndjson"
+    try:
+        rows = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except Exception:
+        return 0, False
+    count = 0
+    reset_seen = False
+    for row in rows:
+        event = row.get("event") if isinstance(row, dict) else None
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        if event_type == "action.completed" and str(event.get("normalized_action") or "") == normalized_action_value:
+            count = 0
+            reset_seen = True
+            continue
+        circuit = event.get("circuit_breaker")
+        if isinstance(circuit, dict) and circuit.get("key") == key and isinstance(circuit.get("count"), int):
+            count = max(count, circuit["count"])
+    return count, reset_seen
+
+def append(event):
+    root_match = re.match(r"^MST-(.+)-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$", session_id)
+    if not root_match:
+        return
+    root_mst_id = root_match.group(1)
+    history_file = base_dir / "sessions" / session_id / "history.ndjson"
+    local_head = base_dir / "sessions" / session_id / "history.head"
+    mirror_head = policy_home / "ledger-heads" / f"{session_id}.head"
+    verify_state = base_dir / "sessions" / session_id / "history.verify"
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    mirror_head.parent.mkdir(parents=True, exist_ok=True)
+
+    last_seq = 0
+    last_hash = "0" * 64
+    idempotency_keys = set()
+    if history_file.is_file():
+        for line in history_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(row, dict):
+                continue
+            event_hash = row.get("event_hash")
+            seq = row.get("seq")
+            if isinstance(event_hash, str) and re.fullmatch(r"[0-9a-f]{64}", event_hash) and isinstance(seq, int):
+                if seq >= last_seq:
+                    last_seq = seq
+                    last_hash = event_hash
+            row_event = row.get("event")
+            if isinstance(row_event, dict) and isinstance(row_event.get("idempotency_key"), str):
+                idempotency_keys.add(row_event["idempotency_key"])
+
+    event.setdefault("schema_version", 1)
+    event.setdefault("mst_session_id", session_id)
+    event.setdefault("root_mst_id", root_mst_id)
+    event.setdefault("type", event.get("event_type"))
+    event.setdefault(
+        "created_at",
+        datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    )
+    event.setdefault("history_head", history_head)
+    if not isinstance(event.get("idempotency_key"), str) or not event.get("idempotency_key").strip():
+        stable = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        event["idempotency_key"] = (
+            f"{session_id}:{event.get('event_type')}:"
+            f"{hashlib.sha256(stable.encode('utf-8')).hexdigest()[:24]}"
+        )
+    if event["idempotency_key"] in idempotency_keys:
+        return
+
+    canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    event_hash = hashlib.sha256((last_hash + "\n" + canonical).encode("utf-8")).hexdigest()
+    row = {
+        "schema_version": 1,
+        "mst_session_id": session_id,
+        "root_mst_id": root_mst_id,
+        "event_type": event.get("event_type"),
+        "created_at": event.get("created_at"),
+        "idempotency_key": event.get("idempotency_key"),
+        "event": event,
+        "event_hash": event_hash,
+        "prev_hash": last_hash,
+        "seq": last_seq + 1,
+    }
+    with history_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+    local_head.write_text(event_hash + "\n", encoding="utf-8")
+    mirror_head.write_text(event_hash + "\n", encoding="utf-8")
+    stat = history_file.stat()
+    fingerprint = f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}"
+    verify_state.write_text(f"{event_hash}\t{fingerprint}\t{last_seq + 1}\n", encoding="utf-8")
+
+scope = action_scope(next_action)
+action_classification = classification(next_action, scope)
+blocker = blocker_from_candidate(payload.get("critical_blocker_candidate"))
+event_type = fallback_event_type
+extra = {}
+
+if blocker is not None:
+    event_type = "terminal.security_confirmation_required"
+    extra["critical_blocker"] = blocker
+elif next_action and is_dangerous_scope(scope):
+    event_type = "terminal.security_confirmation_required"
+    extra["critical_blocker"] = security_blocker(scope)
+elif normalized_error():
+    event_type = "continue.recoverable_issue"
+    norm_action = normalize_action(next_action)
+    norm_error = normalized_error()
+    circuit_key = f"{session_id}:{norm_action}:{norm_error}"
+    prior_count, reset_seen = prior_circuit_state(circuit_key, norm_action)
+    count = prior_count + 1
+    extra["circuit_breaker"] = {
+        "key": circuit_key,
+        "count": count,
+        "limit": 3,
+        "open": count >= 3,
+        "normalized_action": norm_action,
+        "normalized_error": norm_error,
+    }
+    if reset_seen:
+        extra["circuit_breaker_reset"] = {
+            "key": f"{session_id}:{norm_action}:progress-reset",
+            "count": 1,
+            "reason": "action.completed",
+        }
+elif isinstance(payload.get("hook_output"), dict):
+    event_type = "continue.hook_blocking_observed"
+elif payload.get("preventContinuation") is True:
+    event_type = "continue.queued_action"
+elif "critical blocker" in str(payload.get("last_assistant_message") or "").lower():
+    event_type = "continue.queued_action"
+
+event = {
+    "event_type": event_type,
+    "type": event_type,
+    "next_action": next_action or None,
+    "next_action_execution": {"status": "queued", "next_action": next_action} if next_action else None,
+    "action_classification": action_classification if next_action else None,
+    **extra,
+}
+reset_circuit = event.pop("circuit_breaker_reset", None)
+append(event)
+
+if isinstance(reset_circuit, dict):
+    append(
+        {
+            "event_type": "continue.circuit_reset",
+            "type": "continue.circuit_reset",
+            "next_action": next_action or None,
+            "circuit_breaker": reset_circuit,
+        }
+    )
+
+if event_type.startswith("continue.") and next_action and not is_dangerous_scope(scope):
+    append(
+        {
+            "event_type": "action.started",
+            "type": "action.started",
+            "next_action": next_action,
+            "action": next_action,
+            "action_classification": action_classification,
+            "normalized_action": normalize_action(next_action),
+        }
+    )
+PY
+}
+
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   append_audit_entry "pass_through" "" "stop_hook_active_true"
   debug_log "allow" "reason=stop_hook_active_true"
@@ -1939,6 +2249,7 @@ run_snapshot_guard() {
       ;;
   esac
 
+  append_dod012_stop_transition_event "continue.queued_action"
   emit_unhandled_path_fallback "0"
   exit 0
 }
@@ -2257,6 +2568,7 @@ if [ -n "$PRE_STATE_NEXT_INFO" ]; then
     REASON="$REASON Transition source_skill: $PRE_SOURCE_SKILL."
   fi
   REASON="$REASON Do not stop; emit the next tool call now."
+  append_dod012_stop_transition_event "continue.queued_action"
   PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "1")"
   append_block_audit_entry "$REASON"
   emit_block_decision "$REASON"
@@ -2673,6 +2985,7 @@ fi
 REASON="$REASON Do not stop; emit the next tool call now."
 
 PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
+append_dod012_stop_transition_event "continue.queued_action"
 append_block_audit_entry "$REASON"
 emit_block_decision "$REASON"
 debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"

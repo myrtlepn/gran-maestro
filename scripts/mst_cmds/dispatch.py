@@ -147,6 +147,25 @@ def _dispatch_payload_error(payload: dict, session_id: str) -> str | None:
     return None
 
 
+def _continuation_policy_from_context(raw_context: str) -> dict:
+    try:
+        context = json.loads(raw_context or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(context, dict):
+        return {}
+    core = context.get("core_rehydration")
+    if not isinstance(core, dict):
+        core = context
+    policy: dict = {}
+    if core.get("auto") is True:
+        policy["auto"] = True
+    continuation = core.get("continuation")
+    if isinstance(continuation, dict):
+        policy["continuation"] = continuation
+    return policy
+
+
 def _coerce_positive_int(value, fallback: int) -> int:
     try:
         parsed = int(value)
@@ -395,6 +414,7 @@ def cmd_dispatch_register(args):
     canonical_fields = _canonical_dispatch_fields(session_id)
     payload = {
         **canonical_fields,
+        **_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")),
         "task_id": task_id,
         "pid": marker_pid,
         "started_at": now,
@@ -459,6 +479,7 @@ def cmd_dispatch_heartbeat(args):
         return 1
 
     payload.update(_canonical_dispatch_fields(session_id))
+    payload.update(_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")))
     payload["task_id"] = task_id
     payload["last_heartbeat"] = now
     if args.phase:

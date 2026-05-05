@@ -818,6 +818,17 @@ def _recover_rehydration_bundle(
     next_skill = _next_skill_from_snapshot(snapshot)
     workflow["next_skill"] = next_skill.get("name") or ""
     workflow["next_source"] = next_skill.get("source_id") or ""
+    continuation = {}
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("continuation"), dict):
+        continuation = copy.deepcopy(snapshot["continuation"])
+    next_action = None
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("next_action"), dict):
+        next_action = copy.deepcopy(snapshot["next_action"])
+    if next_action is not None:
+        continuation.setdefault("next_action", next_action)
+    if isinstance(snapshot, dict) and snapshot.get("auto") is True:
+        continuation.setdefault("mode", "continue_unless_critical")
+        continuation.setdefault("critical_blocker", None)
     context = {
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
@@ -827,6 +838,8 @@ def _recover_rehydration_bundle(
         "schema_version": 1,
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
+        "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
+        "continuation": continuation,
         "workflow": workflow,
         "current_skill": {
             "name": workflow.get("current_skill") or "",
