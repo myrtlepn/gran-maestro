@@ -528,6 +528,86 @@ def _history_idempotency_key(mst_session_id: str, event: dict) -> str:
     return f"{mst_session_id}:{event_type}:{digest}"
 
 
+def _history_refs_from_mapping(payload: dict) -> set[str]:
+    refs: set[str] = set()
+    for key in ("head_hash", "last_event_id", "event_hash"):
+        value = payload.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
+            refs.add(value.strip())
+    return refs
+
+
+def _core_rehydration_history_refs_from_env() -> set[str]:
+    raw_context = os.environ.get("MST_CONTEXT_JSON", "").strip()
+    if not raw_context:
+        return set()
+    try:
+        payload = json.loads(raw_context)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    core = payload.get("core_rehydration")
+    if not isinstance(core, dict):
+        return set()
+    history = core.get("history")
+    return _history_refs_from_mapping(history) if isinstance(history, dict) else set()
+
+
+def _snapshot_history_refs(base_dir: Path, mst_session_id: str) -> set[str]:
+    snapshot_path = Path(base_dir) / "state" / mst_session_id / "snapshot.json"
+    try:
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    history = payload.get("history")
+    return _history_refs_from_mapping(history) if isinstance(history, dict) else set()
+
+
+def _local_history_head(base_dir: Path, mst_session_id: str) -> str:
+    try:
+        return session_history_head_path(base_dir, mst_session_id).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _history_has_current_invocation_start(base_dir: Path, mst_session_id: str) -> bool:
+    try:
+        rows = _read_history_rows_unlocked(session_history_path(base_dir, mst_session_id))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    current_pid = str(os.getpid())
+    for row in reversed(rows):
+        event = row.get("event") if isinstance(row, dict) else None
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or event.get("type") or "").strip()
+        if event_type != "mst.invocation_start":
+            continue
+        if str(event.get("pid") or "") == current_pid:
+            return True
+    return False
+
+
+def _should_skip_stale_invocation_history_append(base_dir: Path, mst_session_id: str, event: dict) -> bool:
+    event_type = str(event.get("event_type") or event.get("type") or "").strip()
+    if not event_type.startswith("mst.invocation_"):
+        return False
+    refs = _core_rehydration_history_refs_from_env()
+    if not refs:
+        return False
+    if refs & _snapshot_history_refs(base_dir, mst_session_id):
+        return False
+    local_head = _local_history_head(base_dir, mst_session_id)
+    if local_head in refs:
+        return False
+    if event_type in {"mst.invocation_end", "mst.invocation_error"} and _history_has_current_invocation_start(base_dir, mst_session_id):
+        return False
+    return True
+
+
 def _read_history_rows_unlocked(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -584,6 +664,8 @@ def _write_history_heads(base_dir: Path, mst_session_id: str, head_hash: str, hi
 def write_session_history_event(base_dir: Path, mst_session_id: str, payload: dict) -> Path:
     parsed = validate_mst_session_metadata_consistency(base_dir, mst_session_id)
     path = session_history_path(base_dir, parsed.mst_session_id)
+    if _should_skip_stale_invocation_history_append(base_dir, parsed.mst_session_id, payload):
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / "history.lock"
 

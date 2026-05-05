@@ -1,0 +1,122 @@
+{
+  "request_id": "REQ-813",
+  "task_id": "03",
+  "plan_id": "PLN-640",
+  "objective_id": "AGI-030",
+  "overall_status": "pass",
+  "integration_head": "b4c0d0c4aae99db1cf0831db527d3a9d4f72d78a",
+  "must_unmapped_count": 0,
+  "should_unmapped_count": 0,
+  "pac_coverage": [
+    {
+      "pac_id": "PAC-1",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-2",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac002_skill_switch_child_dispatch_keeps_parent_session_and_root_without_new_session"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-3",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac003_compaction_rehydration_write_ignores_conflicting_prompt_summary"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-4",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac004_stop_hook_continuation_uses_active_workflow_next_action_and_ledger_head_evidence"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-5",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no_mutation"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-6",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_dod011_rehydration_contract.py::test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod011_rehydration_contract.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-7",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "DOD-003 through DOD-006 full regression chain",
+        "tests/test_dod006_recover_skill_history.py::test_recovered_context_skill_lifecycle_appends_to_existing_session_ledger",
+        "scripts/tests/test_agile_cross_agi_isolation.py"
+      ],
+      "commands": [
+        "PYTHONPATH=$PWD python3 tests/test_dod003_state_snapshot_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_state_no_ppid_contract.py && PYTHONPATH=$PWD python3 tests/test_dod003_legacy_diagnostic_only.py && PYTHONPATH=$PWD python3 tests/test_dod004_parent_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_subprocess_session_inheritance.py && PYTHONPATH=$PWD python3 tests/test_dod004_hook_parent_session_boundary.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_cli.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_integrity.py && PYTHONPATH=$PWD python3 tests/test_dod005_history_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_hook_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod005_invocation_history.py && PYTHONPATH=$PWD python3 tests/test_dod005_skill_lifecycle_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_resume_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_no_fallback.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_idempotency.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_dispatch_context.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_skill_history.py && PYTHONPATH=$PWD python3 tests/test_dod006_recover_hook_no_fallback.py",
+        "PYTHONPATH=$PWD python3 scripts/tests/test_agile_cross_agi_isolation.py"
+      ]
+    },
+    {
+      "pac_id": "PAC-8",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "npm exec -- tsc --noEmit",
+        "npm test",
+        "git diff --check"
+      ],
+      "commands": [
+        "npm exec -- tsc --noEmit",
+        "npm test",
+        "git diff --check"
+      ]
+    },
+    {
+      "pac_id": "PAC-9",
+      "coverage": "COVERED",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_sync_plugin_cache.py",
+        "tests/test_plugin_manifest_hooks.py",
+        "README.md/docs/skills diff impact check produced no output"
+      ],
+      "commands": [
+        "python3 tests/test_sync_plugin_cache.py && python3 tests/test_plugin_manifest_hooks.py",
+        "git diff --name-only -- README.md docs skills || true",
+        "git diff -- README.md docs skills || true"
+      ]
+    }
+  ]
+}

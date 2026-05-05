@@ -816,6 +816,8 @@ def _recover_rehydration_bundle(
 ) -> dict:
     workflow = _workflow_from_snapshot(snapshot, root_payload)
     next_skill = _next_skill_from_snapshot(snapshot)
+    workflow["next_skill"] = next_skill.get("name") or ""
+    workflow["next_source"] = next_skill.get("source_id") or ""
     context = {
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
@@ -849,6 +851,80 @@ def _recover_rehydration_bundle(
         "recovery_fingerprint": recovery_fingerprint,
         "created_new_session": False,
     }
+
+
+def _structured_legacy_alias_conflict(session_id: str) -> Optional[dict]:
+    diagnostics = _common.legacy_session_diagnostics()
+    snapshot_alias = diagnostics.get("MST_SNAPSHOT_SESSION_ID")
+    if isinstance(snapshot_alias, str) and snapshot_alias.strip():
+        try:
+            from scripts.mst_cmds.session import validate_mst_session_id
+
+            alias_session_id = validate_mst_session_id(snapshot_alias.strip()).mst_session_id
+        except ValueError:
+            alias_session_id = ""
+        if alias_session_id and alias_session_id != session_id:
+            return _recover_non_success(
+                "legacy_identity_not_canonical_source",
+                "MST_SNAPSHOT_SESSION_ID conflicts with canonical MST_SESSION_ID",
+                session_id=session_id,
+                details={"legacy_conflict_source": "MST_SNAPSHOT_SESSION_ID"},
+            )
+    return None
+
+
+def _context_core_history_refs() -> set[str]:
+    context = _json_object_env("MST_CONTEXT_JSON")
+    core = context.get("core_rehydration")
+    if not isinstance(core, dict):
+        return set()
+    history = core.get("history")
+    if not isinstance(history, dict):
+        return set()
+    refs: set[str] = set()
+    for key in ("head_hash", "last_event_id", "event_hash"):
+        value = history.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
+            refs.add(value.strip())
+    return refs
+
+
+def _history_tail_is_current_invocation_start_after_refs(history_result, refs: set[str]) -> bool:
+    if not history_result.rows or not history_result.projections:
+        return False
+    projection = history_result.projections[-1]
+    if projection.get("event_type") != "mst.invocation_start":
+        return False
+    if projection.get("prev_hash") not in refs:
+        return False
+    row = history_result.rows[-1]
+    event = row.get("event") if isinstance(row, dict) else None
+    if not isinstance(event, dict):
+        return False
+    return str(event.get("pid") or "") == str(os.getpid())
+
+
+def _validate_context_rehydration_head_for_write(session_id: str) -> Optional[dict]:
+    refs = _context_core_history_refs()
+    if not refs:
+        return None
+    snapshot = _load_snapshot_for_session(_skill_state_base_dir(), session_id)
+    snapshot_refs = _snapshot_history_refs(snapshot) if isinstance(snapshot, dict) else set()
+    if refs & snapshot_refs:
+        return None
+    history_result, history_error = _load_recover_history(_common.BASE_DIR, session_id)
+    if history_error is not None:
+        return history_error
+    assert history_result is not None
+    if history_result.tail_hash not in refs and not _history_tail_is_current_invocation_start_after_refs(history_result, refs):
+        return _recover_non_success(
+            "stale_history_head",
+            "core rehydration history reference does not match validated ledger head",
+            session_id=session_id,
+            root_mst_id=history_result.root_mst_id,
+            details={"expected_history_head": history_result.tail_hash, "core_rehydration_history_refs": sorted(refs)},
+        )
+    return None
 
 
 def _previous_enter_duration_ms(flow_path: Path, session_id: str, skill: str) -> Optional[float]:
@@ -1419,6 +1495,9 @@ def cmd_state_set(args):
     if not valid_snapshot:
         print(f"Error: {validation_error}", file=sys.stderr)
         return 1
+    context_head_error = _validate_context_rehydration_head_for_write(session_id)
+    if context_head_error is not None:
+        return _emit_recover_non_success(context_head_error)
     resource_id = _current_flow_resource_id()
     try:
         if args.step == 0:
@@ -1557,6 +1636,9 @@ def cmd_state_recover(args):
     if source_error is not None:
         return _emit_recover_non_success(source_error)
     assert session_id is not None
+    legacy_conflict = _structured_legacy_alias_conflict(session_id)
+    if legacy_conflict is not None:
+        return _emit_recover_non_success(legacy_conflict)
 
     try:
         parsed = session_mod.validate_mst_session_metadata_consistency(

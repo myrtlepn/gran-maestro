@@ -1217,6 +1217,50 @@ fail_closed_canonical_mismatch_if_any() {
   exit 0
 }
 
+canonical_ledger_head() {
+  python3 - "$PROJECT_ROOT" "${MST_SESSION_ID:-}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+session_id = sys.argv[2]
+if not re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", session_id or ""):
+    raise SystemExit(0)
+head_path = project_root / ".gran-maestro" / "sessions" / session_id / "history.head"
+try:
+    head = head_path.read_text(encoding="utf-8").strip()
+except OSError:
+    raise SystemExit(0)
+if re.fullmatch(r"[0-9a-f]{64}", head):
+    print(head)
+PY
+}
+
+context_rehydration_head() {
+  MST_CONTEXT_JSON_VALUE="${MST_CONTEXT_JSON:-}" python3 - <<'PY'
+import json
+import os
+import re
+
+try:
+    payload = json.loads(os.environ.get("MST_CONTEXT_JSON_VALUE", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+core = payload.get("core_rehydration")
+history = core.get("history") if isinstance(core, dict) else {}
+if not isinstance(history, dict):
+    history = {}
+for key in ("last_event_id", "head_hash", "event_hash"):
+    value = history.get(key)
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
+        print(value.strip())
+        raise SystemExit(0)
+PY
+}
+
 append_audit_entry() {
   local classification="${1:-}"
   local declared_reason="${2:-}"
@@ -2135,6 +2179,89 @@ if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
     debug_log "block" "reason=state_missing_active_session_detected_pre_snapshot"
     exit 0
   fi
+fi
+
+PRE_STATE_NEXT_INFO="$(python3 - "$STATE_FILE" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+if not os.path.isfile(path):
+    raise SystemExit(0)
+try:
+    payload = json.load(open(path, encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+if not isinstance(payload, dict) or payload.get("workflow_active") is not True:
+    raise SystemExit(0)
+next_action = payload.get("next_action")
+if not isinstance(next_action, dict):
+    raise SystemExit(0)
+skill = next_action.get("expected_skill") or next_action.get("skill") or ""
+if not isinstance(skill, str) or not skill.strip():
+    raise SystemExit(0)
+source = next_action.get("source_id") or next_action.get("source") or ""
+source_skill = next_action.get("source_skill") or ""
+current_skill = payload.get("current_skill") or ""
+active_req = payload.get("active_req") or ""
+iteration = payload.get("iteration")
+updated_at = payload.get("updated_at") or ""
+fields = [
+    skill.strip(),
+    source.strip() if isinstance(source, str) else "",
+    source_skill.strip() if isinstance(source_skill, str) else "",
+    current_skill.strip() if isinstance(current_skill, str) else "",
+    active_req.strip() if isinstance(active_req, str) else "",
+    str(iteration) if isinstance(iteration, int) else "0",
+    updated_at.strip() if isinstance(updated_at, str) else "",
+]
+print("\t".join(value.replace("\t", " ").replace("\n", " ") for value in fields))
+PY
+)"
+if [ -n "$PRE_STATE_NEXT_INFO" ]; then
+  PRE_NEXT_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f1)"
+  PRE_NEXT_SOURCE="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f2)"
+  PRE_SOURCE_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f3)"
+  PRE_CURRENT_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f4)"
+  PRE_ACTIVE_REQ="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f5)"
+  PRE_ITERATION="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f6)"
+  PRE_UPDATED_AT="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f7)"
+  PRE_NEXT_ARGS="-a"
+  PRE_LEDGER_HEAD="$(canonical_ledger_head || true)"
+  PRE_CONTEXT_HEAD="$(context_rehydration_head || true)"
+  if [ -n "$PRE_NEXT_SOURCE" ]; then
+    PRE_NEXT_ARGS="-a $PRE_NEXT_SOURCE"
+  fi
+  REASON="Workflow active, continue current skill and context without stopping."
+  if [ -n "$PRE_CURRENT_SKILL" ]; then
+    REASON="$REASON Current skill: $PRE_CURRENT_SKILL."
+  fi
+  if [ -n "$PRE_ACTIVE_REQ" ]; then
+    REASON="$REASON Active request: $PRE_ACTIVE_REQ."
+  fi
+  if [ "$PRE_ITERATION" != "0" ]; then
+    REASON="$REASON Iteration: $PRE_ITERATION."
+  fi
+  if [ -n "$PRE_UPDATED_AT" ]; then
+    REASON="$REASON Last update: $PRE_UPDATED_AT."
+  fi
+  if [ -n "$PRE_CONTEXT_HEAD" ]; then
+    REASON="$REASON Rehydration head: $PRE_CONTEXT_HEAD."
+  fi
+  if [ -n "$PRE_LEDGER_HEAD" ]; then
+    REASON="$REASON Ledger head: $PRE_LEDGER_HEAD."
+  fi
+  REASON="$REASON You MUST call Skill(skill: \"$PRE_NEXT_SKILL\", args: \"$PRE_NEXT_ARGS\") immediately."
+  if [ -n "$PRE_SOURCE_SKILL" ]; then
+    REASON="$REASON Transition source_skill: $PRE_SOURCE_SKILL."
+  fi
+  REASON="$REASON Do not stop; emit the next tool call now."
+  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "1")"
+  append_block_audit_entry "$REASON"
+  emit_block_decision "$REASON"
+  debug_log "block" "reason=next_action_present_pre_snapshot next_skill=$PRE_NEXT_SKILL next_source=$PRE_NEXT_SOURCE ledger_head=$PRE_LEDGER_HEAD block_count=$PERSISTED_BLOCK_COUNT"
+  exit 0
 fi
 
 run_snapshot_guard
