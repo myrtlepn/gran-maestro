@@ -1,0 +1,274 @@
+{
+  "evidence_producers": {
+    "action_scope": [
+      "hook_boundary_classifier"
+    ],
+    "attempt_count": [
+      "transition_validator"
+    ],
+    "classifier_failure_kind": [
+      "hook_boundary_classifier"
+    ],
+    "history_head": [
+      "history_ledger"
+    ],
+    "history_last_event_id": [
+      "state_snapshot",
+      "history_ledger"
+    ],
+    "limit": [
+      "transition_validator"
+    ],
+    "mismatch_subject": [
+      "validator"
+    ],
+    "mst_session_id": [
+      "session_metadata",
+      "hook_env"
+    ],
+    "next_action": [
+      "state_snapshot",
+      "recover_bundle"
+    ],
+    "next_safe_action": [
+      "hook_boundary_classifier"
+    ],
+    "objective_check_result": [
+      "mst.py agile objective-check"
+    ],
+    "reject_loop_key": [
+      "transition_validator"
+    ],
+    "root_mst_id": [
+      "session_metadata"
+    ]
+  },
+  "guards": {
+    "action_is_destructive_or_external": {
+      "evidence": [
+        "action_scope"
+      ]
+    },
+    "all_required_dod_done": {
+      "evidence": [
+        "objective_check_result"
+      ]
+    },
+    "classifier_failed_or_permission_unknown": {
+      "evidence": [
+        "classifier_failure_kind"
+      ]
+    },
+    "core_rehydration_available": {
+      "evidence": [
+        "mst_session_id",
+        "root_mst_id"
+      ]
+    },
+    "history_head_matches_snapshot": {
+      "evidence": [
+        "history_head",
+        "history_last_event_id"
+      ]
+    },
+    "history_verified": {
+      "evidence": [
+        "history_head"
+      ]
+    },
+    "next_action_present": {
+      "evidence": [
+        "next_action"
+      ]
+    },
+    "no_critical_blocker": {
+      "evidence": [
+        "next_action",
+        "history_head"
+      ]
+    },
+    "no_next_action": {
+      "evidence": [
+        "objective_check_result"
+      ]
+    },
+    "repeat_limit_exceeded": {
+      "evidence": [
+        "reject_loop_key",
+        "attempt_count",
+        "limit"
+      ]
+    },
+    "state_contract_failed": {
+      "evidence": [
+        "mismatch_subject",
+        "history_head"
+      ]
+    },
+    "state_inconsistency_suspected": {
+      "evidence": [
+        "mismatch_subject"
+      ]
+    }
+  },
+  "hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79",
+  "id": "mst-transition-graph",
+  "schema_version": 1,
+  "semantic_invariants": [
+    "all transition from/to states are declared",
+    "nonterminal states are reachable from active",
+    "rejected transitions define on_reject",
+    "required evidence keys have producers",
+    "generated graph view covers all graph states and transitions",
+    "auto_allowed does not bypass destructive or external action guards"
+  ],
+  "states": {
+    "active": {
+      "terminal": false
+    },
+    "blocked": {
+      "terminal": false
+    },
+    "cancelled": {
+      "terminal": true
+    },
+    "completed": {
+      "terminal": true
+    },
+    "failed": {
+      "terminal": true
+    },
+    "inspecting": {
+      "terminal": false
+    }
+  },
+  "transitions": {
+    "continue.queued_action": {
+      "auto_allowed": true,
+      "from": [
+        "active"
+      ],
+      "guards": [
+        "next_action_present",
+        "no_critical_blocker"
+      ],
+      "on_reject": "guard.inspect_only_verification",
+      "required_evidence": [
+        "next_action",
+        "history_head"
+      ],
+      "to": "active",
+      "write_allowed": true
+    },
+    "continue.rehydrate_retry": {
+      "auto_allowed": true,
+      "from": [
+        "active",
+        "inspecting"
+      ],
+      "guards": [
+        "core_rehydration_available",
+        "history_head_matches_snapshot"
+      ],
+      "on_reject": "terminal.state_inconsistency",
+      "required_evidence": [
+        "mst_session_id",
+        "root_mst_id",
+        "history_last_event_id"
+      ],
+      "to": "active",
+      "write_allowed": true
+    },
+    "guard.inspect_only_verification": {
+      "auto_allowed": true,
+      "from": [
+        "active",
+        "inspecting"
+      ],
+      "guards": [
+        "state_inconsistency_suspected"
+      ],
+      "on_reject": "terminal.state_inconsistency",
+      "required_evidence": [
+        "mismatch_subject"
+      ],
+      "to": "inspecting",
+      "write_allowed": false
+    },
+    "terminal.completed": {
+      "auto_allowed": true,
+      "from": [
+        "active"
+      ],
+      "guards": [
+        "all_required_dod_done",
+        "no_next_action",
+        "history_verified"
+      ],
+      "on_reject": "continue.queued_action",
+      "required_evidence": [
+        "objective_check_result",
+        "history_head"
+      ],
+      "to": "completed",
+      "write_allowed": true
+    },
+    "terminal.repeat_failure_limit": {
+      "auto_allowed": false,
+      "from": [
+        "active",
+        "inspecting",
+        "blocked"
+      ],
+      "guards": [
+        "repeat_limit_exceeded"
+      ],
+      "on_reject": "terminal.state_inconsistency",
+      "required_evidence": [
+        "reject_loop_key",
+        "attempt_count",
+        "limit"
+      ],
+      "to": "failed",
+      "write_allowed": true
+    },
+    "terminal.security_confirmation_required": {
+      "auto_allowed": false,
+      "from": [
+        "active",
+        "inspecting"
+      ],
+      "guards": [
+        "action_is_destructive_or_external",
+        "classifier_failed_or_permission_unknown"
+      ],
+      "on_reject": "terminal.state_inconsistency",
+      "required_evidence": [
+        "action_scope",
+        "classifier_failure_kind",
+        "next_safe_action"
+      ],
+      "to": "blocked",
+      "write_allowed": true
+    },
+    "terminal.state_inconsistency": {
+      "auto_allowed": false,
+      "from": [
+        "active",
+        "inspecting",
+        "blocked"
+      ],
+      "guards": [
+        "state_contract_failed"
+      ],
+      "on_reject": "terminal.repeat_failure_limit",
+      "required_evidence": [
+        "mismatch_subject",
+        "history_head"
+      ],
+      "to": "failed",
+      "write_allowed": true
+    }
+  },
+  "version": "2026-05-05.dod016-contract"
+}

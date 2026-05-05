@@ -69,6 +69,11 @@ SCHEDULE_WAKEUP_BLOCK_REASON = (
 SCHEDULE_WAKEUP_RESUME_HINT = (
     "[mst] ScheduleWakeup이 차단되었습니다. 'scripts/mst-loop.sh' 또는 '/mst:resume'으로 재개하세요."
 )
+ASK_USER_QUESTION_BLOCK_RULE_ID = "MST-ASK-USER-QUESTION-BLOCK"
+ASK_USER_QUESTION_BLOCK_REASON = (
+    "AskUserQuestion is blocked during MST workflow chain (workflow_active=true).\n"
+    "This is an attempted user-wait boundary transition; continue the queued MST action instead."
+)
 SCHEDULE_WAKEUP_STATE_TTL_SECONDS = 30 * 60
 SCHEDULE_WAKEUP_GRACE_SECONDS = 30
 PHASE_MUTATING_PYTHON_RE = re.compile(
@@ -2519,6 +2524,9 @@ def hardcoded_core_check(project_root: Path, home: Path, payload: dict) -> int:
             return 0
         stderr(SCHEDULE_WAKEUP_RESUME_HINT)
         return core_block(SCHEDULE_WAKEUP_BLOCK_RULE_ID, SCHEDULE_WAKEUP_BLOCK_REASON)
+
+    if tool_name == "AskUserQuestion" and schedule_wakeup_block_active(project_root):
+        return core_block(ASK_USER_QUESTION_BLOCK_RULE_ID, ASK_USER_QUESTION_BLOCK_REASON)
 
     if tool_name in {"Write", "Edit", "MultiEdit"} and file_path.startswith(policy_root + "/"):
         if "/rules.d/" in file_path or file_path.endswith("/manifest.json"):

@@ -655,13 +655,18 @@ def test_no_claude_code_core_source_modification() -> None:
         "hooks/",
         "scripts/",
         "skills/",
+        "templates/state-machine/",
         "tests/",
         "verification-report.md",
     )
+    allowed_paths = {
+        "dashboard/mst-transition-graph.json",
+    }
     forbidden = [
         path
         for path in changed
-        if not path.startswith(allowed_prefixes)
+        if path not in allowed_paths
+        and not path.startswith(allowed_prefixes)
         or path.startswith(("src/claude-code-core/", "packages/claude-code-core/", "vendor/claude-code/"))
     ]
     assert not forbidden, f"Claude Code core or non-Gran-Maestro surface changed: {forbidden}; all changed={changed}"

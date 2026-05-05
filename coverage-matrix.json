@@ -1,614 +1,709 @@
 {
-  "request_id": "REQ-818",
-  "task_id": "06",
-  "plan_id": "PLN-645",
+  "request_id": "REQ-819",
+  "task_id": "T06",
+  "plan_id": "PLN-646",
   "objective_id": "AGI-030",
-  "dod_id": "DOD-015",
-  "checked_at_utc": "2026-05-05T12:54:13Z",
-  "worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-818/integration",
-  "branch": "gran-maestro/master/AGI-030/REQ-818",
-  "head": "f741393",
-  "overall_status": "FINAL_INTEGRATION_PASS",
+  "dod_id": "DOD-016",
+  "checked_at_utc": "2026-05-05T16:44:19Z",
+  "worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration",
+  "branch": "gran-maestro/master/AGI-030/REQ-819",
+  "head": "3e19e8b6c79b0d1a202b9a00a3b902d137d3bb6b",
+  "integration_head_before_t06": "3e19e8b",
+  "overall_status": "FINAL_INTEGRATION_PASS_WITH_ACTIVE_CACHE_DIAGNOSTIC",
   "status_policy": {
-    "PASS": "Command was run on the integration head and exited 0, or manual evidence is directly proven by current artifacts.",
-    "HISTORICAL_T05": "Evidence was produced by T05 and superseded by T06 final integration confirmation."
+    "PASS": "Command was run in the REQ-819 integration worktree and exited 0, or artifact evidence is directly proven by current files.",
+    "DIAGNOSTIC_RECORDED": "The requested evidence path was checked and the exact mismatch or missing-path diagnostic is recorded without claiming synchronization.",
+    "NOT_APPLICABLE": "The gate did not apply because T06 did not change the relevant surface."
   },
-  "validated_task_commits": {
-    "T01": {
-      "commit": "12ef30b",
-      "status": "committed",
-      "scope": "red-first DOD-015 regression"
+  "graph_identity": {
+    "source_graph_path": "templates/state-machine/mst-transition-graph.json",
+    "graph_id": "mst-transition-graph",
+    "graph_version": "2026-05-05.dod016-contract",
+    "graph_hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79",
+    "schema_version": 1,
+    "states": [
+      "active",
+      "blocked",
+      "cancelled",
+      "completed",
+      "failed",
+      "inspecting"
+    ],
+    "transition_count": 7
+  },
+  "generated_view_identity": {
+    "path": "dashboard/mst-transition-graph.json",
+    "kind": "mst-transition-graph-view",
+    "generated_at": "2026-05-05T00:00:00Z",
+    "source_graph_path": "templates/state-machine/mst-transition-graph.json",
+    "source_graph": {
+      "id": "mst-transition-graph",
+      "version": "2026-05-05.dod016-contract",
+      "hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79"
     },
-    "T02": {
-      "commit": "8ffa0eb",
-      "status": "committed",
-      "scope": "hook and state/recover enforcement"
-    },
-    "T03": {
-      "commit": "f75ee83",
-      "status": "committed",
-      "scope": "dispatch and context propagation"
-    },
-    "T04": {
-      "commit": "68d5289",
-      "status": "committed",
-      "scope": "ledger evidence and no-core enforcement"
-    },
-    "T05": {
-      "commit": "d250533",
-      "status": "committed",
-      "scope": "coverage and review evidence artifacts"
-    },
-    "T06": {
-      "commit": "f741393",
-      "status": "committed",
-      "scope": "final integration and project gates"
+    "covered_states": [
+      "active",
+      "blocked",
+      "cancelled",
+      "completed",
+      "failed",
+      "inspecting"
+    ],
+    "covered_transitions": [
+      "continue.queued_action",
+      "continue.rehydrate_retry",
+      "guard.inspect_only_verification",
+      "terminal.completed",
+      "terminal.repeat_failure_limit",
+      "terminal.security_confirmation_required",
+      "terminal.state_inconsistency"
+    ],
+    "edge_count": 14,
+    "status": "PASS"
+  },
+  "graph_consumer_identity_sync": {
+    "api": "scripts/mst_cmds/transition_graph.py::validate_graph_consumer_identities",
+    "matching_consumers": [
+      "transition_validator",
+      "pre_tool_use_fast_hook",
+      "generated_graph_view"
+    ],
+    "matching_status": "PASS",
+    "matching_summary": "accepted=true, status=ok, consumer_count=3, graph_id/version/hash match canonical graph",
+    "mismatch_consumer": "deliberate_mismatch",
+    "mismatch_status": "PASS",
+    "mismatch_summary": "accepted=false, status=validation_failed, fail_closed=true, diagnostic code graph_consumer_hash_mismatch, mismatched_fields=[graph_hash]",
+    "expected_identity": {
+      "graph_id": "mst-transition-graph",
+      "graph_version": "2026-05-05.dod016-contract",
+      "graph_hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79"
     }
+  },
+  "hook_sync": {
+    "source_of_truth": "hooks/",
+    "project_copy": ".claude/hooks/",
+    "shell_hook_project_copy_status": "PASS",
+    "shell_hook_project_copy_summary": "mst-pre-tool-use.sh, mst-stop-hook.sh, mst-session-init.sh, and mst-auto-chain-context.sh source/project copies have matching sha256 digests.",
+    "required_hook_sync_test": "PASS",
+    "required_plugin_cache_test": "PASS",
+    "pre_tool_use_fast": {
+      "source_path": "hooks/lib/pre_tool_use_fast.py",
+      "source_sha256": "624693b838912f88ef6fd231d6081b124d7f158f7a7b1fd12ce619352ffd8af4",
+      "project_copy_path": ".claude/hooks/lib/pre_tool_use_fast.py",
+      "project_copy_status": "DIAGNOSTIC_RECORDED",
+      "project_copy_diagnostic": "project copy path does not exist: /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/.claude/hooks/lib/pre_tool_use_fast.py",
+      "active_cache_status": "DIAGNOSTIC_RECORDED",
+      "active_cache_diagnostics": [
+        "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/hooks/lib/pre_tool_use_fast.py: mismatch sha256=79d42fd07088f82431f529f9a2ebce57f1106853f4624af1719992f7112f4d52",
+        "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/lib/pre_tool_use_fast.py: mismatch sha256=79d42fd07088f82431f529f9a2ebce57f1106853f4624af1719992f7112f4d52"
+      ]
+    }
+  },
+  "no_core_no_dod017": {
+    "changed_files_master_to_head": [
+      "dashboard/mst-transition-graph.json",
+      "hooks/lib/pre_tool_use_fast.py",
+      "scripts/mst_cmds/transition_graph.py",
+      "templates/state-machine/mst-transition-graph.json",
+      "tests/test_dod015_external_control_surface_contract.py",
+      "tests/test_dod016_transition_graph_contract.py"
+    ],
+    "t06_artifact_files": [
+      "coverage-matrix.json",
+      "coverage-matrix.md",
+      "evidence-ledger.md",
+      "verification-report.md"
+    ],
+    "claude_code_core_source_modified": false,
+    "claude_code_core_forbidden_prefixes": [
+      "src/claude-code-core/",
+      "packages/claude-code-core/",
+      "vendor/claude-code/"
+    ],
+    "execution_flow_artifacts_found": [],
+    "no_dod017_status": "PASS",
+    "no_core_status": "PASS",
+    "note": "DOD-016 introduces transition graph artifacts only. No execution-flow.* file was found by the required find scan."
+  },
+  "frontend_deno_browser_verification": {
+    "status": "NOT_APPLICABLE",
+    "reason": "T06 changed evidence and one Python regression guard only. No frontend, Deno, or browser UI files were changed by T06; npm test and npx tsc --noEmit still passed."
   },
   "pac_coverage": [
     {
       "pac_id": "PAC-1",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "HOOK"
-      ],
       "mapped_ac_ids": [
         "AC-001",
-        "AC-002",
-        "AC-009",
-        "AC-010",
-        "AC-026",
-        "AC-027",
-        "AC-032",
+        "AC-007",
+        "AC-016",
+        "AC-020",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015 targeted suite passed in T05 for hook continuation and structured blocker fixtures; T06 integration-head rerun passed."
+      "evidence": "Canonical graph artifact defines schema_version, states, transitions, from/to, guards, required evidence, on_reject, auto_allowed, write_allowed, and semantic invariants."
     },
     {
       "pac_id": "PAC-2",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "STATE"
-      ],
       "mapped_ac_ids": [
-        "AC-003",
+        "AC-002",
+        "AC-008",
+        "AC-009",
         "AC-011",
-        "AC-017",
+        "AC-012",
+        "AC-015",
+        "AC-022",
         "AC-026",
-        "AC-027",
-        "AC-032",
-        "AC-033",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015, DOD-013, and DOD-014 suites passed for fail-closed state/history/recover mismatch and no new session fallback."
+      "evidence": "DOD-016 targeted regression passed schema/invariant fail-closed coverage, generated view drift detection, and missing/corrupt/hash-skew diagnostics."
     },
     {
       "pac_id": "PAC-3",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "DISPATCH"
-      ],
       "mapped_ac_ids": [
-        "AC-004",
+        "AC-003",
+        "AC-013",
+        "AC-014",
         "AC-015",
         "AC-016",
-        "AC-017",
-        "AC-026",
-        "AC-027",
-        "AC-032",
+        "AC-018",
+        "AC-019",
+        "AC-020",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015 targeted suite passed child dispatch inheritance, auto policy preservation, and dispatch mismatch fail-closed fixtures."
+      "evidence": "Transition validator uses explicit attempted transition envelopes and returns graph identity, guard/evidence, accepted, and structured reject results."
     },
     {
       "pac_id": "PAC-4",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "CONTEXT"
-      ],
       "mapped_ac_ids": [
-        "AC-005",
-        "AC-018",
-        "AC-026",
-        "AC-027",
-        "AC-032",
-        "AC-033",
+        "AC-004",
+        "AC-017",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015 and DOD-011 suites passed core rehydration priority over prompt summary and prior rehydration contract fixtures."
+      "evidence": "Repeated on_reject loop regression passed with stable idempotency key and terminal repeat/state-inconsistency blocker instead of completed success."
     },
     {
       "pac_id": "PAC-5",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "NO-CORE"
-      ],
       "mapped_ac_ids": [
-        "AC-006",
-        "AC-022",
-        "AC-023",
-        "AC-028",
-        "AC-032",
-        "AC-035",
+        "AC-005",
+        "AC-018",
+        "AC-019",
+        "AC-020",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "Changed-file provenance contains only Gran Maestro-owned scripts, hooks, tests, and evidence artifacts; no Claude Code core source paths are present."
+      "evidence": "Hook boundary regression passed for final-answer, AskUserQuestion, self-paced stop, premature completed, and on_reject continuation block behavior."
     },
     {
       "pac_id": "PAC-6",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "AUTO"
-      ],
       "mapped_ac_ids": [
-        "AC-002",
-        "AC-007",
-        "AC-010",
-        "AC-012",
-        "AC-016",
-        "AC-026",
-        "AC-027",
-        "AC-032",
+        "AC-005",
+        "AC-021",
+        "AC-030",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015 and DOD-012 suites passed recoverable issue continuation, no terminal user-wait fallback without critical blocker, and retry/circuit evidence fixtures."
+      "evidence": "Normal hook pass result proves no full state prompt injection, hot-path full graph validation, D2 rendering, or full ledger replay."
     },
     {
       "pac_id": "PAC-7",
       "grade": "MUST",
-      "tags": [
-        "TIER-A",
-        "LEDGER"
-      ],
       "mapped_ac_ids": [
-        "AC-008",
-        "AC-013",
-        "AC-021",
-        "AC-023",
-        "AC-024",
-        "AC-026",
+        "AC-010",
+        "AC-011",
+        "AC-014",
+        "AC-015",
+        "AC-020",
+        "AC-022",
         "AC-027",
-        "AC-032",
-        "AC-033",
+        "AC-034",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "DOD-015 and DOD-014 suites passed same-session append-only enforcement evidence and authoritative ledger projection preservation."
+      "evidence": "validate_graph_consumer_identities accepted matching validator/hook/view consumers and failed closed for deliberate graph_hash mismatch."
     },
     {
       "pac_id": "PAC-8",
       "grade": "MUST",
-      "tags": [
-        "TIER-B",
-        "REGRESSION"
-      ],
       "mapped_ac_ids": [
-        "AC-013",
-        "AC-019",
+        "AC-006",
+        "AC-009",
         "AC-024",
-        "AC-027",
-        "AC-032",
-        "AC-033",
-        "AC-034"
+        "AC-025",
+        "AC-026",
+        "AC-030",
+        "AC-036"
       ],
       "status": "PASS",
-      "evidence": "T06 final integration gate passed DOD-015, DOD-011 through DOD-014, npm test, npx tsc --noEmit, and git diff --check on integration head f741393."
+      "evidence": "Generated dashboard graph view is derived from the canonical graph and includes source path, graph version/hash, generated_at, and covered states/transitions."
     },
     {
       "pac_id": "PAC-9",
       "grade": "MUST",
-      "tags": [
-        "TIER-B",
-        "EVIDENCE"
-      ],
       "mapped_ac_ids": [
+        "AC-001",
+        "AC-002",
+        "AC-003",
+        "AC-004",
+        "AC-005",
+        "AC-006",
+        "AC-007",
+        "AC-008",
+        "AC-009",
+        "AC-010",
+        "AC-011",
+        "AC-012",
+        "AC-013",
+        "AC-014",
+        "AC-015",
+        "AC-016",
+        "AC-017",
+        "AC-018",
+        "AC-019",
+        "AC-020",
+        "AC-021",
+        "AC-022",
+        "AC-024",
+        "AC-025",
         "AC-026",
         "AC-027",
         "AC-028",
-        "AC-031",
-        "AC-036"
+        "AC-029",
+        "AC-030"
       ],
       "status": "PASS",
-      "evidence": "coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, verification-report.md, and RV-001 review evidence map PAC-1 through PAC-11, AC-001 through AC-036, final command evidence, provenance, no-core, hook sync, and no-go scope."
+      "evidence": "DOD-016 targeted test command passed all six contract tests covering graph schema, transition validation, hook on_reject, reject-loop guard, graph skew, generated view drift, and no-DOD017 artifacts."
     },
     {
       "pac_id": "PAC-10",
-      "grade": "SHOULD",
-      "tags": [
-        "IMPACT",
-        "HOOK",
-        "TIER-B"
-      ],
+      "grade": "MUST",
       "mapped_ac_ids": [
-        "AC-014",
         "AC-029",
-        "AC-036"
+        "AC-031",
+        "AC-032"
       ],
       "status": "PASS",
-      "evidence": "hooks/mst-stop-hook.sh, .claude/hooks/mst-stop-hook.sh, and active plugin cache copies for versions 0.59.6 and 0.59.8 all compare equal to the source hook with cmp exit code 0."
+      "evidence": "DOD-011 through DOD-015 regressions, npm test, npx tsc --noEmit, and git diff --check passed on the integration worktree after the DOD-015 dashboard allowlist fix."
     },
     {
       "pac_id": "PAC-11",
-      "grade": "SHOULD",
-      "tags": [
-        "SCOPE",
-        "TIER-B"
-      ],
+      "grade": "MUST",
       "mapped_ac_ids": [
-        "AC-020",
-        "AC-025",
-        "AC-030",
+        "AC-006",
+        "AC-028",
         "AC-035",
         "AC-036"
       ],
       "status": "PASS",
-      "evidence": "No DOD-016 transition graph YAML/D2/dashboard artifacts and no DOD-017 execution-flow JSON/D2/dashboard projection artifacts were introduced by the current changed-file sets."
+      "evidence": "Required find scan returned no execution-flow.* files; changed-file provenance contains transition graph artifacts only, not DOD-017 execution-flow projection artifacts."
+    },
+    {
+      "pac_id": "PAC-12",
+      "grade": "SHOULD",
+      "mapped_ac_ids": [
+        "AC-023",
+        "AC-037"
+      ],
+      "status": "PASS",
+      "evidence": "DOD-015 external control surface suite passed after graph validator integration; no-core provenance remains enforced with narrow generated dashboard graph allowance."
+    },
+    {
+      "pac_id": "PAC-13",
+      "grade": "MUST",
+      "mapped_ac_ids": [
+        "AC-033",
+        "AC-034",
+        "AC-035",
+        "AC-036"
+      ],
+      "status": "PASS",
+      "evidence": "This evidence set records PAC/AC coverage, actual command evidence, graph version/hash sync, hook source/project/cache diagnostics, no-core provenance, and DOD-017 no-go scope."
     }
   ],
   "ac_coverage": [
     {
       "ac_id": "AC-001",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-1"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: hook_enforcement_continues_without_user_wait"
-    },
-    {
-      "ac_id": "AC-002",
-      "task_id": "01",
+      "task_id": "T01",
       "pac_ids": [
         "PAC-1",
-        "PAC-6"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: hook_user_wait_requires_structured_critical_blocker"
-    },
-    {
-      "ac_id": "AC-003",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-2"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: state_recover_mismatch_fails_closed_without_new_session"
-    },
-    {
-      "ac_id": "AC-004",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-3"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: child_dispatch_inherits_parent_session_and_auto_policy"
-    },
-    {
-      "ac_id": "AC-005",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-4"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: core_rehydration_precedes_prompt_summary"
-    },
-    {
-      "ac_id": "AC-006",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-5"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: no_claude_code_core_source_modification"
-    },
-    {
-      "ac_id": "AC-007",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-6"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: recoverable_issue_records_continuation_not_user_wait"
-    },
-    {
-      "ac_id": "AC-008",
-      "task_id": "01",
-      "pac_ids": [
-        "PAC-7"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: external_enforcement_records_same_session_ledger_evidence"
-    },
-    {
-      "ac_id": "AC-009",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-1"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: hook_enforcement_continues_without_user_wait"
-    },
-    {
-      "ac_id": "AC-010",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-1",
-        "PAC-6"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: hook_user_wait_requires_structured_critical_blocker"
-    },
-    {
-      "ac_id": "AC-011",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-2"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: state_recover_mismatch_fails_closed_without_new_session"
-    },
-    {
-      "ac_id": "AC-012",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-6"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: recoverable_issue_records_continuation_not_user_wait"
-    },
-    {
-      "ac_id": "AC-013",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-7",
-        "PAC-8"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-012 and DOD-014 regression suites passed in T05"
-    },
-    {
-      "ac_id": "AC-014",
-      "task_id": "02",
-      "pac_ids": [
-        "PAC-10"
-      ],
-      "status": "PASS",
-      "evidence": "Hook source/project/cache comparisons all pass with cmp exit code 0 after active plugin cache sync."
-    },
-    {
-      "ac_id": "AC-015",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-3"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: child_dispatch_inherits_parent_session_and_auto_policy"
-    },
-    {
-      "ac_id": "AC-016",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-3",
-        "PAC-6"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: dispatch_register_heartbeat_preserve_auto_continuation_policy"
-    },
-    {
-      "ac_id": "AC-017",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-2",
-        "PAC-3"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: dispatch_context_mismatch_fails_closed"
-    },
-    {
-      "ac_id": "AC-018",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-4"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: core_rehydration_precedes_prompt_summary"
-    },
-    {
-      "ac_id": "AC-019",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-8"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-011 and DOD-013 regression suites passed in T05"
-    },
-    {
-      "ac_id": "AC-020",
-      "task_id": "03",
-      "pac_ids": [
-        "PAC-11"
-      ],
-      "status": "PASS",
-      "evidence": "No execution-flow JSON/D2/dashboard projection artifact in changed-file provenance"
-    },
-    {
-      "ac_id": "AC-021",
-      "task_id": "04",
-      "pac_ids": [
-        "PAC-7"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: external_enforcement_records_same_session_ledger_evidence"
-    },
-    {
-      "ac_id": "AC-022",
-      "task_id": "04",
-      "pac_ids": [
-        "PAC-5"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: no_claude_code_core_source_modification"
-    },
-    {
-      "ac_id": "AC-023",
-      "task_id": "04",
-      "pac_ids": [
-        "PAC-5",
-        "PAC-7"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-015 targeted suite: external_enforcement_records_same_session_ledger_evidence"
-    },
-    {
-      "ac_id": "AC-024",
-      "task_id": "04",
-      "pac_ids": [
-        "PAC-7",
-        "PAC-8"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-014 ledger projection suite passed in T05"
-    },
-    {
-      "ac_id": "AC-025",
-      "task_id": "04",
-      "pac_ids": [
-        "PAC-11"
-      ],
-      "status": "PASS",
-      "evidence": "No transition graph YAML/D2/dashboard or execution-flow projection artifact in changed-file provenance"
-    },
-    {
-      "ac_id": "AC-026",
-      "task_id": "05",
-      "pac_ids": [
-        "PAC-1",
-        "PAC-2",
-        "PAC-3",
-        "PAC-4",
-        "PAC-5",
-        "PAC-6",
-        "PAC-7",
         "PAC-9"
       ],
       "status": "PASS",
-      "evidence": "coverage-matrix.json and coverage-matrix.md include PAC-1 through PAC-11 and AC-001 through AC-036"
+      "evidence": "test_graph_artifact_defines_machine_readable_contract PASS."
     },
     {
-      "ac_id": "AC-027",
-      "task_id": "05",
+      "ac_id": "AC-002",
+      "task_id": "T01",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "test_graph_schema_invariants_fail_closed PASS."
+    },
+    {
+      "ac_id": "AC-003",
+      "task_id": "T01",
+      "pac_ids": [
+        "PAC-3",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "test_transition_validator_requires_explicit_envelope PASS."
+    },
+    {
+      "ac_id": "AC-004",
+      "task_id": "T01",
+      "pac_ids": [
+        "PAC-4",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "test_repeated_on_reject_loop_is_bounded PASS."
+    },
+    {
+      "ac_id": "AC-005",
+      "task_id": "T01",
+      "pac_ids": [
+        "PAC-5",
+        "PAC-6",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "test_hook_boundary_uses_graph_on_reject_continuation PASS."
+    },
+    {
+      "ac_id": "AC-006",
+      "task_id": "T01",
+      "pac_ids": [
+        "PAC-8",
+        "PAC-11",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "test_generated_graph_view_detects_drift_without_dod017_artifacts PASS."
+    },
+    {
+      "ac_id": "AC-007",
+      "task_id": "T02",
       "pac_ids": [
         "PAC-1",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "templates/state-machine/mst-transition-graph.json contains canonical graph fields."
+    },
+    {
+      "ac_id": "AC-008",
+      "task_id": "T02",
+      "pac_ids": [
         "PAC-2",
-        "PAC-3",
-        "PAC-4",
-        "PAC-6",
-        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "DOD-016 schema invariant regression rejects invalid graph fixtures fail-closed."
+    },
+    {
+      "ac_id": "AC-009",
+      "task_id": "T02",
+      "pac_ids": [
+        "PAC-2",
         "PAC-8",
         "PAC-9"
       ],
       "status": "PASS",
-      "evidence": "evidence-ledger.md records command, expected, actual summary, and exit code for run commands; final T06 gates are command-backed PASS."
+      "evidence": "Semantic invariants cover reachability, transition references, evidence producers, and generated view coverage."
     },
     {
-      "ac_id": "AC-028",
-      "task_id": "05",
+      "ac_id": "AC-010",
+      "task_id": "T02",
       "pac_ids": [
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "graph_id mst-transition-graph, graph_version 2026-05-05.dod016-contract, and graph_hash 8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79 are stable across recorded consumers."
+    },
+    {
+      "ac_id": "AC-011",
+      "task_id": "T02",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Missing/corrupt/hash-skew graph paths are covered by fail-closed DOD-016 regression."
+    },
+    {
+      "ac_id": "AC-012",
+      "task_id": "T02",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Legacy unknown state/transition behavior remains diagnostic/fail-closed, not silent graph migration."
+    },
+    {
+      "ac_id": "AC-013",
+      "task_id": "T03",
+      "pac_ids": [
+        "PAC-3",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Transition validator requires explicit attempted transition envelope."
+    },
+    {
+      "ac_id": "AC-014",
+      "task_id": "T03",
+      "pac_ids": [
+        "PAC-3",
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Accepted transition result includes graph identity, current state, transition id, target state, required evidence, guard results, write_allowed, and auto_allowed evidence."
+    },
+    {
+      "ac_id": "AC-015",
+      "task_id": "T03",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-3",
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Rejected transition result includes failed guard/reason, required evidence, on_reject, graph version/hash, and diagnostic code."
+    },
+    {
+      "ac_id": "AC-016",
+      "task_id": "T03",
+      "pac_ids": [
+        "PAC-1",
+        "PAC-3",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "auto_allowed and write_allowed semantics are enforced by transition validator regression."
+    },
+    {
+      "ac_id": "AC-017",
+      "task_id": "T03",
+      "pac_ids": [
+        "PAC-4",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Reject-loop idempotency and terminal blocker behavior passed."
+    },
+    {
+      "ac_id": "AC-018",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-3",
         "PAC-5",
         "PAC-9"
       ],
       "status": "PASS",
-      "evidence": "verification-report.md changed-file provenance records no Claude Code core source changes"
+      "evidence": "Stop boundary terminal attempts are represented by graph transition validation fixtures."
+    },
+    {
+      "ac_id": "AC-019",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-3",
+        "PAC-5",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "PreToolUse user-wait and self-paced stop attempts are covered by hook boundary regression."
+    },
+    {
+      "ac_id": "AC-020",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-1",
+        "PAC-3",
+        "PAC-5",
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Hook reject block includes attempted transition, failed guard, required evidence, on_reject transition, next action, graph version/hash, and same-session evidence."
+    },
+    {
+      "ac_id": "AC-021",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-6",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Hook normal pass result flags hot_path_full_graph_validation=false, hot_path_d2_rendering=false, and hot_path_full_ledger_replay=false."
+    },
+    {
+      "ac_id": "AC-022",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Hook graph hash or snapshot skew fails closed."
+    },
+    {
+      "ac_id": "AC-023",
+      "task_id": "T04",
+      "pac_ids": [
+        "PAC-12"
+      ],
+      "status": "PASS",
+      "evidence": "DOD-015 external control surface contract passed after DOD-016 integration."
+    },
+    {
+      "ac_id": "AC-024",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-8",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "dashboard/mst-transition-graph.json includes source_graph_path, source graph id/version/hash, generated_at, covered_states, and covered_transitions."
+    },
+    {
+      "ac_id": "AC-025",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-8",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Generated dashboard view is derived from canonical graph and validated by DOD-016 regression."
+    },
+    {
+      "ac_id": "AC-026",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-2",
+        "PAC-8",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Generated graph view drift detector reports stale hash/coverage gap as non-success diagnostic."
+    },
+    {
+      "ac_id": "AC-027",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-7",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Graph consumer identity sync accepted matching consumers and failed closed on deliberate mismatch."
+    },
+    {
+      "ac_id": "AC-028",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-11",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "Required find scan found no execution-flow.* artifacts."
     },
     {
       "ac_id": "AC-029",
-      "task_id": "05",
+      "task_id": "T05",
+      "pac_ids": [
+        "PAC-10",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "No T06 frontend/Deno files changed; npm test and npx tsc --noEmit passed. Browser/UI build verification was not applicable to T06."
+    },
+    {
+      "ac_id": "AC-030",
+      "task_id": "T06",
+      "pac_ids": [
+        "PAC-1",
+        "PAC-2",
+        "PAC-3",
+        "PAC-4",
+        "PAC-5",
+        "PAC-6",
+        "PAC-8",
+        "PAC-9"
+      ],
+      "status": "PASS",
+      "evidence": "DOD-016 targeted regression command exited 0 with six PASS lines."
+    },
+    {
+      "ac_id": "AC-031",
+      "task_id": "T06",
       "pac_ids": [
         "PAC-10"
       ],
       "status": "PASS",
-      "evidence": "Hook source/project/cache comparisons all pass with cmp exit code 0 after active plugin cache sync."
-    },
-    {
-      "ac_id": "AC-030",
-      "task_id": "05",
-      "pac_ids": [
-        "PAC-11"
-      ],
-      "status": "PASS",
-      "evidence": "verification-report.md records DOD-016/DOD-017 no-go rationale and no generated graph/projection artifacts"
-    },
-    {
-      "ac_id": "AC-031",
-      "task_id": "05",
-      "pac_ids": [
-        "PAC-9"
-      ],
-      "status": "PASS",
-      "evidence": "Artifacts agree on PASS statuses, final T06 gates, hook source/copy/cache sync, changed-file provenance, and no-go scope."
+      "evidence": "DOD-011, DOD-012, DOD-013, DOD-014, and DOD-015 regression commands exited 0."
     },
     {
       "ac_id": "AC-032",
-      "task_id": "06",
+      "task_id": "T06",
       "pac_ids": [
-        "PAC-1",
-        "PAC-2",
-        "PAC-3",
-        "PAC-4",
-        "PAC-5",
-        "PAC-6",
-        "PAC-7",
-        "PAC-8"
+        "PAC-10"
       ],
       "status": "PASS",
-      "evidence": "T06 DOD-015 targeted regression passed on integration head f741393 with 10 tests passed."
+      "evidence": "npm test, npx tsc --noEmit, and git diff --check exited 0."
     },
     {
       "ac_id": "AC-033",
-      "task_id": "06",
+      "task_id": "T06",
       "pac_ids": [
-        "PAC-2",
-        "PAC-4",
-        "PAC-7",
-        "PAC-8"
+        "PAC-13"
       ],
-      "status": "PASS",
-      "evidence": "T06 DOD-011 through DOD-014 regression suites passed on integration head f741393 with 26 tests passed."
+      "status": "PASS_WITH_DIAGNOSTIC",
+      "evidence": "Required hook copy sync and plugin cache tests passed; shell hook project copies match. hooks/lib/pre_tool_use_fast.py has no .claude/hooks/lib project copy and active cache copies are present but mismatched, recorded as exact diagnostics."
     },
     {
       "ac_id": "AC-034",
-      "task_id": "06",
+      "task_id": "T06",
       "pac_ids": [
-        "PAC-8"
+        "PAC-7",
+        "PAC-13"
       ],
       "status": "PASS",
-      "evidence": "T06 project gates passed: npm test, npx tsc --noEmit, and git diff --check exited 0."
+      "evidence": "Artifacts record source graph path, graph_id, graph_version, graph_hash, generated view identity, matching consumer sync pass, and mismatch fail-closed evidence."
     },
     {
       "ac_id": "AC-035",
-      "task_id": "06",
+      "task_id": "T06",
       "pac_ids": [
-        "PAC-5",
-        "PAC-11"
+        "PAC-11",
+        "PAC-13"
       ],
       "status": "PASS",
-      "evidence": "Final diff inspection passed: no Claude Code core paths and no DOD-016/DOD-017 graph/projection artifacts are present."
+      "evidence": "master...HEAD changed-file scan contains no Claude Code core source path; required execution-flow.* find scan returned no files."
     },
     {
       "ac_id": "AC-036",
-      "task_id": "06",
+      "task_id": "T06",
       "pac_ids": [
         "PAC-1",
         "PAC-2",
@@ -617,12 +712,21 @@
         "PAC-5",
         "PAC-6",
         "PAC-7",
-        "PAC-9",
-        "PAC-10",
-        "PAC-11"
+        "PAC-8",
+        "PAC-11",
+        "PAC-13"
       ],
       "status": "PASS",
-      "evidence": "Final evidence completeness review passed: PAC-1 through PAC-11, AC-001 through AC-036, T06 gates, hook cache sync, no-core, and no-go scope are covered."
+      "evidence": "coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, and verification-report.md include PAC-1 through PAC-13 and AC-001 through AC-037."
+    },
+    {
+      "ac_id": "AC-037",
+      "task_id": "T06",
+      "pac_ids": [
+        "PAC-12"
+      ],
+      "status": "PASS",
+      "evidence": "DOD-015 targeted suite passed; auto=true continuation, same-session ledger evidence, and no-core provenance remain observable."
     }
   ],
   "command_evidence": [
@@ -630,142 +734,141 @@
       "id": "CMD-001",
       "status": "PASS",
       "exit_code": 0,
-      "command": "git diff --name-only master...HEAD"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod016_transition_graph_contract.py\"",
+      "summary": "6 DOD-016 tests passed."
     },
     {
       "id": "CMD-002",
       "status": "PASS",
       "exit_code": 0,
-      "command": "git diff --name-only master...HEAD -- . ':!coverage-matrix.json' ':!coverage-matrix.md' ':!evidence-ledger.md' ':!verification-report.md'"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod011_rehydration_contract.py\"",
+      "summary": "6 DOD-011 tests passed."
     },
     {
       "id": "CMD-003",
       "status": "PASS",
       "exit_code": 0,
-      "command": "cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod012_auto_continuation_contract.py\"",
+      "summary": "7 DOD-012 tests passed."
     },
     {
       "id": "CMD-004",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod015_external_control_surface_contract.py"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod013_state_contract_validator.py\"",
+      "summary": "6 DOD-013 tests passed."
     },
     {
       "id": "CMD-005",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod011_rehydration_contract.py"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod014_ledger_projection_contract.py\"",
+      "summary": "7 DOD-014 tests passed."
     },
     {
       "id": "CMD-006",
-      "status": "PASS",
-      "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod012_auto_continuation_contract.py"
+      "status": "FAIL_OBSERVED_THEN_FIXED",
+      "exit_code": 1,
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod015_external_control_surface_contract.py\"",
+      "summary": "Initial run failed because DOD-015 no-core test did not allow expected DOD-016 dashboard/mst-transition-graph.json."
     },
     {
       "id": "CMD-007",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod013_state_contract_validator.py"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_dod015_external_control_surface_contract.py\"",
+      "summary": "Rerun passed 10 DOD-015 tests after narrowing the allowlist to dashboard/mst-transition-graph.json."
     },
     {
       "id": "CMD-008",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod014_ledger_projection_contract.py"
+      "command": "npm test",
+      "summary": "node --test smoke suite passed: 1 test, 0 failures."
     },
     {
       "id": "CMD-009",
       "status": "PASS",
       "exit_code": 0,
-      "command": "Compare active plugin cache hook copies to hooks/mst-stop-hook.sh"
+      "command": "npx tsc --noEmit",
+      "summary": "No output; TypeScript check exited 0."
     },
     {
       "id": "CMD-010",
       "status": "PASS",
       "exit_code": 0,
-      "command": "git diff --check"
+      "command": "git diff --check",
+      "summary": "No whitespace errors."
     },
     {
       "id": "CMD-011",
       "status": "PASS",
       "exit_code": 0,
-      "command": "npm test"
+      "command": "bash \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/hooks/test_hook_copy_sync.sh\"",
+      "summary": "PASS: DOD-002 hook source, project copy, and plugin cache copies are synchronized."
     },
     {
       "id": "CMD-012",
       "status": "PASS",
       "exit_code": 0,
-      "command": "npx tsc --noEmit"
+      "command": "PYTHONPATH=\"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" python3 \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/tests/test_sync_plugin_cache.py\"",
+      "summary": "12 plugin cache integration subtests passed."
     },
     {
       "id": "CMD-013",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod015_external_control_surface_contract.py"
+      "command": "find \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration\" -path '*/execution-flow.*' -type f",
+      "summary": "No output; no execution-flow.* files found."
     },
     {
       "id": "CMD-014",
       "status": "PASS",
       "exit_code": 0,
-      "command": "PYTHONPATH=$WT python3 $WT/tests/test_dod011_rehydration_contract.py && PYTHONPATH=$WT python3 $WT/tests/test_dod012_auto_continuation_contract.py && PYTHONPATH=$WT python3 $WT/tests/test_dod013_state_contract_validator.py && PYTHONPATH=$WT python3 $WT/tests/test_dod014_ledger_projection_contract.py"
+      "command": "git diff --name-only master...HEAD",
+      "summary": "Changed files are expected DOD-016 graph, hook library, transition graph script, and regression test files; no Claude Code core source paths."
     },
     {
       "id": "CMD-015",
       "status": "PASS",
       "exit_code": 0,
-      "command": "git diff --check"
+      "command": "python3 - <<'PY' ... validate_graph_consumer_identities matching and deliberate mismatch ... PY",
+      "summary": "Matching consumers accepted; deliberate graph_hash mismatch returned validation_failed with fail_closed=true."
     },
     {
       "id": "CMD-016",
+      "status": "DIAGNOSTIC_RECORDED",
+      "exit_code": 0,
+      "command": "python3 - <<'PY' ... hook source/project copy sha256 diagnostic ... PY",
+      "summary": "Shell hook project copies match; .claude/hooks/lib/pre_tool_use_fast.py does not exist."
+    },
+    {
+      "id": "CMD-017",
+      "status": "DIAGNOSTIC_RECORDED",
+      "exit_code": 0,
+      "command": "python3 - <<'PY' ... active plugin cache pre_tool_use_fast.py sha256 diagnostic ... PY",
+      "summary": "Active cache pre_tool_use_fast.py copies at 0.59.6 and 0.59.8 are present but mismatched against hooks/lib/pre_tool_use_fast.py."
+    },
+    {
+      "id": "CMD-018",
       "status": "PASS",
       "exit_code": 0,
-      "command": "Final no-core and DOD-016/DOD-017 no-go path scan"
-    }
-  ],
-  "changed_file_provenance": {
-    "integration_diff_master_to_head": [
-      ".claude/hooks/mst-stop-hook.sh",
-      "hooks/mst-stop-hook.sh",
-      "scripts/mst_cmds/_common.py",
-      "scripts/mst_cmds/dispatch.py",
-      "scripts/mst_cmds/hook.py",
-      "scripts/mst_cmds/session.py",
-      "scripts/mst_cmds/state.py",
-      "tests/test_dod015_external_control_surface_contract.py"
-    ],
-    "t05_expected_worktree_outputs": [
-      "coverage-matrix.json",
-      "coverage-matrix.md",
-      "evidence-ledger.md",
-      "verification-report.md"
-    ],
-    "current_pre_artifact_worktree_diff": [],
-    "current_post_artifact_worktree_diff": [
-      "coverage-matrix.json",
-      "coverage-matrix.md",
-      "evidence-ledger.md",
-      "verification-report.md"
-    ],
-    "no_core_source_changes": true,
-    "core_source_absence_rationale": "Changed files are Gran Maestro-owned scripts, hooks, tests, and evidence artifacts. No Claude Code core source, vendored Claude Code source, permission classifier, query loop, or compaction runtime source path appears in the changed-file sets."
-  },
-  "hook_sync": {
-    "source": "hooks/mst-stop-hook.sh",
-    "project_copy": ".claude/hooks/mst-stop-hook.sh",
-    "project_copy_cmp_exit_code": 0,
-    "cache_cmp_exit_codes": {
-      "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/.claude/hooks/mst-stop-hook.sh": 0,
-      "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/hooks/mst-stop-hook.sh": 0,
-      "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh": 0,
-      "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh": 0
+      "command": "python3 -m json.tool \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/coverage-matrix.json\"",
+      "summary": "coverage-matrix.json is valid JSON."
     },
-    "status": "PASS",
-    "rationale": "Source hook, project copy, and active plugin cache hook copies for versions 0.59.6 and 0.59.8 all compare equal after final cache synchronization."
-  },
-  "no_go_scope": {
-    "dod_016_transition_graph_artifacts_introduced": false,
-    "dod_017_execution_flow_projection_artifacts_introduced": false,
-    "rationale": "No transition graph YAML, D2, dashboard artifact, execution-flow JSON, execution-flow D2, or execution-flow dashboard projection appears in the changed-file provenance."
-  }
+    {
+      "id": "CMD-019",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": "grep -R \"graph_hash\\|graph_version\\|DOD-016\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/coverage-matrix.json\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/evidence-ledger.md\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/verification-report.md\"",
+      "summary": "Graph identity and DOD-016 strings are present in required artifacts."
+    },
+    {
+      "id": "CMD-020",
+      "status": "PASS",
+      "exit_code": 0,
+      "command": "grep -R \"PAC-1\\|PAC-13\\|AC-001\\|AC-036\\|AC-037\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/coverage-matrix.md\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/evidence-ledger.md\" \"/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-819/integration/verification-report.md\"",
+      "summary": "PAC and AC coverage sentinel strings are present in required artifacts."
+    }
+  ]
 }
