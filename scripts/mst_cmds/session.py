@@ -1339,6 +1339,46 @@ def cmd_session_complete(args):
     return 0
 
 
+def _current_head_for_flow_view(base_dir: Path, mst_session_id: str, projection: dict) -> dict:
+    source = projection.get("source") if isinstance(projection.get("source"), dict) else {}
+    current = dict(source)
+    head_path = session_history_head_path(base_dir, mst_session_id)
+    current_head = _read_history_sidecar_head(head_path)
+    if current_head:
+        current["history_head"] = current_head
+        current["cumulative_hash"] = current_head
+    verify_path = session_history_verify_path(base_dir, mst_session_id)
+    try:
+        verify_raw = verify_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        verify_raw = ""
+    verify_parts = verify_raw.split("\t")
+    if len(verify_parts) >= 3 and verify_parts[2].isdigit():
+        seq = int(verify_parts[2])
+        current["last_event_seq"] = seq
+        current["event_count"] = seq
+    return current
+
+
+def cmd_session_flow(args):
+    from scripts.mst_cmds import execution_flow
+
+    parsed = validate_mst_session_id(args.mst_session_id)
+    projection_path = Path(_common.BASE_DIR) / "sessions" / parsed.mst_session_id / "execution-flow.json"
+    projection = load_json(projection_path)
+    if not isinstance(projection, dict):
+        print(f"Error: execution-flow projection not found: {projection_path}", file=sys.stderr)
+        return 1
+
+    current_head = _current_head_for_flow_view(Path(_common.BASE_DIR), parsed.mst_session_id, projection)
+    result = execution_flow.render_cli_flow_view(projection, current_head)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(result.get("text") or "")
+    return 0 if result.get("status") in {"ok", "stale"} else 2
+
+
 def register(subparsers):
     sub = subparsers
     sess = sub.add_parser("session")
@@ -1352,6 +1392,10 @@ def register(subparsers):
 
     sess_complete = sess_sub.add_parser("complete")
     sess_complete.add_argument("session_id")
+
+    sess_flow = sess_sub.add_parser("flow")
+    sess_flow.add_argument("mst_session_id")
+    sess_flow.add_argument("--json", action="store_true")
 
     sess_resolve = sess_sub.add_parser("resolve")
     sess_resolve.add_argument("--json", action="store_true")

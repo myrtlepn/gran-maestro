@@ -14,6 +14,7 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { serveDir } from "https://deno.land/std@0.224.0/http/file_server.ts";
+import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 
 import { sseApi } from "./sse.ts";
 import { projectConfigApi } from "./routes/config.ts";

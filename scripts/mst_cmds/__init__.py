@@ -239,6 +239,7 @@ DISPATCH = {
     ("session", "list"): session.cmd_session_list,
     ("session", "inspect"): session.cmd_session_inspect,
     ("session", "complete"): session.cmd_session_complete,
+    ("session", "flow"): session.cmd_session_flow,
     ("session", "resolve"): session.cmd_session_resolve,
     ("session", "split-prompts"): session.cmd_session_split_prompts,
     ("priority", None): priority.cmd_priority,

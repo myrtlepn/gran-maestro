@@ -1,6 +1,7 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { resolveBaseDir } from "../config.ts";
 import {
+  getExecutionFlowViews,
   getFlowEvents,
   initFlowWatcher,
   subscribeFlowSse,
@@ -22,6 +23,28 @@ flowApi.get("/agile/:agiId/flow", async (c) => {
 
   const events = await getFlowEvents(c.req.param("agiId"), baseDir);
   return c.json(events);
+});
+
+flowApi.get("/agile/:agiId/flow/view", async (c) => {
+  const baseDir = baseDirFromContext(c);
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const agiId = c.req.param("agiId");
+  const [events, executionFlowViews] = await Promise.all([
+    getFlowEvents(agiId, baseDir),
+    getExecutionFlowViews(agiId, baseDir),
+  ]);
+  return c.json({
+    schema_version: 1,
+    view_kind: "gran-maestro.flow-view",
+    events,
+    execution_flow_views: executionFlowViews,
+    display_only: true,
+    next_action_authority: false,
+    transition_authority: "dod016_transition_graph",
+  });
 });
 
 flowApi.get("/agile/:agiId/flow/stream", async (c) => {

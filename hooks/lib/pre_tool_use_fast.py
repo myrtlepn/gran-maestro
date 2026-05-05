@@ -1484,6 +1484,40 @@ def verify_history_locked(project_root: Path, home: Path, session_id: str) -> Tu
             pass
 
 
+def inspect_hot_path_history_cursor(project_root: Path, home: Path, session_id: str) -> Tuple[bool, Optional[str], int, str]:
+    history_file, local_head, mirror_head, verify_state = history_paths(project_root, home, session_id)
+    cached = read_verify_state(verify_state)
+    if cached is None:
+        return False, None, 0, "missing history.verify cursor"
+
+    cached_head, cached_fingerprint, cached_seq = cached
+    if not cached_head or len(cached_head) != 64:
+        return False, None, 0, "invalid history.verify cursor head"
+
+    local_value = read_head(local_head)
+    mirror_value = read_head(mirror_head)
+    if not local_value:
+        return False, None, 0, "missing history.head"
+    if not mirror_value:
+        return False, None, 0, "missing home mirror head"
+    if local_value != mirror_value:
+        return False, None, 0, "local and mirror history heads differ"
+    if local_value != cached_head:
+        return False, None, 0, "history.verify cursor does not match current head"
+
+    current_fingerprint = file_fingerprint(history_file)
+    if current_fingerprint != cached_fingerprint:
+        return False, None, 0, "history.verify cursor fingerprint is stale"
+    if current_fingerprint != "missing":
+        tail_hash = last_event_hash(history_file)
+        if tail_hash != cached_head:
+            return False, None, 0, "history.verify cursor does not match ledger tail"
+    elif cached_head != ZERO_HASH:
+        return False, None, 0, "history.verify cursor points to a missing ledger"
+
+    return True, cached_head, cached_seq, ""
+
+
 def acquire_lock(lock_dir: Path) -> bool:
     tries = int(os.environ.get("MST_HISTORY_LOCK_TRIES", "20"))
     while tries > 0:
@@ -2630,8 +2664,12 @@ def main() -> int:
         if not acquire_lock(lock_dir):
             stderr("history ledger mismatch: lock timeout")
             return 2
-        ok, _, _ = verify_history(project_root, home, clean_sid)
+        ok, _, _, cursor_reason = inspect_hot_path_history_cursor(project_root, home, clean_sid)
         if not ok:
+            stderr(
+                "history ledger mismatch: "
+                f"{cursor_reason}; inspect-only state/history consistency verification required"
+            )
             try:
                 lock_dir.rmdir()
             except OSError:

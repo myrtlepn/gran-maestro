@@ -1134,6 +1134,51 @@ def _append_recover_history_event(
     )
 
 
+def _append_context_rehydrated_history_event(
+    base_dir: Path,
+    session_id: str,
+    recovery_fingerprint: str,
+    *,
+    previous_history_head: str,
+    snapshot: Optional[dict] = None,
+) -> None:
+    from scripts.mst_cmds import session as session_mod
+
+    parsed = session_mod.validate_mst_session_id(session_id)
+    continuation, next_action = _snapshot_continuation_evidence(snapshot)
+    idempotency_key = f"{session_id}:context.rehydrated:{recovery_fingerprint}"
+    event = {
+        "schema_version": 1,
+        "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "event_type": "context.rehydrated",
+        "type": "context.rehydrated",
+        "skill": "mst:recover",
+        "resource_id": parsed.root_mst_id,
+        "artifact_id": parsed.root_mst_id,
+        "external_control_surface": "context",
+        "history_head": previous_history_head,
+        "rehydration_transition": "continue.rehydrate_retry",
+        "handoff_consumption_evidence": {
+            "source": "verified_history_ledger",
+            "handoff_history_head": previous_history_head,
+            "prompt_summary_used_as_source": False,
+        },
+        "prompt_summary_used_as_source": False,
+        "idempotency_key": idempotency_key,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+    if continuation:
+        event["continuation"] = continuation
+        if isinstance(continuation.get("critical_blocker"), dict):
+            event["critical_blocker"] = continuation["critical_blocker"]
+    if next_action:
+        event["next_action"] = next_action
+        event["next_action_execution"] = {"status": "handoff_consumed", "next_action": next_action}
+    session_mod.write_session_history_event(base_dir, session_id, event)
+
+
 def _update_snapshot_history_head(state_base_dir: Path, session_id: str, snapshot: Optional[dict], previous_head: str, current_head: str) -> None:
     if not isinstance(snapshot, dict):
         return
@@ -1201,13 +1246,51 @@ def _recover_rehydration_bundle(
     handoff_next_action = copy.deepcopy(continuation.get("next_action")) if isinstance(continuation.get("next_action"), dict) else {}
     if not handoff_next_action and isinstance(next_skill.get("metadata"), dict):
         handoff_next_action = copy.deepcopy(next_skill["metadata"])
+    current_node = ""
+    if workflow.get("current_skill"):
+        current_node = f"{workflow.get('current_skill')}.step-{workflow.get('current_step', 0)}"
+    last_transition = ""
+    blocker = None
+    for row in history_result.rows:
+        event = row.get("event") if isinstance(row, dict) else None
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        if isinstance(event.get("current_node"), str) and event["current_node"].strip():
+            current_node = event["current_node"].strip()
+        if event_type.startswith(("continue.", "guard.", "terminal.", "context.")):
+            last_transition = str(event.get("transition") or event_type)
+        candidate_blocker = event.get("critical_blocker") or event.get("blocker")
+        if isinstance(candidate_blocker, dict):
+            blocker = copy.deepcopy(candidate_blocker)
+    if not last_transition:
+        last_transition = "continue.rehydrate_retry"
+    flow_view = {
+        "execution_flow_json": str(history_result.history_file.parent / "execution-flow.json"),
+        "execution_flow_d2": str(history_result.history_file.parent / "execution-flow.d2"),
+    }
+    execution_flow_handoff = {
+        "schema_version": 1,
+        "mst_session_id": session_id,
+        "root_mst_id": root_mst_id,
+        "history_head": history_result.tail_hash,
+        "current_node": current_node,
+        "last_transition": last_transition,
+        "rehydration_transition": "continue.rehydrate_retry",
+        "next_action": handoff_next_action,
+        "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
+        "blocker": blocker,
+        "critical_blocker": blocker if isinstance(blocker, dict) and blocker.get("critical") is True else None,
+        "flow_view": flow_view,
+    }
     context = {
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
         "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
         "recovery_fingerprint": recovery_fingerprint,
+        "execution_flow_handoff": execution_flow_handoff,
     }
-    context_delivery_order = ["core_rehydration", "execution_handoff", "prompt_summary"]
+    context_delivery_order = ["core_rehydration", "execution_flow_handoff", "prompt_summary"]
     env = {"MST_SESSION_ID": session_id}
     if isinstance(snapshot, dict) and snapshot.get("auto") is True:
         env["MST_AUTO_CONTINUE"] = "true"
@@ -1239,8 +1322,24 @@ def _recover_rehydration_bundle(
         "execution_handoff": {
             "mst_session_id": session_id,
             "root_mst_id": root_mst_id,
+            "history_head": history_result.tail_hash,
+            "current_node": current_node,
+            "last_transition": last_transition,
+            "rehydration_transition": "continue.rehydrate_retry",
             "next_action": handoff_next_action,
+            "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
+            "blocker": blocker,
+            "critical_blocker": blocker if isinstance(blocker, dict) and blocker.get("critical") is True else None,
+            "flow_view": flow_view,
             "source": "core_rehydration",
+        },
+        "execution_flow_handoff": execution_flow_handoff,
+        "budgeted_context": {
+            "execution_flow_handoff": execution_flow_handoff,
+            "omissions": [
+                "full execution-flow nodes omitted; use flow_view.execution_flow_json for details",
+                "full execution-flow D2 omitted; use flow_view.execution_flow_d2 for details",
+            ],
         },
         "context_delivery_order": context_delivery_order,
         "source_precedence": ["validated_history_ledger", "validated_state_snapshot", "prompt_summary_diagnostic_only"],
@@ -2439,6 +2538,13 @@ def cmd_state_recover(args):
             _common.BASE_DIR,
             session_id,
             agi_id,
+            recovery_fingerprint,
+            previous_history_head=previous_history_head,
+            snapshot=existing,
+        )
+        _append_context_rehydrated_history_event(
+            _common.BASE_DIR,
+            session_id,
             recovery_fingerprint,
             previous_history_head=previous_history_head,
             snapshot=existing,

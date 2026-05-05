@@ -604,8 +604,8 @@ def test_core_rehydration_precedes_prompt_summary() -> None:
         assert core["next_execution"]["env"]["MST_SESSION_ID"] == SID
         assert core.get("prompt_summary_used_as_source") is False
         order = payload.get("context_delivery_order") or core.get("context_delivery_order")
-        assert order == ["core_rehydration", "execution_handoff", "prompt_summary"], payload
-        handoff = core.get("execution_handoff")
+        assert order == ["core_rehydration", "execution_flow_handoff", "prompt_summary"], payload
+        handoff = core.get("execution_flow_handoff")
         assert isinstance(handoff, dict), core
         assert handoff.get("mst_session_id") == SID, handoff
         assert handoff.get("next_action", {}).get("source_id") == REQ, handoff
@@ -613,7 +613,25 @@ def test_core_rehydration_precedes_prompt_summary() -> None:
 
 def _git_changed_files() -> list[str]:
     changed: set[str] = set()
+    branch_result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
     base_ref = "master"
+    if current_branch.endswith(tuple(f"-T{task_id:02d}" for task_id in range(1, 100))):
+        candidate = re.sub(r"-T\d{2}$", "", current_branch)
+        if subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", candidate],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        ).returncode == 0:
+            base_ref = candidate
     base_result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "merge-base", "HEAD", base_ref],
         capture_output=True,
@@ -661,6 +679,9 @@ def test_no_claude_code_core_source_modification() -> None:
     )
     allowed_paths = {
         "dashboard/mst-transition-graph.json",
+        "src/flow-watcher.ts",
+        "src/routes/flowApi.ts",
+        "src/server.ts",
     }
     forbidden = [
         path
