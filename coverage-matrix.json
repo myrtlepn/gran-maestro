@@ -1,454 +1,374 @@
 {
-  "request_id": "REQ-820",
-  "task_id": "T07",
-  "plan_id": "PLN-647",
+  "request_id": "REQ-821",
+  "task_id": "T03",
+  "plan_id": "PLN-648",
   "objective_id": "AGI-030",
-  "dod_id": "DOD-017",
-  "checked_at_utc": "2026-05-05T18:43:55Z",
-  "worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-820/integration",
-  "branch": "gran-maestro/master/AGI-030/REQ-820",
-  "head": "03671a7bf3da433f939509842013c964a6d0a149",
-  "integration_head_before_final_evidence_refresh": "03671a7 [REQ-820] Align DOD-015 guard with DOD-017 flow view",
-  "overall_status": "PASS_WITH_ACTIVE_CACHE_DIAGNOSTIC_RECORDED",
-  "source_of_truth_policy": {
-    "actual_execution_flow": "verified_history_ledger",
-    "transition_authority": "dod016_transition_graph",
-    "derived_or_auxiliary_artifacts": [
-      "execution-flow.json",
-      "execution-flow.d2",
-      "dashboard/CLI flow view",
-      "compaction handoff summary",
-      "snapshot/cache/prompt summary"
+  "sprint": "S17",
+  "dod_id": "DOD-008",
+  "pac_ids": [
+    "PAC-1",
+    "PAC-2",
+    "PAC-3",
+    "PAC-4",
+    "PAC-5",
+    "PAC-6",
+    "PAC-7",
+    "PAC-8",
+    "PAC-9",
+    "PAC-10",
+    "PAC-11"
+  ],
+  "checked_at_utc": "2026-05-05T19:37:39Z",
+  "worktree": "/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-821/t03",
+  "branch": "gran-maestro/master/AGI-030/REQ-821-T03",
+  "head": "f7c0fd34081542e92f7fa6a01c835ba7bed3ec69",
+  "overall_status": "PASS",
+  "verdict_summary": "DOD-008 owner_pid diagnostic-only final validation passed on the integration head, including exact spec-listed DOD-011~DOD-014 wrapper regression commands and current equivalent suites.",
+  "dod008_identity_boundary": {
+    "canonical_identity": [
+      "MST_SESSION_ID",
+      "mst_session_id"
     ],
-    "decision_sources": [
-      "verified_history_ledger",
-      "dod016_transition_graph"
+    "diagnostic_only_fields": [
+      "owner_pid",
+      "owner_ppid",
+      "owner_session_id",
+      "hook session_id",
+      "snapshot sessionId",
+      "MST_STATE_PPID"
     ],
-    "fail_closed_policy": "A projection or handoff with stale history_head/source hash is read-only and cannot drive validator judgement, next-action execution, auto-write, or handoff consumption."
-  },
-  "source_ledger_head_hash_evidence": {
-    "fixture_source": "tests/test_dod017_execution_flow_projection_contract.py::_source_head",
-    "ledger_path": ".gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/history.ndjson",
-    "mst_session_id": "MST-AGI-030-20260506T010203000Z-dod017aa",
-    "last_event_id": "evt-014",
-    "last_event_seq": 14,
-    "cumulative_hash": "f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470",
-    "event_count": 14,
-    "ledger_schema_version": 1,
-    "history_head": "f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470",
-    "validated_by": [
-      "test_source_ledger_head_requires_minimum_evidence",
-      "test_ledger_replay_accepts_required_event_families",
-      "test_projection_generator_writes_json_with_source_provenance"
-    ]
-  },
-  "execution_flow_identity": {
-    "projection_kind": "dod017.execution-flow",
-    "projection_schema_version": 1,
-    "projection_created_at_fixture": "2026-05-05T18:43:55Z",
-    "projection_hash_fixture": "a229d846e8ad10eff76e1b24f9e3e5978aa5eb86d94fc3f0babfe8e42b455da8",
-    "source_kind": "verified_history_ledger",
-    "source_hash": "f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470",
-    "history_head": "f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470",
-    "generated_paths_from_contract": {
-      "execution_flow_json": ".gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.json",
-      "execution_flow_d2": ".gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.d2",
-      "dashboard_flow_view": "/dashboard/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/flow",
-      "cli_flow_view": "mst.py session flow MST-AGI-030-20260506T010203000Z-dod017aa"
-    },
-    "persistent_execution_flow_artifacts_found_in_worktree": [],
-    "find_command_summary": "find \"$PWD\" -path '*/execution-flow.*' -type f returned no output in the T07 worktree."
-  },
-  "dod016_graph_identity_impact": {
-    "status": "PASS",
-    "boundary": "DOD-016 remains the canonical possible-transition graph; DOD-017 records actual execution-flow only.",
-    "source_graph_path": "templates/state-machine/mst-transition-graph.json",
-    "generated_graph_view_path": "dashboard/mst-transition-graph.json",
-    "graph_id": "mst-transition-graph",
-    "graph_version": "2026-05-05.dod016-contract",
-    "graph_hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79",
-    "states": [
-      "active",
-      "blocked",
-      "cancelled",
-      "completed",
-      "failed",
-      "inspecting"
+    "forbidden_roles_for_owner_pid": [
+      "canonical identity source",
+      "fallback",
+      "alias",
+      "migration source",
+      "recover target",
+      "continuation policy key",
+      "takeover trigger"
     ],
-    "transitions": [
-      "continue.queued_action",
-      "continue.rehydrate_retry",
-      "guard.inspect_only_verification",
-      "terminal.completed",
-      "terminal.repeat_failure_limit",
-      "terminal.security_confirmation_required",
-      "terminal.state_inconsistency"
-    ],
-    "validated_by": [
-      "test_graph_and_execution_flow_views_are_separate_artifacts",
-      "test_projection_never_authorizes_forbidden_graph_transition",
-      "test_generated_graph_view_detects_drift_without_dod017_artifacts"
-    ]
-  },
-  "stale_fail_closed_evidence": {
-    "status": "PASS",
-    "projection": "test_stale_projection_rejects_decision_consumption and test_cli_flow_view_marks_stale_projection_read_only prove stale projections are read-only/regenerate-required and consumers are denied.",
-    "handoff": "test_stale_handoff_blocks_auto_write_and_next_action proves stale handoff history_head blocks auto_write and next_action_execution with guard.inspect_only_verification.",
-    "hook": "test_hook_cache_miss_routes_to_inspect_only_without_replay proves cache miss/stale hot-path state routes to inspect-only without full replay."
-  },
-  "compaction_handoff_evidence": {
-    "status": "PASS",
-    "required_fields": [
-      "current_node",
-      "last_transition",
-      "next_action",
-      "blocker",
-      "critical_blocker",
-      "history_head",
-      "flow_view.execution_flow_json",
-      "flow_view.execution_flow_d2"
-    ],
-    "handoff_history_head": "f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470",
-    "flow_paths": {
-      "execution_flow_json": ".gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.json",
-      "execution_flow_d2": ".gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.d2"
-    },
-    "validated_by": [
-      "test_compaction_handoff_contains_cursor_provenance_and_flow_paths",
-      "test_rehydration_context_prefers_verified_handoff_over_llm_summary",
-      "test_context_compaction_and_rehydration_events_share_session_ledger",
-      "test_stale_handoff_blocks_auto_write_and_next_action"
-    ]
-  },
-  "hook_hot_path_evidence": {
-    "status": "PASS",
-    "keyword": "no-hot-path-full-projection",
-    "forbidden_hot_path_work": {
-      "hot_path_full_ledger_replay": false,
-      "hot_path_execution_flow_projection": false,
-      "hot_path_d2_rendering": false,
-      "hot_path_dashboard_rendering": false
-    },
-    "allowed_hot_path_source": "fresh cursor_state/cache_state plus minimal current_head_evidence",
-    "validated_by": [
-      "test_hook_hot_path_never_full_replays_or_renders",
-      "test_hook_hot_path_uses_cursor_cache_for_current_flow_state",
-      "test_hook_cache_miss_routes_to_inspect_only_without_replay"
-    ]
+    "owner_pid_role": "process lock liveness diagnostic-only",
+    "read_only_lock_diagnostic": true,
+    "no_identity_fallback": true,
+    "no_core": true,
+    "hook_sync_required": false,
+    "hook_sync_evidence": "T03 evidence refresh made no production/doc/hook changes; no hook source-of-truth synchronization was required."
   },
   "pac_coverage": [
     {
       "pac_id": "PAC-1",
       "grade": "MUST",
-      "text": "동일 `mst_session_id` history ledger가 `skill.enter`, `skill.step`, `skill.exit`, `skill.recover`, `continue.*`, `guard.*`, `terminal.*`, `context.compacted`, `context.rehydrated`, `action.*`, `blocker.*` event를 replay 가능한 actual execution-flow source로 기록한다.",
       "mapped_ac_ids": [
-        "AC-031"
+        "AC-009",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "DOD-017 targeted suite replayed same-session ledger fixture MST-AGI-030-20260506T010203000Z-dod017aa and recognized all required event families."
+      "text": "owner_pid remains stale/history/result lock holder process liveness diagnostic payload only; it is not an MST_SESSION_ID/mst_session_id source, fallback, alias, migration requirement, or takeover trigger.",
+      "evidence": "DOD-008 targeted suite and DOD-007 regression passed; owner_pid is asserted as diagnostic-only, not a canonical identity source/fallback/alias/migration/takeover trigger."
     },
     {
       "pac_id": "PAC-2",
       "grade": "MUST",
-      "text": "execution-flow source-of-truth는 verified history ledger이며 `execution-flow.json`, `execution-flow.d2`, dashboard/CLI view, compaction handoff summary, snapshot/cache/prompt summary는 모두 derived 또는 보조 artifact로만 취급된다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-011",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Source boundary test reports verified_history_ledger and dod016_transition_graph as decision sources; generated and summary artifacts are derived/display/auxiliary."
+      "text": "state snapshot, history ledger, recover bundle, skill dispatch envelope, and continuation policy keys use canonical MST_SESSION_ID/mst_session_id only, without reading/promoting owner_pid.",
+      "evidence": "Targeted test asserts no legacy identity artifacts or policy heads are created; DOD-006/009/011 regressions preserve canonical mst_session_id flow."
     },
     {
       "pac_id": "PAC-3",
       "grade": "MUST",
-      "text": "source ledger head/hash 검증은 최소 `ledger_path`, `mst_session_id`, last event id/seq, cumulative hash, event count, ledger schema version, `history_head`를 포함하고 projection 생성·소비 시 재검증된다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-011",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Source head fixture records ledger_path, mst_session_id, evt-014/seq 14, cumulative hash/history_head f341e57..., event_count 14, ledger_schema_version 1."
+      "text": "legacy/process values owner_pid, owner_ppid, owner_session_id, hook session_id, snapshot sessionId, and MST_STATE_PPID do not override, repair, merge, or persist over canonical mst_session_id.",
+      "evidence": "Targeted test fixture combines owner_pid, session_id, and owner_session_id while preserving canonical mst_session_id and rejecting legacy artifact creation."
     },
     {
       "pac_id": "PAC-4",
       "grade": "MUST",
-      "text": "projection generator가 ledger verify/head/hash 검증을 통과한 뒤에만 `execution-flow.json`과 `execution-flow.d2`를 생성하고, generated output에 source ledger path, `history_head`, projection schema version, projection hash, `projection_created_at`을 포함한다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-010",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Projection generator JSON/D2 tests passed; unverified source test proves no execution-flow artifacts are written on validation failure."
+      "text": "stale lock diagnosis is read-only and does not create/modify state, session, history, or recover artifacts or perform lock takeover from owner_pid.",
+      "evidence": "Targeted stale candidate test hashes history.head, policy mirror head, and owner.json before/after; hashes are unchanged."
     },
     {
       "pac_id": "PAC-5",
       "grade": "MUST",
-      "text": "projection의 `history_head` 또는 source hash가 현재 ledger head/hash와 다르면 stale로 표시하고 validator 판단, next-action 결정, auto-write, compaction handoff 소비에 사용하지 않으며 read-only display 또는 `guard.inspect_only_verification`/state inconsistency 경로로만 전환한다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-010",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Stale projection and stale handoff tests passed; consumer permissions are false and stale route is guard.inspect_only_verification."
+      "text": "lock diagnostic payload may expose lock_path, owner_pid, owner_status, and stale reason, but identity evidence separates those from mst_session_id.",
+      "evidence": "Evidence and tests separate lock_path/process-liveness diagnostics from canonical mst_session_id identity; owner_pid is not promoted into identity payload."
     },
     {
       "pac_id": "PAC-6",
       "grade": "MUST",
-      "text": "projection은 possible transition graph(DOD-016)와 actual execution-flow(DOD-017)를 명확히 구분하고, transition 허용 판단은 DOD-016 graph + verified ledger/snapshot validator만 사용한다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-036"
+        "AC-009",
+        "AC-011",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Graph/projection separation and forbidden transition tests passed; projection_used_as_authority remains false."
+      "text": "recover/resume docs and skill contracts classify owner_pid as diagnostic-only and carry forward the same canonical MST_SESSION_ID/mst_session_id context.",
+      "evidence": "Recover and docs contract tests pass and require diagnostic-only wording for owner_pid."
     },
     {
       "pac_id": "PAC-7",
       "grade": "MUST",
-      "text": "dashboard/CLI flow view와 D2 view는 `execution-flow.json` 또는 verified ledger projection에서 파생된 generated view이며 source provenance, coverage, drift, stale, regenerate-required 상태를 표시한다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-011",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Dashboard, CLI, and D2 tests passed with source ledger provenance, coverage, stale/drift/read-only/regenerate-required display status."
+      "text": "hook hot path and pre-tool-use/stop diagnostics do not use process lock owner metadata as canonical session selector.",
+      "evidence": "Hook source assertions pass for hooks/lib/pre_tool_use_fast.py and hooks/mst-pre-tool-use.sh: owner_pid/process lock owner metadata is not a session selector."
     },
     {
       "pac_id": "PAC-8",
       "grade": "MUST",
-      "text": "compaction handoff summary는 `current_node`, `last_transition`, `next_action`, blocker status, `history_head`, flow view paths를 포함하고 Gran Maestro-owned rehydration/continuation context에서 LLM summary보다 먼저 소비될 수 있도록 연결된다.",
       "mapped_ac_ids": [
-        "AC-031",
-        "AC-034"
+        "AC-009",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Handoff summary and rehydration context tests passed; delivery order is core_rehydration, execution_flow_handoff, prompt_summary."
+      "text": "DOD-008 targeted regression proves owner_pid does not derive .gran-maestro/state/{owner_pid} or .gran-maestro/sessions/{owner_pid} paths.",
+      "evidence": "Targeted regression asserts .gran-maestro/state/{owner_pid}, .gran-maestro/sessions/{owner_pid}, and legacy session paths do not exist after diagnosis."
     },
     {
       "pac_id": "PAC-9",
       "grade": "MUST",
-      "text": "`context.compacted`/`context.rehydrated` event append와 handoff 생성/소비 evidence가 같은 `mst_session_id` ledger에 남고, stale handoff는 자동 write와 next-action 실행을 중단한다.",
       "mapped_ac_ids": [
-        "AC-031"
+        "AC-009",
+        "AC-010",
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Context handoff evidence events share mst_session_id and stale handoff blocks auto_write_allowed and next_action_execution_allowed."
+      "text": "DOD-008 targeted/stale lock tests prove owner_pid liveness checks preserve existing lock file, canonical history head, and policy mirror head.",
+      "evidence": "Targeted regression preserves canonical history.head, mirror head, and lock owner file while stale diagnostic remains read-only."
     },
     {
       "pac_id": "PAC-10",
       "grade": "MUST",
-      "text": "hook hot path는 full execution-flow projection, D2/dashboard rendering, full ledger replay를 수행하지 않고 precomputed per-session cursor/current-state cache 또는 최소 head evidence로 `current_node`, `last_transition`, `next_action`만 O(1)에 가깝게 조회한다.",
       "mapped_ac_ids": [
-        "AC-031"
+        "AC-011",
+        "AC-012"
       ],
       "status": "PASS",
-      "evidence": "Hot-path tests passed with hot_path_full_ledger_replay=false, hot_path_execution_flow_projection=false, hot_path_d2_rendering=false, and hot_path_dashboard_rendering=false."
+      "text": "prior DOD regressions plus npm test, npx tsc --noEmit, and git diff --check pass on the integration head.",
+      "evidence": "Exact spec-listed DOD-011~DOD-014 wrapper regression commands, available DOD-015~DOD-017 suites, npm test, npx tsc --noEmit, and git diff --check passed."
     },
     {
       "pac_id": "PAC-11",
       "grade": "MUST",
-      "text": "hot-path cursor/cache miss 또는 stale state가 감지되면 hook은 full replay로 복구하지 않고 inspect-only verification 또는 state inconsistency diagnostic으로 전환한다.",
       "mapped_ac_ids": [
-        "AC-031"
+        "AC-013"
       ],
       "status": "PASS",
-      "evidence": "Cache miss/stale test passed; route is inspect_only / guard.inspect_only_verification without full replay."
-    },
-    {
-      "pac_id": "PAC-12",
-      "grade": "MUST",
-      "text": "DOD-017 targeted tests는 ledger replay, projection generation, stale head rejection, D2/dashboard provenance, compaction handoff, no-hot-path-full-projection, graph/projection separation을 검증한다.",
-      "mapped_ac_ids": [
-        "AC-031"
-      ],
-      "status": "PASS",
-      "evidence": "Full DOD-017 targeted suite passed with 20 PASS lines."
-    },
-    {
-      "pac_id": "PAC-13",
-      "grade": "MUST",
-      "text": "graph/projection separation tests는 projection에 나타난 transition이라도 DOD-016 graph/validator가 금지하면 허용되지 않고, projection에 없는 transition이라도 DOD-016 graph와 ledger/snapshot validator 조건을 충족해야만 판단될 수 있음을 검증한다.",
-      "mapped_ac_ids": [
-        "AC-031",
-        "AC-036"
-      ],
-      "status": "PASS",
-      "evidence": "Projection never authorizes forbidden graph transition; DOD-016 generated graph drift test remains green."
-    },
-    {
-      "pac_id": "PAC-14",
-      "grade": "MUST",
-      "text": "DOD-011~DOD-016 regression suites, `npm test`, `npx tsc --noEmit`, `git diff --check`가 final integration head에서 통과한다.",
-      "mapped_ac_ids": [
-        "AC-032",
-        "AC-033"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-011 through DOD-016 suites passed; npm test and npx tsc --noEmit passed; final git diff --check is recorded in command evidence."
-    },
-    {
-      "pac_id": "PAC-15",
-      "grade": "MUST",
-      "text": "DOD-017은 Claude Code core source를 수정하지 않고 Gran Maestro-owned `mst.py`, `hooks/`, skills, dashboard, tests 표면에서만 구현된다.",
-      "mapped_ac_ids": [
-        "AC-035"
-      ],
-      "status": "PASS",
-      "evidence": "No changed path is under src/claude-code-core/, packages/claude-code-core/, or vendor/claude-code/."
-    },
-    {
-      "pac_id": "PAC-16",
-      "grade": "SHOULD",
-      "text": "기존 DOD-016 transition graph artifact, generated graph view, graph consumer hash evidence는 DOD-017 execution-flow projection 도입 후에도 canonical possible-transition graph source로 유지된다.",
-      "mapped_ac_ids": [
-        "AC-036"
-      ],
-      "status": "PASS",
-      "evidence": "DOD-016 canonical graph remains templates/state-machine/mst-transition-graph.json with graph_hash 8bfe2272... and generated graph view dashboard/mst-transition-graph.json."
-    },
-    {
-      "pac_id": "PAC-17",
-      "grade": "MUST",
-      "text": "evidence artifacts는 PAC/AC coverage, command evidence, source ledger head/hash validation, generated artifact provenance, stale fail-closed behavior, compaction handoff evidence, hot-path no-full-projection evidence, no-core provenance를 기록한다.",
-      "mapped_ac_ids": [
-        "AC-034",
-        "AC-035",
-        "AC-036"
-      ],
-      "status": "PASS",
-      "evidence": "coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, and verification-report.md record PAC/AC coverage, command results, history_head/source hash, generated provenance, stale behavior, handoff, no-hot-path-full-projection, and no-core provenance."
+      "text": "final evidence artifacts record PAC/AC coverage, command evidence, owner_pid diagnostic-only evidence, no identity fallback evidence, read-only lock diagnostic evidence, no-core provenance, and S17 DOD-008 objective reference.",
+      "evidence": "coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, and verification-report.md were refreshed for REQ-821 / PLN-648 / AGI-030 / DOD-008."
     }
   ],
   "ac_coverage": [
     {
-      "ac_id": "AC-031",
+      "ac_id": "AC-009",
       "status": "PASS",
-      "evidence": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod017_execution_flow_projection_contract.py\" exited 0 with 20 PASS lines."
+      "evidence": "DOD-008 targeted suite passed: 4 PASS lines covering owner_pid diagnostic-only, no legacy identity paths, read-only stale lock preservation, recover docs, and hook boundary assertions."
     },
     {
-      "ac_id": "AC-032",
+      "ac_id": "AC-010",
       "status": "PASS",
-      "evidence": "DOD-011, DOD-012, DOD-013, DOD-014, DOD-015, and DOD-016 regression suites exited 0."
+      "evidence": "tests/test_agile_stale_lock_diagnostics.py passed and preserves live/missing/inconclusive/unknown/stale/scope-mismatch/ledger-mismatch diagnostic categories without artifact mutation."
     },
     {
-      "ac_id": "AC-033",
+      "ac_id": "AC-011",
       "status": "PASS",
-      "evidence": "npm test and npx tsc --noEmit exited 0; git diff --check final gate recorded as PASS."
+      "evidence": "DOD-006, DOD-007, DOD-009, exact spec-listed DOD-011~DOD-014 wrapper suites, and DOD-015~DOD-017 regressions passed. The DOD-011~DOD-014 wrappers delegate to the current regression files while preserving the approved spec command surface."
     },
     {
-      "ac_id": "AC-034",
+      "ac_id": "AC-012",
       "status": "PASS",
-      "evidence": "Evidence artifacts cover PAC-1 through PAC-17 and AC-031 through AC-036, including history_head and no-hot-path-full-projection sentinel evidence."
+      "evidence": "npm test, npx tsc --noEmit, and git diff --check passed."
     },
     {
-      "ac_id": "AC-035",
+      "ac_id": "AC-013",
       "status": "PASS",
-      "evidence": "No Claude Code core source modification in changed-file provenance; DOD-017 no-core scope test passed."
-    },
-    {
-      "ac_id": "AC-036",
-      "status": "PASS",
-      "evidence": "DOD-016 graph identity remains canonical possible-transition graph source and DOD-017 projection remains actual-flow display/derived artifact."
+      "evidence": "Final evidence artifacts record REQ-821, PLN-648, AGI-030, DOD-008, PAC-1..PAC-11, command evidence, owner_pid diagnostic-only, read-only lock diagnostic, no identity fallback, and no-core provenance."
     }
   ],
   "commands": [
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod017_execution_flow_projection_contract.py\"",
-      "expected": "DOD-017 targeted suite passes.",
-      "actual_summary": "20 PASS lines covering replay/source head, projection JSON/D2, stale fail-closed, dashboard/CLI, graph separation, hot path, handoff, and no-core.",
+      "id": "CMD-001",
+      "ac_pac": "AC-009, PAC-1~PAC-9",
+      "command": "python3 tests/test_dod008_owner_pid_diagnostic_only_contract.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "4 PASS lines: legacy identity artifact non-creation, read-only stale candidate/head preservation, recover docs diagnostic-only, hook source no owner_pid session selector."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod011_rehydration_contract.py\"",
-      "expected": "DOD-011 regression passes.",
-      "actual_summary": "6 PASS lines.",
+      "id": "CMD-002",
+      "ac_pac": "AC-010, PAC-4, PAC-5, PAC-9",
+      "command": "python3 tests/test_agile_stale_lock_diagnostics.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "stale lock diagnostics regression passed across live/missing/inconclusive/unknown/stale/scope/ledger branches."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod012_auto_continuation_contract.py\"",
-      "expected": "DOD-012 regression passes.",
-      "actual_summary": "7 PASS lines.",
+      "id": "CMD-003",
+      "ac_pac": "AC-011, PAC-6",
+      "command": "python3 tests/test_dod006_recover_contract_docs.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "recover/resume contract docs passed."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod013_state_contract_validator.py\"",
-      "expected": "DOD-013 regression passes.",
-      "actual_summary": "6 PASS lines.",
+      "id": "CMD-004",
+      "ac_pac": "AC-011, PAC-1, PAC-3",
+      "command": "python3 tests/test_dod007_owner_pid_diagnostic_only.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "owner_pid diagnostic-only regression passed."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod014_ledger_projection_contract.py\"",
-      "expected": "DOD-014 regression passes.",
-      "actual_summary": "7 PASS lines.",
+      "id": "CMD-005",
+      "ac_pac": "AC-011, PAC-2, PAC-3",
+      "command": "python3 tests/test_dod007_contract_docs.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "canonical identity boundary docs passed."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod015_external_control_surface_contract.py\"",
-      "expected": "DOD-015 regression passes.",
-      "actual_summary": "10 PASS lines.",
+      "id": "CMD-006",
+      "ac_pac": "AC-011, PAC-2, PAC-3",
+      "command": "python3 tests/test_dod009_contract_docs.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "session identity glossary and canonical state/history/recover terms passed."
     },
     {
-      "command": "PYTHONPATH=\"$PWD\" python3 \"$PWD/tests/test_dod016_transition_graph_contract.py\"",
-      "expected": "DOD-016 regression passes.",
-      "actual_summary": "6 PASS lines.",
+      "id": "CMD-007",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "python3 tests/test_dod011_continuation_contract.py",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "Exact spec-listed DOD-011 wrapper passed and delegates to tests/test_dod011_rehydration_contract.py; 6 PASS lines preserve continuation/rehydration and legacy identity non-fallback coverage."
     },
     {
+      "id": "CMD-008",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod011_rehydration_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "6 PASS lines for resume checkpoint, child dispatch, compaction rehydration, stop hook continuation, stale mismatch, and legacy identity non-fallback."
+    },
+    {
+      "id": "CMD-009",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "python3 tests/test_dod012_auto_true_continuation_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "Exact spec-listed DOD-012 wrapper passed and delegates to tests/test_dod012_auto_continuation_contract.py; 7 PASS lines preserve auto continuation policy and retry circuit scoping coverage."
+    },
+    {
+      "id": "CMD-010",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod012_auto_continuation_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "7 PASS lines for auto continuation policy, recoverable issue continuation, blocker/security guards, action classification, and retry circuit scoping."
+    },
+    {
+      "id": "CMD-011",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "python3 tests/test_dod013_state_contract_validation.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "Exact spec-listed DOD-013 wrapper passed and delegates to tests/test_dod013_state_contract_validator.py; 6 PASS lines preserve state/history/recover/dispatch validation coverage."
+    },
+    {
+      "id": "CMD-012",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod013_state_contract_validator.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "6 PASS lines for snapshot/history/recover/dispatch contracts and failure shape/partial write state inconsistency."
+    },
+    {
+      "id": "CMD-013",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "python3 tests/test_dod014_history_snapshot_consistency.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "Exact spec-listed DOD-014 wrapper passed and delegates to tests/test_dod014_ledger_projection_contract.py; 8 PASS lines preserve ledger/snapshot projection consistency coverage."
+    },
+    {
+      "id": "CMD-014",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod014_ledger_projection_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "8 PASS lines for snapshot projection, ledger head mismatch, replay mismatch, state inconsistency, recursive guard, circuit breaker, hook enforcement, and recover mismatch."
+    },
+    {
+      "id": "CMD-015",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod015_external_control_surface_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "5 PASS lines including child dispatch, heartbeat policy preservation, context mismatch, core rehydration order, and no Claude Code core modification."
+    },
+    {
+      "id": "CMD-016",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod016_transition_graph_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "6 PASS lines for transition graph artifact/schema/validator/on_reject/hook boundary/generated view drift."
+    },
+    {
+      "id": "CMD-017",
+      "ac_pac": "AC-011, PAC-10",
+      "command": "PYTHONPATH=\"$PWD\" python3 tests/test_dod017_execution_flow_projection_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "actual_summary": "20 PASS lines for execution-flow projection, provenance, stale read-only behavior, hot path, handoff, graph separation, and no-core."
+    },
+    {
+      "id": "CMD-018",
+      "ac_pac": "AC-012, PAC-10",
       "command": "npm test",
-      "expected": "Project smoke tests pass.",
-      "actual_summary": "node --test tests/smoke.test.mjs: 1 test, 0 failures.",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "node --test tests/smoke.test.mjs: 1 pass, 0 fail."
     },
     {
+      "id": "CMD-019",
+      "ac_pac": "AC-012, PAC-10",
       "command": "npx tsc --noEmit",
-      "expected": "TypeScript check passes.",
-      "actual_summary": "No output; exit 0.",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "No TypeScript errors; exit 0."
     },
     {
+      "id": "CMD-020",
+      "ac_pac": "AC-012, PAC-10",
       "command": "git diff --check",
-      "expected": "No whitespace errors.",
-      "actual_summary": "No output; exit 0.",
+      "status": "PASS",
       "exit_code": 0,
-      "status": "PASS"
-    },
-    {
-      "command": "python3 -m json.tool \"$PWD/coverage-matrix.json\"",
-      "expected": "coverage-matrix.json is valid JSON.",
-      "actual_summary": "JSON parsed successfully.",
-      "exit_code": 0,
-      "status": "PASS"
-    },
-    {
-      "command": "grep -R \"PAC-17\\|DOD-017\\|history_head\\|no-hot-path-full-projection\" \"$PWD/coverage-matrix.md\" \"$PWD/evidence-ledger.md\" \"$PWD/verification-report.md\"",
-      "expected": "Required evidence sentinel strings are present.",
-      "actual_summary": "Sentinel strings present in markdown evidence artifacts.",
-      "exit_code": 0,
-      "status": "PASS"
-    },
-    {
-      "command": "git diff --name-only gran-maestro/master/AGI-030/REQ-820...HEAD",
-      "expected": "Changed-file provenance excludes Claude Code core source paths.",
-      "actual_summary": "No output before evidence commit because T07 starts at integration head; T07 worktree evidence files are tracked separately under changed_files.evidence_artifacts.",
-      "exit_code": 0,
-      "status": "PASS"
-    },
-    {
-      "command": "find \"$PWD\" -path '*/execution-flow.*' -type f",
-      "expected": "Only intended generated DOD-017 projection artifacts are allowed.",
-      "actual_summary": "No persistent execution-flow.* artifacts found in T07 worktree.",
-      "exit_code": 0,
-      "status": "PASS"
+      "actual_summary": "No whitespace errors before evidence refresh; final gate rerun after evidence write is recorded separately."
     }
   ],
   "changed_files": {
@@ -458,43 +378,30 @@
       "evidence-ledger.md",
       "verification-report.md"
     ],
-    "base_three_dot_head_output_before_evidence_commit": [],
+    "pre_evidence_branch_changes": [
+      "tests/test_dod008_owner_pid_diagnostic_only_contract.py"
+    ],
     "forbidden_core_prefixes": [
       "src/claude-code-core/",
       "packages/claude-code-core/",
       "vendor/claude-code/"
+    ],
+    "no_core_provenance": "Changed files are evidence artifacts, the DOD-008 targeted regression, and DOD-011~DOD-014 wrapper regression files; no changed path is under forbidden Claude Code core prefixes. DOD-015 and DOD-017 no-core regressions passed.",
+    "wrapper_regression_files": [
+      "tests/test_dod011_continuation_contract.py",
+      "tests/test_dod012_auto_true_continuation_contract.py",
+      "tests/test_dod013_state_contract_validation.py",
+      "tests/test_dod014_history_snapshot_consistency.py"
     ]
   },
-  "no_core": {
-    "status": "PASS",
-    "claude_code_core_source_modified": false,
-    "forbidden_prefix_hits": [],
-    "validated_by": [
-      "test_compaction_handoff_does_not_modify_claude_code_core",
-      "test_no_claude_code_core_source_modification",
-      "git diff --name-only gran-maestro/master/AGI-030/REQ-820...HEAD"
-    ]
-  },
-  "diagnostics": {
-    "hook_cache_skew": {
-      "status": "DIAGNOSTIC_RECORDED",
-      "source_path": "hooks/lib/pre_tool_use_fast.py",
-      "source_sha256": "df25c404c8068e889f988568a2585dc16b197df21ad1da8dcd99f4e56d3d8984",
-      "project_copy_path": ".claude/hooks/lib/pre_tool_use_fast.py",
-      "project_copy_status": "MISSING",
-      "active_cache_copies": [
-        {
-          "path": "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/hooks/lib/pre_tool_use_fast.py",
-          "sha256": "79d42fd07088f82431f529f9a2ebce57f1106853f4624af1719992f7112f4d52",
-          "status": "MISMATCH"
-        },
-        {
-          "path": "/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/lib/pre_tool_use_fast.py",
-          "sha256": "79d42fd07088f82431f529f9a2ebce57f1106853f4624af1719992f7112f4d52",
-          "status": "MISMATCH"
-        }
-      ],
-      "claim": "Diagnostic only; synchronization is not claimed."
-    }
-  }
+  "sentinels_required": [
+    "REQ-821",
+    "PLN-648",
+    "DOD-008",
+    "PAC-11",
+    "owner_pid",
+    "diagnostic-only",
+    "read-only",
+    "no-core"
+  ]
 }

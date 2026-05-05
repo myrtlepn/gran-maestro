@@ -1,115 +1,85 @@
-# REQ-820 Final Coverage Matrix
+# REQ-821 Final Coverage Matrix
 
-- Request: REQ-820
-- Task: T07 final evidence and regression gate
-- Plan: PLN-647
+- Request: REQ-821
+- Task: T03 final validation and evidence
+- Plan: PLN-648
 - Objective: AGI-030
-- DoD: DOD-017
-- Worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-820/integration`
-- Branch: `gran-maestro/master/AGI-030/REQ-820`
-- Head under validation: `03671a7bf3da433f939509842013c964a6d0a149`
-- Checked at: `2026-05-05T18:43:55Z`
-- Overall status: PASS with active plugin cache diagnostic recorded.
+- Sprint: S17
+- DoD: DOD-008
+- Worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-821/t03`
+- Branch: `gran-maestro/master/AGI-030/REQ-821-T03`
+- Head under validation: `f7c0fd34081542e92f7fa6a01c835ba7bed3ec69`
+- Checked at: `2026-05-05T19:37:39Z`
+- Overall status: PASS
 
-## Source-Of-Truth Policy
+## DOD-008 Source-Of-Truth Policy
 
-The authoritative DOD-017 actual execution-flow source is the verified history ledger for the same `mst_session_id`. Generated `execution-flow.json`, `execution-flow.d2`, dashboard/CLI flow views, compaction handoff summaries, snapshot/cache data, and prompt summaries are derived or auxiliary. They do not authorize transition decisions by themselves.
+Canonical identity remains `MST_SESSION_ID` / `mst_session_id`. `owner_pid` is process lock liveness diagnostic-only evidence for stale/history/result lock diagnostics. It is not a canonical identity source, fallback, alias, migration source, recover target, continuation policy key, or lock takeover trigger.
 
-Transition authority remains the DOD-016 possible-transition graph plus verified ledger/snapshot validation. DOD-017 projections are display and handoff artifacts derived from the verified ledger.
-
-## Execution-Flow Provenance
-
-| Field | Evidence |
-| --- | --- |
-| Source ledger fixture | `tests/test_dod017_execution_flow_projection_contract.py::_source_head` |
-| `ledger_path` | `.gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/history.ndjson` |
-| `mst_session_id` | `MST-AGI-030-20260506T010203000Z-dod017aa` |
-| Last event | `evt-014`, seq `14` |
-| Cumulative hash / `history_head` | `f341e57a5d808c7c437102c2c68d62cec3257bf5011a2e155edf2c93dc42c470` |
-| Event count / schema | `14`, ledger schema version `1` |
-| Projection kind | `dod017.execution-flow` |
-| Projection schema | `1` |
-| Projection hash fixture | `a229d846e8ad10eff76e1b24f9e3e5978aa5eb86d94fc3f0babfe8e42b455da8` |
-| Generated paths from contract | `.gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.json`, `.gran-maestro/sessions/MST-AGI-030-20260506T010203000Z-dod017aa/execution-flow.d2` |
-| Persistent projection artifacts in integration worktree | None found by `find "$PWD" -path '*/execution-flow.*' -type f` |
-
-The DOD-017 tests prove the projection generator writes `execution-flow.json` and `execution-flow.d2` only after ledger verify/head/hash validation. The generated payload carries source ledger path, `history_head`, source hash, projection schema version, projection hash, and `projection_created_at`.
+Stale lock diagnostic behavior is read-only: diagnostics may report `lock_path`, `owner_pid`, `owner_status`, stale reason, and next action, but they must not create or mutate `.gran-maestro/state/{owner_pid}`, `.gran-maestro/sessions/{owner_pid}`, canonical `history.head`, policy mirror heads, recover artifacts, or lock owner files.
 
 ## PAC Coverage
 
 | PAC | Grade | AC | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| PAC-1 | MUST | AC-031 | PASS | Same `mst_session_id` ledger replay recognizes `skill.enter`, `skill.step`, `skill.exit`, `skill.recover`, `continue.*`, `guard.*`, `terminal.*`, `context.compacted`, `context.rehydrated`, `action.*`, and `blocker.*`. |
-| PAC-2 | MUST | AC-031, AC-034 | PASS | Verified history ledger is source-of-truth; generated JSON/D2/dashboard/CLI/handoff/snapshot/cache/prompt summary are derived or auxiliary. |
-| PAC-3 | MUST | AC-031, AC-034 | PASS | Source head evidence records `ledger_path`, `mst_session_id`, last event id/seq, cumulative hash, event count, ledger schema version, and `history_head`. |
-| PAC-4 | MUST | AC-031, AC-034 | PASS | Projection JSON/D2 generation passes only after verified source validation and includes generated provenance. |
-| PAC-5 | MUST | AC-031, AC-034 | PASS | Stale projection source is fail-closed: read-only/regenerate-required and denied for validator, next-action, auto-write, and handoff consumption. |
-| PAC-6 | MUST | AC-031, AC-036 | PASS | DOD-016 possible graph and DOD-017 actual execution-flow remain separate; transition authority is DOD-016 graph plus verified ledger/snapshot validation. |
-| PAC-7 | MUST | AC-031, AC-034 | PASS | Dashboard, CLI, and D2 views expose provenance, coverage, stale, drift, and regenerate status as generated views. |
-| PAC-8 | MUST | AC-031, AC-034 | PASS | Compaction handoff includes current node, last transition, next action, blocker status, `history_head`, and flow paths; rehydration consumes it before LLM prompt summary. |
-| PAC-9 | MUST | AC-031 | PASS | `context.compacted` and `context.rehydrated` evidence remains in the same session ledger; stale handoff blocks auto write and next action. |
-| PAC-10 | MUST | AC-031 | PASS | Hook hot path uses cursor/cache/minimal head evidence and avoids full replay, full projection, D2 rendering, and dashboard rendering. |
-| PAC-11 | MUST | AC-031 | PASS | Cursor/cache miss or stale hot-path state routes to inspect-only/state inconsistency without full replay. |
-| PAC-12 | MUST | AC-031 | PASS | Full DOD-017 targeted suite passed with 20 tests, including no-hot-path-full-projection. |
-| PAC-13 | MUST | AC-031, AC-036 | PASS | Graph/projection separation tests prove projection cannot authorize DOD-016-forbidden transitions. |
-| PAC-14 | MUST | AC-032, AC-033 | PASS | DOD-011 through DOD-016 regressions, `npm test`, `npx tsc --noEmit`, and `git diff --check` passed. |
-| PAC-15 | MUST | AC-035 | PASS | No Claude Code core source path is changed. |
-| PAC-16 | SHOULD | AC-036 | PASS | DOD-016 graph identity remains canonical: `mst-transition-graph`, version `2026-05-05.dod016-contract`, hash `8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79`. |
-| PAC-17 | MUST | AC-034, AC-035, AC-036 | PASS | These evidence artifacts record PAC/AC coverage, commands, source ledger head/hash, generated provenance, stale behavior, handoff, hot path, and no-core provenance. |
+| PAC-1 | MUST | AC-009, AC-013 | PASS | DOD-008 targeted suite and DOD-007 regression passed; owner_pid is asserted as diagnostic-only, not a canonical identity source/fallback/alias/migration/takeover trigger. |
+| PAC-2 | MUST | AC-009, AC-011, AC-013 | PASS | Targeted test asserts no legacy identity artifacts or policy heads are created; DOD-006/009/011 regressions preserve canonical mst_session_id flow. |
+| PAC-3 | MUST | AC-009, AC-011, AC-013 | PASS | Targeted test fixture combines owner_pid, session_id, and owner_session_id while preserving canonical mst_session_id and rejecting legacy artifact creation. |
+| PAC-4 | MUST | AC-009, AC-010, AC-013 | PASS | Targeted stale candidate test hashes history.head, policy mirror head, and owner.json before/after; hashes are unchanged. |
+| PAC-5 | MUST | AC-009, AC-010, AC-013 | PASS | Evidence and tests separate lock_path/process-liveness diagnostics from canonical mst_session_id identity; owner_pid is not promoted into identity payload. |
+| PAC-6 | MUST | AC-009, AC-011, AC-013 | PASS | Recover and docs contract tests pass and require diagnostic-only wording for owner_pid. |
+| PAC-7 | MUST | AC-009, AC-011, AC-013 | PASS | Hook source assertions pass for hooks/lib/pre_tool_use_fast.py and hooks/mst-pre-tool-use.sh: owner_pid/process lock owner metadata is not a session selector. |
+| PAC-8 | MUST | AC-009, AC-013 | PASS | Targeted regression asserts .gran-maestro/state/{owner_pid}, .gran-maestro/sessions/{owner_pid}, and legacy session paths do not exist after diagnosis. |
+| PAC-9 | MUST | AC-009, AC-010, AC-013 | PASS | Targeted regression preserves canonical history.head, mirror head, and lock owner file while stale diagnostic remains read-only. |
+| PAC-10 | MUST | AC-011, AC-012 | PASS | Exact spec-listed DOD-011~DOD-014 wrapper regression commands, available DOD-015~DOD-017 suites, npm test, npx tsc --noEmit, and git diff --check passed. |
+| PAC-11 | MUST | AC-013 | PASS | coverage-matrix.json, coverage-matrix.md, evidence-ledger.md, and verification-report.md were refreshed for REQ-821 / PLN-648 / AGI-030 / DOD-008. |
 
 ## AC Coverage
 
-| AC | Requirement | Status | Evidence |
-| --- | --- | --- | --- |
-| AC-031 | Full DOD-017 targeted regression passes. | PASS | `tests/test_dod017_execution_flow_projection_contract.py` exited 0 with 20 PASS lines. |
-| AC-032 | DOD-011 through DOD-016 regressions pass. | PASS | Six prior DoD regression suites exited 0. |
-| AC-033 | `npm test`, `npx tsc --noEmit`, and `git diff --check` pass. | PASS | Project smoke, TypeScript, and whitespace gates passed. |
-| AC-034 | Evidence artifacts cover all PAC/AC items. | PASS | `coverage-matrix.json`, this matrix, `evidence-ledger.md`, and `verification-report.md` cover PAC-1 through PAC-17 and AC-031 through AC-036. |
-| AC-035 | Claude Code core remains untouched. | PASS | No changed path under `src/claude-code-core/`, `packages/claude-code-core/`, or `vendor/claude-code/`; DOD-017 no-core test passed. |
-| AC-036 | DOD-016 graph identity impact remains explicit. | PASS | DOD-016 graph artifact/view/hash remain canonical possible-transition graph evidence after DOD-017. |
+| AC | Status | Evidence |
+| --- | --- | --- |
+| AC-009 | PASS | DOD-008 targeted suite passed: 4 PASS lines covering owner_pid diagnostic-only, no legacy identity paths, read-only stale lock preservation, recover docs, and hook boundary assertions. |
+| AC-010 | PASS | tests/test_agile_stale_lock_diagnostics.py passed and preserves live/missing/inconclusive/unknown/stale/scope-mismatch/ledger-mismatch diagnostic categories without artifact mutation. |
+| AC-011 | PASS | DOD-006, DOD-007, DOD-009, exact spec-listed DOD-011~DOD-014 wrapper suites, and DOD-015~DOD-017 regressions passed. The DOD-011~DOD-014 wrappers delegate to the current regression files while preserving the approved spec command surface. |
+| AC-012 | PASS | npm test, npx tsc --noEmit, and git diff --check passed. |
+| AC-013 | PASS | Final evidence artifacts record REQ-821, PLN-648, AGI-030, DOD-008, PAC-1..PAC-11, command evidence, owner_pid diagnostic-only, read-only lock diagnostic, no identity fallback, and no-core provenance. |
 
 ## Command Summary
 
-| Command | Result |
-| --- | --- |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod017_execution_flow_projection_contract.py"` | PASS, 20 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod011_rehydration_contract.py"` | PASS, 6 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod012_auto_continuation_contract.py"` | PASS, 7 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod013_state_contract_validator.py"` | PASS, 6 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod014_ledger_projection_contract.py"` | PASS, 7 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod015_external_control_surface_contract.py"` | PASS, 10 tests |
-| `PYTHONPATH="$PWD" python3 "$PWD/tests/test_dod016_transition_graph_contract.py"` | PASS, 6 tests |
-| `npm test` | PASS, 1 smoke test |
-| `npx tsc --noEmit` | PASS |
-| `git diff --check` | PASS |
-| `python3 -m json.tool "$PWD/coverage-matrix.json"` | PASS |
-| `grep -R "PAC-17\|DOD-017\|history_head\|no-hot-path-full-projection" ...` | PASS |
-| `git diff --name-only gran-maestro/master/AGI-030/REQ-820...HEAD` | PASS, no code/core paths before T07 evidence commit |
-| `find "$PWD" -path '*/execution-flow.*' -type f` | PASS, no persistent projection artifacts in worktree |
+| ID | AC/PAC | Command | Status | Exit | Actual summary |
+| --- | --- | --- | --- | --- | --- |
+| CMD-001 | AC-009, PAC-1~PAC-9 | `python3 tests/test_dod008_owner_pid_diagnostic_only_contract.py` | PASS | 0 | 4 PASS lines: legacy identity artifact non-creation, read-only stale candidate/head preservation, recover docs diagnostic-only, hook source no owner_pid session selector. |
+| CMD-002 | AC-010, PAC-4, PAC-5, PAC-9 | `python3 tests/test_agile_stale_lock_diagnostics.py` | PASS | 0 | stale lock diagnostics regression passed across live/missing/inconclusive/unknown/stale/scope/ledger branches. |
+| CMD-003 | AC-011, PAC-6 | `python3 tests/test_dod006_recover_contract_docs.py` | PASS | 0 | recover/resume contract docs passed. |
+| CMD-004 | AC-011, PAC-1, PAC-3 | `python3 tests/test_dod007_owner_pid_diagnostic_only.py` | PASS | 0 | owner_pid diagnostic-only regression passed. |
+| CMD-005 | AC-011, PAC-2, PAC-3 | `python3 tests/test_dod007_contract_docs.py` | PASS | 0 | canonical identity boundary docs passed. |
+| CMD-006 | AC-011, PAC-2, PAC-3 | `python3 tests/test_dod009_contract_docs.py` | PASS | 0 | session identity glossary and canonical state/history/recover terms passed. |
+| CMD-007 | AC-011, PAC-10 | `python3 tests/test_dod011_continuation_contract.py` | PASS | 0 | Exact spec-listed DOD-011 wrapper passed and delegates to tests/test_dod011_rehydration_contract.py; 6 PASS lines preserve continuation/rehydration and legacy identity non-fallback coverage. |
+| CMD-008 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod011_rehydration_contract.py` | PASS | 0 | 6 PASS lines for resume checkpoint, child dispatch, compaction rehydration, stop hook continuation, stale mismatch, and legacy identity non-fallback. |
+| CMD-009 | AC-011, PAC-10 | `python3 tests/test_dod012_auto_true_continuation_contract.py` | PASS | 0 | Exact spec-listed DOD-012 wrapper passed and delegates to tests/test_dod012_auto_continuation_contract.py; 7 PASS lines preserve auto continuation policy and retry circuit scoping coverage. |
+| CMD-010 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod012_auto_continuation_contract.py` | PASS | 0 | 7 PASS lines for auto continuation policy, recoverable issue continuation, blocker/security guards, action classification, and retry circuit scoping. |
+| CMD-011 | AC-011, PAC-10 | `python3 tests/test_dod013_state_contract_validation.py` | PASS | 0 | Exact spec-listed DOD-013 wrapper passed and delegates to tests/test_dod013_state_contract_validator.py; 6 PASS lines preserve state/history/recover/dispatch validation coverage. |
+| CMD-012 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod013_state_contract_validator.py` | PASS | 0 | 6 PASS lines for snapshot/history/recover/dispatch contracts and failure shape/partial write state inconsistency. |
+| CMD-013 | AC-011, PAC-10 | `python3 tests/test_dod014_history_snapshot_consistency.py` | PASS | 0 | Exact spec-listed DOD-014 wrapper passed and delegates to tests/test_dod014_ledger_projection_contract.py; 8 PASS lines preserve ledger/snapshot projection consistency coverage. |
+| CMD-014 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod014_ledger_projection_contract.py` | PASS | 0 | 8 PASS lines for snapshot projection, ledger head mismatch, replay mismatch, state inconsistency, recursive guard, circuit breaker, hook enforcement, and recover mismatch. |
+| CMD-015 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod015_external_control_surface_contract.py` | PASS | 0 | 5 PASS lines including child dispatch, heartbeat policy preservation, context mismatch, core rehydration order, and no Claude Code core modification. |
+| CMD-016 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod016_transition_graph_contract.py` | PASS | 0 | 6 PASS lines for transition graph artifact/schema/validator/on_reject/hook boundary/generated view drift. |
+| CMD-017 | AC-011, PAC-10 | `PYTHONPATH="$PWD" python3 tests/test_dod017_execution_flow_projection_contract.py` | PASS | 0 | 20 PASS lines for execution-flow projection, provenance, stale read-only behavior, hot path, handoff, graph separation, and no-core. |
+| CMD-018 | AC-012, PAC-10 | `npm test` | PASS | 0 | node --test tests/smoke.test.mjs: 1 pass, 0 fail. |
+| CMD-019 | AC-012, PAC-10 | `npx tsc --noEmit` | PASS | 0 | No TypeScript errors; exit 0. |
+| CMD-020 | AC-012, PAC-10 | `git diff --check` | PASS | 0 | No whitespace errors before evidence refresh; final gate rerun after evidence write is recorded separately. |
 
-## DOD-016 Graph Identity Impact
+## Owner PID Diagnostic-Only Evidence
 
-DOD-016 remains the canonical possible-transition graph source. DOD-017 actual execution-flow projection is separate and cannot authorize transitions. The canonical graph source is `templates/state-machine/mst-transition-graph.json`; generated graph view is `dashboard/mst-transition-graph.json`; graph id/version/hash are:
+- `tests/test_dod008_owner_pid_diagnostic_only_contract.py` uses canonical session `MST-AGI-030-20260506T010203456Z-dod008` and legacy/process fields `owner_pid`, `session_id`, and `owner_session_id` in the same stale lock fixture.
+- The targeted test asserts no owner_pid-derived or legacy-derived identity paths are created under `.gran-maestro/state/`, `.gran-maestro/sessions/`, or policy `ledger-heads/`.
+- The stale candidate test hashes `history.head`, policy mirror head, and `history.lock/owner.json` before and after diagnosis; hashes remain unchanged.
+- Recover docs and hook source assertions preserve diagnostic-only wording and forbid owner_pid/process lock owner metadata as a session selector.
 
-```text
-graph_id=mst-transition-graph
-graph_version=2026-05-05.dod016-contract
-graph_hash=8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79
-```
+## No Identity Fallback / No-Core Provenance
 
-## No-Core Provenance
+No identity fallback evidence: canonical `mst_session_id` wins over owner_pid, owner_session_id, hook `session_id`, snapshot `sessionId`, and other process/legacy values. No-core evidence: validation changed root evidence artifacts, the DOD-008 targeted regression, and DOD-011~DOD-014 wrapper regression files; no path under `src/claude-code-core/`, `packages/claude-code-core/`, or `vendor/claude-code/` is modified. DOD-015 and DOD-017 no-core tests passed.
 
-T07 evidence changes are limited to root evidence files:
+## Spec-listed Wrapper Evidence
 
-```text
-coverage-matrix.json
-coverage-matrix.md
-evidence-ledger.md
-verification-report.md
-```
-
-Forbidden core prefixes are `src/claude-code-core/`, `packages/claude-code-core/`, and `vendor/claude-code/`. No changed path uses those prefixes.
-
-## Diagnostic-Only Cache Caveat
-
-`hooks/lib/pre_tool_use_fast.py` source sha256 is `df25c404c8068e889f988568a2585dc16b197df21ad1da8dcd99f4e56d3d8984`. The project copy `.claude/hooks/lib/pre_tool_use_fast.py` is missing. Active cache copies under `~/.claude/plugins/cache/gran-maestro/mst/0.59.6` and `0.59.8` have sha256 `79d42fd07088f82431f529f9a2ebce57f1106853f4624af1719992f7112f4d52`, so synchronization is not claimed.
+The exact spec-listed DOD-011~DOD-014 commands are present as wrapper regression files and passed. They delegate to the current equivalent regression suites: `test_dod011_rehydration_contract.py`, `test_dod012_auto_continuation_contract.py`, `test_dod013_state_contract_validator.py`, and `test_dod014_ledger_projection_contract.py`.
