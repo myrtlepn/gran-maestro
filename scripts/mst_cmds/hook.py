@@ -282,6 +282,7 @@ def _emit_history_error(error: HistoryValidationError, *, json_mode: bool) -> No
             **error.details,
         }
     if json_mode:
+        payload.setdefault("external_control_surface", "history")
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     else:
         print(f"{error.code}: {error.message}", file=sys.stderr)

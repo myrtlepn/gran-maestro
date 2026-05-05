@@ -155,18 +155,20 @@ def structured_mst_session_id_from_env() -> str | None:
         payload = _json_object_from_env(env_name)
         if not isinstance(payload, dict):
             continue
-        value = payload.get("mst_session_id")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
         core = payload.get("core_rehydration")
         if isinstance(core, dict):
             value = core.get("mst_session_id")
             if isinstance(value, str) and value.strip():
                 return value.strip()
+        value = payload.get("mst_session_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 
 def canonical_mst_session_id_from_env_or_context() -> str | None:
+    if len(sys.argv) > 1 and sys.argv[1] == "dispatch" and os.environ.get("MST_INVOCATION_HISTORY_ACTIVE") != "1":
+        return None
     env_value = canonical_session_id_from_env()
     context_value = structured_mst_session_id_from_env()
     if env_value and context_value and env_value != context_value:

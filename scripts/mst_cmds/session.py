@@ -807,6 +807,28 @@ def _write_history_heads(base_dir: Path, mst_session_id: str, head_hash: str, hi
     _atomic_write_text(verify_state, f"{head_hash}\t{_file_fingerprint(history_file)}\t{seq}\n")
 
 
+def _read_history_sidecar_head(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _read_verify_head(path: Path) -> str:
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return raw.split("\t", 1)[0].strip()
+
+
+def _history_sidecars_match_tail(base_dir: Path, mst_session_id: str, tail_hash: str) -> bool:
+    local_head = _read_history_sidecar_head(session_history_head_path(base_dir, mst_session_id))
+    mirror_head = _read_history_sidecar_head(_session_history_mirror_head_path(base_dir, mst_session_id))
+    verify_head = _read_verify_head(session_history_verify_path(base_dir, mst_session_id))
+    return local_head == tail_hash and mirror_head == tail_hash and verify_head == tail_hash
+
+
 def write_session_history_event(base_dir: Path, mst_session_id: str, payload: dict) -> Path:
     parsed = validate_mst_session_metadata_consistency(base_dir, mst_session_id)
     path = session_history_path(base_dir, parsed.mst_session_id)
@@ -835,6 +857,9 @@ def write_session_history_event(base_dir: Path, mst_session_id: str, payload: di
         _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=5)
         try:
             last_seq, last_hash, idempotency_keys = _history_tail_unlocked(path)
+            if event_type.startswith("mst.invocation_") and last_seq > 0:
+                if not _history_sidecars_match_tail(base_dir, parsed.mst_session_id, last_hash):
+                    return path
             if event["idempotency_key"] in idempotency_keys:
                 return path
             event_hash = _history_event_hash(last_hash, event)
@@ -890,11 +915,46 @@ def _context_payload_session_candidates(payload: dict) -> list[str]:
             candidates.append(nested.strip())
         next_execution = core.get("next_execution")
         if isinstance(next_execution, dict):
+            env = next_execution.get("env")
+            if isinstance(env, dict):
+                next_env_sid = env.get("MST_SESSION_ID")
+                if isinstance(next_env_sid, str) and next_env_sid.strip():
+                    candidates.append(next_env_sid.strip())
             context = next_execution.get("context")
             if isinstance(context, dict):
                 next_context_sid = context.get("mst_session_id")
                 if isinstance(next_context_sid, str) and next_context_sid.strip():
                     candidates.append(next_context_sid.strip())
+        handoff = core.get("execution_handoff")
+        if isinstance(handoff, dict):
+            handoff_sid = handoff.get("mst_session_id")
+            if isinstance(handoff_sid, str) and handoff_sid.strip():
+                candidates.append(handoff_sid.strip())
+    return candidates
+
+
+def _context_payload_root_candidates(payload: dict) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    direct = payload.get("root_mst_id")
+    if isinstance(direct, str) and direct.strip():
+        candidates.append(("root_mst_id", direct.strip()))
+    core = payload.get("core_rehydration")
+    if isinstance(core, dict):
+        nested = core.get("root_mst_id")
+        if isinstance(nested, str) and nested.strip():
+            candidates.append(("core_rehydration.root_mst_id", nested.strip()))
+        next_execution = core.get("next_execution")
+        if isinstance(next_execution, dict):
+            context = next_execution.get("context")
+            if isinstance(context, dict):
+                next_context_root = context.get("root_mst_id")
+                if isinstance(next_context_root, str) and next_context_root.strip():
+                    candidates.append(("core_rehydration.next_execution.context.root_mst_id", next_context_root.strip()))
+        handoff = core.get("execution_handoff")
+        if isinstance(handoff, dict):
+            handoff_root = handoff.get("root_mst_id")
+            if isinstance(handoff_root, str) and handoff_root.strip():
+                candidates.append(("core_rehydration.execution_handoff.root_mst_id", handoff_root.strip()))
     return candidates
 
 
@@ -945,12 +1005,11 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
                 reason="MST_SESSION_ID and structured mst_session_id mismatch",
             )
 
-    root_mst_id = payload.get("root_mst_id")
-    if isinstance(root_mst_id, str) and root_mst_id.strip():
-        if validate_root_mst_id(root_mst_id.strip()) != parsed.root_mst_id:
+    for field, root_mst_id in _context_payload_root_candidates(payload):
+        if validate_root_mst_id(root_mst_id) != parsed.root_mst_id:
             _common.raise_validation_failure(
                 target="dispatch_envelope",
-                field="root_mst_id",
+                field=field,
                 reason="MST_CONTEXT_JSON root_mst_id mismatch",
             )
 
@@ -978,7 +1037,7 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
         if validate_root_mst_id(core_root.strip()) != parsed.root_mst_id:
             _common.raise_validation_failure(
                 target="dispatch_envelope",
-                field="root_mst_id",
+                field="core_rehydration.root_mst_id",
                 reason="MST_CONTEXT_JSON core_rehydration root_mst_id mismatch",
             )
         if ("auto" in payload or "auto" in core) and payload.get("auto") != core.get("auto"):
@@ -1118,7 +1177,11 @@ def child_env_with_required_session_context() -> dict[str, str]:
 
     payload_value = _session_id_from_stdin_or_env_payload()
     if payload_value and env_value != payload_value:
-        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+        _common.raise_validation_failure(
+            target="dispatch_envelope",
+            field="mst_session_id",
+            reason="MST_SESSION_ID and structured mst_session_id mismatch",
+        )
 
     session_id = _validate_session_id(env_value)
     child_env = os.environ.copy()

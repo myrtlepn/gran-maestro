@@ -1,244 +1,135 @@
-# REQ-817 T04 Evidence Ledger
+# REQ-818 Final Evidence Ledger
 
-- Request: REQ-817
-- Task: T04
-- Plan: PLN-644
-- Objective: AGI-030 Sprint 13 DOD-014
-- Checked at: 2026-05-05T10:17:18Z
-- Integration worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-817/t04`
-- Validated integration head: `409edce7b6fcb1f95492484d1940a93d2dd1e194`
-- T01 commit: `b889b1104886b3d807d31079e6be1e39b39d18f1`
-- T02 commit: `f243195283def22e0d53b3faf72942adc8490803`
-- T03 commit: `9f3dd391b8091a16e31f7395142f7d8dc0d16389`
-- Overall status: PASS
+- Request: REQ-818
+- Task: T06 final integration gate
+- Plan: PLN-645
+- Objective: AGI-030 / DOD-015
+- Worktree: `/Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-030/REQ-818/integration`
+- Checked at: 2026-05-05T12:54:13Z
+- Overall status: FINAL INTEGRATION PASS
 
-## Source Provenance
+The final evidence is command-backed on integration head `f741393`. T05 historical delegated/follow-up rows are superseded by T06 final gates and post-sync hook cache comparisons.
 
-REQ-817 implements DOD-014: the history ledger is the authoritative event stream and snapshot state is only trusted as a validated projection. T04 is evidence-only. It updates only:
+## Command Evidence
 
-- `coverage-matrix.json`
-- `coverage-matrix.md`
-- `evidence-ledger.md`
-- `verification-report.md`
+| ID | AC/PAC | Command | Expected | Actual summary | Exit code | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| CMD-001 | AC-028, PAC-5, PAC-9 | `git diff --name-only master...HEAD` | Changed files are Gran Maestro-owned surfaces and contain no Claude Code core source paths. | Listed hook source/copy, `scripts/mst_cmds/*`, DOD-015 test, and evidence artifacts. | 0 | PASS |
+| CMD-002 | AC-028, AC-030, PAC-5, PAC-11 | `git diff --name-only master...HEAD -- . ':!coverage-matrix.json' ':!coverage-matrix.md' ':!evidence-ledger.md' ':!verification-report.md'` | Non-evidence integration diff excludes DOD-016/DOD-017 graph/projection artifacts and Claude Code core source. | Gran Maestro-owned hook/script/test list only; no transition graph YAML/D2/dashboard and no execution-flow JSON/D2/dashboard projection path. | 0 | PASS |
+| CMD-003 | AC-029, PAC-10 | `cmp -s hooks/mst-stop-hook.sh .claude/hooks/mst-stop-hook.sh` | Source hook and project copy match. | Files match. Source/project hook copy sync is PASS. | 0 | PASS |
+| CMD-004 | AC-001~AC-008, AC-009~AC-012, AC-015~AC-018, AC-021~AC-023, AC-032, PAC-1~PAC-8 | `PYTHONPATH=$WT python3 $WT/tests/test_dod015_external_control_surface_contract.py` | DOD-015 targeted external control surface regression passes on integration head. | 10 tests passed: hook continuation, structured blocker, state/recover fail-closed, child dispatch inheritance, dispatch auto policy, dispatch mismatch fail-closed, core rehydration priority, no-core provenance, recoverable issue continuation, same-session ledger evidence. | 0 | PASS |
+| CMD-005 | AC-019, AC-033, PAC-4, PAC-8 | `PYTHONPATH=$WT python3 $WT/tests/test_dod011_rehydration_contract.py` | DOD-011 rehydration regression remains green. | 6 tests passed. | 0 | PASS |
+| CMD-006 | AC-013, AC-033, PAC-6, PAC-8 | `PYTHONPATH=$WT python3 $WT/tests/test_dod012_auto_continuation_contract.py` | DOD-012 auto continuation regression remains green. | 7 tests passed. | 0 | PASS |
+| CMD-007 | AC-019, AC-033, PAC-2, PAC-8 | `PYTHONPATH=$WT python3 $WT/tests/test_dod013_state_contract_validator.py` | DOD-013 state contract validator remains green. | 6 tests passed. | 0 | PASS |
+| CMD-008 | AC-024, AC-033, PAC-7, PAC-8 | `PYTHONPATH=$WT python3 $WT/tests/test_dod014_ledger_projection_contract.py` | DOD-014 ledger projection regression remains green. | 7 tests passed. | 0 | PASS |
+| CMD-009 | AC-014, AC-029, PAC-10 | Compare active plugin cache hook copies to `hooks/mst-stop-hook.sh`. | Source, project copy, and active plugin cache copies match. | Project copy and four active cache hook copies under versions `0.59.6` and `0.59.8` all returned `cmp` exit code 0. | 0 | PASS |
+| CMD-010 | AC-034, PAC-8 | `npm test` | Project test suite passes on integration head. | `node --test tests/smoke.test.mjs` passed: 1 test, 0 failures. | 0 | PASS |
+| CMD-011 | AC-034, PAC-8 | `npx tsc --noEmit` | TypeScript gate passes on integration head. | No output; command exited 0. | 0 | PASS |
+| CMD-012 | AC-027, AC-031, AC-034, PAC-8 | `git diff --check` | Integration diff has no whitespace errors. | No output; command exited 0. | 0 | PASS |
+| CMD-013 | AC-035, PAC-5, PAC-11 | Final no-core and no-go path scan. | No Claude Code core source paths and no DOD-016/DOD-017 artifacts. | `NO_CORE_PATHS=PASS`; `NO_DOD016_DOD017_ARTIFACTS=PASS`. | 0 | PASS |
 
-No runtime code, tests, hooks, CLAUDE.md, generated graphs, dashboard files, README, skills, or docs were modified by T04.
+## PAC Evidence
 
-## T01 Red-First Provenance
+### PAC-1 - Hook Enforcement
 
-- Commit: `b889b1104886b3d807d31079e6be1e39b39d18f1`
-- Integration merge: `e309375 Merge REQ-817 T01 regression`
-- File: `tests/test_dod014_ledger_projection_contract.py`
-- AC-002 valid snapshot projection: PASS before runtime changes.
-- AC-001 partial write, AC-003 ledger head mismatch, AC-004 replay mismatch, AC-005 auto continuation blocker, AC-006 recursive transition guard, and AC-007 fingerprint circuit breaker were RED before runtime implementation.
-- DOD-011, DOD-012, DOD-013 regressions, `py_compile`, and `git diff --check` passed in T01.
+- AC: AC-001, AC-002, AC-009, AC-010, AC-026, AC-027, AC-032, AC-036
+- Expected: Stop/SubagentStop/PreToolUse boundaries continue active `auto=true` workflow without user wait unless structured critical blocker evidence exists.
+- Actual: CMD-004 exited 0 on integration head and passed hook continuation plus structured blocker fixtures.
 
-## T02 Implementation Evidence
+### PAC-2 - State Enforcement
 
-- Commit: `f243195283def22e0d53b3faf72942adc8490803`
-- Integration merge: `b309eca Merge REQ-817 T02 runtime consistency`
-- Files: `scripts/mst_cmds/_common.py`, `scripts/mst_cmds/hook.py`, `scripts/mst_cmds/state.py`, `tests/test_dod014_ledger_projection_contract.py`
-- Scope:
-  - Runtime `state_inconsistency` payloads for history head/verify partial writes.
-  - Recover-side stale history/snapshot projection mismatch handling.
-  - Ledger replay projection comparison.
-- T02 scope tests PASS:
-  - `partial_write_state_inconsistency`
-  - `valid_snapshot_projection_matches_replay`
-  - `ledger_head_mismatch_blocks_continuation`
-  - `replay_mismatch_is_non_success`
-- T03 tests still RED at T02 were expected:
-  - `auto_continuation_state_inconsistency_blocker`
-  - `recursive_transition_guard_downgrades_write`
-  - `fingerprint_circuit_breaker_scopes_repeated_failures`
-- DOD-011, DOD-012, DOD-013 regressions, `git diff --check`, and `py_compile` passed.
+- AC: AC-003, AC-011, AC-017, AC-026, AC-027, AC-032, AC-033, AC-036
+- Expected: state/history/recover and dispatch mismatch paths fail closed without new session fallback.
+- Actual: CMD-004, CMD-007, and CMD-008 exited 0 with mismatch/fail-closed coverage.
 
-## T03 Recovery Guard/Circuit Breaker Evidence
+### PAC-3 - Skill Dispatch
 
-- Commit: `9f3dd391b8091a16e31f7395142f7d8dc0d16389`
-- Integration merge: `409edce7b6fcb1f95492484d1940a93d2dd1e194`
-- Files: `hooks/mst-stop-hook.sh`, `.claude/hooks/mst-stop-hook.sh`, `scripts/mst_cmds/session.py`, `scripts/mst_cmds/state.py`
-- Scope:
-  - Stale recover/auto continuation blockers.
-  - Recursive transition depth guard downgrade.
-  - `transition_source`-scoped repeat failure circuit breaker evidence.
-  - Terminal `terminal.repeat_failure_limit` blocker evidence.
-- PM validation PASS:
-  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod014_ledger_projection_contract.py`
-  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod012_auto_continuation_contract.py`
-  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod011_rehydration_contract.py`
-  - `PYTHONPATH=<t03-worktree> python3 <t03-worktree>/tests/test_dod013_state_contract_validator.py`
-  - `git diff --check`
-  - `PYTHONPYCACHEPREFIX=/private/tmp/gm-pycache-t03-pm python3 -m py_compile <t03-worktree>/scripts/mst_cmds/session.py <t03-worktree>/scripts/mst_cmds/state.py`
+- AC: AC-004, AC-015, AC-016, AC-017, AC-026, AC-027, AC-032, AC-036
+- Expected: child dispatch/register/heartbeat/recover envelopes inherit parent `MST_SESSION_ID`, root session, and auto policy.
+- Actual: CMD-004 exited 0 and passed child dispatch inheritance, auto policy preservation, and dispatch mismatch fail-closed tests.
 
-## AC-020 Through AC-024 Evidence
+### PAC-4 - Context Enforcement
 
-- AC-020: `coverage-matrix.json` and `coverage-matrix.md` map PAC-1 through PAC-10, DOD-014 AC IDs, responsible task IDs, test/evidence references, changed-file provenance, hook sync, and docs/skills impact.
-- AC-021: `evidence-ledger.md` includes source provenance, T01 red-first, T02 implementation, T03 recovery guard/circuit breaker, PAC-1 through PAC-10 records, hook sync evidence, docs/skills impact, and mandatory command summaries.
-- AC-022: `verification-report.md` lists DOD-014 targeted regression, DOD-013, DOD-012, DOD-011, `npm test`, `npm exec -- tsc --noEmit`, `git diff --check`, `python3 -m json.tool coverage-matrix.json`, hook comparisons, and docs/skills impact command-by-command.
-- AC-023: changed files are classified as source, tests, hooks, evidence artifacts, and docs/no-impact in `coverage-matrix.json`, `coverage-matrix.md`, and `verification-report.md`.
-- AC-024: hook sync evidence is recorded for source/project/cache paths; README/docs/skills update is not required because T04 is evidence-only and T03 hook behavior change is covered by hook sync evidence.
+- AC: AC-005, AC-018, AC-026, AC-027, AC-032, AC-033, AC-036
+- Expected: core rehydration and execution handoff outrank prompt summary in recover/resume/skill/compaction context.
+- Actual: CMD-004 and CMD-005 exited 0 with core rehydration priority and DOD-011 coverage.
 
-## PAC-1 — History append/head/verify partial write state inconsistency
+### PAC-5 - No Core Modification
 
-- AC: AC-001, AC-008, AC-009, AC-020, AC-021
-- Tasks: T01, T02, T04
-- Evidence: `partial_write_state_inconsistency`
-- Expected: event append, head update, and verify metadata update must agree in one `mst_session_id` ledger; partial write produces structured non-success state inconsistency.
-- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
+- AC: AC-006, AC-022, AC-023, AC-028, AC-032, AC-035, AC-036
+- Expected: DOD-015 uses Gran Maestro-owned scripts/hooks/tests/evidence only and does not modify Claude Code core source.
+- Actual: CMD-001, CMD-002, CMD-004, and CMD-013 prove no Claude Code core source, query loop, permission classifier, compaction runtime, vendored Claude Code path, or monkey-patch source was present.
 
-## PAC-2 — Snapshot validated projection requires ledger head and replay match
+### PAC-6 - Auto Continuation
 
-- AC: AC-002, AC-010, AC-020, AC-021
-- Tasks: T01, T02, T04
-- Evidence: `valid_snapshot_projection_matches_replay`
-- Expected: snapshot `history.last_event_id` matches ledger head and replay projection matches snapshot workflow/history fields.
-- Actual: PASS.
+- AC: AC-002, AC-007, AC-010, AC-012, AC-016, AC-026, AC-027, AC-032, AC-036
+- Expected: recoverable issues do not become user wait, success-only completion, or new-session fallback without critical blocker evidence.
+- Actual: CMD-004 and CMD-006 exited 0 with recoverable continuation, user-wait guard, blocker evidence, security boundary, action classification, and retry circuit scope coverage.
 
-## PAC-3 — Snapshot/recover/head mismatch blocks automatic continuation/write
+### PAC-7 - History Ledger Evidence
 
-- AC: AC-003, AC-014, AC-020, AC-021
-- Tasks: T01, T02, T03, T04
-- Evidence: `ledger_head_mismatch_blocks_continuation`
-- Expected: mismatch among `history.head`, snapshot `history.last_event_id`, and recover bundle `history_last_event_id` blocks automatic continuation/write.
-- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
+- AC: AC-008, AC-013, AC-021, AC-023, AC-024, AC-026, AC-027, AC-032, AC-033, AC-036
+- Expected: enforcement transition, blocker, retry, and circuit metadata stay append-only in the same `mst_session_id` ledger while DOD-014 projection remains authoritative.
+- Actual: CMD-004 and CMD-008 exited 0 with same-session ledger evidence and DOD-014 ledger projection preservation.
 
-## PAC-4 — Replay mismatch is not corrected by prompt summary or snapshot-only trust
+### PAC-8 - Regression Evidence
 
-- AC: AC-004, AC-011, AC-020, AC-021
-- Tasks: T01, T02, T04
-- Evidence: `replay_mismatch_is_non_success`
-- Expected: ledger replay mismatch fails through inspect-only/state inconsistency path without prompt summary or snapshot-only fallback.
-- Actual: T01 RED before runtime implementation; T02/T03/T04 PASS.
+- AC: AC-013, AC-019, AC-024, AC-027, AC-032, AC-033, AC-034
+- Expected: DOD-015, DOD-014, DOD-013, DOD-012, DOD-011, `npm test`, `npx tsc --noEmit`, and `git diff --check` are command-backed.
+- Actual: CMD-004 through CMD-008 and CMD-010 through CMD-012 all exited 0 on integration head.
 
-## PAC-5 — Auto=true inconsistency leaves blocker evidence and inspect-only next action
+### PAC-9 - Coverage and Evidence Artifacts
 
-- AC: AC-005, AC-015, AC-020, AC-021
-- Tasks: T01, T02, T03, T04
-- Evidence: `auto_continuation_state_inconsistency_blocker`
-- Expected: auto continuation records critical blocker or inspect-only next action and does not report success, created new session, completed, or user wait.
-- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
+- AC: AC-026, AC-027, AC-028, AC-031, AC-036
+- Expected: artifacts explicitly map PAC-1 through PAC-11 and AC-001 through AC-036, command evidence, changed-file provenance, no-core evidence, and external control surface evidence.
+- Actual: `coverage-matrix.json`, `coverage-matrix.md`, `evidence-ledger.md`, `verification-report.md`, and RV-001 review artifacts record final PASS evidence.
 
-## PAC-6 — Recursive guard depth excess downgrades automatic write
+### PAC-10 - Hook Source/Copy/Cache Sync
 
-- AC: AC-006, AC-016, AC-020, AC-021
-- Tasks: T01, T02, T03, T04
-- Evidence: `recursive_transition_guard_downgrades_write`
-- Expected: repeated recover/compact/continuation in one `mst_session_id` tracks `transition_source`, depth, or chain and downgrades automatic write on depth excess.
-- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
+- AC: AC-014, AC-029, AC-036
+- Expected: hook source, project copy, and active plugin cache hook copies match.
+- Actual: CMD-003 and CMD-009 passed. Source/project and active plugin cache comparisons all returned `cmp` exit code 0.
 
-## PAC-7 — Circuit breaker scope and terminal blocker evidence
+### PAC-11 - DOD-016/DOD-017 No-Go Scope
 
-- AC: AC-007, AC-017, AC-020, AC-021
-- Tasks: T01, T02, T03, T04
-- Evidence: `fingerprint_circuit_breaker_scopes_repeated_failures`
-- Expected: repeat failure scope is `mst_session_id + transition_source + normalized_action + normalized_error`, and circuit open records `terminal.repeat_failure_limit` instead of completed.
-- Actual: T01 RED; T02 expected RED; T03/T04 PASS.
+- AC: AC-020, AC-025, AC-030, AC-035, AC-036
+- Expected: DOD-015 evidence does not introduce transition graph YAML/D2/dashboard or execution-flow JSON/D2/dashboard projection artifacts.
+- Actual: CMD-001, CMD-002, and CMD-013 changed-file/path scans contain no such artifacts; `verification-report.md` records the no-go rationale.
 
-## PAC-8 — Mandatory regression/build evidence
+## Mandatory Output Summaries
 
-- AC: AC-012, AC-013, AC-018, AC-022
-- Commands and results:
-  - DOD-014 targeted regression: PASS.
-  - DOD-013 state contract validator: PASS.
-  - DOD-012 auto continuation: PASS.
-  - DOD-011 rehydration: PASS.
-  - `npm test`: PASS.
-  - `npm exec -- tsc --noEmit`: PASS.
-  - `git diff --check`: PASS.
-  - `python3 -m json.tool coverage-matrix.json`: PASS.
-
-## PAC-9 — Coverage/evidence artifacts with PAC/AC/provenance
-
-- AC: AC-020, AC-021, AC-022, AC-023
-- Files: `coverage-matrix.json`, `coverage-matrix.md`, `evidence-ledger.md`, `verification-report.md`
-- Evidence: PAC-1 through PAC-10, AC-001 through AC-024, responsible task IDs, commands, changed-file provenance, hook sync evidence, and docs/skills no-impact rationale are recorded.
-- Actual: PASS.
-
-## PAC-10 — Hook/docs sync evidence or not-required rationale
-
-- AC: AC-019, AC-024
-- Hook evidence: T03 changed hooks and PM synced active plugin cache copies.
-- Docs/skills evidence: README/docs/skills update not required because T04 is evidence-only and T03 hook behavior change is covered by hook sync evidence.
-- Actual: PASS.
-
-## Hook Sync Evidence
-
-- `hooks/mst-stop-hook.sh` was updated first in T03.
-- `.claude/hooks/mst-stop-hook.sh` project copy matches source: `cmp=0`.
-- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
-- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.6/.claude/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
-- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
-- `/Users/brandev/.claude/plugins/cache/gran-maestro/mst/0.59.8/.claude/hooks/mst-stop-hook.sh` matches source: `cmp=0`.
-
-## Docs/Skills Impact
-
-README/docs/skills update is not required. T04 is evidence-only and did not change user-facing docs or skill contracts. T03 hook behavior change is covered by hook source/project/cache sync evidence above.
-
-## Mandatory Command Output Summaries
-
-### DOD-014 Targeted Regression
+### DOD-015 Targeted Regression
 
 ```text
-PASS test_partial_write_state_inconsistency
-PASS test_valid_snapshot_projection_matches_replay
-PASS test_ledger_head_mismatch_blocks_continuation
-PASS test_replay_mismatch_is_non_success
-PASS test_auto_continuation_state_inconsistency_blocker
-PASS test_recursive_transition_guard_downgrades_write
-PASS test_fingerprint_circuit_breaker_scopes_repeated_failures
+PASS test_hook_enforcement_continues_without_user_wait
+PASS test_hook_user_wait_requires_structured_critical_blocker
+PASS test_state_recover_mismatch_fails_closed_without_new_session
+PASS test_child_dispatch_inherits_parent_session_and_auto_policy
+PASS test_dispatch_register_heartbeat_preserve_auto_continuation_policy
+PASS test_dispatch_context_mismatch_fails_closed
+PASS test_core_rehydration_precedes_prompt_summary
+PASS test_no_claude_code_core_source_modification
+PASS test_recoverable_issue_records_continuation_not_user_wait
+PASS test_external_enforcement_records_same_session_ledger_evidence
 ```
 
-### DOD-013 State Contract Validator
+### DOD-011 Through DOD-014 Regression Summary
 
 ```text
-PASS test_snapshot_required_fields_fail_closed
-PASS test_snapshot_path_contract_fail_closed
-PASS test_history_event_contract_fail_closed
-PASS test_recover_bundle_contract_fail_closed
-PASS test_dispatch_envelope_contract_fail_closed
-PASS test_failure_shape
+DOD-011: 6 tests passed
+DOD-012: 7 tests passed
+DOD-013: 6 tests passed
+DOD-014: 7 tests passed
 ```
 
-### DOD-012 Auto Continuation
+### Project Gates
 
 ```text
-PASS test_auto_continuation_policy_persists_through_recover_bundle
-PASS test_recoverable_issue_records_continue_transition_and_next_action_execution_evidence
-PASS test_user_wait_guard_redirects_without_critical_evidence
-PASS test_blocker_evidence_is_structured_before_user_wait_is_allowed
-PASS test_security_boundary_records_confirmation_required_and_does_not_start_original_action
-PASS test_action_classification_precedes_blocker_declaration_from_prose
-PASS test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
+npm test: PASS
+npx tsc --noEmit: PASS
+git diff --check: PASS
 ```
 
-### DOD-011 Rehydration
+## Not Marked PASS
 
-```text
-PASS test_ac001_resume_checkpoint_uses_existing_snapshot_and_ledger_head
-PASS test_ac002_skill_switch_child_dispatch_keeps_parent_session_and_root_without_new_session
-PASS test_ac003_compaction_rehydration_write_ignores_conflicting_prompt_summary
-PASS test_ac004_stop_hook_continuation_uses_active_workflow_next_action_and_ledger_head_evidence
-PASS test_ac005_stale_mismatch_and_prompt_summary_only_inputs_are_non_success_no_mutation
-PASS test_ac006_legacy_identity_inputs_are_never_success_or_fallback_sources
-```
-
-### npm test
-
-```text
-gran-maestro smoke test runner executes deterministically
-tests 1
-pass 1
-fail 0
-```
-
-### TypeScript, Diff, JSON, Grep, Hook Sync
-
-```text
-npm exec -- tsc --noEmit: PASS, no diagnostics.
-git diff --check: PASS, no whitespace errors.
-python3 -m json.tool coverage-matrix.json: PASS.
-PAC grep checks for coverage-matrix.md and evidence-ledger.md: PASS.
-verification-report.md grep check: PASS.
-hook source/project/cache cmp checks: PASS, cmp=0 for all required paths.
-git status --short: only the four allowed evidence artifact files changed.
-```
+None. All final DOD-015 DOD/PAC/AC/project gates are command-backed or directly proven by final integration evidence.

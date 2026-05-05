@@ -1488,6 +1488,8 @@ except OSError:
 if not re.fullmatch(r"[0-9a-f]{64}", history_head or ""):
     history_head = "0" * 64
 
+hook_boundary = str(payload.get("hook_event_name") or "Stop").strip() or "Stop"
+
 def normalize_action(action):
     explicit = action.get("normalized_action") if isinstance(action, dict) else None
     if isinstance(explicit, str) and explicit.strip():
@@ -1736,11 +1738,21 @@ elif "critical blocker" in str(payload.get("last_assistant_message") or "").lowe
 event = {
     "event_type": event_type,
     "type": event_type,
+    "hook_boundary": hook_boundary,
+    "external_control_surface": "hook",
+    "new_session_fallback": False,
     "next_action": next_action or None,
     "next_action_execution": {"status": "queued", "next_action": next_action} if next_action else None,
     "action_classification": action_classification if next_action else None,
     **extra,
 }
+if event_type.startswith("continue."):
+    event.setdefault(
+        "attempted_recovery",
+        ["queued same-session continuation instead of terminal user wait"],
+    )
+elif isinstance(event.get("critical_blocker"), dict):
+    event.setdefault("user_wait_transition", event_type)
 reset_circuit = event.pop("circuit_breaker_reset", None)
 append(event)
 
@@ -1749,6 +1761,9 @@ if isinstance(reset_circuit, dict):
         {
             "event_type": "continue.circuit_reset",
             "type": "continue.circuit_reset",
+            "hook_boundary": hook_boundary,
+            "external_control_surface": "hook",
+            "new_session_fallback": False,
             "next_action": next_action or None,
             "circuit_breaker": reset_circuit,
         }
@@ -1759,6 +1774,9 @@ if event_type.startswith("continue.") and next_action and not is_dangerous_scope
         {
             "event_type": "action.started",
             "type": "action.started",
+            "hook_boundary": hook_boundary,
+            "external_control_surface": "hook",
+            "new_session_fallback": False,
             "next_action": next_action,
             "action": next_action,
             "action_classification": action_classification,

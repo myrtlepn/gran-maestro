@@ -765,12 +765,17 @@ def _recover_non_success(
 
 
 def _emit_recover_non_success(payload: dict) -> int:
+    payload.setdefault(
+        "external_control_surface",
+        "recover" if len(sys.argv) > 1 and sys.argv[1] == "recover" else "state",
+    )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     print(f"{payload.get('code')}: {payload.get('message')}", file=sys.stderr)
     return 1
 
 
 def _emit_validation_payload(payload: dict) -> int:
+    payload.setdefault("external_control_surface", "state")
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     print(f"{payload.get('code')}: {payload.get('message') or payload.get('reason')}", file=sys.stderr)
     return 1
@@ -1011,28 +1016,121 @@ def _recovery_fingerprint(agi_id: str, session_id: str) -> str:
     return "recover:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
 
-def _append_recover_history_event(base_dir: Path, session_id: str, agi_id: str, recovery_fingerprint: str) -> None:
+def _history_head_for_session(base_dir: Path, session_id: str) -> str:
+    from scripts.mst_cmds import session as session_mod
+
+    try:
+        head = session_mod.session_history_head_path(base_dir, session_id).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return head if re.fullmatch(r"[0-9a-f]{64}", head) else ""
+
+
+def _snapshot_continuation_evidence(snapshot: Optional[dict]) -> tuple[dict, dict]:
+    if not isinstance(snapshot, dict):
+        return {}, {}
+    continuation = copy.deepcopy(snapshot.get("continuation")) if isinstance(snapshot.get("continuation"), dict) else {}
+    next_action = copy.deepcopy(snapshot.get("next_action")) if isinstance(snapshot.get("next_action"), dict) else {}
+    if not next_action and isinstance(continuation.get("next_action"), dict):
+        next_action = copy.deepcopy(continuation["next_action"])
+    if next_action and "next_action" not in continuation:
+        continuation["next_action"] = copy.deepcopy(next_action)
+    return continuation, next_action
+
+
+def _append_state_history_event(
+    base_dir: Path,
+    session_id: str,
+    *,
+    snapshot: dict,
+    command: str,
+) -> None:
+    from scripts.mst_cmds import session as session_mod
+
+    parsed = session_mod.validate_mst_session_id(session_id)
+    history_head = _history_head_for_session(base_dir, session_id)
+    continuation, next_action = _snapshot_continuation_evidence(snapshot)
+    idempotency_material = f"{session_id}:state.evidence:{command}:{os.getpid()}:{history_head}"
+    idempotency_key = f"{session_id}:state.evidence:{hashlib.sha256(idempotency_material.encode('utf-8')).hexdigest()[:24]}"
+    event = {
+        "schema_version": 1,
+        "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "event_type": "state.evidence",
+        "type": "state.evidence",
+        "artifact_id": parsed.mst_session_id,
+        "resource_id": parsed.root_mst_id,
+        "external_control_surface": "state",
+        "command": command,
+        "history_head": history_head or None,
+        "new_session_fallback": False,
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+        "pid": os.getpid(),
+        "ppid": _resolve_owner_ppid(),
+        "idempotency_key": idempotency_key,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+    if continuation:
+        event["continuation"] = continuation
+        if isinstance(continuation.get("critical_blocker"), dict):
+            event["critical_blocker"] = continuation["critical_blocker"]
+        if isinstance(continuation.get("circuit_breaker"), dict):
+            event["circuit_breaker"] = continuation["circuit_breaker"]
+    if next_action:
+        event["next_action"] = next_action
+        event["next_action_execution"] = {"status": "observed", "next_action": next_action}
+    session_mod.write_session_history_event(base_dir, session_id, event)
+
+
+def _append_recover_history_event(
+    base_dir: Path,
+    session_id: str,
+    agi_id: str,
+    recovery_fingerprint: str,
+    *,
+    previous_history_head: str = "",
+    snapshot: Optional[dict] = None,
+) -> None:
     from scripts.mst_cmds import session as session_mod
 
     parsed = session_mod.validate_mst_session_id(session_id)
     idempotency_key = f"{session_id}:skill.recover:{recovery_fingerprint}"
+    continuation, next_action = _snapshot_continuation_evidence(snapshot)
+    event = {
+        "schema_version": 1,
+        "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "event_type": "skill.recover",
+        "skill": "mst:recover",
+        "resource_id": agi_id,
+        "artifact_id": agi_id,
+        "status": "rehydrated",
+        "recovery_fingerprint": recovery_fingerprint,
+        "external_control_surface": "context",
+        "history_head": previous_history_head or _history_head_for_session(base_dir, session_id) or None,
+        "attempted_recovery": ["validated history ledger and rebuilt core rehydration envelope"],
+        "new_session_fallback": False,
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+        "idempotency_key": idempotency_key,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+    if continuation:
+        event["continuation"] = continuation
+        if isinstance(continuation.get("critical_blocker"), dict):
+            event["critical_blocker"] = continuation["critical_blocker"]
+        if isinstance(continuation.get("circuit_breaker"), dict):
+            event["circuit_breaker"] = continuation["circuit_breaker"]
+    if next_action:
+        event["next_action"] = next_action
+        event["next_action_execution"] = {"status": "handoff_prepared", "next_action": next_action}
     session_mod.write_session_history_event(
         base_dir,
         session_id,
-        {
-            "schema_version": 1,
-            "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
-            "mst_session_id": parsed.mst_session_id,
-            "root_mst_id": parsed.root_mst_id,
-            "event_type": "skill.recover",
-            "skill": "mst:recover",
-            "resource_id": agi_id,
-            "artifact_id": agi_id,
-            "status": "rehydrated",
-            "recovery_fingerprint": recovery_fingerprint,
-            "idempotency_key": idempotency_key,
-            "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        },
+        event,
     )
 
 
@@ -1051,6 +1149,28 @@ def _update_snapshot_history_head(state_base_dir: Path, session_id: str, snapsho
         updated = dict(snapshot)
         updated["history"] = history
         _atomic_json_write(_snapshot_path_for_session(state_base_dir, session_id), updated)
+
+
+def _latest_dispatch_context_for_session(session_id: str) -> dict:
+    run_directory = _common.run_dir_no_create()
+    if not run_directory.is_dir():
+        return {}
+    candidates: list[tuple[str, dict]] = []
+    for path in sorted(run_directory.glob("*.json")):
+        payload = _common.load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("mst_session_id") != session_id:
+            continue
+        task_id = str(payload.get("child_artifact_id") or payload.get("task_id") or path.stem).strip()
+        if not task_id:
+            continue
+        timestamp = str(payload.get("last_heartbeat") or payload.get("started_at") or "")
+        candidates.append((timestamp, {"child_artifact_id": task_id, "external_control_surface": "dispatch"}))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0])
+    return candidates[-1][1]
 
 
 def _recover_rehydration_bundle(
@@ -1078,12 +1198,20 @@ def _recover_rehydration_bundle(
     if isinstance(snapshot, dict) and snapshot.get("auto") is True:
         continuation.setdefault("mode", "continue_unless_critical")
         continuation.setdefault("critical_blocker", None)
+    handoff_next_action = copy.deepcopy(continuation.get("next_action")) if isinstance(continuation.get("next_action"), dict) else {}
+    if not handoff_next_action and isinstance(next_skill.get("metadata"), dict):
+        handoff_next_action = copy.deepcopy(next_skill["metadata"])
     context = {
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
+        "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
         "recovery_fingerprint": recovery_fingerprint,
     }
-    return {
+    context_delivery_order = ["core_rehydration", "execution_handoff", "prompt_summary"]
+    env = {"MST_SESSION_ID": session_id}
+    if isinstance(snapshot, dict) and snapshot.get("auto") is True:
+        env["MST_AUTO_CONTINUE"] = "true"
+    envelope = {
         "schema_version": 1,
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
@@ -1105,14 +1233,25 @@ def _recover_rehydration_bundle(
             "path": str(history_result.history_file),
         },
         "next_execution": {
-            "env": {"MST_SESSION_ID": session_id},
+            "env": env,
             "context": context,
         },
+        "execution_handoff": {
+            "mst_session_id": session_id,
+            "root_mst_id": root_mst_id,
+            "next_action": handoff_next_action,
+            "source": "core_rehydration",
+        },
+        "context_delivery_order": context_delivery_order,
         "source_precedence": ["validated_history_ledger", "validated_state_snapshot", "prompt_summary_diagnostic_only"],
         "prompt_summary_used_as_source": False,
         "recovery_fingerprint": recovery_fingerprint,
         "created_new_session": False,
     }
+    dispatch_context = _latest_dispatch_context_for_session(session_id)
+    if dispatch_context:
+        envelope.update(dispatch_context)
+    return envelope
 
 
 def _structured_legacy_alias_conflict(session_id: str) -> Optional[dict]:
@@ -1220,6 +1359,63 @@ def _recover_context_contract_failure(
             mst_session_id=session_id,
             root_mst_id=root_mst_id,
         )
+    next_execution = core.get("next_execution")
+    if isinstance(next_execution, dict):
+        env = next_execution.get("env")
+        if isinstance(env, dict):
+            env_session_id = env.get("MST_SESSION_ID")
+            if isinstance(env_session_id, str) and env_session_id.strip() and env_session_id.strip() != session_id:
+                return _common.validation_failure_payload(
+                    target="recover_bundle",
+                    field="core_rehydration.next_execution.env.MST_SESSION_ID",
+                    reason="next_execution env MST_SESSION_ID must match canonical session",
+                    mst_session_id=session_id,
+                    root_mst_id=root_mst_id,
+                )
+        handoff_context = next_execution.get("context")
+        if isinstance(handoff_context, dict):
+            context_session_id = handoff_context.get("mst_session_id")
+            if (
+                isinstance(context_session_id, str)
+                and context_session_id.strip()
+                and context_session_id.strip() != session_id
+            ):
+                return _common.validation_failure_payload(
+                    target="recover_bundle",
+                    field="core_rehydration.next_execution.context.mst_session_id",
+                    reason="next_execution context mst_session_id must match canonical session",
+                    mst_session_id=session_id,
+                    root_mst_id=root_mst_id,
+                )
+            context_root = handoff_context.get("root_mst_id")
+            if isinstance(context_root, str) and context_root.strip() and context_root.strip() != root_mst_id:
+                return _common.validation_failure_payload(
+                    target="recover_bundle",
+                    field="core_rehydration.next_execution.context.root_mst_id",
+                    reason="next_execution context root_mst_id must match session root",
+                    mst_session_id=session_id,
+                    root_mst_id=root_mst_id,
+                )
+    execution_handoff = core.get("execution_handoff")
+    if isinstance(execution_handoff, dict):
+        handoff_session_id = execution_handoff.get("mst_session_id")
+        if isinstance(handoff_session_id, str) and handoff_session_id.strip() and handoff_session_id.strip() != session_id:
+            return _common.validation_failure_payload(
+                target="recover_bundle",
+                field="core_rehydration.execution_handoff.mst_session_id",
+                reason="execution_handoff mst_session_id must match canonical session",
+                mst_session_id=session_id,
+                root_mst_id=root_mst_id,
+            )
+        handoff_root = execution_handoff.get("root_mst_id")
+        if isinstance(handoff_root, str) and handoff_root.strip() and handoff_root.strip() != root_mst_id:
+            return _common.validation_failure_payload(
+                target="recover_bundle",
+                field="core_rehydration.execution_handoff.root_mst_id",
+                reason="execution_handoff root_mst_id must match session root",
+                mst_session_id=session_id,
+                root_mst_id=root_mst_id,
+            )
 
     history = core.get("history")
     if not isinstance(history, dict):
@@ -2088,6 +2284,15 @@ def cmd_state_get(args):
             field="mst_session_id" if "mst_session_id" in validation_error else "state_snapshot",
             reason=f"snapshot {validation_error}",
         )
+    try:
+        _append_state_history_event(
+            _common.BASE_DIR,
+            session_id,
+            snapshot=data,
+            command="state get",
+        )
+    except Exception as exc:
+        print(f"[state] warning: failed to append state evidence ({exc})", file=sys.stderr)
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 
@@ -2230,7 +2435,14 @@ def cmd_state_recover(args):
     previous_history_head = history_result.tail_hash
     recovery_fingerprint = _recovery_fingerprint(agi_id, session_id)
     try:
-        _append_recover_history_event(_common.BASE_DIR, session_id, agi_id, recovery_fingerprint)
+        _append_recover_history_event(
+            _common.BASE_DIR,
+            session_id,
+            agi_id,
+            recovery_fingerprint,
+            previous_history_head=previous_history_head,
+            snapshot=existing,
+        )
         updated_history, history_error = _load_recover_history(_common.BASE_DIR, session_id)
     except Exception as exc:
         return _emit_recover_non_success(
@@ -2255,7 +2467,17 @@ def cmd_state_recover(args):
         previous_history_head=previous_history_head,
         recovery_fingerprint=recovery_fingerprint,
     )
-    print(json.dumps({"status": "ok", "core_rehydration": envelope}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "core_rehydration": envelope,
+                "context_delivery_order": envelope.get("context_delivery_order"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

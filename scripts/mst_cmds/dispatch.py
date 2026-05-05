@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -164,6 +166,138 @@ def _continuation_policy_from_context(raw_context: str) -> dict:
     if isinstance(continuation, dict):
         policy["continuation"] = continuation
     return policy
+
+
+def _dispatch_context_envelope(
+    *,
+    session_id: str,
+    task_id: str,
+    raw_context: str,
+    command: str | None = None,
+) -> dict:
+    canonical_fields = _canonical_dispatch_fields(session_id)
+    policy = _continuation_policy_from_context(raw_context)
+    next_execution_context = {
+        "mst_session_id": canonical_fields["mst_session_id"],
+        "root_mst_id": canonical_fields["root_mst_id"],
+    }
+    if policy.get("auto") is True:
+        next_execution_context["auto"] = True
+    envelope = {
+        **canonical_fields,
+        **policy,
+        "child_artifact_id": task_id,
+        "task_id": task_id,
+        "external_control_surface": "dispatch",
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+        "next_execution": {
+            "env": {
+                "MST_SESSION_ID": canonical_fields["mst_session_id"],
+                "MST_CONTEXT_JSON": raw_context,
+            },
+            "context": next_execution_context,
+        },
+    }
+    if command is not None:
+        envelope["command"] = command
+    return envelope
+
+
+def _emit_dispatch_validation_failure(exc: _common.ContractValidationError) -> int:
+    return _common.emit_validation_failure(
+        target=exc.target,
+        field=exc.field,
+        reason=exc.reason,
+        code=exc.code,
+        external_control_surface="dispatch",
+        prompt_summary_used_as_source=False,
+    )
+
+
+def _emit_dispatch_payload_mismatch(payload_error: str) -> int:
+    field = "mst_session_id"
+    if "root_mst_id" in payload_error:
+        field = "root_mst_id"
+    elif "schema_version" in payload_error:
+        field = "schema_version"
+    return _common.emit_validation_failure(
+        target="dispatch_envelope",
+        field=field,
+        reason=payload_error,
+        external_control_surface="dispatch",
+        prompt_summary_used_as_source=False,
+    )
+
+
+def _emit_dispatch_value_error(exc: ValueError) -> int | None:
+    message = str(exc)
+    if "mismatch" not in message:
+        return None
+    field = "mst_session_id"
+    if "root_mst_id" in message or "root" in message:
+        field = "root_mst_id"
+    elif "schema_version" in message:
+        field = "schema_version"
+    return _common.emit_validation_failure(
+        target="dispatch_envelope",
+        field=field,
+        reason=message,
+        external_control_surface="dispatch",
+        prompt_summary_used_as_source=False,
+    )
+
+
+def _history_head_for_session(session_id: str) -> str:
+    try:
+        head = session_mod.session_history_head_path(_common.BASE_DIR, session_id).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return head if re.fullmatch(r"[0-9a-f]{64}", head) else ""
+
+
+def _append_dispatch_history_event(session_id: str, payload: dict, event_type: str) -> None:
+    session_path = session_mod.session_metadata_path(_common.BASE_DIR, session_id)
+    if not session_path.is_file():
+        return
+    task_id = str(payload.get("task_id") or payload.get("child_artifact_id") or "").strip()
+    if not task_id:
+        return
+    canonical_fields = _canonical_dispatch_fields(session_id)
+    idempotency_key = f"{session_id}:{event_type}:{task_id}:{payload.get('phase', '')}:{payload.get('last_heartbeat', '')}"
+    event = {
+        **canonical_fields,
+        "event_type": event_type,
+        "type": event_type,
+        "skill": str(payload.get("skill") or "mst:dispatch"),
+        "artifact_id": task_id,
+        "resource_id": task_id,
+        "child_artifact_id": task_id,
+        "external_control_surface": "dispatch",
+        "history_head": _history_head_for_session(session_id) or None,
+        "new_session_fallback": False,
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
+        "provider": payload.get("provider"),
+        "provider_task_id": payload.get("provider_task_id") or os.environ.get("MST_PROVIDER_TASK_ID"),
+        "pid": payload.get("pid"),
+        "ppid": os.getppid(),
+        "started_by_pid": payload.get("started_by_pid"),
+        "phase": payload.get("phase"),
+        "status": payload.get("phase") or "running",
+        "idempotency_key": idempotency_key,
+        "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
+        "created_at": _now_iso(),
+    }
+    if isinstance(payload.get("continuation"), dict):
+        event["continuation"] = payload["continuation"]
+        next_action = payload["continuation"].get("next_action")
+        if isinstance(next_action, dict):
+            event["next_action"] = next_action
+    try:
+        session_mod.write_session_history_event(_common.BASE_DIR, session_id, event)
+    except Exception as exc:
+        print(f"[dispatch] warning: failed to append dispatch history event ({exc})", file=sys.stderr)
 
 
 def _coerce_positive_int(value, fallback: int) -> int:
@@ -357,6 +491,30 @@ def cmd_dispatch_build(args):
         f"{heartbeat_cmd}; "
         "exit $EC"
     )
+    if os.environ.get("MST_SESSION_ID", "").strip() and os.environ.get("MST_CONTEXT_JSON", "").strip():
+        try:
+            child_env = session_mod.child_env_with_required_session_context()
+        except ValueError as exc:
+            if isinstance(exc, _common.ContractValidationError):
+                return _emit_dispatch_validation_failure(exc)
+            validation_result = _emit_dispatch_value_error(exc)
+            if validation_result is not None:
+                return validation_result
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        print(
+            json.dumps(
+                _dispatch_context_envelope(
+                    session_id=child_env["MST_SESSION_ID"],
+                    task_id=task_id,
+                    raw_context=child_env["MST_CONTEXT_JSON"],
+                    command=command,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     print(command)
     return 0
 
@@ -395,12 +553,10 @@ def cmd_dispatch_register(args):
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
         if isinstance(exc, _common.ContractValidationError):
-            return _common.emit_validation_failure(
-                target=exc.target,
-                field=exc.field,
-                reason=exc.reason,
-                code=exc.code,
-            )
+            return _emit_dispatch_validation_failure(exc)
+        validation_result = _emit_dispatch_value_error(exc)
+        if validation_result is not None:
+            return validation_result
         if _common.is_missing_canonical_session_error(exc):
             return _common.emit_session_identity_non_success("dispatch register")
         print(f"Error: {exc}", file=sys.stderr)
@@ -416,13 +572,16 @@ def cmd_dispatch_register(args):
     if isinstance(existing_payload, dict):
         payload_error = _dispatch_payload_error(existing_payload, session_id)
         if payload_error is not None:
-            print(f"Error: {payload_error}", file=sys.stderr)
-            return 1
+            return _emit_dispatch_payload_mismatch(payload_error)
     canonical_fields = _canonical_dispatch_fields(session_id)
     payload = {
         **canonical_fields,
         **_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")),
         "task_id": task_id,
+        "child_artifact_id": task_id,
+        "external_control_surface": "dispatch",
+        "created_new_session": False,
+        "prompt_summary_used_as_source": False,
         "pid": marker_pid,
         "started_at": now,
         "phase": "running",
@@ -432,6 +591,11 @@ def cmd_dispatch_register(args):
         "worktree_dir": str(args.worktree_dir),
         "last_heartbeat": now,
     }
+    payload["next_execution"] = _dispatch_context_envelope(
+        session_id=session_id,
+        task_id=task_id,
+        raw_context=child_env.get("MST_CONTEXT_JSON", ""),
+    )["next_execution"]
     if getattr(args, "started_by_pid", None) is not None:
         try:
             payload["started_by_pid"] = int(args.started_by_pid)
@@ -459,6 +623,7 @@ def cmd_dispatch_register(args):
     except Exception as exc:
         print(f"[dispatch] warning: failed to write active-flow marker ({exc})", file=sys.stderr)
     save_json(state_path, payload)
+    _append_dispatch_history_event(session_id, payload, "dispatch.register")
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 
@@ -468,12 +633,10 @@ def cmd_dispatch_heartbeat(args):
         child_env = session_mod.child_env_with_required_session_context()
     except ValueError as exc:
         if isinstance(exc, _common.ContractValidationError):
-            return _common.emit_validation_failure(
-                target=exc.target,
-                field=exc.field,
-                reason=exc.reason,
-                code=exc.code,
-            )
+            return _emit_dispatch_validation_failure(exc)
+        validation_result = _emit_dispatch_value_error(exc)
+        if validation_result is not None:
+            return validation_result
         if _common.is_missing_canonical_session_error(exc):
             return _common.emit_session_identity_non_success("dispatch heartbeat")
         print(f"Error: {exc}", file=sys.stderr)
@@ -489,12 +652,20 @@ def cmd_dispatch_heartbeat(args):
         payload = {"task_id": task_id}
     payload_error = _dispatch_payload_error(payload, session_id)
     if payload_error is not None:
-        print(f"Error: {payload_error}", file=sys.stderr)
-        return 1
+        return _emit_dispatch_payload_mismatch(payload_error)
 
     payload.update(_canonical_dispatch_fields(session_id))
     payload.update(_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")))
     payload["task_id"] = task_id
+    payload["child_artifact_id"] = task_id
+    payload["external_control_surface"] = "dispatch"
+    payload["created_new_session"] = False
+    payload["prompt_summary_used_as_source"] = False
+    payload["next_execution"] = _dispatch_context_envelope(
+        session_id=session_id,
+        task_id=task_id,
+        raw_context=child_env.get("MST_CONTEXT_JSON", ""),
+    )["next_execution"]
     payload["last_heartbeat"] = now
     if args.phase:
         payload["phase"] = str(args.phase).strip()
@@ -511,6 +682,7 @@ def cmd_dispatch_heartbeat(args):
         print(f"[dispatch] warning: failed to write heartbeat state ({exc})", file=sys.stderr)
         return 0
 
+    _append_dispatch_history_event(session_id, payload, "dispatch.heartbeat")
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 
