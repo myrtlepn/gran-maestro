@@ -21,6 +21,8 @@ CANONICAL_SID = "MST-AGI-030-20260506T010203456Z-dod008"
 OWNER_PID = 987654321
 LEGACY_SESSION_ID = "legacy-runtime-session-dod008"
 OWNER_SESSION_ID = "legacy-owner-session-dod008"
+HOOK_SESSION_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+TRANSCRIPT_UUID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 ZERO_HASH = "0" * 64
 STALE_SECONDS = 3600
 
@@ -65,9 +67,58 @@ def _snapshot(*roots: Path) -> dict[str, str]:
     return result
 
 
+def _diagnostic_only_values() -> tuple[str, ...]:
+    return (
+        str(OWNER_PID),
+        LEGACY_SESSION_ID,
+        OWNER_SESSION_ID,
+        HOOK_SESSION_UUID,
+        TRANSCRIPT_UUID,
+    )
+
+
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _write_closed_minimum_artifacts(gm_dir: Path) -> None:
+    _write_text(gm_dir / "recovery" / "latest" / f"{CANONICAL_SID}.json", json.dumps({"mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "handoff" / "latest" / f"{CANONICAL_SID}.json", json.dumps({"canonical_mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "current-work" / "latest" / f"{CANONICAL_SID}.json", json.dumps({"mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "active-flow" / f"{CANONICAL_SID}.json", json.dumps({"mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "run" / f"run-{CANONICAL_SID}.json", json.dumps({"canonical_mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "sessions" / "index.json", json.dumps({"mst_session_id": CANONICAL_SID}) + "\n")
+    _write_text(gm_dir / "locks" / f"{CANONICAL_SID}.json", json.dumps({"owner": {"mst_session_id": CANONICAL_SID}}) + "\n")
+
+
+def _assert_no_diagnostic_identity_artifact_partition(gm_dir: Path) -> None:
+    diagnostic_values = _diagnostic_only_values()
+    violations: list[str] = []
+    for path in sorted(gm_dir.rglob("*")):
+        relative = path.relative_to(gm_dir).as_posix()
+        for value in diagnostic_values:
+            if value in relative:
+                violations.append(f"path uses diagnostic-only identity: {relative}")
+        if not path.is_file() or path.suffix != ".json":
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        stack = [("$", payload)]
+        while stack:
+            prefix, value = stack.pop()
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    child_prefix = f"{prefix}.{key}"
+                    if key in {"mst_session_id", "canonical_mst_session_id"} and child in diagnostic_values:
+                        violations.append(f"{path.relative_to(gm_dir)}:{child_prefix} uses diagnostic-only identity")
+                    stack.append((child_prefix, child))
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    stack.append((f"{prefix}[{index}]", child))
+    assert not violations, "\n".join(violations)
 
 
 def _write_history_scope(workspace: Path, *, owner: dict[str, Any]) -> tuple[Path, Path, Path, dict[str, Path]]:
@@ -149,6 +200,36 @@ def test_stale_history_owner_pid_metadata_does_not_create_legacy_identity_artifa
         assert not (policy_heads / f"{OWNER_PID}.head").exists()
         assert not (policy_heads / f"{LEGACY_SESSION_ID}.head").exists()
         assert not (policy_heads / f"{OWNER_SESSION_ID}.head").exists()
+
+
+def test_diagnostic_only_ids_do_not_mutate_closed_minimum_artifact_partitions() -> None:
+    with _workspace() as raw:
+        workspace = Path(raw)
+        project_root, home, lock_path, _paths = _write_history_scope(
+            workspace,
+            owner={
+                "owner_pid": OWNER_PID,
+                "owner_started_at": time.time() - STALE_SECONDS - 30,
+                "session_id": LEGACY_SESSION_ID,
+                "owner_session_id": OWNER_SESSION_ID,
+                "hook_session_id": HOOK_SESSION_UUID,
+                "transcript_path": f"/tmp/{TRANSCRIPT_UUID}.jsonl",
+            },
+        )
+        gm_dir = project_root / ".gran-maestro"
+        _write_closed_minimum_artifacts(gm_dir)
+        before = _snapshot(project_root, home)
+
+        payload = _diagnose(project_root, home, lock_path)
+
+        assert payload.get("category") in {
+            "history-lock-stale-candidate",
+            "owner-live",
+            "diagnosis-inconclusive",
+            "owner-unknown",
+        }, payload
+        assert _snapshot(project_root, home) == before
+        _assert_no_diagnostic_identity_artifact_partition(gm_dir)
 
 
 def test_stale_candidate_keeps_owner_pid_diagnostic_only_and_preserves_heads_and_owner_file() -> None:

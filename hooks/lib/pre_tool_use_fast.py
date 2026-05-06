@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 ZERO_HASH = "0" * 64
+CANONICAL_MST_SESSION_ID_RE = re.compile(
+    r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$"
+)
 LLM_MST_CLI_RULE_ID = "MST-LLM-MST-CLI-BLOCK"
 ANSI_C_QUOTING_SENTINEL = "__ANSI_C_QUOTING_DETECTED__"
 PROCESS_SUBSTITUTION_SENTINEL = "__PROCESS_SUBSTITUTION_DETECTED__"
@@ -842,6 +845,15 @@ def sanitize_session_id(value: str) -> Optional[str]:
     if re.search(r"[^A-Za-z0-9._-]", value):
         return None
     return value
+
+
+def canonical_mst_session_id_from_payload(payload: dict) -> str:
+    for value in (os.environ.get("MST_SESSION_ID"), payload.get("mst_session_id")):
+        if isinstance(value, str):
+            candidate = value.strip()
+            if CANONICAL_MST_SESSION_ID_RE.fullmatch(candidate):
+                return candidate
+    return ""
 
 
 def normalize_path(raw_path: str, project_root: Path, home: Path) -> str:
@@ -2434,10 +2446,10 @@ def evaluate_policy(project_root: Path, home: Path, payload: dict) -> Tuple[int,
         )
 
     def history_exists(type_filter) -> bool:
-        return any(match_object(row, type_filter) for row in load_history_events(project_root, str(payload.get("session_id") or ""), history_cache))
+        return any(match_object(row, type_filter) for row in load_history_events(project_root, canonical_mst_session_id_from_payload(payload), history_cache))
 
     def history_not_exists_after(anchor, target) -> bool:
-        rows = load_history_events(project_root, str(payload.get("session_id") or ""), history_cache)
+        rows = load_history_events(project_root, canonical_mst_session_id_from_payload(payload), history_cache)
         anchor_index = -1
         for index, row in enumerate(rows):
             if match_object(row, anchor):
@@ -2533,7 +2545,7 @@ def hardcoded_core_check(project_root: Path, home: Path, payload: dict) -> int:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         tool_input = {}
-    session_id = str(payload.get("session_id") or "").strip()
+    session_id = canonical_mst_session_id_from_payload(payload)
     clean_sid = sanitize_session_id(session_id) if session_id else None
     raw_file_path = str(tool_input.get("file_path") or tool_input.get("path") or "")
     command = str(tool_input.get("command") or "")
@@ -2649,7 +2661,7 @@ def main() -> int:
     if not isinstance(payload, dict):
         payload = {}
 
-    session_id = str(payload.get("session_id") or "").strip()
+    session_id = canonical_mst_session_id_from_payload(payload)
     clean_sid = ""
     lock_dir: Optional[Path] = None
     if session_id:

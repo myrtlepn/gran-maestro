@@ -254,16 +254,36 @@ def legacy_session_diagnostics() -> dict:
     return diagnostics
 
 
-def session_identity_non_success_payload(subject: str, message: str | None = None) -> dict:
+def session_identity_non_success_code(error: object | None = None, diagnostics: dict | None = None) -> str | None:
+    text = str(error or "")
+    if "MST_SESSION_ID and structured mst_session_id mismatch" in text:
+        return "mst_session_id_mismatch"
+    if "invalid structured mst_session_id" in text:
+        return "invalid_canonical_mst_session_id"
+    if "missing MST_SESSION_ID" in text or "missing canonical MST_SESSION_ID" in text:
+        return "legacy_identity_not_canonical_source" if diagnostics else "missing_canonical_mst_session_id"
+    if error is None:
+        return "legacy_identity_not_canonical_source" if diagnostics else "missing_canonical_mst_session_id"
+    return None
+
+
+def session_identity_non_success_payload(
+    subject: str,
+    message: str | None = None,
+    *,
+    code: str | None = None,
+    error: object | None = None,
+) -> dict:
     diagnostics = legacy_session_diagnostics()
-    code = "legacy_identity_not_canonical_source" if diagnostics else "missing_canonical_mst_session_id"
+    resolved_code = code or session_identity_non_success_code(error, diagnostics) or "missing_canonical_mst_session_id"
     return {
         "status": "error",
-        "code": code,
-        "message": message or f"{subject} requires canonical MST_SESSION_ID or structured mst_session_id",
+        "code": resolved_code,
+        "message": message or str(error or "") or f"{subject} requires canonical MST_SESSION_ID or structured mst_session_id",
         "created_new_session": False,
         "canonical_mst_session_id": None,
         "legacy_diagnostics": diagnostics,
+        "mutation_performed": False,
     }
 
 
@@ -363,11 +383,20 @@ def raise_validation_failure(
     raise ContractValidationError(target=target, field=field, reason=reason, code=code)
 
 
-def emit_session_identity_non_success(subject: str, message: str | None = None) -> int:
-    payload = session_identity_non_success_payload(subject, message)
+def emit_session_identity_non_success(
+    subject: str,
+    message: str | None = None,
+    *,
+    code: str | None = None,
+    error: object | None = None,
+) -> int:
+    payload = session_identity_non_success_payload(subject, message, code=code, error=error)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    print(f"{payload['code']}: {payload['message']}", file=sys.stderr)
     return 1
+
+
+def is_session_identity_non_success_error(error: object) -> bool:
+    return session_identity_non_success_code(error, legacy_session_diagnostics()) is not None
 
 
 def is_missing_canonical_session_error(error: object) -> bool:
