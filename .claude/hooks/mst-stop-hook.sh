@@ -226,15 +226,66 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
-  emit_approve_json "no canonical mst_session_id" ""
-  exit 0
+  LEGACY_STOP_GUARD_STATE_KEY="$(MST_STOP_HOOK_STDIN_RAW="$STDIN_RAW" PROJECT_ROOT="$PROJECT_ROOT" MST_STOP_HOOK_PARENT_PPID="$PPID" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+import re
+from pathlib import Path
+
+STRUCTURED_RE = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
+SAFE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+try:
+    payload = json.loads(os.environ.get("MST_STOP_HOOK_STDIN_RAW", "") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    raise SystemExit(0)
+
+raw = os.environ.get("MST_STOP_HOOK_STDIN_RAW", "")
+structured = payload.get("mst_session_id")
+if isinstance(structured, str) and STRUCTURED_RE.fullmatch(structured.strip()):
+    print(structured.strip())
+    raise SystemExit(0)
+
+session_id = payload.get("session_id")
+session_id = session_id.strip() if isinstance(session_id, str) else ""
+if session_id and ("/" in session_id or ".." in session_id or not SAFE_RE.fullmatch(session_id)):
+    session_id = ""
+
+parent_ppid = os.environ.get("MST_STOP_HOOK_PARENT_PPID", "").strip()
+return_to_seen = "return_to=" in raw
+if return_to_seen and parent_ppid.isdigit():
+    print(parent_ppid)
+    raise SystemExit(0)
+
+if session_id:
+    snapshot_path = Path(os.environ.get("PROJECT_ROOT", ".")) / ".gran-maestro" / "state" / session_id / "snapshot.json"
+    if snapshot_path.is_file():
+        print(session_id)
+        raise SystemExit(0)
+    legacy_owner_fields = any(
+        payload.get(key) not in (None, "")
+        for key in ("owner_ppid", "owner_session_id", "sessionId")
+    )
+    if not legacy_owner_fields:
+        print(session_id)
+        raise SystemExit(0)
+PY
+)"
+  if [ -z "$LEGACY_STOP_GUARD_STATE_KEY" ]; then
+    emit_approve_json "no canonical mst_session_id" ""
+    exit 0
+  fi
+  STATE_FILE="${MST_TMP}/mst-state-${LEGACY_STOP_GUARD_STATE_KEY}.json"
+else
+  MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
+  export MST_SESSION_ID
+  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
 fi
-MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
-export MST_SESSION_ID
-STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
 mkdir -p "$MST_TMP"
 MST_LEDGER_HOOK_EVENT="Stop"
-if [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
+if [ -n "${MST_SESSION_ID:-}" ] && [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null
   source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
 fi
@@ -2818,6 +2869,12 @@ if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
     append_block_audit_entry "$REASON"
     emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected"
+    exit 0
+  fi
+  if [ "${SNAPSHOT_PRESENT:-false}" != "true" ] && [ -z "${MST_SESSION_ID:-}" ] && [ -z "$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)" ] && [ "${SESSION_ID:-unknown}" != "unknown" ]; then
+    append_audit_entry "pass_through" "" "no-mst-session"
+    debug_log "allow" "reason=no_mst_session state_status=$STATE_STATUS session_id=${SESSION_ID:-unknown}"
+    emit_approve_decision "no-mst-session"
     exit 0
   fi
   append_audit_entry "pass_through" "" "workflow_inactive"

@@ -1283,12 +1283,21 @@ def _recover_rehydration_bundle(
         "critical_blocker": blocker if isinstance(blocker, dict) and blocker.get("critical") is True else None,
         "flow_view": flow_view,
     }
+    current_work_handoff = _recover_current_work_handoff(
+        session_id=session_id,
+        root_mst_id=root_mst_id,
+        workflow=workflow,
+        next_skill=next_skill,
+        history_head=history_result.tail_hash,
+        snapshot=snapshot,
+    )
     context = {
         "mst_session_id": session_id,
         "root_mst_id": root_mst_id,
         "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
         "recovery_fingerprint": recovery_fingerprint,
         "execution_flow_handoff": execution_flow_handoff,
+        "current_work_handoff": current_work_handoff,
     }
     context_delivery_order = ["core_rehydration", "execution_flow_handoff", "prompt_summary"]
     env = {"MST_SESSION_ID": session_id}
@@ -1334,11 +1343,14 @@ def _recover_rehydration_bundle(
             "source": "core_rehydration",
         },
         "execution_flow_handoff": execution_flow_handoff,
+        "current_work_handoff": current_work_handoff,
         "budgeted_context": {
             "execution_flow_handoff": execution_flow_handoff,
+            "current_work_handoff": current_work_handoff,
             "omissions": [
                 "full execution-flow nodes omitted; use flow_view.execution_flow_json for details",
                 "full execution-flow D2 omitted; use flow_view.execution_flow_d2 for details",
+                "raw history rows and transcript content omitted; use current_work_handoff.evidence_paths for source inspection",
             ],
         },
         "context_delivery_order": context_delivery_order,
@@ -1351,6 +1363,93 @@ def _recover_rehydration_bundle(
     if dispatch_context:
         envelope.update(dispatch_context)
     return envelope
+
+
+def _recover_current_work_handoff(
+    *,
+    session_id: str,
+    root_mst_id: str,
+    workflow: dict,
+    next_skill: dict,
+    history_head: str,
+    snapshot: Optional[dict],
+) -> dict:
+    from scripts.mst_cmds.current_work_handoff import project_current_work_handoff
+
+    current_skill = str(workflow.get("current_skill") or "").strip()
+    current_step = str(workflow.get("current_step") or "").strip()
+    next_name = str(next_skill.get("name") or "").strip()
+    next_source = str(next_skill.get("source_id") or "").strip()
+    auto = bool(next_skill.get("auto"))
+    source_evidence = f".gran-maestro/state/{session_id}/snapshot.json"
+    task_id = next_source or root_mst_id
+    task_sources = []
+    if current_skill or next_source:
+        task_sources.append(
+            {
+                "kind": "recover_resume",
+                "id": task_id,
+                "title": f"Recover {task_id}",
+                "status": str(workflow.get("status") or "active"),
+                "owner": "mst:recover",
+                "phase": f"step-{current_step}" if current_step else "unknown",
+                "source": "state_snapshot",
+                "evidence_path": source_evidence,
+            }
+        )
+    action_type = "resume_workflow" if next_name else "no_action_available"
+    command_hint = f"/{next_name}" if next_name.startswith("mst:") else (f"/mst:{next_name}" if next_name else "")
+    if command_hint and next_source:
+        command_hint = f"{command_hint} {next_source}"
+    if command_hint and auto:
+        command_hint = f"{command_hint} -a"
+    return project_current_work_handoff(
+        {
+            "schema_version": 1,
+            "mst_session_id": session_id,
+            "canonical_mst_session_id": session_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "source_history_head": history_head,
+            "current_history_head": history_head,
+            "history_head_evidence_path": f".gran-maestro/sessions/{session_id}/history.head",
+            "identity": {
+                "env": {"MST_SESSION_ID": session_id},
+                "context": {"mst_session_id": session_id, "root_mst_id": root_mst_id},
+                "legacy_diagnostics": {},
+            },
+            "active_workflow": {
+                "skill": current_skill or "mst:recover",
+                "source_id": root_mst_id,
+                "auto": bool(isinstance(snapshot, dict) and snapshot.get("auto") is True),
+                "status": str(workflow.get("status") or "active"),
+                "evidence_path": source_evidence,
+            },
+            "task_sources": task_sources,
+            "resume_queue": {
+                "skill": next_name,
+                "args": f"{next_source} -a".strip() if auto and next_source else next_source,
+                "source_skill": current_skill,
+                "source_id": next_source,
+                "auto": auto,
+                "evidence_path": source_evidence,
+            },
+            "next_action_source": {
+                "action_type": action_type,
+                "label": f"Resume {next_name}" if next_name else "No current-work action available",
+                "target": next_source,
+                "command_hint": command_hint,
+                "reason": "recover/resume envelope projected a bounded current-work handoff",
+                "confidence": 0.85 if next_name else 0.0,
+                "evidence_path": source_evidence,
+            },
+            "blocker_sources": [],
+            "writer_coverage": {
+                "source_history_head": history_head,
+                "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                "writers": [],
+            },
+        }
+    )
 
 
 def _structured_legacy_alias_conflict(session_id: str) -> Optional[dict]:
@@ -1399,6 +1498,15 @@ def _recover_context_contract_failure(
     context = _json_object_env("MST_CONTEXT_JSON")
     if not context:
         return None
+    handoff = context.get("current_work_handoff")
+    if isinstance(handoff, dict):
+        handoff_error = _current_work_handoff_contract_failure(
+            handoff,
+            session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+        if handoff_error is not None:
+            return handoff_error
     if context.get("schema_version") is not None and context.get("schema_version") != 1:
         return _common.validation_failure_payload(
             target="recover_bundle",
@@ -1427,13 +1535,7 @@ def _recover_context_contract_failure(
             root_mst_id=root_mst_id,
         )
     if not isinstance(core, dict):
-        return _common.validation_failure_payload(
-            target="recover_bundle",
-            field="core_rehydration",
-            reason="core_rehydration object is required",
-            mst_session_id=session_id,
-            root_mst_id=root_mst_id,
-        )
+        return None
     if core.get("schema_version") != 1:
         return _common.validation_failure_payload(
             target="recover_bundle",
@@ -1590,6 +1692,61 @@ def _recover_context_contract_failure(
                 mst_session_id=session_id,
                 root_mst_id=root_mst_id,
             )
+    return None
+
+
+def _current_work_handoff_contract_failure(
+    handoff: dict,
+    *,
+    session_id: str,
+    root_mst_id: str,
+) -> Optional[dict]:
+    if handoff.get("schema_version") != 1:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="current_work_handoff.schema_version",
+            reason="current_work_handoff schema_version is required and must be 1",
+            code="schema_invalid",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    handoff_session_id = handoff.get("canonical_mst_session_id") or handoff.get("mst_session_id")
+    if isinstance(handoff_session_id, str) and handoff_session_id.strip() and handoff_session_id.strip() != session_id:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="current_work_handoff.mst_session_id",
+            reason="current_work_handoff mst_session_id must match canonical session",
+            code="identity_mismatch",
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
+    freshness = handoff.get("projection_freshness")
+    freshness_status = freshness.get("status") if isinstance(freshness, dict) else None
+    blocker_types = {
+        str(blocker.get("blocker_type") or "")
+        for blocker in handoff.get("blockers", [])
+        if isinstance(blocker, dict)
+    } if isinstance(handoff.get("blockers"), list) else set()
+    blocking_types = {
+        "stale_projection",
+        "identity_mismatch",
+        "missing_source",
+        "schema_invalid",
+    }
+    blocked = blocker_types & blocking_types
+    if freshness_status == "stale" and "stale_projection" not in blocked:
+        blocked.add("stale_projection")
+    if freshness_status == "identity_mismatch" and "identity_mismatch" not in blocked:
+        blocked.add("identity_mismatch")
+    if blocked:
+        return _common.validation_failure_payload(
+            target="recover_bundle",
+            field="current_work_handoff.blockers",
+            reason="current_work_handoff is not safe for automatic recovery consumption",
+            code=sorted(blocked)[0],
+            mst_session_id=session_id,
+            root_mst_id=root_mst_id,
+        )
     return None
 
 

@@ -35,6 +35,37 @@ type WriterMatrixRow = {
   evidence_path?: unknown;
 };
 
+type CurrentWorkFreshnessStatus =
+  | "fresh"
+  | "stale"
+  | "identity_mismatch"
+  | "no_history"
+  | "unknown";
+
+type CurrentWorkNextActionType =
+  | "continue_skill"
+  | "resume_workflow"
+  | "run_request"
+  | "approve_request"
+  | "accept_request"
+  | "resume_agile_sprint"
+  | "resolve_blocker"
+  | "wait_for_user"
+  | "no_action_available"
+  | "unknown";
+
+type CurrentWorkBlockerType =
+  | "pending_dependency"
+  | "failed_validation"
+  | "missing_accept"
+  | "protected_branch"
+  | "stale_projection"
+  | "identity_mismatch"
+  | "policy_blocked"
+  | "missing_source"
+  | "schema_invalid"
+  | "unknown";
+
 const ALLOWED_WRITER_COVERAGE_STATUS: WriterCoverageStatus[] = [
   "ok",
   "not_applicable",
@@ -129,6 +160,39 @@ const DEFAULT_WRITER_MATRIX: WriterMatrixRow[] = [
     expected_events: ["hook.*.start", "hook.*.complete"],
     evidence_path: ".gran-maestro/sessions/{mst_session_id}/history.ndjson",
   },
+];
+
+const CURRENT_WORK_MAX_STACK_ITEMS = 20;
+const CURRENT_WORK_FRESHNESS_STATUS: CurrentWorkFreshnessStatus[] = [
+  "fresh",
+  "stale",
+  "identity_mismatch",
+  "no_history",
+  "unknown",
+];
+const CURRENT_WORK_NEXT_ACTION_TYPES: CurrentWorkNextActionType[] = [
+  "continue_skill",
+  "resume_workflow",
+  "run_request",
+  "approve_request",
+  "accept_request",
+  "resume_agile_sprint",
+  "resolve_blocker",
+  "wait_for_user",
+  "no_action_available",
+  "unknown",
+];
+const CURRENT_WORK_BLOCKER_TYPES: CurrentWorkBlockerType[] = [
+  "pending_dependency",
+  "failed_validation",
+  "missing_accept",
+  "protected_branch",
+  "stale_projection",
+  "identity_mismatch",
+  "policy_blocked",
+  "missing_source",
+  "schema_invalid",
+  "unknown",
 ];
 
 // ─── API: Debug ────────────────────────────────────────────────────────────
@@ -454,6 +518,333 @@ function sanitizeWriterCoveragePayload(
   };
 }
 
+function currentWorkEvidencePath(value: unknown, mstSessionId: string): string {
+  const text = stringValue(value);
+  if (text?.startsWith(".gran-maestro/") && !text.includes("..")) {
+    return text;
+  }
+  return `.gran-maestro/sessions/${mstSessionId || "unknown"}/history.head`;
+}
+
+function currentWorkIdentityMismatch(context: Record<string, unknown>): boolean {
+  const identity = isRecord(context.identity) ? context.identity : {};
+  const env = isRecord(identity.env) ? identity.env : {};
+  const structured = isRecord(identity.context) ? identity.context : {};
+  const envId = safeSegment(env.MST_SESSION_ID);
+  const structuredId = safeSegment(structured.mst_session_id);
+  return Boolean(envId && structuredId && envId !== structuredId);
+}
+
+function currentWorkFreshnessStatus(
+  context: Record<string, unknown>,
+): CurrentWorkFreshnessStatus {
+  if (context.schema_version !== 1) return "unknown";
+  if (currentWorkIdentityMismatch(context)) return "identity_mismatch";
+  const source = stringValue(context.source_history_head);
+  const current = stringValue(context.current_history_head);
+  if (!source && !current) return "no_history";
+  if (!source || !current) return "unknown";
+  return source === current ? "fresh" : "stale";
+}
+
+function currentWorkStack(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+): Record<string, unknown> {
+  const sources = Array.isArray(context.task_sources)
+    ? context.task_sources.filter(isRecord)
+    : [];
+  const items = sources.slice(0, CURRENT_WORK_MAX_STACK_ITEMS).map((source) => ({
+    kind: stringValue(source.kind) ?? "unknown",
+    id: stringValue(source.id) ?? "unknown",
+    title: stringValue(source.title) ?? "Untitled current work",
+    status: stringValue(source.status) ?? "unknown",
+    owner: stringValue(source.owner) ?? "unknown",
+    phase: stringValue(source.phase) ?? "unknown",
+    source: stringValue(source.source) ?? "unknown",
+    evidence_path: currentWorkEvidencePath(source.evidence_path, mstSessionId),
+  }));
+  return {
+    max_items: CURRENT_WORK_MAX_STACK_ITEMS,
+    truncated: sources.length > CURRENT_WORK_MAX_STACK_ITEMS,
+    total: sources.length,
+    items,
+  };
+}
+
+function currentWorkActiveWorkflow(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+): Record<string, unknown> | null {
+  const workflow = isRecord(context.active_workflow)
+    ? context.active_workflow
+    : null;
+  if (!workflow) return null;
+  return {
+    skill: stringValue(workflow.skill) ?? "unknown",
+    source_id: stringValue(workflow.source_id) ?? "",
+    auto: Boolean(workflow.auto),
+    status: stringValue(workflow.status) ?? "unknown",
+    evidence_path: currentWorkEvidencePath(workflow.evidence_path, mstSessionId),
+  };
+}
+
+function currentWorkNextAction(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+): Record<string, unknown> {
+  const raw = isRecord(context.next_action_source)
+    ? context.next_action_source
+    : isRecord(context.resume_queue)
+    ? {
+      action_type: "resume_workflow",
+      label: `Resume ${stringValue(context.resume_queue.skill) ?? "workflow"}`,
+      target: stringValue(context.resume_queue.source_id) ?? "",
+      command_hint: `/${stringValue(context.resume_queue.skill) ?? ""} ${
+        stringValue(context.resume_queue.args) ?? ""
+      }`.trim(),
+      reason: "resume queue contains the next bounded action",
+      confidence: 0.7,
+      evidence_path: context.resume_queue.evidence_path,
+    }
+    : {
+      action_type: "no_action_available",
+      label: "No current-work action available",
+      target: "",
+      command_hint: "",
+      reason: "no next action source was present in bounded projection inputs",
+      confidence: 0,
+    };
+  const actionType = CURRENT_WORK_NEXT_ACTION_TYPES.includes(
+      stringValue(raw.action_type) as CurrentWorkNextActionType,
+    )
+    ? stringValue(raw.action_type)
+    : "unknown";
+  const confidence = typeof raw.confidence === "number" &&
+      Number.isFinite(raw.confidence)
+    ? Math.max(0, Math.min(1, raw.confidence))
+    : 0;
+  return {
+    action_type: actionType,
+    allowed_action_type: CURRENT_WORK_NEXT_ACTION_TYPES,
+    label: stringValue(raw.label) ?? "Unknown next action",
+    target: stringValue(raw.target) ?? "",
+    command_hint: stringValue(raw.command_hint) ?? "",
+    reason: stringValue(raw.reason) ??
+      "next action was derived from bounded current-work sources",
+    confidence,
+    evidence_path: currentWorkEvidencePath(raw.evidence_path, mstSessionId),
+  };
+}
+
+function currentWorkBlocker(
+  source: Record<string, unknown>,
+  mstSessionId: string,
+): Record<string, unknown> {
+  const blockerType = CURRENT_WORK_BLOCKER_TYPES.includes(
+      stringValue(source.blocker_type) as CurrentWorkBlockerType,
+    )
+    ? stringValue(source.blocker_type)
+    : "unknown";
+  const nextActionType = CURRENT_WORK_NEXT_ACTION_TYPES.includes(
+      stringValue(source.next_action_type) as CurrentWorkNextActionType,
+    )
+    ? stringValue(source.next_action_type)
+    : "resolve_blocker";
+  return {
+    blocker_type: blockerType,
+    status: stringValue(source.status) ?? "blocked",
+    message: stringValue(source.message) ?? "current-work blocker",
+    evidence_path: currentWorkEvidencePath(source.evidence_path, mstSessionId),
+    recoverable: Boolean(source.recoverable),
+    next_action_type: nextActionType,
+  };
+}
+
+function currentWorkBlockers(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+  freshnessStatus: CurrentWorkFreshnessStatus,
+  stack: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const blockers = Array.isArray(context.blocker_sources)
+    ? context.blocker_sources.filter(isRecord).map((source) =>
+      currentWorkBlocker(source, mstSessionId)
+    )
+    : [];
+  if (context.schema_version !== 1) {
+    blockers.push(currentWorkBlocker({
+      blocker_type: "schema_invalid",
+      status: "blocked",
+      message: "current-work handoff source schema_version is missing or unsupported",
+      recoverable: false,
+      next_action_type: "resolve_blocker",
+      evidence_path: context.schema_evidence_path,
+    }, mstSessionId));
+  }
+  if (freshnessStatus === "identity_mismatch") {
+    blockers.push(currentWorkBlocker({
+      blocker_type: "identity_mismatch",
+      status: "blocked",
+      message: "canonical MST_SESSION_ID and structured mst_session_id do not match",
+      recoverable: true,
+      next_action_type: "resolve_blocker",
+      evidence_path: context.identity_evidence_path,
+    }, mstSessionId));
+  }
+  if (freshnessStatus === "stale") {
+    blockers.push(currentWorkBlocker({
+      blocker_type: "stale_projection",
+      status: "blocked",
+      message: "current history head differs from projection source_history_head",
+      recoverable: true,
+      next_action_type: "resolve_blocker",
+      evidence_path: context.history_head_evidence_path,
+    }, mstSessionId));
+  }
+  if (!isRecord(context.active_workflow) && Number(stack.total ?? 0) === 0) {
+    blockers.push(currentWorkBlocker({
+      blocker_type: "missing_source",
+      status: "blocked",
+      message: "current-work handoff has no active workflow or task source",
+      recoverable: true,
+      next_action_type: "resume_workflow",
+      evidence_path: context.source_evidence_path,
+    }, mstSessionId));
+  }
+  const seen = new Set<string>();
+  return blockers.filter((blocker) => {
+    const key = `${blocker.blocker_type}\0${blocker.message}\0${blocker.evidence_path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function currentWorkEvidencePaths(...sections: unknown[]): string[] {
+  const paths: string[] = [];
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) collect(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const path = stringValue(value.evidence_path);
+    if (path?.startsWith(".gran-maestro/") && !paths.includes(path)) {
+      paths.push(path);
+    }
+    for (const child of Object.values(value)) collect(child);
+  };
+  for (const section of sections) collect(section);
+  return paths;
+}
+
+function projectCurrentWorkHandoff(
+  context: Record<string, unknown>,
+): Record<string, unknown> {
+  const mstSessionId = canonicalMstSessionId(context);
+  const generatedAt = stringValue(context.generated_at) ??
+    new Date().toISOString();
+  const stack = currentWorkStack(context, mstSessionId);
+  const workflow = currentWorkActiveWorkflow(context, mstSessionId);
+  const action = currentWorkNextAction(context, mstSessionId);
+  const freshnessStatus = currentWorkFreshnessStatus(context);
+  const freshness = {
+    status: freshnessStatus,
+    allowed_status: CURRENT_WORK_FRESHNESS_STATUS,
+    source_history_head: stringValue(context.source_history_head),
+    current_history_head: stringValue(context.current_history_head),
+    generated_at: generatedAt,
+    evidence_path: currentWorkEvidencePath(
+      context.history_head_evidence_path,
+      mstSessionId,
+    ),
+  };
+  const blockers = currentWorkBlockers(
+    context,
+    mstSessionId,
+    freshnessStatus,
+    stack,
+  );
+  const evidencePaths = currentWorkEvidencePaths(
+    workflow,
+    stack,
+    action,
+    blockers,
+    freshness,
+  );
+  return {
+    schema_version: 1,
+    mst_session_id: mstSessionId,
+    canonical_mst_session_id: mstSessionId,
+    lookup_key: mstSessionId,
+    partition_key: mstSessionId,
+    recovery_selector: mstSessionId,
+    source_history_head: stringValue(context.source_history_head),
+    generated_at: generatedAt,
+    projection_freshness: freshness,
+    active_workflow: workflow,
+    current_task_stack: stack,
+    next_action: action,
+    blockers,
+    legacy_diagnostics: legacyDiagnostics(context),
+    evidence_paths: evidencePaths.length
+      ? evidencePaths
+      : [currentWorkEvidencePath(null, mstSessionId)],
+  };
+}
+
+function sanitizeCurrentWorkHandoffPayload(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isRecord(value) || value.schema_version !== 1) return null;
+  const payload = projectCurrentWorkHandoff(value);
+  return {
+    ...payload,
+    projection_freshness: isRecord(value.projection_freshness)
+      ? value.projection_freshness
+      : payload.projection_freshness,
+    active_workflow: isRecord(value.active_workflow)
+      ? currentWorkActiveWorkflow(value, String(payload.mst_session_id ?? ""))
+      : null,
+    current_task_stack: isRecord(value.current_task_stack)
+      ? value.current_task_stack
+      : payload.current_task_stack,
+    next_action: isRecord(value.next_action) ? value.next_action : payload.next_action,
+    blockers: Array.isArray(value.blockers)
+      ? value.blockers.filter(isRecord).map((blocker) =>
+        currentWorkBlocker(blocker, String(payload.mst_session_id ?? ""))
+      )
+      : payload.blockers,
+    evidence_paths: Array.isArray(value.evidence_paths)
+      ? value.evidence_paths.filter((path): path is string =>
+        typeof path === "string" && path.startsWith(".gran-maestro/")
+      )
+      : payload.evidence_paths,
+  };
+}
+
+async function readCurrentWorkContext(
+  baseDir: string,
+  sessionId: string,
+  relativePath: string,
+): Promise<Record<string, unknown>> {
+  const candidates = [
+    relativePath ? `${baseDir}/${relativePath}` : "",
+    sessionId
+      ? `${baseDir}/sessions/${sessionId}/current-work-handoff-context.json`
+      : "",
+    sessionId ? `${baseDir}/sessions/${sessionId}/current-work-handoff.json` : "",
+    `${baseDir}/debug/current-work-handoff-context.json`,
+    `${baseDir}/debug/current-work-handoff.json`,
+  ].filter(Boolean);
+  for (const path of candidates) {
+    const payload = await readJsonFile<unknown>(path);
+    if (isRecord(payload)) return payload;
+  }
+  return {};
+}
+
 async function readWriterCoverageContext(
   baseDir: string,
   sessionId: string,
@@ -540,6 +931,41 @@ projectDebugApi.get("/debug/writer-coverage", async (c) => {
       mst_session_id: context.mst_session_id ?? sessionId,
       canonical_mst_session_id: context.canonical_mst_session_id ?? sessionId,
       source_history_head: context.source_history_head ?? sourceHistoryHead ??
+        null,
+    });
+
+  return c.json(boundedPayload);
+});
+
+projectDebugApi.get("/debug/current-work-handoff", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const sessionId = safeSegment(c.req.query("session"));
+  const sourceHistoryHead = stringValue(c.req.query("source_head"));
+  const currentHistoryHead = stringValue(c.req.query("current_head")) ??
+    sourceHistoryHead;
+  const relativeContextPath = safeRelativeJsonPath(c.req.query("context"));
+  if (c.req.query("context") && !relativeContextPath) {
+    return c.json({ error: "Invalid context path" }, 400);
+  }
+
+  const context = await readCurrentWorkContext(
+    baseDir,
+    sessionId,
+    relativeContextPath,
+  );
+  const boundedPayload = sanitizeCurrentWorkHandoffPayload(context) ??
+    projectCurrentWorkHandoff({
+      ...context,
+      schema_version: context.schema_version ?? 1,
+      mst_session_id: context.mst_session_id ?? sessionId,
+      canonical_mst_session_id: context.canonical_mst_session_id ?? sessionId,
+      source_history_head: context.source_history_head ?? sourceHistoryHead ??
+        null,
+      current_history_head: context.current_history_head ?? currentHistoryHead ??
         null,
     });
 
