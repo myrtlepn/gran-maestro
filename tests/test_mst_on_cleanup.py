@@ -486,6 +486,20 @@ def test_cleanup_apply_is_idempotent_no_op_on_second_run(tmp_path):
     assert _read_bytes_by_path(watched_paths) == after_first
 
 
+def test_cleanup_no_op_preserves_existing_empty_hooks_dir(tmp_path):
+    project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+    hooks_dir = project / ".claude" / "hooks"
+    assert hooks_dir.exists()
+
+    payload = _run_cleanup_apply_json(project)
+
+    assert payload["status"] == "ok"
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["deleted"] == []
+    assert payload["mutation"] == {"dry_run": False, "mutated": False}
+    assert hooks_dir.exists()
+
+
 def test_cleanup_malformed_settings_failure_reported_without_destructive_mutation(tmp_path):
     project = _setup_registered_project(
         tmp_path,

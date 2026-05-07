@@ -844,7 +844,7 @@ def cmd_on_cleanup(args) -> int:
         # cleanup empty .claude/hooks dir (선택)
         hooks_dir = project_root / ".claude" / "hooks"
         try:
-            if hooks_dir.exists() and not any(hooks_dir.iterdir()):
+            if deleted and hooks_dir.exists() and not any(hooks_dir.iterdir()):
                 hooks_dir.rmdir()
         except OSError:
             pass
