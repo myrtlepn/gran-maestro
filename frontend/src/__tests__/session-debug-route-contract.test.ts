@@ -26,6 +26,7 @@ describe('DOD-005 Session Debug route and tab contract', () => {
     expect(tabSearch.some((value) => value.includes('session debug'))).toBe(false);
     expect(tabSearch.some((value) => value.includes('hud'))).toBe(false);
     expect(tabSearch.some((value) => value.includes('statusline'))).toBe(false);
+    expect(tabSearch.some((value) => value.includes('compact_display'))).toBe(false);
   });
 
   it('keeps Session Debug inside /debug and /debug/:sessionId routes only', () => {
@@ -36,7 +37,14 @@ describe('DOD-005 Session Debug route and tab contract', () => {
     expect(paths).not.toContain('/session-debug');
     expect(paths).not.toContain('/debug/session-debug');
     expect(paths).not.toContain('/debug/:sessionId/session-debug');
-    expect(paths.filter((path) => path.includes('hud') || path.includes('statusline'))).toEqual([]);
+    expect(
+      paths.filter(
+        (path) =>
+          path.includes('hud') ||
+          path.includes('statusline') ||
+          path.includes('compact_display')
+      )
+    ).toEqual([]);
   });
 });
 
@@ -77,5 +85,6 @@ describe('DOD-005 Session Debug panel registry contract', () => {
     const registryText = JSON.stringify(SESSION_DEBUG_PANEL_REGISTRY).toLowerCase();
     expect(registryText).not.toContain('hud');
     expect(registryText).not.toContain('statusline');
+    expect(registryText).not.toContain('compact_display');
   });
 });
