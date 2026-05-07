@@ -6,6 +6,7 @@ from typing import Any
 
 from scripts import _skill_state
 from scripts.mst_cmds import current_work_handoff
+from scripts.mst_cmds import dod008_evidence
 from scripts.mst_cmds import execution_flow
 from scripts.mst_cmds import prompt_correlation
 from scripts.mst_cmds import state
@@ -436,6 +437,8 @@ def _validate_guard_evidence(context: dict[str, Any], mst_session_id: str) -> di
 
 
 def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]:
+    shared_evidence = dod008_evidence.project_dod008_evidence(context, mst_session_id=mst_session_id)
+    bounded_dod008 = dod008_evidence.axis_evidence(shared_evidence)
     ledger = context.get("ledger")
     if isinstance(ledger, dict):
         ledger_result = execution_flow.validate_source_ledger_projection_source(ledger)
@@ -448,6 +451,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
                 _text(diagnostic.get("reason")) or "verified ledger linkage failed",
                 evidence_path=ledger_result.get("ledger_path"),
                 mst_session_id=mst_session_id,
+                dod008_evidence=bounded_dod008,
             )
 
     linkage = context.get("history_linkage") if isinstance(context.get("history_linkage"), dict) else {}
@@ -458,6 +462,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
             "history_linkage_unknown",
             "history linkage evidence was not available",
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     evidence_path = linkage.get("evidence_path")
     event_hash = linkage.get("event_hash")
@@ -470,6 +475,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
             evidence_path=evidence_path,
             event_hash=event_hash,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     projection_head = _text(linkage.get("projection_source_head"))
     verified_head = _text(linkage.get("verified_ledger_head"))
@@ -483,6 +489,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
             evidence_path=evidence_path,
             event_hash=event_hash,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     if snapshot_head and verified_head and snapshot_head != verified_head:
         return _axis(
@@ -493,6 +500,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
             evidence_path=evidence_path,
             event_hash=event_hash,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     mirror_head = _text(linkage.get("mirror_head"))
     verify_head = _text(linkage.get("verify_head"))
@@ -505,6 +513,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
             evidence_path=evidence_path,
             event_hash=event_hash,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     return _axis(
         "history_linkage",
@@ -514,6 +523,7 @@ def _validate_history_linkage(context: dict[str, Any], mst_session_id: str) -> d
         evidence_path=evidence_path,
         event_hash=event_hash,
         mst_session_id=mst_session_id,
+        dod008_evidence=bounded_dod008,
     )
 
 
@@ -527,6 +537,8 @@ def _is_stale_marked(projection: dict[str, Any], handoff: dict[str, Any]) -> boo
 
 
 def _validate_projection_freshness(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]:
+    shared_evidence = dod008_evidence.project_dod008_evidence(context, mst_session_id=mst_session_id)
+    bounded_dod008 = dod008_evidence.axis_evidence(shared_evidence)
     projection = context.get("execution_flow_projection") if isinstance(context.get("execution_flow_projection"), dict) else {}
     handoff = context.get("current_work_handoff") if isinstance(context.get("current_work_handoff"), dict) else {}
     if not projection and handoff:
@@ -549,6 +561,7 @@ def _validate_projection_freshness(context: dict[str, Any], mst_session_id: str)
             "projection source or current verified head was not available",
             evidence_path=evidence_path,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     if source_head == current_head:
         return _axis(
@@ -558,6 +571,7 @@ def _validate_projection_freshness(context: dict[str, Any], mst_session_id: str)
             "projection source head matches current verified head",
             evidence_path=evidence_path,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     if _is_stale_marked(projection, handoff):
         return _axis(
@@ -567,6 +581,7 @@ def _validate_projection_freshness(context: dict[str, Any], mst_session_id: str)
             "projection source head changed and stale marker is present",
             evidence_path=evidence_path,
             mst_session_id=mst_session_id,
+            dod008_evidence=bounded_dod008,
         )
     return _axis(
         "projection_freshness",
@@ -575,6 +590,7 @@ def _validate_projection_freshness(context: dict[str, Any], mst_session_id: str)
         "projection source head changed without stale or regenerate marker",
         evidence_path=evidence_path,
         mst_session_id=mst_session_id,
+        dod008_evidence=bounded_dod008,
     )
 
 

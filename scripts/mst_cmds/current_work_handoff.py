@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scripts.mst_cmds.dod008_evidence import project_dod008_evidence
+
 
 MAX_STACK_ITEMS = 20
 ALLOWED_FRESHNESS_STATUS = (
@@ -258,13 +260,22 @@ def _freshness_status(context: dict[str, Any]) -> str:
 
 def _projection_freshness(context: dict[str, Any], mst_session_id: str, generated_at: str) -> dict[str, Any]:
     status = _freshness_status(context)
+    dod008 = project_dod008_evidence(context, mst_session_id=mst_session_id, generated_at=context.get("generated_at"))
+    dod008_freshness = dod008.get("projection_freshness") if isinstance(dod008.get("projection_freshness"), dict) else {}
     return {
         "status": status,
         "allowed_status": list(ALLOWED_FRESHNESS_STATUS),
         "source_history_head": _history_head(context.get("source_history_head")),
-        "current_history_head": _history_head(context.get("current_history_head")),
+        "current_history_head": (
+            _history_head(context.get("current_verified_head"))
+            or _history_head(context.get("verified_history_head"))
+            or _history_head(context.get("current_history_head"))
+            or _history_head(dod008.get("verified_history_head"))
+        ),
         "generated_at": generated_at,
-        "evidence_path": _evidence_path(context.get("history_head_evidence_path"), mst_session_id),
+        "code": _safe_text(dod008_freshness.get("code")) or status,
+        "basis": _safe_text(dod008_freshness.get("basis")) or "history_head",
+        "evidence_path": _evidence_path(dod008_freshness.get("evidence_path") or context.get("history_head_evidence_path"), mst_session_id),
     }
 
 
