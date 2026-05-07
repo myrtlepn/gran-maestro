@@ -30,11 +30,28 @@ def test_plugin_manifest_hooks_file_exposes_expected_events() -> None:
     assert set(hooks_payload["hooks"]) == EXPECTED_HOOK_EVENTS
 
 
+def test_canonical_hook_commands_use_plugin_root_only() -> None:
+    hooks_payload = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
+
+    for event, entries in hooks_payload["hooks"].items():
+        assert entries, f"{event} must declare at least one hook entry"
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                command = hook.get("command", "")
+                assert command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/"), (
+                    f"{event} must use plugin-root canonical hook command: {command}"
+                )
+                assert "$CLAUDE_PROJECT_DIR/.claude/hooks" not in command
+                assert ".claude/hooks" not in command
+
+
 def main() -> int:
     test_plugin_manifest_declares_hooks_file()
     print("PASS test_plugin_manifest_declares_hooks_file")
     test_plugin_manifest_hooks_file_exposes_expected_events()
     print("PASS test_plugin_manifest_hooks_file_exposes_expected_events")
+    test_canonical_hook_commands_use_plugin_root_only()
+    print("PASS test_canonical_hook_commands_use_plugin_root_only")
     return 0
 
 

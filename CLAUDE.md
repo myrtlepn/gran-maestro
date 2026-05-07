@@ -3,22 +3,31 @@
 > 플러그인 세계관 및 스킬 레퍼런스: [docs/CLAUDE.md](docs/CLAUDE.md)
 > 릴리스 체크리스트: [docs/RELEASE.md](docs/RELEASE.md)
 
-## Hook 수정 규칙 (CRITICAL)
+## Hook 책임 경계 및 수정 규칙 (CRITICAL)
 
-`.claude/hooks/` 파일은 **직접 수정 금지**. `/mst:on` 실행 시 `hooks/` 원본에서 덮어씌워집니다.
+MST hook runtime은 3계층으로 구분합니다:
 
-이 플러그인의 hook을 수정하려면 최종 source of truth는 `/Users/brandev/mygit/gran-maestro/hooks/` 하위 파일입니다.
+1. **Plugin core canonical runtime**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command가 일반 프로젝트의 유일한 canonical MST core hook 등록 경로입니다.
+2. **Project legacy / source repo 개발 보조**: `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...`에 남아 있는 사본은 일반 프로젝트 canonical runtime이 아닙니다. 이 저장소에서 source 개발·레거시 호환·cleanup/doctor 진단 대상으로만 취급합니다.
+3. **User-global environment hooks**: `~/.claude/settings.json`의 `maestro-guard.sh`, `log-prompt.sh`, `check-version.sh` 등은 사용자 전역 환경 hook 계층이며 MST core SessionStart/Stop hook이 아닙니다.
+
+`.claude/hooks/` 파일은 **직접 수정 금지**. `/mst:on`은 일반 프로젝트에 `.claude/hooks` 사본이나 `settings.local.json` hooks block을 canonical runtime으로 주입하면 안 됩니다.
+
+이 플러그인의 MST core hook을 수정하려면 최종 source of truth는 `/Users/brandev/mygit/gran-maestro/hooks/` 하위 파일입니다.
 
 Hook 수정이 필요할 때는 반드시 아래 순서를 따릅니다:
 
 1. **`hooks/` 원본 수정**: 프로젝트 루트의 `hooks/` 디렉토리 파일을 수정
-2. **프로젝트에 복사**: `cp hooks/*.sh .claude/hooks/`
-3. **플러그인 캐시에 복사**: `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/hooks/` 및 `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/.claude/hooks/`
-4. **커밋**: `hooks/`와 `.claude/hooks/` 변경사항 모두 커밋
+2. **canonical 등록 확인**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command가 변경 의도와 일치하는지 확인
+3. **source repo 보조 사본 동기화가 필요한 경우에만 복사**: 이 저장소의 legacy/source-dev 진단을 위해 필요한 경우 `cp hooks/*.sh .claude/hooks/` 실행. 일반 프로젝트 `/mst:on` 동작으로 해석하지 않습니다.
+4. **플러그인 캐시에 복사**: 릴리스/검증 목적상 필요한 버전에 `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/hooks/` 및 legacy 보조가 필요한 경우에만 `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/.claude/hooks/`
+5. **커밋**: `hooks/`와 실제로 동기화한 보조 사본 변경사항을 함께 커밋
 
 ```
-hooks/                    ← 플러그인 소유 원본 (수정 대상)
-.claude/hooks/            ← 프로젝트 복사본 (/mst:on이 hooks/에서 복사)
+hooks/                    ← 플러그인 소유 원본 및 canonical command 대상 (수정 대상)
+hooks/hooks.json          ← plugin core canonical hook registration
+.claude/hooks/            ← source repo legacy/source-dev 보조 사본 (일반 프로젝트 canonical runtime 아님)
+~/.claude/settings.json   ← user-global environment hook 계층 (MST core hook 아님)
 ```
 
 ## 프로젝트 구조
