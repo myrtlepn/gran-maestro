@@ -23,8 +23,10 @@ ROW_FIELDS = (
     "observed",
     "status",
     "last_event_type",
+    "last_event",
     "last_success_at",
     "last_error_at",
+    "last_error",
     "last_source_head",
     "reason",
     "evidence_path",
@@ -69,9 +71,9 @@ DEFAULT_WRITER_MATRIX = (
     },
     {
         "writer_id": "prompt_writer",
-        "expected": False,
+        "expected": True,
         "expected_events": ("prompt.submitted",),
-        "evidence_path": ".gran-maestro/requests/REQ-823/follow-up-dod004.md",
+        "evidence_path": ".gran-maestro/sessions/{mst_session_id}/history.ndjson",
     },
     {
         "writer_id": "hook_lifecycle_ledger",
@@ -277,8 +279,6 @@ def _reason(status: str, writer_id: str, event: dict[str, Any] | None, source_hi
     if status == "ok":
         return None
     if status == "not_applicable":
-        if writer_id == "prompt_writer":
-            return "prompt writer is deferred to DOD-004 and not applicable for this session context"
         return "writer is not required for this session context"
     if status == "not_seen":
         return "expected writer has no matching event in bounded scan"
@@ -294,6 +294,21 @@ def _reason(status: str, writer_id: str, event: dict[str, Any] | None, source_hi
         event_reason = event.get("reason") if isinstance(event, dict) else None
         return event_reason if isinstance(event_reason, str) and event_reason.strip() else "writer event schema is invalid"
     return "writer status could not be determined from bounded diagnostics"
+
+
+def _bounded_event(event: dict[str, Any] | None, mst_session_id: str, matrix_row: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(event, dict):
+        return None
+    event_mst_session_id = _safe_mst_session_id(event.get("mst_session_id")) or mst_session_id
+    return {
+        "event_type": _event_type(event),
+        "created_at": _event_created_at(event),
+        "write_status": str(event.get("write_status") or "success").strip().lower() or "success",
+        "mst_session_id": event_mst_session_id,
+        "source_history_head": _source_head(event),
+        "reason": event.get("reason") if isinstance(event.get("reason"), str) and event.get("reason").strip() else None,
+        "evidence_path": _evidence_path(matrix_row, event, event_mst_session_id),
+    }
 
 
 def _row_for_writer(
@@ -312,11 +327,13 @@ def _row_for_writer(
     last_source_head = _source_head(last_event) if last_event is not None else None
     last_success_at = None
     last_error_at = None
+    last_error_event = None
     for event in matches:
         if _is_success(event):
             last_success_at = _event_created_at(event)
         if _is_error(event) or _schema_invalid(event):
             last_error_at = _event_created_at(event)
+            last_error_event = event
 
     if not expected and not observed:
         status = "not_applicable"
@@ -337,14 +354,21 @@ def _row_for_writer(
     else:
         status = "ok"
 
+    if status in {"identity_mismatch", "write_failed", "schema_invalid"} and last_event is not None:
+        last_error_event = last_event
+        if last_error_at is None:
+            last_error_at = _event_created_at(last_event)
+
     row = {
         "writer_id": writer_id,
         "expected": expected,
         "observed": observed,
         "status": status,
         "last_event_type": last_event_type,
+        "last_event": _bounded_event(last_event, mst_session_id, matrix_row),
         "last_success_at": last_success_at,
         "last_error_at": last_error_at,
+        "last_error": _bounded_event(last_error_event, mst_session_id, matrix_row),
         "last_source_head": last_source_head,
         "reason": _reason(status, writer_id, last_event, source_history_head),
         "evidence_path": _evidence_path(matrix_row, last_event, mst_session_id),

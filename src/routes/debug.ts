@@ -21,8 +21,10 @@ type WriterCoverageRow = {
   observed: boolean;
   status: WriterCoverageStatus;
   last_event_type: string | null;
+  last_event: Record<string, unknown> | null;
   last_success_at: string | null;
   last_error_at: string | null;
+  last_error: Record<string, unknown> | null;
   last_source_head: unknown;
   reason: string | null;
   evidence_path: string;
@@ -66,6 +68,36 @@ type CurrentWorkBlockerType =
   | "schema_invalid"
   | "unknown";
 
+type PromptTimelineFreshnessStatus =
+  | "fresh"
+  | "stale"
+  | "identity_mismatch"
+  | "no_history"
+  | "unknown";
+
+type PromptTimelineAnchor = {
+  seq: number | null;
+  event_hash: string | null;
+  event_type: "prompt.submitted";
+  created_at: string | null;
+  timestamp: string | null;
+  prompt_digest: string | null;
+  prompt_size_bytes: number | null;
+  prompt_excerpt: Record<string, unknown> | null;
+  transcript_path: string | null;
+  history_head_before: string | null;
+  idempotency_key: string | null;
+  source: string | null;
+  head_relation: Record<string, unknown>;
+  following_events: {
+    max_items: number;
+    total: number;
+    truncated: boolean;
+    items: Record<string, unknown>[];
+  };
+  first_semantic_event: Record<string, unknown> | null;
+};
+
 const ALLOWED_WRITER_COVERAGE_STATUS: WriterCoverageStatus[] = [
   "ok",
   "not_applicable",
@@ -83,8 +115,10 @@ const WRITER_COVERAGE_ROW_FIELDS = [
   "observed",
   "status",
   "last_event_type",
+  "last_event",
   "last_success_at",
   "last_error_at",
+  "last_error",
   "last_source_head",
   "reason",
   "evidence_path",
@@ -150,9 +184,9 @@ const DEFAULT_WRITER_MATRIX: WriterMatrixRow[] = [
   },
   {
     writer_id: "prompt_writer",
-    expected: false,
+    expected: true,
     expected_events: ["prompt.submitted"],
-    evidence_path: ".gran-maestro/requests/REQ-823/follow-up-dod004.md",
+    evidence_path: ".gran-maestro/sessions/{mst_session_id}/history.ndjson",
   },
   {
     writer_id: "hook_lifecycle_ledger",
@@ -194,6 +228,58 @@ const CURRENT_WORK_BLOCKER_TYPES: CurrentWorkBlockerType[] = [
   "schema_invalid",
   "unknown",
 ];
+const PROMPT_TIMELINE_FRESHNESS_STATUS: PromptTimelineFreshnessStatus[] = [
+  "fresh",
+  "stale",
+  "identity_mismatch",
+  "no_history",
+  "unknown",
+];
+const PROMPT_TIMELINE_EVENT_TYPE = "prompt.submitted";
+const PROMPT_TIMELINE_MAX_ANCHORS = 20;
+const PROMPT_TIMELINE_MAX_FOLLOWING_EVENTS = 50;
+const PROMPT_EXCERPT_MAX_CHARS = 240;
+const PROMPT_TIMELINE_ROW_KEYS = ["history" + "_rows", "rows"] as const;
+const PROMPT_TIMELINE_ALLOWED_FIELDS = [
+  "schema_version",
+  "mst_session_id",
+  "canonical_mst_session_id",
+  "generated_at",
+  "source_head",
+  "correlation_basis",
+  "projection_freshness",
+  "prompt_anchors",
+  "policy_block_indicators",
+  "core_block_indicators",
+  "evidence_paths",
+] as const;
+const PROMPT_TIMELINE_ANCHOR_FIELDS = [
+  "seq",
+  "event_hash",
+  "event_type",
+  "created_at",
+  "timestamp",
+  "prompt_digest",
+  "prompt_size_bytes",
+  "prompt_excerpt",
+  "transcript_path",
+  "history_head_before",
+  "idempotency_key",
+  "source",
+  "head_relation",
+  "following_events",
+  "first_semantic_event",
+] as const;
+const PROMPT_TIMELINE_FOLLOWING_EVENT_FIELDS = [
+  "seq",
+  "event_type",
+  "created_at",
+  "timestamp",
+  "prev_hash",
+  "event_hash",
+  "mst_session_id",
+  "head_relation",
+] as const;
 
 // ─── API: Debug ────────────────────────────────────────────────────────────
 
@@ -346,15 +432,13 @@ function evidencePath(
 
 function writerReason(
   status: WriterCoverageStatus,
-  writerId: string,
+  _writerId: string,
   event: Record<string, unknown> | null,
   projectionSourceHead: unknown,
 ): string | null {
   if (status === "ok") return null;
   if (status === "not_applicable") {
-    return writerId === "prompt_writer"
-      ? "prompt writer is deferred to DOD-004 prompt correlation and not applicable for this session context"
-      : "writer is not required for this session context";
+    return "writer is not required for this session context";
   }
   if (status === "not_seen") {
     return "expected writer has no matching event in bounded projection context";
@@ -376,6 +460,23 @@ function writerReason(
   return "writer status could not be determined from bounded diagnostics";
 }
 
+function boundedWriterEvent(
+  event: Record<string, unknown> | null,
+  matrixRow: WriterMatrixRow,
+  mstSessionId: string,
+): Record<string, unknown> | null {
+  if (!event) return null;
+  return {
+    event_type: eventType(event),
+    created_at: eventCreatedAt(event),
+    write_status: writeStatus(event) || "success",
+    mst_session_id: safeSegment(event.mst_session_id) || mstSessionId,
+    source_history_head: sourceHead(event),
+    reason: stringValue(event.reason),
+    evidence_path: evidencePath(matrixRow, event, mstSessionId),
+  };
+}
+
 function writerCoverageRow(
   matrixRow: WriterMatrixRow,
   events: Record<string, unknown>[],
@@ -394,6 +495,7 @@ function writerCoverageRow(
   const lastSourceHead = sourceHead(lastEvent);
   let lastSuccessAt: string | null = null;
   let lastErrorAt: string | null = null;
+  let lastErrorEvent: Record<string, unknown> | null = null;
 
   for (const event of matches) {
     const status = writeStatus(event);
@@ -405,6 +507,7 @@ function writerCoverageRow(
       schemaInvalid(event)
     ) {
       lastErrorAt = eventCreatedAt(event);
+      lastErrorEvent = event;
     }
   }
 
@@ -430,14 +533,24 @@ function writerCoverageRow(
     status = "unknown";
   } else status = "ok";
 
+  if (
+    ["identity_mismatch", "write_failed", "schema_invalid"].includes(status) &&
+    lastEvent
+  ) {
+    lastErrorEvent = lastEvent;
+    lastErrorAt ??= eventCreatedAt(lastEvent);
+  }
+
   return {
     writer_id: writerId,
     expected,
     observed,
     status,
     last_event_type: eventType(lastEvent),
+    last_event: boundedWriterEvent(lastEvent, matrixRow, mstSessionId),
     last_success_at: lastSuccessAt,
     last_error_at: lastErrorAt,
+    last_error: boundedWriterEvent(lastErrorEvent, matrixRow, mstSessionId),
     last_source_head: lastSourceHead,
     reason: writerReason(status, writerId, lastEvent, projectionSourceHead),
     evidence_path: evidencePath(matrixRow, lastEvent, mstSessionId),
@@ -516,6 +629,292 @@ function sanitizeWriterCoveragePayload(
       ? value.legacy_diagnostics
       : {},
   };
+}
+
+function promptTimelineIdentityMismatch(
+  context: Record<string, unknown>,
+): boolean {
+  const identity = isRecord(context.identity) ? context.identity : {};
+  const env = isRecord(identity.env) ? identity.env : {};
+  const structured = isRecord(identity.context) ? identity.context : {};
+  const envId = safeSegment(env.MST_SESSION_ID);
+  const structuredId = safeSegment(structured.mst_session_id);
+  return Boolean(envId && structuredId && envId !== structuredId);
+}
+
+function promptTimelineFreshness(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+): Record<string, unknown> {
+  const sourceHead = stringValue(context.source_history_head);
+  const currentHead = stringValue(context.current_history_head);
+  const status: PromptTimelineFreshnessStatus = promptTimelineIdentityMismatch(
+      context,
+    )
+    ? "identity_mismatch"
+    : !sourceHead && !currentHead
+    ? "no_history"
+    : sourceHead && currentHead
+    ? sourceHead === currentHead ? "fresh" : "stale"
+    : "unknown";
+  return {
+    status: PROMPT_TIMELINE_FRESHNESS_STATUS.includes(status)
+      ? status
+      : "unknown",
+    source_head: sourceHead,
+    current_head: currentHead,
+    evidence_path: currentWorkEvidencePath(
+      `.gran-maestro/sessions/${mstSessionId || "unknown"}/history.head`,
+      mstSessionId,
+    ),
+  };
+}
+
+function promptTimelineRows(
+  context: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const rows = PROMPT_TIMELINE_ROW_KEYS
+    .map((key) => context[key])
+    .find(Array.isArray) ?? [];
+  return rows.filter((row): row is Record<string, unknown> => isRecord(row)).map((row) => {
+    const event = isRecord(row.event) ? row.event : {};
+    const merged: Record<string, unknown> = { ...event };
+    for (const [sourceKey, targetKey] of [
+      ["event_type", "event_type"],
+      ["created_at", "created_at"],
+      ["timestamp", "timestamp"],
+      ["event_hash", "event_hash"],
+      ["prev_hash", "prev_hash"],
+      ["seq", "seq"],
+      ["mst_session_id", "mst_session_id"],
+    ] as const) {
+      if (row[sourceKey] !== undefined && merged[targetKey] === undefined) {
+        merged[targetKey] = row[sourceKey];
+      }
+    }
+    return merged;
+  });
+}
+
+function promptTimelineFollowingEvent(
+  row: Record<string, unknown>,
+  anchorHash: string | null,
+): Record<string, unknown> {
+  return {
+    seq: typeof row.seq === "number" ? row.seq : null,
+    event_type: eventType(row),
+    created_at: stringValue(row.created_at) ?? stringValue(row.timestamp),
+    timestamp: stringValue(row.timestamp) ?? stringValue(row.created_at),
+    prev_hash: stringValue(row.prev_hash),
+    event_hash: stringValue(row.event_hash),
+    mst_session_id: stringValue(row.mst_session_id),
+    head_relation: anchorHash && stringValue(row.prev_hash) === anchorHash
+      ? "direct_child"
+      : "after_anchor",
+  };
+}
+
+function promptTimelineEvidencePaths(
+  context: Record<string, unknown>,
+  mstSessionId: string,
+): string[] {
+  const paths = new Set<string>();
+  if (mstSessionId) {
+    paths.add(`.gran-maestro/sessions/${mstSessionId}/history.ndjson`);
+  }
+  const coverage = isRecord(context.writer_coverage) ? context.writer_coverage : {};
+  if (Array.isArray(coverage.writers)) {
+    for (const writer of coverage.writers) {
+      if (!isRecord(writer)) continue;
+      const evidencePath = stringValue(writer.evidence_path);
+      if (evidencePath?.startsWith(".gran-maestro/")) {
+        paths.add(evidencePath);
+      }
+    }
+  }
+  return [...paths].slice(0, 10);
+}
+
+function boundedPromptExcerpt(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const rawText = stringValue(value.text) ?? "";
+  const maxChars = Math.max(
+    1,
+    Math.min(PROMPT_EXCERPT_MAX_CHARS, typeof value.max_chars === "number" ? value.max_chars : PROMPT_EXCERPT_MAX_CHARS),
+  );
+  const text = rawText.slice(0, maxChars);
+  return {
+    text,
+    max_chars: maxChars,
+    truncated: Boolean(value.truncated) || rawText.length > maxChars,
+    omitted_bytes: typeof value.omitted_bytes === "number" ? value.omitted_bytes : Math.max(0, rawText.length - text.length),
+  };
+}
+
+function projectPromptTimeline(
+  context: Record<string, unknown>,
+): Record<string, unknown> {
+  const mstSessionId = canonicalMstSessionId(context);
+  const rows = promptTimelineRows(context);
+  const promptRows = rows.filter((row) => eventType(row) === PROMPT_TIMELINE_EVENT_TYPE);
+  const anchors: PromptTimelineAnchor[] = promptRows
+    .slice(0, PROMPT_TIMELINE_MAX_ANCHORS)
+    .map((row) => {
+      const rowSeq = typeof row.seq === "number" ? row.seq : null;
+      const anchorHash = stringValue(row.event_hash);
+      const followingRows = rows.filter((candidate) =>
+        typeof candidate.seq === "number" &&
+        typeof rowSeq === "number" &&
+        candidate.seq > rowSeq
+      );
+      const followingItems = followingRows
+        .slice(0, PROMPT_TIMELINE_MAX_FOLLOWING_EVENTS)
+        .map((candidate) => promptTimelineFollowingEvent(candidate, anchorHash));
+      return {
+        seq: rowSeq,
+        event_hash: anchorHash,
+        event_type: "prompt.submitted",
+        created_at: stringValue(row.created_at) ?? stringValue(row.timestamp),
+        timestamp: stringValue(row.timestamp) ?? stringValue(row.created_at),
+        prompt_digest: stringValue(row.prompt_digest),
+        prompt_size_bytes: typeof row.prompt_size_bytes === "number"
+          ? row.prompt_size_bytes
+          : null,
+        prompt_excerpt: boundedPromptExcerpt(row.prompt_excerpt),
+        transcript_path: stringValue(row.transcript_path),
+        history_head_before: stringValue(row.history_head_before),
+        idempotency_key: stringValue(row.idempotency_key),
+        source: stringValue(row.source),
+        head_relation: {
+          history_head_before: stringValue(row.history_head_before),
+          prompt_prev_hash: stringValue(row.prev_hash),
+          prompt_event_hash: anchorHash,
+          matches_previous_head: stringValue(row.history_head_before) ===
+            stringValue(row.prev_hash),
+        },
+        following_events: {
+          max_items: PROMPT_TIMELINE_MAX_FOLLOWING_EVENTS,
+          total: followingRows.length,
+          truncated: followingRows.length > PROMPT_TIMELINE_MAX_FOLLOWING_EVENTS,
+          items: followingItems,
+        },
+        first_semantic_event: followingItems.at(0) ?? null,
+      };
+    });
+  const followingEventTypes = anchors.flatMap((anchor) =>
+    anchor.following_events.items
+      .map((item) => stringValue(item.event_type))
+      .filter((type): type is string => Boolean(type))
+  );
+  return {
+    schema_version: 1,
+    mst_session_id: mstSessionId,
+    canonical_mst_session_id: mstSessionId,
+    generated_at: stringValue(context.generated_at) ?? new Date().toISOString(),
+    source_head: stringValue(context.source_history_head) ??
+      stringValue(context.current_history_head),
+    correlation_basis: ["ledger_order", "timestamp", "head_relation"],
+    projection_freshness: promptTimelineFreshness(context, mstSessionId),
+    prompt_anchors: {
+      max_items: PROMPT_TIMELINE_MAX_ANCHORS,
+      total: promptRows.length,
+      truncated: promptRows.length > PROMPT_TIMELINE_MAX_ANCHORS,
+      items: anchors,
+    },
+    policy_block_indicators: {
+      count: followingEventTypes.filter((type) => type === "policy_block").length,
+      event_types: followingEventTypes.includes("policy_block")
+        ? ["policy_block"]
+        : [],
+    },
+    core_block_indicators: {
+      count: followingEventTypes.filter((type) => type === "core_block").length,
+      event_types: followingEventTypes.includes("core_block")
+        ? ["core_block"]
+        : [],
+    },
+    evidence_paths: promptTimelineEvidencePaths(context, mstSessionId),
+  };
+}
+
+function sanitizePromptTimelineFollowingEvent(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const result: Record<string, unknown> = {};
+  for (const field of PROMPT_TIMELINE_FOLLOWING_EVENT_FIELDS) {
+    result[field] = value[field] ?? null;
+  }
+  return result;
+}
+
+function sanitizePromptTimelineAnchor(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isRecord(value) || !isRecord(value.following_events)) return null;
+  const result: Record<string, unknown> = {};
+  for (const field of PROMPT_TIMELINE_ANCHOR_FIELDS) {
+    result[field] = value[field] ?? null;
+  }
+  const followingEvents = isRecord(value.following_events)
+    ? value.following_events
+    : {};
+  result.following_events = {
+    max_items: typeof followingEvents.max_items === "number"
+      ? followingEvents.max_items
+      : PROMPT_TIMELINE_MAX_FOLLOWING_EVENTS,
+    total: typeof followingEvents.total === "number" ? followingEvents.total : 0,
+    truncated: Boolean(followingEvents.truncated),
+    items: Array.isArray(followingEvents.items)
+      ? followingEvents.items
+        .map(sanitizePromptTimelineFollowingEvent)
+        .filter((item): item is Record<string, unknown> => item !== null)
+      : [],
+  };
+  result.first_semantic_event = sanitizePromptTimelineFollowingEvent(
+    value.first_semantic_event,
+  );
+  result.head_relation = isRecord(value.head_relation) ? value.head_relation : {};
+  result.prompt_excerpt = boundedPromptExcerpt(value.prompt_excerpt);
+  return result;
+}
+
+function sanitizePromptTimelinePayload(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (
+    !isRecord(value) || !isRecord(value.prompt_anchors) ||
+    !isRecord(value.projection_freshness) ||
+    !Array.isArray(value.correlation_basis)
+  ) {
+    return null;
+  }
+  const result: Record<string, unknown> = {};
+  for (const field of PROMPT_TIMELINE_ALLOWED_FIELDS) {
+    result[field] = value[field] ?? null;
+  }
+  const anchors = isRecord(value.prompt_anchors) ? value.prompt_anchors : {};
+  result.prompt_anchors = {
+    max_items: typeof anchors.max_items === "number"
+      ? anchors.max_items
+      : PROMPT_TIMELINE_MAX_ANCHORS,
+    total: typeof anchors.total === "number" ? anchors.total : 0,
+    truncated: Boolean(anchors.truncated),
+    items: Array.isArray(anchors.items)
+      ? anchors.items
+        .map(sanitizePromptTimelineAnchor)
+        .filter((item): item is Record<string, unknown> => item !== null)
+      : [],
+  };
+  result.correlation_basis = value.correlation_basis.filter((basis): basis is string =>
+    ["ledger_order", "timestamp", "head_relation"].includes(String(basis))
+  );
+  result.evidence_paths = Array.isArray(value.evidence_paths)
+    ? value.evidence_paths.filter((path): path is string =>
+      typeof path === "string" && path.startsWith(".gran-maestro/")
+    )
+    : [];
+  return result;
 }
 
 function currentWorkEvidencePath(value: unknown, mstSessionId: string): string {
@@ -867,6 +1266,27 @@ async function readWriterCoverageContext(
   return {};
 }
 
+async function readPromptTimelineContext(
+  baseDir: string,
+  sessionId: string,
+  relativePath: string,
+): Promise<Record<string, unknown>> {
+  const candidates = [
+    relativePath ? `${baseDir}/${relativePath}` : "",
+    sessionId
+      ? `${baseDir}/sessions/${sessionId}/prompt-timeline-context.json`
+      : "",
+    sessionId ? `${baseDir}/sessions/${sessionId}/prompt-timeline.json` : "",
+    `${baseDir}/debug/prompt-timeline-context.json`,
+    `${baseDir}/debug/prompt-timeline.json`,
+  ].filter(Boolean);
+  for (const path of candidates) {
+    const payload = await readJsonFile<unknown>(path);
+    if (isRecord(payload)) return payload;
+  }
+  return {};
+}
+
 projectDebugApi.get("/debug", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));
   if (!baseDir) {
@@ -961,6 +1381,40 @@ projectDebugApi.get("/debug/current-work-handoff", async (c) => {
     projectCurrentWorkHandoff({
       ...context,
       schema_version: context.schema_version ?? 1,
+      mst_session_id: context.mst_session_id ?? sessionId,
+      canonical_mst_session_id: context.canonical_mst_session_id ?? sessionId,
+      source_history_head: context.source_history_head ?? sourceHistoryHead ??
+        null,
+      current_history_head: context.current_history_head ?? currentHistoryHead ??
+        null,
+    });
+
+  return c.json(boundedPayload);
+});
+
+projectDebugApi.get("/debug/prompt-timeline", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const sessionId = safeSegment(c.req.query("session"));
+  const sourceHistoryHead = stringValue(c.req.query("source_head"));
+  const currentHistoryHead = stringValue(c.req.query("current_head")) ??
+    sourceHistoryHead;
+  const relativeContextPath = safeRelativeJsonPath(c.req.query("context"));
+  if (c.req.query("context") && !relativeContextPath) {
+    return c.json({ error: "Invalid context path" }, 400);
+  }
+
+  const context = await readPromptTimelineContext(
+    baseDir,
+    sessionId,
+    relativeContextPath,
+  );
+  const boundedPayload = sanitizePromptTimelinePayload(context) ??
+    projectPromptTimeline({
+      ...context,
       mst_session_id: context.mst_session_id ?? sessionId,
       canonical_mst_session_id: context.canonical_mst_session_id ?? sessionId,
       source_history_head: context.source_history_head ?? sourceHistoryHead ??

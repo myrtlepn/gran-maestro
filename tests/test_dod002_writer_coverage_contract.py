@@ -48,7 +48,7 @@ EXPECTED_STATUSES = {
     "bash_history_writer": "identity_mismatch",
     "policy_writer": "write_failed",
     "stop_continuation_writer": "schema_invalid",
-    "prompt_writer": "not_applicable",
+    "prompt_writer": "not_seen",
     "hook_lifecycle_ledger": "unknown",
 }
 
@@ -171,12 +171,12 @@ def _writer_matrix() -> list[dict[str, Any]]:
         {
             "writer_id": "prompt_writer",
             "surface": "prompt writer",
-            "expected": False,
+            "expected": True,
             "expected_events": ["prompt.submitted"],
             "required_when": "UserPromptSubmit event is available",
             "identity_classification": "canonical selector + diagnostics",
             "delivery_type": "return_payload",
-            "evidence_path": ".gran-maestro/requests/REQ-823/follow-up-dod004.md",
+            "evidence_path": f".gran-maestro/sessions/{SID}/history.ndjson",
         },
         {
             "writer_id": "hook_lifecycle_ledger",
@@ -342,10 +342,10 @@ def test_writer_coverage_keeps_not_applicable_separate_from_expected_but_unobser
     assert state["observed"] is False
     assert state["status"] == "not_seen"
 
-    assert prompt["expected"] is False
+    assert prompt["expected"] is True
     assert prompt["observed"] is False
-    assert prompt["status"] == "not_applicable"
-    assert "DOD-004" in prompt["reason"] or "not applicable" in prompt["reason"].lower()
+    assert prompt["status"] == "not_seen"
+    assert "matching event" in prompt["reason"].lower()
 
 
 def test_writer_coverage_payload_is_bounded_and_excludes_raw_history_full_payload() -> None:
@@ -365,7 +365,7 @@ def test_writer_coverage_payload_is_bounded_and_excludes_raw_history_full_payloa
     assert isinstance(summary, dict), "bounded payload must include summary counts"
     assert summary["total"] == len(EXPECTED_STATUSES)
     assert summary["ok"] == 1
-    assert summary["not_applicable"] == 1
+    assert summary["not_applicable"] == 0
     assert summary["non_ok"] == len(EXPECTED_STATUSES) - 1
 
 

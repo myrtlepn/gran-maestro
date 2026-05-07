@@ -165,6 +165,16 @@ if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_comple
   trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
 fi
 
+append_semantic_prompt_submitted() {
+  (
+    cd "$PROJECT_ROOT" || exit 0
+    printf '%s' "$STDIN_RAW" | python3 scripts/mst_cmds/prompt_correlation.py append-user-prompt \
+      --project-root "$PROJECT_ROOT" >/dev/null
+  ) 2>/dev/null || true
+}
+
+append_semantic_prompt_submitted
+
 is_auto_chain_active() {
   python3 - "$STATE_FILE" <<'PY' 2>/dev/null || true
 import json
