@@ -820,6 +820,8 @@ def cmd_on_cleanup(args) -> int:
         if failed:
             mutated = bool(removed or deleted)
             # rollback settings
+            settings_rolled_back = backup_text is None
+            settings_rollback_error = None
             if backup_text is not None:
                 try:
                     tmp_fd, tmp_path = tempfile.mkstemp(
@@ -830,13 +832,20 @@ def cmd_on_cleanup(args) -> int:
                     with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                         f.write(backup_text)
                     os.replace(tmp_path, settings_path)
-                except OSError:
-                    pass
-            inventory["mutation"]["mutated"] = mutated
+                    settings_rolled_back = True
+                except OSError as exc:
+                    settings_rollback_error = str(exc)
+            inventory["mutation"]["mutated"] = mutated and settings_rolled_back
             payload.update(inventory)
-            payload["status"] = "rollback"
-            payload["reason"] = "file deletion failed; settings rollback attempted"
-            payload["settings"] = {"removed": removed, "rolled_back": True}
+            payload["status"] = "rollback" if settings_rolled_back else "error"
+            payload["reason"] = (
+                "file deletion failed; settings rollback attempted"
+                if settings_rolled_back
+                else "file deletion failed; settings rollback failed"
+            )
+            payload["settings"] = {"removed": removed, "rolled_back": settings_rolled_back}
+            if settings_rollback_error is not None:
+                payload["settings"]["rollback_error"] = settings_rollback_error
             payload["files"] = {"deleted": deleted, "failed": failed}
             _emit(args, payload)
             return 1

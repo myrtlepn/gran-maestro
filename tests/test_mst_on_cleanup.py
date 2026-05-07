@@ -697,6 +697,48 @@ def test_cleanup_file_delete_failure_restores_files_after_quarantine_unlink_erro
     assert _read_bytes_by_path(watched_paths) == before
 
 
+def test_cleanup_settings_rollback_failure_reports_error(tmp_path, monkeypatch, capsys):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    monkeypatch.setenv("MST_PROJECT_ROOT", str(project))
+    real_replace = on.os.replace
+
+    def fake_file_deletions(targets):
+        def fail_restore_replace(src, dst):
+            if str(dst).endswith("settings.local.json"):
+                raise OSError("simulated settings rollback failure")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(on.os, "replace", fail_restore_replace)
+        return [], [(str(project / ".claude" / "hooks" / "mst-stop-hook.sh"), "simulated delete failure")]
+
+    monkeypatch.setattr(on, "_apply_file_deletions", fake_file_deletions)
+    args = type("Args", (), {"dry_run": False, "json": True, "silent": False})()
+
+    rc = on.cmd_on_cleanup(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "file deletion failed; settings rollback failed"
+    assert payload["settings"]["rolled_back"] is False
+    assert "rollback_error" in payload["settings"]
+    assert payload["mutation"] == {"dry_run": False, "mutated": False}
+
+
 def test_inventory_dry_run_json_exposes_dod002_top_level_contract(tmp_path):
     project = _setup_dod002_inventory_project(tmp_path)
     home = tmp_path / "home"
