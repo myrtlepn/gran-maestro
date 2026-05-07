@@ -17,6 +17,8 @@ from typing import Optional
 
 import pytest
 
+from scripts.mst_cmds import on
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_CLI = [sys.executable, str(REPO_ROOT / "scripts" / "mst.py")]
 DOD002_TOP_LEVEL_FIELDS = {
@@ -66,6 +68,12 @@ def _run_cleanup_dry_run_json(cwd: Path, env: Optional[dict] = None) -> dict:
     return json.loads(proc.stdout)
 
 
+def _run_cleanup_apply_json(cwd: Path, env: Optional[dict] = None) -> dict:
+    proc = _run_cleanup(cwd, env=env)
+    assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
+    return json.loads(proc.stdout)
+
+
 def _setup_dod002_inventory_project(tmp_path: Path) -> Path:
     project = _setup_registered_project(
         tmp_path,
@@ -98,6 +106,22 @@ def _setup_dod002_inventory_project(tmp_path: Path) -> Path:
 
 def _read_bytes_by_path(paths: list[Path]) -> dict[Path, bytes]:
     return {path: path.read_bytes() for path in paths}
+
+
+def _read_project_settings(project: Path) -> dict:
+    return json.loads((project / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+
+
+def _commands_for(settings: dict, event: str, matcher: str = "") -> list[str]:
+    commands: list[str] = []
+    for entry in settings.get("hooks", {}).get(event, []):
+        if entry.get("matcher", "") != matcher:
+            continue
+        for hook in entry.get("hooks", []):
+            command = hook.get("command")
+            if isinstance(command, str):
+                commands.append(command)
+    return commands
 
 
 def _collect_classifications(value) -> set[str]:
@@ -362,6 +386,357 @@ def test_dry_run_no_changes(tmp_path):
     assert (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
     settings = json.loads((project / ".claude" / "settings.local.json").read_text())
     assert "Stop" in settings.get("hooks", {})
+
+
+def test_cleanup_apply_preserves_custom_command_in_mixed_matcher_and_reports_inventory(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "shell",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "/home/user/scripts/my-prompt-hook.sh"}
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+
+    payload = _run_cleanup_apply_json(project)
+
+    settings = _read_project_settings(project)
+    stop_commands = _commands_for(settings, "Stop", "shell")
+    assert stop_commands == ["/usr/local/bin/my-custom-stop-hook.sh"]
+    assert _commands_for(settings, "UserPromptSubmit") == ["/home/user/scripts/my-prompt-hook.sh"]
+
+    assert payload["status"] == "ok"
+    assert payload["mutation"] == {"dry_run": False, "mutated": True}
+    assert DOD002_TOP_LEVEL_FIELDS.issubset(payload)
+
+
+def test_cleanup_files_only_known_legacy_removed_and_preserved_user_mst_like_files(tmp_path):
+    known_legacy = [
+        "mst-stop-hook.sh",
+        "mst-session-init.sh",
+        "mst-pre-tool-use.sh",
+        "mst-auto-chain-context.sh",
+    ]
+    preserved_files = [
+        "mst-user-custom.sh",
+        "mst-stop-hook.local.sh",
+        "my-user-hook.sh",
+    ]
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=known_legacy + preserved_files,
+    )
+
+    payload = _run_cleanup_apply_json(project)
+
+    hooks_dir = project / ".claude" / "hooks"
+    assert all(not (hooks_dir / name).exists() for name in known_legacy)
+    assert all((hooks_dir / name).exists() for name in preserved_files)
+    deleted_basenames = {Path(path).name for path in payload["files"]["deleted"]}
+    assert deleted_basenames == set(known_legacy)
+
+
+def test_cleanup_apply_is_idempotent_no_op_on_second_run(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+
+    first_payload = _run_cleanup_apply_json(project)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    after_first = _read_bytes_by_path(watched_paths)
+
+    second_payload = _run_cleanup_apply_json(project)
+
+    assert first_payload["status"] == "ok"
+    assert second_payload["status"] in {"ok", "no_op"}
+    assert second_payload["settings"]["removed"] == []
+    assert second_payload["files"]["deleted"] == []
+    assert second_payload["mutation"] == {"dry_run": False, "mutated": False}
+    assert _read_bytes_by_path(watched_paths) == after_first
+
+
+def test_cleanup_no_op_preserves_existing_empty_hooks_dir(tmp_path):
+    project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+    hooks_dir = project / ".claude" / "hooks"
+    assert hooks_dir.exists()
+
+    payload = _run_cleanup_apply_json(project)
+
+    assert payload["status"] == "ok"
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["deleted"] == []
+    assert payload["mutation"] == {"dry_run": False, "mutated": False}
+    assert hooks_dir.exists()
+
+
+def test_cleanup_malformed_settings_failure_reported_without_destructive_mutation(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    settings_path = project / ".claude" / "settings.local.json"
+    settings_path.write_text('{"hooks": ', encoding="utf-8")
+    watched_paths = [
+        settings_path,
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    proc = _run_cleanup(project)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode in {0, 1}
+    assert payload["status"] in {"skipped", "error", "failed", "diagnostic"}
+    assert {"malformed_settings", "parse_error"}.intersection(_diagnostic_codes(payload))
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_unexpected_hooks_schema_failure_reported_without_destructive_mutation(tmp_path):
+    project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=["my-user-hook.sh"])
+    settings_path = project / ".claude" / "settings.local.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": ["Read"]},
+                "hooks": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"}
+                        ],
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    watched_paths = [
+        settings_path,
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    proc = _run_cleanup(project)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode in {0, 1}
+    assert payload["status"] in {"skipped", "error", "failed", "diagnostic"}
+    assert "diagnostics" in payload
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_settings_write_failure_reports_reason_without_file_deletion(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"}
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    claude_dir = project / ".claude"
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+    claude_dir.chmod(0o555)
+    try:
+        proc = _run_cleanup(project)
+    finally:
+        claude_dir.chmod(0o755)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "settings.local.json write failed"
+    assert payload["settings"]["failed"]
+    assert payload["files"]["deleted"] == []
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_file_delete_failure_reports_reason_and_rolls_back_settings(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        hooks_dir / "mst-stop-hook.sh",
+        hooks_dir / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+    hooks_dir.chmod(0o555)
+    try:
+        proc = _run_cleanup(project)
+    finally:
+        hooks_dir.chmod(0o755)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 1
+    assert payload["status"] == "rollback"
+    assert payload["reason"] == "file deletion failed; settings rollback attempted"
+    assert payload["settings"]["rolled_back"] is True
+    assert payload["files"]["failed"]
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_file_delete_failure_restores_files_after_partial_move(tmp_path, monkeypatch):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=["mst-stop-hook.sh", "mst-session-init.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    targets = [
+        str(hooks_dir / "mst-stop-hook.sh"),
+        str(hooks_dir / "mst-session-init.sh"),
+    ]
+    watched_paths = [Path(target) for target in targets] + [hooks_dir / "my-user-hook.sh"]
+    before = _read_bytes_by_path(watched_paths)
+    real_replace = on.os.replace
+    move_count = 0
+
+    def fail_second_move(src, dst):
+        nonlocal move_count
+        if str(src) in targets:
+            move_count += 1
+            if move_count == 2:
+                raise OSError("simulated delete preparation failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(on.os, "replace", fail_second_move)
+
+    deleted, failed = on._apply_file_deletions(targets)
+
+    assert deleted == []
+    assert failed
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_file_delete_failure_restores_files_after_quarantine_unlink_error(tmp_path, monkeypatch):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=["mst-stop-hook.sh", "mst-session-init.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    targets = [
+        str(hooks_dir / "mst-stop-hook.sh"),
+        str(hooks_dir / "mst-session-init.sh"),
+    ]
+    watched_paths = [Path(target) for target in targets] + [hooks_dir / "my-user-hook.sh"]
+    before = _read_bytes_by_path(watched_paths)
+    real_unlink = Path.unlink
+
+    def fail_quarantine_unlink(self, *args, **kwargs):
+        if ".mst-cleanup." in str(self):
+            raise OSError("simulated final delete failure")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_quarantine_unlink)
+
+    deleted, failed = on._apply_file_deletions(targets)
+
+    assert deleted == []
+    assert failed
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_settings_rollback_failure_reports_error(tmp_path, monkeypatch, capsys):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    monkeypatch.setenv("MST_PROJECT_ROOT", str(project))
+    real_replace = on.os.replace
+
+    def fake_file_deletions(targets):
+        def fail_restore_replace(src, dst):
+            if str(dst).endswith("settings.local.json"):
+                raise OSError("simulated settings rollback failure")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(on.os, "replace", fail_restore_replace)
+        return [], [(str(project / ".claude" / "hooks" / "mst-stop-hook.sh"), "simulated delete failure")]
+
+    monkeypatch.setattr(on, "_apply_file_deletions", fake_file_deletions)
+    args = type("Args", (), {"dry_run": False, "json": True, "silent": False})()
+
+    rc = on.cmd_on_cleanup(args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "file deletion failed; settings rollback failed"
+    assert payload["settings"]["rolled_back"] is False
+    assert "rollback_error" in payload["settings"]
+    assert payload["mutation"] == {"dry_run": False, "mutated": False}
 
 
 def test_inventory_dry_run_json_exposes_dod002_top_level_contract(tmp_path):

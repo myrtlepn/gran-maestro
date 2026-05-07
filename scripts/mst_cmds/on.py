@@ -401,26 +401,36 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
 
     settings = _read_json_diagnostic(settings_path, diagnostics, malformed_settings=True)
     if isinstance(settings, dict):
-        for item in _iter_settings_hook_commands(settings) or []:
-            command = item["command"]
-            if MST_HOOK_COMMAND_RE.search(command):
-                project_legacy["settings"]["candidates"].append(
-                    {
-                        "classification": CLASS_PROJECT_LEGACY,
-                        "status": "candidate",
-                        "reason": "legacy_mst_settings_hook",
-                        **item,
-                    }
+        hooks_value = settings.get("hooks")
+        if "hooks" in settings and not isinstance(hooks_value, dict):
+            diagnostics.append(
+                _diagnostic(
+                    DIAGNOSTIC_MALFORMED_SETTINGS,
+                    "settings.local.json hooks must be a JSON object",
+                    settings_path,
                 )
-            else:
-                user_custom["settings"].append(
-                    {
-                        "classification": CLASS_USER_CUSTOM,
-                        "status": "preserved",
-                        "reason": "user_custom_settings_hook",
-                        **item,
-                    }
-                )
+            )
+        else:
+            for item in _iter_settings_hook_commands(settings) or []:
+                command = item["command"]
+                if MST_HOOK_COMMAND_RE.search(command):
+                    project_legacy["settings"]["candidates"].append(
+                        {
+                            "classification": CLASS_PROJECT_LEGACY,
+                            "status": "candidate",
+                            "reason": "legacy_mst_settings_hook",
+                            **item,
+                        }
+                    )
+                else:
+                    user_custom["settings"].append(
+                        {
+                            "classification": CLASS_USER_CUSTOM,
+                            "status": "preserved",
+                            "reason": "user_custom_settings_hook",
+                            **item,
+                        }
+                    )
     elif settings_path.exists() and not any(d.get("path") == str(settings_path) for d in diagnostics):
         diagnostics.append(_diagnostic(DIAGNOSTIC_MALFORMED_SETTINGS, "settings.local.json is not a JSON object", settings_path))
 
@@ -545,6 +555,21 @@ def _build_cleanup_inventory(project_root: Path, *, dry_run: bool, mutated: bool
     }
 
 
+def _settings_diagnostics_block_mutation(project_root: Path, diagnostics: List[dict]) -> bool:
+    settings_path = str(project_root / ".claude" / "settings.local.json")
+    blocking_codes = {
+        DIAGNOSTIC_MALFORMED_SETTINGS,
+        DIAGNOSTIC_PARSE_ERROR,
+        DIAGNOSTIC_PERMISSION_DENIED,
+    }
+    for diagnostic in diagnostics:
+        if diagnostic.get("path") != settings_path:
+            continue
+        if diagnostic.get("code") in blocking_codes:
+            return True
+    return False
+
+
 def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[bool, List[str]]:
     """settings.local.json hooks 정리 적용. atomic via tempfile + os.replace."""
     if original_text is None:
@@ -564,9 +589,12 @@ def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[
         new_settings["hooks"] = new_hooks
     else:
         new_settings.pop("hooks", None)
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        prefix=".settings.local.json.", suffix=".tmp", dir=str(settings_path.parent)
-    )
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            prefix=".settings.local.json.", suffix=".tmp", dir=str(settings_path.parent)
+        )
+    except OSError:
+        return False, removed
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(new_settings, f, indent=2, ensure_ascii=False)
@@ -582,17 +610,82 @@ def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[
 
 
 def _apply_file_deletions(targets: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
-    deleted: List[str] = []
-    failed: List[Tuple[str, str]] = []
-    for target in targets:
+    existing = [Path(target) for target in targets if Path(target).exists()]
+    if not existing:
+        return [], []
+
+    backups: Dict[Path, Tuple[bytes, int]] = {}
+    for target in existing:
         try:
-            Path(target).unlink()
-            deleted.append(target)
+            stat_result = target.stat()
+            backups[target] = (target.read_bytes(), stat_result.st_mode)
+        except OSError as exc:
+            return [], [(str(target), str(exc))]
+
+    try:
+        quarantine_dir = Path(tempfile.mkdtemp(prefix=".mst-cleanup.", dir=str(existing[0].parent)))
+    except OSError as exc:
+        return [], [(str(target), str(exc)) for target in existing]
+
+    moved: List[Tuple[Path, Path]] = []
+    failed: List[Tuple[str, str]] = []
+    for index, target in enumerate(existing):
+        quarantine_path = quarantine_dir / f"{index}-{target.name}"
+        try:
+            os.replace(target, quarantine_path)
+            moved.append((target, quarantine_path))
         except FileNotFoundError:
             continue
         except OSError as exc:
-            failed.append((target, str(exc)))
-    return deleted, failed
+            failed.append((str(target), str(exc)))
+            break
+
+    def restore_targets() -> None:
+        for target, quarantine_path in reversed(moved):
+            try:
+                if quarantine_path.exists():
+                    os.replace(quarantine_path, target)
+            except OSError as exc:
+                failed.append((str(target), f"restore failed: {exc}"))
+        for target, (content, mode) in backups.items():
+            if target.exists():
+                continue
+            try:
+                target.write_bytes(content)
+                target.chmod(mode & 0o777)
+            except OSError as exc:
+                failed.append((str(target), f"restore failed: {exc}"))
+
+    if failed:
+        restore_targets()
+        try:
+            quarantine_dir.rmdir()
+        except OSError:
+            pass
+        return [], failed
+
+    deleted: List[str] = []
+    for target, quarantine_path in moved:
+        try:
+            quarantine_path.unlink()
+            deleted.append(str(target))
+        except OSError as exc:
+            failed.append((str(target), str(exc)))
+            break
+
+    if failed:
+        restore_targets()
+        try:
+            quarantine_dir.rmdir()
+        except OSError:
+            pass
+        return [], failed
+
+    try:
+        quarantine_dir.rmdir()
+    except OSError:
+        pass
+    return deleted, []
 
 
 def _emit(args: argparse.Namespace, payload: dict) -> None:
@@ -659,30 +752,65 @@ def cmd_on_cleanup(args) -> int:
         return 0
 
     if _is_plugin_source_repo(project_root):
+        inventory = _build_cleanup_inventory(project_root, dry_run=False, mutated=False)
+        payload["status"] = "skipped"
+        payload["reason"] = "plugin source repo (out of cleanup scope)"
+        payload["settings"] = {
+            "path": str(project_root / ".claude" / "settings.local.json"),
+            "exists": (project_root / ".claude" / "settings.local.json").exists(),
+            "removed": [],
+        }
+        payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+        payload.update(inventory)
         payload["status"] = "skipped"
         payload["reason"] = "plugin source repo (out of cleanup scope)"
         _emit(args, payload)
         return 0
 
     if not _acquire_lock(lock_path):
+        inventory = _build_cleanup_inventory(project_root, dry_run=False, mutated=False)
+        payload["status"] = "skipped"
+        payload["reason"] = "another cleanup in progress (lock held)"
+        payload["settings"] = {"removed": []}
+        payload["files"] = {"deleted": []}
+        payload.update(inventory)
         payload["status"] = "skipped"
         payload["reason"] = "another cleanup in progress (lock held)"
         _emit(args, payload)
         return 0
 
     try:
+        inventory = _build_cleanup_inventory(project_root, dry_run=False, mutated=False)
+        if _settings_diagnostics_block_mutation(project_root, inventory.get("diagnostics", [])):
+            payload.update(inventory)
+            payload["status"] = "diagnostic"
+            payload["reason"] = "settings.local.json cannot be safely mutated"
+            payload["settings"] = {"removed": []}
+            payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+            _emit(args, payload)
+            return 0
+
         settings_path = project_root / ".claude" / "settings.local.json"
         backup_text: Optional[str] = None
         if settings_path.exists():
             try:
                 backup_text = settings_path.read_text(encoding="utf-8")
             except OSError:
-                backup_text = None
+                payload.update(inventory)
+                payload["status"] = "diagnostic"
+                payload["reason"] = "settings.local.json cannot be read"
+                payload["settings"] = {"removed": []}
+                payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+                _emit(args, payload)
+                return 0
 
         ok_settings, removed = _apply_settings(settings_path, backup_text)
         if not ok_settings:
+            payload.update(inventory)
             payload["status"] = "error"
             payload["reason"] = "settings.local.json write failed"
+            payload["settings"] = {"removed": [], "failed": removed}
+            payload["files"] = {"deleted": []}
             _emit(args, payload)
             return 1
 
@@ -690,7 +818,10 @@ def cmd_on_cleanup(args) -> int:
         deleted, failed = _apply_file_deletions(targets)
 
         if failed:
+            mutated = bool(removed or deleted)
             # rollback settings
+            settings_rolled_back = backup_text is None
+            settings_rollback_error = None
             if backup_text is not None:
                 try:
                     tmp_fd, tmp_path = tempfile.mkstemp(
@@ -701,10 +832,20 @@ def cmd_on_cleanup(args) -> int:
                     with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                         f.write(backup_text)
                     os.replace(tmp_path, settings_path)
-                except OSError:
-                    pass
-            payload["status"] = "rollback"
-            payload["settings"] = {"removed": removed, "rolled_back": True}
+                    settings_rolled_back = True
+                except OSError as exc:
+                    settings_rollback_error = str(exc)
+            inventory["mutation"]["mutated"] = mutated and settings_rolled_back
+            payload.update(inventory)
+            payload["status"] = "rollback" if settings_rolled_back else "error"
+            payload["reason"] = (
+                "file deletion failed; settings rollback attempted"
+                if settings_rolled_back
+                else "file deletion failed; settings rollback failed"
+            )
+            payload["settings"] = {"removed": removed, "rolled_back": settings_rolled_back}
+            if settings_rollback_error is not None:
+                payload["settings"]["rollback_error"] = settings_rollback_error
             payload["files"] = {"deleted": deleted, "failed": failed}
             _emit(args, payload)
             return 1
@@ -712,11 +853,14 @@ def cmd_on_cleanup(args) -> int:
         # cleanup empty .claude/hooks dir (선택)
         hooks_dir = project_root / ".claude" / "hooks"
         try:
-            if hooks_dir.exists() and not any(hooks_dir.iterdir()):
+            if deleted and hooks_dir.exists() and not any(hooks_dir.iterdir()):
                 hooks_dir.rmdir()
         except OSError:
             pass
 
+        mutated = bool(removed or deleted)
+        inventory["mutation"]["mutated"] = mutated
+        payload.update(inventory)
         payload["status"] = "ok"
         payload["settings"] = {"removed": removed}
         payload["files"] = {"deleted": deleted}
