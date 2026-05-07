@@ -114,6 +114,23 @@ def test_output_contains_required_fields(tmp_path, monkeypatch, capsys):
     assert "Expected version:" in captured.out
 
 
+def test_doctor_fixtures_model_project_legacy_not_canonical(tmp_path, monkeypatch, capsys):
+    """Doctor inspects project-local hook copies as legacy/source-dev diagnostics."""
+    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert installed_path == tmp_path / "workspace" / ".claude" / "hooks"
+    assert source_path == tmp_path / "plugin" / "hooks"
+    assert "${CLAUDE_PLUGIN_ROOT}" not in captured.out
+    assert "Installed hooks:" in captured.out
+    assert "Source hooks:" in captured.out
+
+
 def test_doctor_output_contains_legacy_env_alias_migration_tokens(tmp_path, monkeypatch, capsys):
     """DOD-010: doctor exposes deprecated legacy alias migration signal."""
     installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)

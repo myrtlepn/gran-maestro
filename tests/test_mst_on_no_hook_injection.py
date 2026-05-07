@@ -54,6 +54,15 @@ def test_skill_md_announces_hooks_json_self_registration():
     assert "hooks.json 자체 등록" in text, (
         "hooks.json self-registration 안내 누락"
     )
+    assert "plugin core canonical runtime" in text, (
+        "plugin core canonical runtime 안내 누락"
+    )
+    assert "일반 프로젝트 canonical runtime이 아니라 project legacy" in text, (
+        "project legacy 경계 안내 누락"
+    )
+    assert "user-global environment hook" in text, (
+        "user-global hook 계층 안내 누락"
+    )
     assert "${CLAUDE_PLUGIN_ROOT}" in text, (
         "${CLAUDE_PLUGIN_ROOT} 변수 안내 누락"
     )
@@ -130,6 +139,8 @@ def test_hooks_json_unchanged():
         for entry in entries:
             for h in entry.get("hooks", []):
                 cmd = h.get("command", "")
-                assert "${CLAUDE_PLUGIN_ROOT}" in cmd, (
-                    f"{event} hook command missing CLAUDE_PLUGIN_ROOT: {cmd}"
+                assert cmd.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/"), (
+                    f"{event} hook command must use canonical plugin root path: {cmd}"
                 )
+                assert "$CLAUDE_PROJECT_DIR/.claude/hooks" not in cmd
+                assert ".claude/hooks" not in cmd
