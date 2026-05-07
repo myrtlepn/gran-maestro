@@ -17,6 +17,8 @@ from typing import Optional
 
 import pytest
 
+from scripts.mst_cmds import on
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_CLI = [sys.executable, str(REPO_ROOT / "scripts" / "mst.py")]
 DOD002_TOP_LEVEL_FIELDS = {
@@ -616,6 +618,39 @@ def test_cleanup_file_delete_failure_reports_reason_and_rolls_back_settings(tmp_
     assert payload["reason"] == "file deletion failed; settings rollback attempted"
     assert payload["settings"]["rolled_back"] is True
     assert payload["files"]["failed"]
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_file_delete_failure_restores_files_after_partial_move(tmp_path, monkeypatch):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=["mst-stop-hook.sh", "mst-session-init.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    targets = [
+        str(hooks_dir / "mst-stop-hook.sh"),
+        str(hooks_dir / "mst-session-init.sh"),
+    ]
+    watched_paths = [Path(target) for target in targets] + [hooks_dir / "my-user-hook.sh"]
+    before = _read_bytes_by_path(watched_paths)
+    real_replace = on.os.replace
+    move_count = 0
+
+    def fail_second_move(src, dst):
+        nonlocal move_count
+        if str(src) in targets:
+            move_count += 1
+            if move_count == 2:
+                raise OSError("simulated delete preparation failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(on.os, "replace", fail_second_move)
+
+    deleted, failed = on._apply_file_deletions(targets)
+
+    assert deleted == []
+    assert failed
     assert _read_bytes_by_path(watched_paths) == before
 
 

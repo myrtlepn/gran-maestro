@@ -610,17 +610,51 @@ def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[
 
 
 def _apply_file_deletions(targets: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
-    deleted: List[str] = []
+    existing = [Path(target) for target in targets if Path(target).exists()]
+    if not existing:
+        return [], []
+    try:
+        quarantine_dir = Path(tempfile.mkdtemp(prefix=".mst-cleanup.", dir=str(existing[0].parent)))
+    except OSError as exc:
+        return [], [(str(target), str(exc)) for target in existing]
+
+    moved: List[Tuple[Path, Path]] = []
     failed: List[Tuple[str, str]] = []
-    for target in targets:
+    for index, target in enumerate(existing):
+        quarantine_path = quarantine_dir / f"{index}-{target.name}"
         try:
-            Path(target).unlink()
-            deleted.append(target)
+            os.replace(target, quarantine_path)
+            moved.append((target, quarantine_path))
         except FileNotFoundError:
             continue
         except OSError as exc:
-            failed.append((target, str(exc)))
-    return deleted, failed
+            failed.append((str(target), str(exc)))
+            break
+
+    if failed:
+        for target, quarantine_path in reversed(moved):
+            try:
+                if quarantine_path.exists():
+                    os.replace(quarantine_path, target)
+            except OSError as exc:
+                failed.append((str(target), f"restore failed: {exc}"))
+        try:
+            quarantine_dir.rmdir()
+        except OSError:
+            pass
+        return [], failed
+
+    deleted = [str(target) for target, _ in moved]
+    for _, quarantine_path in moved:
+        try:
+            quarantine_path.unlink()
+        except OSError:
+            pass
+    try:
+        quarantine_dir.rmdir()
+    except OSError:
+        pass
+    return deleted, []
 
 
 def _emit(args: argparse.Namespace, payload: dict) -> None:
