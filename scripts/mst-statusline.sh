@@ -125,6 +125,111 @@ save_transcript_bridge() {
   fi
 }
 
+build_compact_mst_line() {
+  local snapshot_path="${1:-}"
+  local input_json="${2:-}"
+  local mst_session_id="${3:-}"
+  local external_hud_available="${4:-true}"
+  PYTHONPATH="${STATUSLINE_SOURCE_ROOT}${PYTHONPATH:+:$PYTHONPATH}" python3 - "$snapshot_path" "$input_json" "$mst_session_id" "$external_hud_available" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+from pathlib import Path
+
+from scripts.mst_cmds.current_work_handoff import project_current_work_handoff
+from scripts.mst_cmds.hud_statusline_compact import project_hud_statusline_compact
+
+snapshot_path = sys.argv[1] if len(sys.argv) > 1 else ""
+input_json = sys.argv[2] if len(sys.argv) > 2 else ""
+mst_session_id = sys.argv[3] if len(sys.argv) > 3 else ""
+external_hud_available = (sys.argv[4] if len(sys.argv) > 4 else "true") == "true"
+
+try:
+    input_payload = json.loads(input_json or "{}")
+except Exception:
+    input_payload = {}
+if not isinstance(input_payload, dict):
+    input_payload = {}
+
+source = None
+if snapshot_path and os.path.isfile(snapshot_path):
+    try:
+        data = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if isinstance(data, dict):
+        stack = data.get("skillStack") if isinstance(data.get("skillStack"), list) else []
+        current_skill = data.get("currentSkill") or data.get("current_skill")
+        current_step = data.get("step", data.get("currentStep", data.get("current_step")))
+        total_steps = data.get("total", data.get("totalSteps", data.get("total_steps")))
+        tasks = []
+        for index, frame in enumerate(stack):
+            if not isinstance(frame, dict):
+                continue
+            tasks.append(
+                {
+                    "kind": "workflow_frame",
+                    "id": str(frame.get("id") or frame.get("source_id") or frame.get("skill") or f"stack-{index + 1}"),
+                    "title": str(frame.get("title") or frame.get("skill") or "workflow frame"),
+                    "status": str(frame.get("status") or "active"),
+                    "owner": str(frame.get("owner") or "unknown"),
+                    "phase": str(frame.get("phase") or "statusline"),
+                    "source": "snapshot",
+                    "evidence_path": str(frame.get("evidence_path") or ".gran-maestro/state/snapshot.json"),
+                }
+            )
+        if isinstance(current_skill, str) and current_skill.strip():
+            tasks.append(
+                {
+                    "kind": "active_workflow",
+                    "id": str(data.get("root_id") or data.get("source_id") or current_skill),
+                    "title": current_skill,
+                    "status": str(data.get("status") or "active"),
+                    "owner": str(data.get("owner") or "unknown"),
+                    "phase": "statusline",
+                    "source": "snapshot",
+                    "evidence_path": str(data.get("evidence_path") or ".gran-maestro/state/snapshot.json"),
+                }
+            )
+        next_action = data.get("nextAction") if isinstance(data.get("nextAction"), dict) else data.get("next_action")
+        source = {
+            "schema_version": data.get("schema_version", 1),
+            "mst_session_id": mst_session_id or data.get("mst_session_id") or input_payload.get("mst_session_id") or "",
+            "canonical_mst_session_id": mst_session_id or data.get("canonical_mst_session_id") or data.get("mst_session_id") or input_payload.get("mst_session_id") or "",
+            "root_id": data.get("root_id") or data.get("source_id") or "unknown",
+            "generated_at": data.get("generated_at") or data.get("updated_at") or "",
+            "source_history_head": data.get("source_history_head"),
+            "current_history_head": data.get("current_history_head"),
+            "identity": {
+                "env": {"MST_SESSION_ID": mst_session_id} if mst_session_id else {},
+                "context": {"mst_session_id": input_payload.get("mst_session_id")} if input_payload.get("mst_session_id") else {},
+            },
+            "active_workflow": {
+                "skill": current_skill,
+                "source_id": data.get("source_id") or data.get("root_id") or "",
+                "auto": bool(data.get("auto")),
+                "status": data.get("status") or "active",
+                "evidence_path": data.get("evidence_path") or ".gran-maestro/state/snapshot.json",
+            } if isinstance(current_skill, str) and current_skill.strip() else None,
+            "current_step": current_step,
+            "total_steps": total_steps,
+            "task_sources": tasks,
+            "next_action_source": next_action if isinstance(next_action, dict) else None,
+            "blocker_sources": data.get("blocker_sources") if isinstance(data.get("blocker_sources"), list) else [],
+            "external_hud": {"available": external_hud_available},
+        }
+
+projection = project_current_work_handoff(source) if isinstance(source, dict) else None
+if isinstance(projection, dict) and isinstance(source, dict):
+    projection["root_id"] = source.get("root_id") or "unknown"
+    projection["current_step"] = source.get("current_step")
+    projection["total_steps"] = source.get("total_steps")
+    projection["external_hud"] = source.get("external_hud")
+compact = project_hud_statusline_compact(projection)
+print(compact["compact_text"])
+PY
+}
+
 build_mst_line() {
   local transcript_path="${1:-}"
   local dispatch_run_dir="${2:-}"
@@ -819,7 +924,20 @@ CANONICAL_STATUSLINE_SESSION_ID="$(resolve_canonical_session_id "$MST_SESSION_ID
 DISPATCH_RUN_DIR="${PROJECT_ROOT}/.gran-maestro/run"
 SNAPSHOT_PATH="$(resolve_snapshot_path "$CANONICAL_STATUSLINE_SESSION_ID")"
 save_transcript_bridge "$TRANSCRIPT_PATH"
-MST_LINE="$(build_mst_line "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
+EXTERNAL_HUD_AVAILABLE="false"
+if [ -n "$HUD_OUTPUT" ]; then
+  EXTERNAL_HUD_AVAILABLE="true"
+fi
+MST_LINE=""
+if [ -n "$CANONICAL_STATUSLINE_SESSION_ID" ]; then
+  MST_LINE="$(build_compact_mst_line "$SNAPSHOT_PATH" "$INPUT_JSON" "$CANONICAL_STATUSLINE_SESSION_ID" "$EXTERNAL_HUD_AVAILABLE")"
+fi
+if [ -z "$MST_LINE" ]; then
+  MST_LINE="$(build_mst_line "$TRANSCRIPT_PATH" "$DISPATCH_RUN_DIR" "$INPUT_JSON" "$PROJECT_ROOT" "$CURRENT_STATUSLINE_PPID" "${MST_STOP_STATE_GUARD_WINDOW_SEC:-900}" "$SNAPSHOT_PATH")"
+fi
+if [ -z "$MST_LINE" ]; then
+  MST_LINE="$(build_compact_mst_line "$SNAPSHOT_PATH" "$INPUT_JSON" "$CANONICAL_STATUSLINE_SESSION_ID" "$EXTERNAL_HUD_AVAILABLE")"
+fi
 
 if [ -n "$HUD_OUTPUT" ]; then
   printf '%s\n' "$HUD_OUTPUT"
