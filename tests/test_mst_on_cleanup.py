@@ -654,6 +654,35 @@ def test_cleanup_file_delete_failure_restores_files_after_partial_move(tmp_path,
     assert _read_bytes_by_path(watched_paths) == before
 
 
+def test_cleanup_file_delete_failure_restores_files_after_quarantine_unlink_error(tmp_path, monkeypatch):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={},
+        hook_files=["mst-stop-hook.sh", "mst-session-init.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    targets = [
+        str(hooks_dir / "mst-stop-hook.sh"),
+        str(hooks_dir / "mst-session-init.sh"),
+    ]
+    watched_paths = [Path(target) for target in targets] + [hooks_dir / "my-user-hook.sh"]
+    before = _read_bytes_by_path(watched_paths)
+    real_unlink = Path.unlink
+
+    def fail_quarantine_unlink(self, *args, **kwargs):
+        if ".mst-cleanup." in str(self):
+            raise OSError("simulated final delete failure")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_quarantine_unlink)
+
+    deleted, failed = on._apply_file_deletions(targets)
+
+    assert deleted == []
+    assert failed
+    assert _read_bytes_by_path(watched_paths) == before
+
+
 def test_inventory_dry_run_json_exposes_dod002_top_level_contract(tmp_path):
     project = _setup_dod002_inventory_project(tmp_path)
     home = tmp_path / "home"

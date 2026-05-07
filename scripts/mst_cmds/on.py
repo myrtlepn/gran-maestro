@@ -613,6 +613,15 @@ def _apply_file_deletions(targets: List[str]) -> Tuple[List[str], List[Tuple[str
     existing = [Path(target) for target in targets if Path(target).exists()]
     if not existing:
         return [], []
+
+    backups: Dict[Path, Tuple[bytes, int]] = {}
+    for target in existing:
+        try:
+            stat_result = target.stat()
+            backups[target] = (target.read_bytes(), stat_result.st_mode)
+        except OSError as exc:
+            return [], [(str(target), str(exc))]
+
     try:
         quarantine_dir = Path(tempfile.mkdtemp(prefix=".mst-cleanup.", dir=str(existing[0].parent)))
     except OSError as exc:
@@ -631,25 +640,47 @@ def _apply_file_deletions(targets: List[str]) -> Tuple[List[str], List[Tuple[str
             failed.append((str(target), str(exc)))
             break
 
-    if failed:
+    def restore_targets() -> None:
         for target, quarantine_path in reversed(moved):
             try:
                 if quarantine_path.exists():
                     os.replace(quarantine_path, target)
             except OSError as exc:
                 failed.append((str(target), f"restore failed: {exc}"))
+        for target, (content, mode) in backups.items():
+            if target.exists():
+                continue
+            try:
+                target.write_bytes(content)
+                target.chmod(mode & 0o777)
+            except OSError as exc:
+                failed.append((str(target), f"restore failed: {exc}"))
+
+    if failed:
+        restore_targets()
         try:
             quarantine_dir.rmdir()
         except OSError:
             pass
         return [], failed
 
-    deleted = [str(target) for target, _ in moved]
-    for _, quarantine_path in moved:
+    deleted: List[str] = []
+    for target, quarantine_path in moved:
         try:
             quarantine_path.unlink()
+            deleted.append(str(target))
+        except OSError as exc:
+            failed.append((str(target), str(exc)))
+            break
+
+    if failed:
+        restore_targets()
+        try:
+            quarantine_dir.rmdir()
         except OSError:
             pass
+        return [], failed
+
     try:
         quarantine_dir.rmdir()
     except OSError:
