@@ -544,6 +544,81 @@ def test_cleanup_unexpected_hooks_schema_failure_reported_without_destructive_mu
     assert _read_bytes_by_path(watched_paths) == before
 
 
+def test_cleanup_settings_write_failure_reports_reason_without_file_deletion(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"}
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    claude_dir = project / ".claude"
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+    claude_dir.chmod(0o555)
+    try:
+        proc = _run_cleanup(project)
+    finally:
+        claude_dir.chmod(0o755)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "settings.local.json write failed"
+    assert payload["settings"]["failed"]
+    assert payload["files"]["deleted"] == []
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_file_delete_failure_reports_reason_and_rolls_back_settings(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        hooks_dir / "mst-stop-hook.sh",
+        hooks_dir / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+    hooks_dir.chmod(0o555)
+    try:
+        proc = _run_cleanup(project)
+    finally:
+        hooks_dir.chmod(0o755)
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 1
+    assert payload["status"] == "rollback"
+    assert payload["reason"] == "file deletion failed; settings rollback attempted"
+    assert payload["settings"]["rolled_back"] is True
+    assert payload["files"]["failed"]
+    assert _read_bytes_by_path(watched_paths) == before
+
+
 def test_inventory_dry_run_json_exposes_dod002_top_level_contract(tmp_path):
     project = _setup_dod002_inventory_project(tmp_path)
     home = tmp_path / "home"

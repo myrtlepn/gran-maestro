@@ -770,6 +770,7 @@ def cmd_on_cleanup(args) -> int:
             inventory["mutation"]["mutated"] = mutated
             payload.update(inventory)
             payload["status"] = "rollback"
+            payload["reason"] = "file deletion failed; settings rollback attempted"
             payload["settings"] = {"removed": removed, "rolled_back": True}
             payload["files"] = {"deleted": deleted, "failed": failed}
             _emit(args, payload)
