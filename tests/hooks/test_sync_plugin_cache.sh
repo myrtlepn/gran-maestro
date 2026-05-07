@@ -181,6 +181,31 @@ JSON
   )
 }
 
+write_mst_py_hooks_sync_stub() {
+  local project_root="$1"
+
+  mkdir -p "$project_root/scripts"
+  cat > "$project_root/scripts/mst.py" <<'PY'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+root = Path.cwd()
+if len(sys.argv) >= 3 and sys.argv[1:3] == ["hooks", "sync"]:
+    hooks_dir = root / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    (hooks_dir / ".mst-hook-version").write_text("TEST\n", encoding="utf-8")
+    (hooks_dir / "mst-session-init.sh").write_text("#!/usr/bin/env bash\n# copied by stub\n", encoding="utf-8")
+    (hooks_dir / "mst-pre-tool-use.sh").write_text("#!/usr/bin/env bash\n# copied by stub\n", encoding="utf-8")
+    (root / ".stub-hooks-sync-called").write_text(" ".join(sys.argv[1:]) + "\n", encoding="utf-8")
+    raise SystemExit(0)
+raise SystemExit(0)
+PY
+  chmod +x "$project_root/scripts/mst.py"
+}
+
 require_single_file_match() {
   local name="$1"
   local pattern="$2"
@@ -500,6 +525,89 @@ test_ac203_invalid_version_skipped() {
   done
 }
 
+test_req834_dod005_session_start_does_not_implicitly_sync_project_hooks() {
+  local case_dir project_root claude_home stdout_file stderr_file status
+
+  case_dir="$(new_case_dir)"
+  project_root="$case_dir/project"
+  claude_home="$case_dir/home"
+  stdout_file="$case_dir/stdout.log"
+  stderr_file="$case_dir/stderr.log"
+
+  write_project_fixture "$project_root" "# normal runtime content"
+  write_mst_py_hooks_sync_stub "$project_root"
+  create_fake_cache_targets "$claude_home"
+
+  set +e
+  run_session_init "$project_root" "$claude_home" "$stdout_file" "$stderr_file"
+  status=$?
+  set -e
+
+  assert_eq "REQ-834 DOD-005 SessionStart exit code" "0" "$status"
+  assert_file_missing "REQ-834 DOD-005 SessionStart must not call hooks sync stub" "$project_root/.stub-hooks-sync-called"
+  assert_file_missing "REQ-834 DOD-005 SessionStart must not create project hooks dir" "$project_root/.claude/hooks"
+  assert_file_missing "REQ-834 DOD-005 SessionStart must not create hook version" "$project_root/.claude/hooks/.mst-hook-version"
+  assert_file_missing "REQ-834 DOD-005 SessionStart must not copy mst-session-init" "$project_root/.claude/hooks/mst-session-init.sh"
+  assert_file_missing "REQ-834 DOD-005 SessionStart must not copy mst-pre-tool-use" "$project_root/.claude/hooks/mst-pre-tool-use.sh"
+}
+
+test_req834_dod005_explicit_hooks_sync_stub_path_creates_project_hooks() {
+  local case_dir project_root claude_home status
+
+  case_dir="$(new_case_dir)"
+  project_root="$case_dir/project"
+  claude_home="$case_dir/home"
+
+  write_project_fixture "$project_root" "# explicit sync content"
+  write_mst_py_hooks_sync_stub "$project_root"
+
+  set +e
+  (
+    cd "$project_root" || exit 1
+    HOME="$claude_home" python3 scripts/mst.py hooks sync >"$case_dir/explicit.stdout" 2>"$case_dir/explicit.stderr"
+  )
+  status=$?
+  set -e
+
+  assert_eq "REQ-834 DOD-005 explicit hooks sync stub exit code" "0" "$status"
+  assert_file_exists "REQ-834 DOD-005 explicit hooks sync stub marker" "$project_root/.stub-hooks-sync-called"
+  assert_file_exists "REQ-834 DOD-005 explicit hooks dir version" "$project_root/.claude/hooks/.mst-hook-version"
+  assert_file_exists "REQ-834 DOD-005 explicit hooks sync copies mst-session-init" "$project_root/.claude/hooks/mst-session-init.sh"
+  assert_file_exists "REQ-834 DOD-005 explicit hooks sync copies mst-pre-tool-use" "$project_root/.claude/hooks/mst-pre-tool-use.sh"
+}
+
+test_req834_dod005_explicit_hooks_sync_production_path_creates_project_hooks() {
+  local case_dir project_root claude_home status plugin_version synced_version
+
+  case_dir="$(new_case_dir)"
+  project_root="$case_dir/project"
+  claude_home="$case_dir/home"
+
+  write_project_fixture "$project_root" "# production explicit sync content"
+
+  set +e
+  (
+    cd "$project_root" || exit 1
+    HOME="$claude_home" PYTHONPATH="$REPO_ROOT" python3 "$REPO_ROOT/scripts/mst.py" hooks sync >"$case_dir/production-explicit.stdout" 2>"$case_dir/production-explicit.stderr"
+  )
+  status=$?
+  set -e
+
+  assert_eq "REQ-834 DOD-005 production explicit hooks sync exit code" "0" "$status"
+  assert_file_exists "REQ-834 DOD-005 production explicit hooks dir version" "$project_root/.claude/hooks/.mst-hook-version"
+  assert_file_exists "REQ-834 DOD-005 production explicit hooks sync copies mst-session-init" "$project_root/.claude/hooks/mst-session-init.sh"
+  assert_file_exists "REQ-834 DOD-005 production explicit hooks sync copies mst-pre-tool-use" "$project_root/.claude/hooks/mst-pre-tool-use.sh"
+
+  plugin_version="$(python3 - "$REPO_ROOT/.claude-plugin/plugin.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])
+PY
+)"
+  synced_version="$(cat "$project_root/.claude/hooks/.mst-hook-version")"
+  assert_eq "REQ-834 DOD-005 production explicit hooks sync version" "$plugin_version" "$synced_version"
+}
+
 test_ac204a_static_sync_contract() {
   local todo_count function_count run_function_count cleanup_call_line sync_call_line run_sync_call_line order_probe
 
@@ -758,6 +866,9 @@ run_case "AC-104 old version protection" test_ac104_old_version_protection
 run_case "AC-201 destination symlink protection" test_ac201_destination_symlink_protection
 run_case "AC-202 source symlink skipped" test_ac202_source_symlink_skipped
 run_case "AC-203 invalid version skipped" test_ac203_invalid_version_skipped
+run_case "REQ-834 DOD-005 SessionStart does not implicitly sync project hooks" test_req834_dod005_session_start_does_not_implicitly_sync_project_hooks
+run_case "REQ-834 DOD-005 explicit hooks sync stub creates project hooks" test_req834_dod005_explicit_hooks_sync_stub_path_creates_project_hooks
+run_case "REQ-834 DOD-005 explicit hooks sync production creates project hooks" test_req834_dod005_explicit_hooks_sync_production_path_creates_project_hooks
 run_case "AC-204a static sync contract" test_ac204a_static_sync_contract
 run_case "AC-204b second run skip log" test_ac204b_second_run_skip_log
 run_case "AC-204c session-init average under 500ms" test_ac204c_session_init_average_under_500ms
