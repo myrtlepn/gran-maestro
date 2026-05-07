@@ -19,6 +19,29 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_CLI = [sys.executable, str(REPO_ROOT / "scripts" / "mst.py")]
+DOD002_TOP_LEVEL_FIELDS = {
+    "mutation",
+    "environment",
+    "plugin_core",
+    "project_legacy",
+    "user_global",
+    "user_custom",
+    "duplicate_risks",
+    "diagnostics",
+}
+DOD002_CLASSIFICATIONS = {
+    "plugin_core",
+    "project_legacy",
+    "user_global",
+    "user_custom",
+}
+DOD002_DIAGNOSTIC_CODES = {
+    "malformed_settings",
+    "missing_hooks_registry",
+    "parse_error",
+    "permission_denied",
+    "unknown_environment",
+}
 
 
 def _run_cleanup(cwd: Path, *extra_args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -34,6 +57,96 @@ def _run_cleanup(cwd: Path, *extra_args: str, env: Optional[dict] = None) -> sub
         text=True,
         env=full_env,
         timeout=15,
+    )
+
+
+def _run_cleanup_dry_run_json(cwd: Path, env: Optional[dict] = None) -> dict:
+    proc = _run_cleanup(cwd, "--dry-run", env=env)
+    assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
+    return json.loads(proc.stdout)
+
+
+def _setup_dod002_inventory_project(tmp_path: Path) -> Path:
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "/home/user/scripts/my-prompt-hook.sh"}
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    hooks_dir = project / ".claude" / "hooks"
+    (hooks_dir / "mst-stop-hook.sh").write_text("#!/bin/bash\necho legacy-stop\n", encoding="utf-8")
+    (hooks_dir / "my-user-hook.sh").write_text("#!/bin/bash\necho custom\n", encoding="utf-8")
+    return project
+
+
+def _read_bytes_by_path(paths: list[Path]) -> dict[Path, bytes]:
+    return {path: path.read_bytes() for path in paths}
+
+
+def _collect_classifications(value) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        classification = value.get("classification")
+        if isinstance(classification, str):
+            found.add(classification)
+        for child in value.values():
+            found.update(_collect_classifications(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.update(_collect_classifications(child))
+    return found
+
+
+def _diagnostic_codes(payload: dict) -> set[str]:
+    codes: set[str] = set()
+    for diagnostic in payload.get("diagnostics", []):
+        if not isinstance(diagnostic, dict):
+            continue
+        for key in ("code", "reason", "reason_code"):
+            value = diagnostic.get(key)
+            if isinstance(value, str):
+                codes.add(value)
+    return codes
+
+
+def _write_user_global_settings(home: Path) -> None:
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {"type": "command", "command": "~/.claude/scripts/check-version.sh"}
+                            ],
+                        }
+                    ]
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -249,6 +362,140 @@ def test_dry_run_no_changes(tmp_path):
     assert (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
     settings = json.loads((project / ".claude" / "settings.local.json").read_text())
     assert "Stop" in settings.get("hooks", {})
+
+
+def test_inventory_dry_run_json_exposes_dod002_top_level_contract(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    home = tmp_path / "home"
+    _write_user_global_settings(home)
+
+    payload = _run_cleanup_dry_run_json(project, env={"HOME": str(home)})
+
+    assert DOD002_TOP_LEVEL_FIELDS.issubset(payload), (
+        f"missing DOD-002 inventory fields: {DOD002_TOP_LEVEL_FIELDS - set(payload)}"
+    )
+    assert payload["mutation"]["dry_run"] is True
+    assert payload["mutation"]["mutated"] is False
+
+
+def test_inventory_classification_enum_is_exactly_reusable_and_limited(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    home = tmp_path / "home"
+    _write_user_global_settings(home)
+
+    payload = _run_cleanup_dry_run_json(project, env={"HOME": str(home)})
+
+    classifications = _collect_classifications(payload)
+    assert classifications == DOD002_CLASSIFICATIONS
+
+
+def test_dry_run_no_mutation_byte_for_byte_for_settings_and_hooks(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert payload["mutation"]["dry_run"] is True
+    assert payload["mutation"]["mutated"] is False
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_custom_hook_inventory_reports_preserved_not_cleanup_candidate(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    user_custom_text = json.dumps(payload["user_custom"], ensure_ascii=False)
+    assert "/usr/local/bin/my-custom-stop-hook.sh" in user_custom_text
+    assert "/home/user/scripts/my-prompt-hook.sh" in user_custom_text
+    assert "my-user-hook.sh" in user_custom_text
+    assert "preserved" in user_custom_text
+
+    project_legacy_text = json.dumps(payload["project_legacy"], ensure_ascii=False)
+    assert "/usr/local/bin/my-custom-stop-hook.sh" not in project_legacy_text
+    assert "/home/user/scripts/my-prompt-hook.sh" not in project_legacy_text
+    assert "my-user-hook.sh" not in project_legacy_text
+
+
+def test_duplicate_risk_observable_for_plugin_core_and_project_legacy_same_event(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    duplicate_risks = payload["duplicate_risks"]
+    assert duplicate_risks, "expected duplicate risk when plugin core and project legacy Stop hooks coexist"
+    duplicate_text = json.dumps(duplicate_risks, ensure_ascii=False)
+    assert "Stop" in duplicate_text
+    assert "plugin_core" in duplicate_text
+    assert "project_legacy" in duplicate_text
+    assert "reason" in duplicate_text
+
+
+def test_diagnostic_malformed_settings_reports_stable_reason_codes(tmp_path):
+    project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+    settings_path = project / ".claude" / "settings.local.json"
+    settings_path.write_text('{"hooks": ', encoding="utf-8")
+    before = settings_path.read_bytes()
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert {"malformed_settings", "parse_error"}.issubset(_diagnostic_codes(payload))
+    assert settings_path.read_bytes() == before
+
+
+def test_diagnostic_missing_hooks_registry_reports_stable_reason_code(tmp_path):
+    project = tmp_path / "plugin_like_without_registry"
+    project.mkdir()
+    (project / ".gran-maestro").mkdir()
+    (project / ".claude-plugin").mkdir()
+    (project / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"hooks": "./hooks/hooks.json"}) + "\n",
+        encoding="utf-8",
+    )
+    (project / ".claude").mkdir()
+    (project / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert "missing_hooks_registry" in _diagnostic_codes(payload)
+
+
+def test_diagnostic_permission_denied_reports_stable_reason_code(tmp_path):
+    project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+    settings_path = project / ".claude" / "settings.local.json"
+    before = settings_path.read_bytes()
+    settings_path.chmod(0)
+    try:
+        payload = _run_cleanup_dry_run_json(project)
+    finally:
+        settings_path.chmod(0o644)
+
+    assert "permission_denied" in _diagnostic_codes(payload)
+    assert settings_path.read_bytes() == before
+
+
+def test_diagnostic_unknown_environment_reports_stable_reason_code(tmp_path):
+    project = tmp_path / "unknown"
+    project.mkdir()
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert "unknown_environment" in _diagnostic_codes(payload)
+
+
+def test_diagnostic_reason_code_enum_is_locked() -> None:
+    assert DOD002_DIAGNOSTIC_CODES == {
+        "malformed_settings",
+        "missing_hooks_registry",
+        "parse_error",
+        "permission_denied",
+        "unknown_environment",
+    }
 
 
 def test_plugin_source_repo_skipped(tmp_path):

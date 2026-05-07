@@ -36,10 +36,49 @@ MST_HOOK_FILES = [
     "stop-agile-gate-reasons.json",
 ]
 
+CLASS_PLUGIN_CORE = "plugin_core"
+CLASS_PROJECT_LEGACY = "project_legacy"
+CLASS_USER_GLOBAL = "user_global"
+CLASS_USER_CUSTOM = "user_custom"
+HOOK_CLASSIFICATIONS = (
+    CLASS_PLUGIN_CORE,
+    CLASS_PROJECT_LEGACY,
+    CLASS_USER_GLOBAL,
+    CLASS_USER_CUSTOM,
+)
+
+DIAGNOSTIC_MALFORMED_SETTINGS = "malformed_settings"
+DIAGNOSTIC_MISSING_HOOKS_REGISTRY = "missing_hooks_registry"
+DIAGNOSTIC_PARSE_ERROR = "parse_error"
+DIAGNOSTIC_PERMISSION_DENIED = "permission_denied"
+DIAGNOSTIC_UNKNOWN_ENVIRONMENT = "unknown_environment"
+DIAGNOSTIC_REASON_CODES = (
+    DIAGNOSTIC_MALFORMED_SETTINGS,
+    DIAGNOSTIC_MISSING_HOOKS_REGISTRY,
+    DIAGNOSTIC_PARSE_ERROR,
+    DIAGNOSTIC_PERMISSION_DENIED,
+    DIAGNOSTIC_UNKNOWN_ENVIRONMENT,
+)
+
+MST_HOOK_FILE_EVENTS = {
+    "mst-session-init.sh": "SessionStart",
+    "mst-pre-tool-use.sh": "PreToolUse",
+    "mst-stop-hook.sh": "Stop",
+    "mst-auto-chain-context.sh": "UserPromptSubmit",
+}
+USER_GLOBAL_HOOK_NAMES = {
+    "maestro-guard.sh",
+    "log-prompt.sh",
+    "check-version.sh",
+}
+
 LOCK_STALE_SECONDS = 60
 
 
 def _project_root() -> Path:
+    env_root = os.environ.get("MST_PROJECT_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).resolve()
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -52,6 +91,77 @@ def _project_root() -> Path:
     except Exception:
         pass
     return Path.cwd()
+
+
+def _diagnostic(code: str, message: str, path: Optional[Path] = None) -> dict:
+    item = {
+        "code": code,
+        "reason_code": code,
+        "reason": code,
+        "message": message,
+    }
+    if path is not None:
+        item["path"] = str(path)
+    return item
+
+
+def _read_json_diagnostic(path: Path, diagnostics: List[dict], *, malformed_settings: bool = False):
+    if not path.exists():
+        return None
+    try:
+        mode = path.stat().st_mode
+    except OSError as exc:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), path))
+        return None
+    if mode & 0o444 == 0:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, "file is not readable", path))
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError as exc:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), path))
+    except json.JSONDecodeError as exc:
+        if malformed_settings:
+            diagnostics.append(_diagnostic(DIAGNOSTIC_MALFORMED_SETTINGS, str(exc), path))
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PARSE_ERROR, str(exc), path))
+    except OSError as exc:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), path))
+    return None
+
+
+def _iter_settings_hook_commands(settings: object):
+    if not isinstance(settings, dict):
+        return
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            inner = entry.get("hooks")
+            if not isinstance(inner, list):
+                continue
+            matcher = entry.get("matcher", "")
+            for hook in inner:
+                if not isinstance(hook, dict):
+                    continue
+                command = hook.get("command")
+                if isinstance(command, str) and command.strip():
+                    yield {
+                        "event": str(event),
+                        "matcher": matcher if isinstance(matcher, str) else "",
+                        "command": command,
+                    }
+
+
+def _command_hook_name(command: str) -> str:
+    for name in set(MST_HOOK_FILE_EVENTS) | USER_GLOBAL_HOOK_NAMES:
+        if name in command:
+            return name
+    return Path(command.strip().split()[0]).name if command.strip() else ""
 
 
 def _acquire_lock(lock_path: Path) -> bool:
@@ -149,6 +259,292 @@ def _plan_file_deletions(project_root: Path) -> List[str]:
     return targets
 
 
+def _classify_environment(project_root: Path, diagnostics: List[dict]) -> dict:
+    is_source = _is_plugin_source_repo(project_root)
+    parts = project_root.resolve().parts
+    is_worktree = ".gran-maestro" in parts and "worktrees" in parts
+    has_base = (project_root / ".gran-maestro").is_dir()
+    has_project_surface = any(
+        (project_root / rel).exists()
+        for rel in (".claude", ".claude-plugin", "hooks")
+    )
+
+    if is_source:
+        kind = "source-dev"
+        status = "skipped"
+        reason = "plugin source repo (out of cleanup scope)"
+    elif is_worktree:
+        kind = "worktree"
+        status = "diagnostic"
+        reason = "worktree-like environment"
+    elif has_base or has_project_surface:
+        kind = "project"
+        status = "ok"
+        reason = "project cleanup inventory"
+    else:
+        kind = "unknown"
+        status = "diagnostic"
+        reason = DIAGNOSTIC_UNKNOWN_ENVIRONMENT
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_UNKNOWN_ENVIRONMENT,
+                "no .gran-maestro, .claude, or plugin metadata found",
+                project_root,
+            )
+        )
+
+    return {
+        "project_root": str(project_root),
+        "kind": kind,
+        "status": status,
+        "reason": reason,
+        "source_repo": is_source,
+        "worktree_like": is_worktree,
+        "cleanup_scope": "skipped" if is_source else "project",
+    }
+
+
+def _plugin_inventory_root(project_root: Path) -> Path:
+    if (project_root / ".claude-plugin" / "plugin.json").exists():
+        return project_root
+    return _common._plugin_root()
+
+
+def _plugin_core_inventory(project_root: Path, diagnostics: List[dict]) -> dict:
+    plugin_root = _plugin_inventory_root(project_root)
+    manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    hooks: List[dict] = []
+    result = {
+        "classification": CLASS_PLUGIN_CORE,
+        "status": "unknown",
+        "plugin_root": str(plugin_root),
+        "manifest": str(manifest_path),
+        "registry": None,
+        "hooks": hooks,
+    }
+
+    manifest = _read_json_diagnostic(manifest_path, diagnostics)
+    if not isinstance(manifest, dict):
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PARSE_ERROR, "plugin manifest is missing or invalid", manifest_path))
+        return result
+
+    registry_ref = manifest.get("hooks")
+    registry_path = plugin_root / registry_ref if isinstance(registry_ref, str) else plugin_root / "hooks" / "hooks.json"
+    result["registry"] = str(registry_path)
+    if not registry_path.exists():
+        result["status"] = "missing_registry"
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_MISSING_HOOKS_REGISTRY,
+                "plugin hook registry not found",
+                registry_path,
+            )
+        )
+        return result
+
+    registry = _read_json_diagnostic(registry_path, diagnostics)
+    if not isinstance(registry, dict):
+        result["status"] = "parse_error"
+        return result
+
+    registry_hooks = registry.get("hooks")
+    if not isinstance(registry_hooks, dict):
+        result["status"] = "parse_error"
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PARSE_ERROR, "plugin hook registry has no hooks object", registry_path))
+        return result
+
+    for event, entries in registry_hooks.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            matcher = entry.get("matcher", "")
+            inner = entry.get("hooks", [])
+            if not isinstance(inner, list):
+                continue
+            for hook in inner:
+                if not isinstance(hook, dict):
+                    continue
+                command = hook.get("command")
+                if not isinstance(command, str):
+                    continue
+                hook_name = _command_hook_name(command)
+                expected_path = plugin_root / "hooks" / hook_name if hook_name else None
+                hooks.append(
+                    {
+                        "classification": CLASS_PLUGIN_CORE,
+                        "status": "canonical" if command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/") else "observed",
+                        "event": str(event),
+                        "matcher": matcher if isinstance(matcher, str) else "",
+                        "command": command,
+                        "path": str(expected_path) if expected_path is not None else None,
+                    }
+                )
+
+    result["status"] = "canonical" if hooks else "empty"
+    return result
+
+
+def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[dict]) -> tuple[dict, dict]:
+    settings_path = project_root / ".claude" / "settings.local.json"
+    project_legacy = {
+        "classification": CLASS_PROJECT_LEGACY,
+        "settings": {"path": str(settings_path), "candidates": []},
+        "files": {"path": str(project_root / ".claude" / "hooks"), "candidates": []},
+    }
+    user_custom = {
+        "classification": CLASS_USER_CUSTOM,
+        "settings": [],
+        "files": [],
+    }
+
+    settings = _read_json_diagnostic(settings_path, diagnostics, malformed_settings=True)
+    if isinstance(settings, dict):
+        for item in _iter_settings_hook_commands(settings) or []:
+            command = item["command"]
+            if MST_HOOK_COMMAND_RE.search(command):
+                project_legacy["settings"]["candidates"].append(
+                    {
+                        "classification": CLASS_PROJECT_LEGACY,
+                        "status": "candidate",
+                        "reason": "legacy_mst_settings_hook",
+                        **item,
+                    }
+                )
+            else:
+                user_custom["settings"].append(
+                    {
+                        "classification": CLASS_USER_CUSTOM,
+                        "status": "preserved",
+                        "reason": "user_custom_settings_hook",
+                        **item,
+                    }
+                )
+    elif settings_path.exists() and not any(d.get("path") == str(settings_path) for d in diagnostics):
+        diagnostics.append(_diagnostic(DIAGNOSTIC_MALFORMED_SETTINGS, "settings.local.json is not a JSON object", settings_path))
+
+    hooks_dir = project_root / ".claude" / "hooks"
+    if hooks_dir.exists():
+        try:
+            mode = hooks_dir.stat().st_mode
+            if mode & 0o555 == 0:
+                diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, "hooks directory is not readable", hooks_dir))
+            else:
+                for hook_path in sorted(hooks_dir.iterdir()):
+                    if hook_path.name in MST_HOOK_FILES:
+                        project_legacy["files"]["candidates"].append(
+                            {
+                                "classification": CLASS_PROJECT_LEGACY,
+                                "status": "candidate",
+                                "reason": "legacy_mst_hook_file",
+                                "path": str(hook_path),
+                                "name": hook_path.name,
+                                "event": MST_HOOK_FILE_EVENTS.get(hook_path.name),
+                            }
+                        )
+                    elif hook_path.is_file():
+                        user_custom["files"].append(
+                            {
+                                "classification": CLASS_USER_CUSTOM,
+                                "status": "preserved",
+                                "reason": "user_custom_hook_file",
+                                "path": str(hook_path),
+                                "name": hook_path.name,
+                            }
+                        )
+        except PermissionError as exc:
+            diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), hooks_dir))
+        except OSError as exc:
+            diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), hooks_dir))
+
+    return project_legacy, user_custom
+
+
+def _user_global_inventory(diagnostics: List[dict]) -> dict:
+    settings_path = Path.home() / ".claude" / "settings.json"
+    result = {
+        "classification": CLASS_USER_GLOBAL,
+        "settings": {"path": str(settings_path), "exists": settings_path.exists()},
+        "hooks": [],
+    }
+    settings = _read_json_diagnostic(settings_path, diagnostics)
+    if isinstance(settings, dict):
+        for item in _iter_settings_hook_commands(settings) or []:
+            hook_name = _command_hook_name(item["command"])
+            result["hooks"].append(
+                {
+                    "classification": CLASS_USER_GLOBAL,
+                    "status": "observed",
+                    "reason": "user_global_settings_hook",
+                    "known_global": hook_name in USER_GLOBAL_HOOK_NAMES,
+                    "name": hook_name,
+                    **item,
+                }
+            )
+    return result
+
+
+def _duplicate_risks(plugin_core: dict, project_legacy: dict) -> List[dict]:
+    plugin_events = {
+        item.get("event")
+        for item in plugin_core.get("hooks", [])
+        if isinstance(item, dict) and item.get("event")
+    }
+    legacy_events = {
+        item.get("event")
+        for group in (
+            project_legacy.get("settings", {}).get("candidates", []),
+            project_legacy.get("files", {}).get("candidates", []),
+        )
+        for item in group
+        if isinstance(item, dict) and item.get("event")
+    }
+    risks: List[dict] = []
+    for event in sorted(plugin_events & legacy_events):
+        risks.append(
+            {
+                "event": event,
+                "sources": [CLASS_PLUGIN_CORE, CLASS_PROJECT_LEGACY],
+                "classifications": [CLASS_PLUGIN_CORE, CLASS_PROJECT_LEGACY],
+                "reason": "plugin_core_and_project_legacy_hooks_coexist",
+            }
+        )
+    return risks
+
+
+def _mark_source_dev_project_legacy(project_legacy: dict) -> None:
+    for group in (
+        project_legacy.get("settings", {}).get("candidates", []),
+        project_legacy.get("files", {}).get("candidates", []),
+    ):
+        for item in group:
+            if isinstance(item, dict):
+                item["status"] = "skipped"
+                item["reason"] = "source_dev_diagnostic_only"
+
+
+def _build_cleanup_inventory(project_root: Path, *, dry_run: bool, mutated: bool) -> dict:
+    diagnostics: List[dict] = []
+    environment = _classify_environment(project_root, diagnostics)
+    plugin_core = _plugin_core_inventory(project_root, diagnostics)
+    project_legacy, user_custom = _project_legacy_and_custom_inventory(project_root, diagnostics)
+    user_global = _user_global_inventory(diagnostics)
+    if environment.get("source_repo"):
+        _mark_source_dev_project_legacy(project_legacy)
+
+    return {
+        "mutation": {"dry_run": dry_run, "mutated": mutated},
+        "environment": environment,
+        "plugin_core": plugin_core,
+        "project_legacy": project_legacy,
+        "user_global": user_global,
+        "user_custom": user_custom,
+        "duplicate_risks": _duplicate_risks(plugin_core, project_legacy),
+        "diagnostics": diagnostics,
+    }
+
+
 def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[bool, List[str]]:
     """settings.local.json hooks 정리 적용. atomic via tempfile + os.replace."""
     if original_text is None:
@@ -243,16 +639,28 @@ def cmd_on_cleanup(args) -> int:
     lock_path = _common.tmp_dir(project_root) / "cleanup.lock"
     payload: dict = {"project_root": str(project_root)}
 
-    if _is_plugin_source_repo(project_root):
-        payload["status"] = "skipped"
-        payload["reason"] = "plugin source repo (out of cleanup scope)"
+    if args.dry_run:
+        inventory = _build_cleanup_inventory(project_root, dry_run=True, mutated=False)
+        if inventory.get("environment", {}).get("source_repo"):
+            payload["status"] = "skipped"
+            payload["reason"] = "plugin source repo (out of cleanup scope)"
+            payload["settings"] = {
+                "path": str(project_root / ".claude" / "settings.local.json"),
+                "exists": (project_root / ".claude" / "settings.local.json").exists(),
+                "removed": [],
+            }
+            payload["files"] = {"targets": []}
+        else:
+            payload["status"] = "dry_run"
+            payload["settings"] = _plan_settings_changes(project_root)
+            payload["files"] = {"targets": _plan_file_deletions(project_root)}
+        payload.update(inventory)
         _emit(args, payload)
         return 0
 
-    if args.dry_run:
-        payload["status"] = "dry_run"
-        payload["settings"] = _plan_settings_changes(project_root)
-        payload["files"] = {"targets": _plan_file_deletions(project_root)}
+    if _is_plugin_source_repo(project_root):
+        payload["status"] = "skipped"
+        payload["reason"] = "plugin source repo (out of cleanup scope)"
         _emit(args, payload)
         return 0
 
