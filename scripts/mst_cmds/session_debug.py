@@ -6,6 +6,7 @@ from typing import Any
 
 from scripts.mst_cmds.current_work_handoff import project_current_work_handoff
 from scripts.mst_cmds.prompt_correlation import project_prompt_timeline
+from scripts.mst_cmds.state_machine_health import validate_state_machine_health
 from scripts.mst_cmds.writer_coverage import project_writer_coverage
 
 
@@ -99,6 +100,48 @@ def _collect_evidence_paths(*values: Any, mst_session_id: str) -> list[str]:
     if not paths:
         paths.append(DEFAULT_EVIDENCE_PATH.format(mst_session_id=mst_session_id or "unknown"))
     return paths
+
+
+def _bounded_health_axis(axis: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "axis": _safe_text(axis.get("axis")) or "unknown",
+        "status": _safe_text(axis.get("status")) or "unknown",
+        "code": _safe_text(axis.get("code")) or "unknown",
+        "reason": _safe_text(axis.get("reason")) or "health axis did not provide a bounded reason",
+    }
+    event_hash = _safe_text(axis.get("event_hash"))
+    if event_hash and len(event_hash) == 64:
+        result["event_hash"] = event_hash
+    else:
+        result["evidence_path"] = axis.get("evidence_path")
+    return result
+
+
+def _bounded_state_machine_health(fixture: dict[str, Any], *, mst_session_id: str) -> dict[str, Any]:
+    health = validate_state_machine_health(fixture)
+    axes = health.get("axes") if isinstance(health.get("axes"), list) else []
+    bounded_axes = [_bounded_health_axis(axis) for axis in axes if isinstance(axis, dict)]
+    failing_axes = [axis["axis"] for axis in bounded_axes if axis.get("status") == "fail"]
+    unknown_axes = [axis["axis"] for axis in bounded_axes if axis.get("status") == "unknown"]
+    summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
+    detail = {
+        "schema_version": health.get("schema_version", 1),
+        "source_projection": "DOD-007",
+        "status": _safe_text(health.get("status")) or "unknown",
+        "summary": {
+            "total": summary.get("total", len(bounded_axes)),
+            "pass": summary.get("pass", 0),
+            "fail": summary.get("fail", len(failing_axes)),
+            "unknown": summary.get("unknown", len(unknown_axes)),
+            "by_status": summary.get("by_status") if isinstance(summary.get("by_status"), dict) else {},
+        },
+        "axes": bounded_axes,
+        "failing_axes": failing_axes,
+        "unknown_axes": unknown_axes,
+        "bounded_payload": health.get("raw_payload_excluded") is True,
+    }
+    detail["evidence_paths"] = _collect_evidence_paths(detail, health.get("fixture_catalog"), mst_session_id=mst_session_id)
+    return detail
 
 
 def _bounded_writer_projection(fixture: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +262,7 @@ def _summary(
     writer_coverage: dict[str, Any],
     current_work: dict[str, Any],
     prompt_timeline: dict[str, Any],
+    state_machine_health: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "identity": {
@@ -248,6 +292,11 @@ def _summary(
         "integrity": {
             "status": _integrity_status(fixture),
             "reason": _safe_text((fixture.get("integrity") or {}).get("reason") if isinstance(fixture.get("integrity"), dict) else "") or "verifier_not_in_scope",
+            "state_machine_health": {
+                "status": state_machine_health.get("status"),
+                "fail": state_machine_health.get("summary", {}).get("fail") if isinstance(state_machine_health.get("summary"), dict) else 0,
+                "unknown": state_machine_health.get("summary", {}).get("unknown") if isinstance(state_machine_health.get("summary"), dict) else 0,
+            },
         },
         "projection": {
             "status": _projection_status(fixture, current_work, prompt_timeline),
@@ -294,7 +343,12 @@ def _identity_detail(fixture: dict[str, Any], *, mst_session_id: str) -> dict[st
     return detail
 
 
-def _execution_flow_detail(fixture: dict[str, Any], *, mst_session_id: str) -> dict[str, Any]:
+def _execution_flow_detail(
+    fixture: dict[str, Any],
+    *,
+    mst_session_id: str,
+    state_machine_health: dict[str, Any],
+) -> dict[str, Any]:
     source = fixture.get("execution_flow") if isinstance(fixture.get("execution_flow"), dict) else {}
     detail = {
         "panel_id": "execution_flow",
@@ -303,8 +357,9 @@ def _execution_flow_detail(fixture: dict[str, Any], *, mst_session_id: str) -> d
         "next_action": source.get("next_action") if source else "unknown",
         "node_health": source.get("node_health") if isinstance(source.get("node_health"), dict) else {"status": "unknown", "reason": "verifier_not_in_scope"},
         "edge_health": source.get("edge_health") if isinstance(source.get("edge_health"), dict) else {"status": "unknown", "reason": "verifier_not_in_scope"},
+        "state_machine_health": state_machine_health,
     }
-    detail["evidence_paths"] = _collect_evidence_paths(source, mst_session_id=mst_session_id)
+    detail["evidence_paths"] = _collect_evidence_paths(source, state_machine_health, mst_session_id=mst_session_id)
     return detail
 
 
@@ -426,6 +481,7 @@ def _selected_detail(
     writer_coverage: dict[str, Any],
     current_work: dict[str, Any],
     prompt_timeline: dict[str, Any],
+    state_machine_health: dict[str, Any],
 ) -> dict[str, Any]:
     if panel_id == "identity":
         return _identity_detail(fixture, mst_session_id=mst_session_id)
@@ -434,7 +490,11 @@ def _selected_detail(
     if panel_id == "current_work":
         return _current_work_detail(current_work, mst_session_id=mst_session_id)
     if panel_id == "execution_flow":
-        return _execution_flow_detail(fixture, mst_session_id=mst_session_id)
+        return _execution_flow_detail(
+            fixture,
+            mst_session_id=mst_session_id,
+            state_machine_health=state_machine_health,
+        )
     if panel_id == "writer_coverage":
         return _writer_detail(writer_coverage, mst_session_id=mst_session_id)
     if panel_id == "integrity_freshness":
@@ -444,7 +504,13 @@ def _selected_detail(
     return _summary_detail(summary, mst_session_id=mst_session_id, evidence_paths=evidence_paths)
 
 
-def _panel_status(panel_id: str, summary: dict[str, Any], fixture: dict[str, Any], prompt_timeline: dict[str, Any]) -> str:
+def _panel_status(
+    panel_id: str,
+    summary: dict[str, Any],
+    fixture: dict[str, Any],
+    prompt_timeline: dict[str, Any],
+    state_machine_health: dict[str, Any],
+) -> str:
     if panel_id == "identity":
         return str(summary["identity"]["status"])
     if panel_id == "prompt_timeline":
@@ -454,7 +520,7 @@ def _panel_status(panel_id: str, summary: dict[str, Any], fixture: dict[str, Any
     if panel_id == "execution_flow":
         source = fixture.get("execution_flow") if isinstance(fixture.get("execution_flow"), dict) else {}
         health = source.get("node_health") if isinstance(source.get("node_health"), dict) else {}
-        return _safe_text(health.get("status")) or "unknown"
+        return _safe_text(health.get("status")) or _safe_text(state_machine_health.get("status")) or "unknown"
     if panel_id == "writer_coverage":
         return str(summary["writers"]["status"])
     if panel_id == "integrity_freshness":
@@ -464,9 +530,18 @@ def _panel_status(panel_id: str, summary: dict[str, Any], fixture: dict[str, Any
     return str(summary["projection"]["status"])
 
 
-def _panels(summary: dict[str, Any], fixture: dict[str, Any], prompt_timeline: dict[str, Any]) -> list[dict[str, str]]:
+def _panels(
+    summary: dict[str, Any],
+    fixture: dict[str, Any],
+    prompt_timeline: dict[str, Any],
+    state_machine_health: dict[str, Any],
+) -> list[dict[str, str]]:
     return [
-        {"id": panel_id, "label": label, "status": _panel_status(panel_id, summary, fixture, prompt_timeline)}
+        {
+            "id": panel_id,
+            "label": label,
+            "status": _panel_status(panel_id, summary, fixture, prompt_timeline, state_machine_health),
+        }
         for panel_id, label in PANEL_REGISTRY
     ]
 
@@ -481,6 +556,7 @@ def _panel_details(
     writer_coverage: dict[str, Any],
     current_work: dict[str, Any],
     prompt_timeline: dict[str, Any],
+    state_machine_health: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     return {
         panel_id: _selected_detail(
@@ -493,6 +569,7 @@ def _panel_details(
             writer_coverage=writer_coverage,
             current_work=current_work,
             prompt_timeline=prompt_timeline,
+            state_machine_health=state_machine_health,
         )
         for panel_id, _ in PANEL_REGISTRY
     }
@@ -505,6 +582,7 @@ def project_session_debug_dashboard(fixture: dict[str, Any]) -> dict[str, Any]:
     writer_coverage = _bounded_writer_projection(context)
     current_work = _bounded_current_work_projection(context)
     prompt_timeline = _bounded_prompt_projection(context)
+    state_machine_health = _bounded_state_machine_health(context, mst_session_id=mst_session_id)
     summary = _summary(
         context,
         mst_session_id=mst_session_id,
@@ -512,12 +590,14 @@ def project_session_debug_dashboard(fixture: dict[str, Any]) -> dict[str, Any]:
         writer_coverage=writer_coverage,
         current_work=current_work,
         prompt_timeline=prompt_timeline,
+        state_machine_health=state_machine_health,
     )
     evidence_paths = _collect_evidence_paths(
         writer_coverage,
         current_work,
         prompt_timeline,
         context.get("execution_flow"),
+        state_machine_health,
         context.get("integrity"),
         context.get("policy_blocks"),
         mst_session_id=mst_session_id,
@@ -534,6 +614,7 @@ def project_session_debug_dashboard(fixture: dict[str, Any]) -> dict[str, Any]:
         writer_coverage=writer_coverage,
         current_work=current_work,
         prompt_timeline=prompt_timeline,
+        state_machine_health=state_machine_health,
     )
     selected_detail = panel_details[selected_panel_id]
 
@@ -542,7 +623,7 @@ def project_session_debug_dashboard(fixture: dict[str, Any]) -> dict[str, Any]:
         "generated_at": generated_at,
         "mst_session_id": mst_session_id,
         "summary": summary,
-        "panels": _panels(summary, context, prompt_timeline),
+        "panels": _panels(summary, context, prompt_timeline, state_machine_health),
         "panel_details": panel_details,
         "selected_detail": selected_detail,
         "evidence_paths": evidence_paths,
