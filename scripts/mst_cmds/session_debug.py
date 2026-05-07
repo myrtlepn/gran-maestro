@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.mst_cmds.current_work_handoff import project_current_work_handoff
+from scripts.mst_cmds.dod008_evidence import project_dod008_evidence
 from scripts.mst_cmds.prompt_correlation import project_prompt_timeline
 from scripts.mst_cmds.state_machine_health import validate_state_machine_health
 from scripts.mst_cmds.writer_coverage import project_writer_coverage
@@ -364,16 +365,9 @@ def _execution_flow_detail(
 
 
 def _integrity_detail(fixture: dict[str, Any], *, mst_session_id: str, generated_at: str) -> dict[str, Any]:
-    source = fixture.get("integrity") if isinstance(fixture.get("integrity"), dict) else {}
-    detail = {
-        "panel_id": "integrity_freshness",
-        "status": _integrity_status(fixture),
-        "reason": _safe_text(source.get("reason")) or "verifier_not_in_scope",
-        "source_history_head": source.get("source_history_head", fixture.get("source_history_head")),
-        "current_history_head": source.get("current_history_head", fixture.get("current_history_head")),
-        "generated_at": generated_at,
-    }
-    detail["evidence_paths"] = _collect_evidence_paths(source, detail, mst_session_id=mst_session_id)
+    detail = project_dod008_evidence(fixture, mst_session_id=mst_session_id, generated_at=fixture.get("generated_at"))
+    detail["status"] = _integrity_status(fixture)
+    detail["reason"] = detail.get("history_integrity", {}).get("reason", "verifier_not_in_scope")
     return detail
 
 
