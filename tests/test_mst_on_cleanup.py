@@ -199,6 +199,42 @@ def _setup_registered_project(tmp_path: Path, settings_hooks: dict, hook_files: 
     return project
 
 
+def _setup_plugin_source_repo(tmp_path: Path) -> Path:
+    plugin_repo = tmp_path / "plugin_src"
+    plugin_repo.mkdir()
+    (plugin_repo / ".gran-maestro").mkdir()
+    (plugin_repo / ".claude-plugin").mkdir()
+    (plugin_repo / ".claude-plugin" / "plugin.json").write_text('{"version": "0.0.0"}', encoding="utf-8")
+    (plugin_repo / "hooks").mkdir()
+    (plugin_repo / "hooks" / "hooks.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+    (plugin_repo / "hooks" / "mst-stop-hook.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    (plugin_repo / ".claude" / "hooks").mkdir(parents=True)
+    (plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    (plugin_repo / ".claude" / "hooks" / "my-source-dev-hook.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    (plugin_repo / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": ["Read"]},
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                                {"type": "command", "command": "/usr/local/bin/source-custom-stop.sh"},
+                            ],
+                        }
+                    ]
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return plugin_repo
+
+
 def test_pattern_matches_claude_project_dir_variant(tmp_path):
     project = _setup_registered_project(
         tmp_path,
@@ -247,6 +283,70 @@ def test_pattern_matches_git_rev_parse_variant(tmp_path):
     payload = json.loads(proc.stdout)
     assert payload["status"] == "ok"
     assert len(payload["settings"]["removed"]) == 1
+
+
+def test_pattern_matches_absolute_project_root_variant_without_other_project(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": str(tmp_path / "other" / ".claude" / "hooks" / "mst-stop-hook.sh")},
+                        {"type": "command", "command": str(tmp_path / "registered" / ".claude" / "hooks" / "mst-stop-hook.sh")},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh"],
+    )
+
+    payload = _run_cleanup_apply_json(project)
+    settings = _read_project_settings(project)
+    stop_commands = _commands_for(settings, "Stop")
+
+    assert payload["status"] == "ok"
+    assert str(project / ".claude" / "hooks" / "mst-stop-hook.sh") in payload["settings"]["removed"]
+    assert stop_commands == [str(tmp_path / "other" / ".claude" / "hooks" / "mst-stop-hook.sh")]
+
+
+def test_pattern_matches_quoted_env_wrapped_project_root_variants(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "SessionStart": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'/usr/bin/env MST_MODE=legacy "{tmp_path / "registered" / ".claude" / "hooks" / "mst-session-init.sh"}"',
+                        }
+                    ],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "Skill",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'bash -lc \'"{tmp_path / "registered" / ".claude" / "hooks" / "mst-pre-tool-use.sh"}"\'',
+                        }
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-session-init.sh", "mst-pre-tool-use.sh"],
+    )
+
+    payload = _run_cleanup_apply_json(project)
+    settings = _read_project_settings(project)
+
+    assert len(payload["settings"]["removed"]) == 2
+    assert _commands_for(settings, "SessionStart") == []
+    assert _commands_for(settings, "PreToolUse", "Skill") == []
 
 
 def test_user_custom_hook_preserved(tmp_path):
@@ -875,20 +975,72 @@ def test_diagnostic_reason_code_enum_is_locked() -> None:
 
 def test_plugin_source_repo_skipped(tmp_path):
     """gran-maestro 자체 플러그인 소스 저장소는 cleanup 대상에서 제외된다."""
-    plugin_repo = tmp_path / "plugin_src"
-    plugin_repo.mkdir()
-    (plugin_repo / ".gran-maestro").mkdir()
-    (plugin_repo / ".claude-plugin").mkdir()
-    (plugin_repo / ".claude-plugin" / "plugin.json").write_text('{"version": "0.0.0"}', encoding="utf-8")
-    (plugin_repo / "hooks").mkdir()
-    (plugin_repo / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
-    (plugin_repo / ".claude" / "hooks").mkdir(parents=True)
-    (plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    plugin_repo = _setup_plugin_source_repo(tmp_path)
 
     proc = _run_cleanup(plugin_repo)
     assert proc.returncode == 0
     payload = json.loads(proc.stdout)
     assert payload["status"] == "skipped"
     assert "plugin source repo" in payload["reason"]
-    # mst-stop-hook.sh should still exist
     assert (plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert (plugin_repo / "hooks" / "mst-stop-hook.sh").exists()
+
+
+def test_source_repo_cleanup_opt_in_dry_run_reports_legacy_candidates(tmp_path):
+    plugin_repo = _setup_plugin_source_repo(tmp_path)
+
+    proc = _run_cleanup(plugin_repo, "--dry-run", "--source-repo")
+    payload = json.loads(proc.stdout)
+    project_legacy_text = json.dumps(payload["project_legacy"], ensure_ascii=False)
+
+    assert proc.returncode == 0
+    assert payload["status"] == "dry_run"
+    assert payload["environment"]["source_repo"] is True
+    assert "source_dev_diagnostic_only" not in project_legacy_text
+    assert "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh" in payload["settings"]["removed"]
+    assert str(plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh") in payload["files"]["targets"]
+    assert (plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert (plugin_repo / "hooks" / "mst-stop-hook.sh").exists()
+
+
+def test_source_repo_cleanup_opt_in_apply_preserves_source_hooks_and_custom(tmp_path):
+    plugin_repo = _setup_plugin_source_repo(tmp_path)
+
+    payload = _run_cleanup_apply_json(plugin_repo, env={"MST_PROJECT_ROOT": str(plugin_repo)})
+    assert payload["status"] == "skipped"
+
+    payload = json.loads(_run_cleanup(plugin_repo, "--source-repo").stdout)
+    settings = _read_project_settings(plugin_repo)
+
+    assert payload["status"] == "ok"
+    assert "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh" in payload["settings"]["removed"]
+    assert not (plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert (plugin_repo / ".claude" / "hooks" / "my-source-dev-hook.sh").exists()
+    assert (plugin_repo / "hooks" / "hooks.json").exists()
+    assert (plugin_repo / "hooks" / "mst-stop-hook.sh").exists()
+    assert _commands_for(settings, "Stop") == ["/usr/local/bin/source-custom-stop.sh"]
+
+
+def test_source_repo_cleanup_opt_in_rollback_preserves_source_hooks_and_custom(tmp_path, monkeypatch):
+    plugin_repo = _setup_plugin_source_repo(tmp_path)
+    watched_paths = [
+        plugin_repo / ".claude" / "settings.local.json",
+        plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh",
+        plugin_repo / ".claude" / "hooks" / "my-source-dev-hook.sh",
+        plugin_repo / "hooks" / "hooks.json",
+        plugin_repo / "hooks" / "mst-stop-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    real_apply_file_deletions = on._apply_file_deletions
+
+    def fail_source_file_delete(targets):
+        deleted, _failed = real_apply_file_deletions([])
+        return deleted, [(targets[0], "simulated source repo delete failure")]
+
+    monkeypatch.setattr(on, "_apply_file_deletions", fail_source_file_delete)
+    monkeypatch.setenv("MST_PROJECT_ROOT", str(plugin_repo))
+    rc = on.cmd_on_cleanup(type("Args", (), {"dry_run": False, "source_repo": True, "json": True, "silent": False})())
+
+    assert rc == 1
+    assert _read_bytes_by_path(watched_paths) == before

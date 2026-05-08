@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
-from scripts.mst_cmds import _common
+from scripts.mst_cmds import _common, on
 from scripts.mst_cmds._common import (
     _project_root,
 )
@@ -137,38 +137,36 @@ def _print_resolve_base_payload(detected_base: str, req_id: str | None, as_json:
 
 def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int:
     source_claude_dir = project_root / ".claude"
-    source_hooks_dir = source_claude_dir / "hooks"
     target_claude_dir = worktree_path / ".claude"
-    target_hooks_dir = target_claude_dir / "hooks"
-
-    if not source_hooks_dir.is_dir():
-        print(f"Error: source hooks directory not found: {source_hooks_dir}", file=sys.stderr)
-        return 1
-
-    hook_sources = sorted(source_hooks_dir.glob("mst-*.sh"))
-    if not hook_sources:
-        print(f"Error: no mst hook scripts found in {source_hooks_dir}", file=sys.stderr)
-        return 1
 
     settings_source = source_claude_dir / "settings.local.json"
     if not settings_source.is_file():
-        print(f"Error: source settings file not found: {settings_source}", file=sys.stderr)
-        return 1
-
-    target_hooks_dir.mkdir(parents=True, exist_ok=True)
+        return 0
 
     try:
-        for hook_source in hook_sources:
-            target_path = target_hooks_dir / hook_source.name
-            shutil.copy2(hook_source, target_path)
-            target_path.chmod(0o755)
-
-        hook_version_source = source_hooks_dir / ".mst-hook-version"
-        if hook_version_source.is_file():
-            shutil.copy2(hook_version_source, target_hooks_dir / ".mst-hook-version")
-
         target_claude_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(settings_source, target_claude_dir / "settings.local.json")
+        target_settings = target_claude_dir / "settings.local.json"
+        try:
+            settings = json.loads(settings_source.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            shutil.copy2(settings_source, target_settings)
+            return 0
+
+        if not isinstance(settings, dict):
+            shutil.copy2(settings_source, target_settings)
+            return 0
+
+        filtered = dict(settings)
+        hooks = filtered.get("hooks")
+        if isinstance(hooks, dict):
+            new_hooks, _removed = on._filter_hooks_block(hooks, project_root)
+            if new_hooks:
+                filtered["hooks"] = new_hooks
+            else:
+                filtered.pop("hooks", None)
+        with open(target_settings, "w", encoding="utf-8") as f:
+            json.dump(filtered, f, ensure_ascii=False, indent=2)
+            f.write("\n")
     except Exception as exc:
         print(f"Error: failed to copy worktree support files ({exc})", file=sys.stderr)
         return 1

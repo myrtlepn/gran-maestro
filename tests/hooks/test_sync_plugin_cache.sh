@@ -147,6 +147,7 @@ write_hooks_fixture() {
   local project_root="$1"
 
   mkdir -p "$project_root/hooks/lib"
+  cp "$REPO_ROOT/hooks/hooks.json" "$project_root/hooks/hooks.json"
   cp "$REPO_ROOT/hooks/mst-pre-tool-use.sh" "$project_root/hooks/mst-pre-tool-use.sh"
   cp "$REPO_ROOT/hooks/lib/pre_tool_use_fast.py" "$project_root/hooks/lib/pre_tool_use_fast.py"
   cp "$REPO_ROOT/hooks/lib/history.bash" "$project_root/hooks/lib/history.bash"
@@ -308,6 +309,7 @@ test_act08_002_sync_hooks_lib_to_plugin_cache() {
   run_session_init "$project_root" "$claude_home" "$stdout_file" "$stderr_file"
 
   for rel in \
+    hooks/hooks.json \
     hooks/lib/pre_tool_use_fast.py \
     hooks/lib/history.bash \
     hooks/lib/rule_engine.bash \
@@ -320,6 +322,15 @@ test_act08_002_sync_hooks_lib_to_plugin_cache() {
     assert_eq "AC-T08-002 cache hash $rel" "$(sha256_file "$source_file")" "$(sha256_file "$cache_file")"
     assert_eq "AC-T08-002 marketplace hash $rel" "$(sha256_file "$source_file")" "$(sha256_file "$marketplace_file")"
   done
+
+  assert_contains_file \
+    "AC-T08-002 cache hooks.json uses plugin root" \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/' \
+    "$claude_home/.claude/plugins/cache/gran-maestro/mst/TEST/hooks/hooks.json"
+  assert_contains_file \
+    "AC-T08-002 marketplace hooks.json uses plugin root" \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/' \
+    "$claude_home/.claude/plugins/marketplaces/gran-maestro/hooks/hooks.json"
 
   set +e
   (

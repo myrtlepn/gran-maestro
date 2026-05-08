@@ -49,6 +49,7 @@ Hook 관련 변경이 포함된 릴리스에서는 아래 항목을 함께 확�
 - source hooks인 프로젝트 루트 `hooks/` 원본 파일이 최종 source of truth이며, plugin core canonical runtime command가 `${CLAUDE_PLUGIN_ROOT}/hooks/...`를 가리키는지 확인합니다.
 - plugin cache packaging에 source hooks와 `hooks/hooks.json`이 포함되어 캐시 버전에 반영되는지 확인합니다.
 - docs/tests consistency를 위해 hook boundary 문서와 문서 테스트를 함께 갱신합니다.
+- 검증 evidence는 아래 순서대로 no-injection/manifest, cleanup, hooks sync/plugin cache, worktree, global hook 축을 분리해 기록하고, skip/fail은 해당 축의 사유로 남깁니다.
 - hook 변경 후 아래 검증을 실행합니다:
   ```bash
   python3 -m pytest tests/test_mst_on_no_hook_injection.py tests/test_plugin_manifest_hooks.py  # no-injection / manifest

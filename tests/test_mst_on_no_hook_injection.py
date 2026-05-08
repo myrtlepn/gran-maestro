@@ -76,6 +76,18 @@ PROJECT_HOOK_NEGATION_PATTERNS = [
     r"legacy",
     r"레거시",
 ]
+RELEASE_HOOK_REGRESSION_COMMANDS = {
+    "no-injection / manifest": (
+        "python3 -m pytest tests/test_mst_on_no_hook_injection.py "
+        "tests/test_plugin_manifest_hooks.py"
+    ),
+    "cleanup": "python3 -m pytest tests/test_mst_on_cleanup.py",
+    "hooks sync / plugin cache": "bash tests/hooks/test_sync_plugin_cache.sh",
+    "worktree": "python3 -m pytest tests/test_worktree_create_regression.py",
+    "global hook / user-global": (
+        "python3 -m pytest tests/test_global_user_hooks_safety.py"
+    ),
+}
 
 
 def _skill_text() -> str:
@@ -244,6 +256,48 @@ def test_release_docs_include_hook_change_checklist_requirements():
     assert not missing, f"{_relative(path)} missing hook release checklist items: {missing}"
 
 
+def test_release_docs_list_hook_regression_commands_by_boundary():
+    """Hook release checklist는 실제 suite 명령과 boundary 축 이름을 함께 고정해야 한다."""
+    path = REPO_ROOT / "docs" / "RELEASE.md"
+    text = _read_text(path)
+    missing = []
+
+    for boundary, command in RELEASE_HOOK_REGRESSION_COMMANDS.items():
+        if command not in text:
+            missing.append(f"{boundary}: missing command {command!r}")
+        if not re.search(re.escape(boundary), text, flags=re.IGNORECASE):
+            missing.append(f"{boundary}: missing boundary label")
+
+    assert not missing, "\n".join(missing)
+
+
+def test_release_docs_separate_manifest_hooks_json_source_and_cache_packaging():
+    """plugin manifest, hooks.json, source hooks, cache packaging은 서로 구분되어야 한다."""
+    path = REPO_ROOT / "docs" / "RELEASE.md"
+    text = _read_text(path)
+    required = {
+        "plugin manifest hooks reference": (
+            r"plugin manifest.*\.claude-plugin/plugin\.json.*"
+            r'"hooks": "\./hooks/hooks\.json"'
+        ),
+        "hooks.json registration": r"`hooks/hooks\.json` 등록",
+        "source hooks source-of-truth": (
+            r"source hooks.*`hooks/`.*source of truth"
+        ),
+        "plugin-root canonical command": r"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/\.\.\.",
+        "cache packaging includes both source hooks and hooks.json": (
+            r"plugin cache packaging.*source hooks.*`hooks/hooks\.json`"
+        ),
+    }
+    missing = [
+        name
+        for name, pattern in required.items()
+        if not re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    ]
+
+    assert not missing, f"{_relative(path)} missing separated hook checklist items: {missing}"
+
+
 def test_docs_legacy_claude_hooks_references_have_allowed_context():
     """.claude/hooks 언급은 legacy/source-dev/cleanup/repair 등 허용 맥락이어야 한다."""
     failures = []
@@ -301,6 +355,44 @@ def test_simulated_new_project_no_hooks_dir(tmp_path):
     assert "Hook 파일 복사" not in text
     # tmpdir에는 .claude/hooks/가 존재하지 않음을 자명하게 확인 (negative control)
     assert not (tmp_path / ".claude" / "hooks").exists()
+
+
+def test_skill_md_hook_injection_static_contract_excludes_project_runtime_mutations():
+    """/mst:on no-injection은 project hook/settings runtime mutation을 금지하는 정적 계약이다."""
+    text = _skill_text()
+    required_contract = [
+        r"일반 프로젝트에 `\.claude/hooks/` 사본을 만들지 않으며",
+        r"settings\.local\.json`의 `hooks` 블록도 MST core canonical runtime으로 변경하지 않습니다",
+        r"project-local `\.claude/hooks/mst-\*\.sh`.*cleanup·diagnostic 대상",
+    ]
+    forbidden_mutations = {
+        "create project .claude/hooks": (
+            r"mkdir\s+-p[^\n]*(PROJECT_ROOT|CLAUDE_PROJECT_DIR)[^\n]*\.claude/hooks"
+        ),
+        "copy source hooks into project .claude/hooks": (
+            r"cp\s+[^\n]*hooks/\*\.sh[^\n]*(PROJECT_ROOT|CLAUDE_PROJECT_DIR)"
+            r"[^\n]*\.claude/hooks"
+        ),
+        "mutate settings.local.json hooks field": (
+            r"settings\.local\.json[^\n]*(hooks\.setdefault|json\.dump|UserPromptSubmit)"
+        ),
+    }
+
+    missing_contract = [
+        pattern
+        for pattern in required_contract
+        if not re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    ]
+    assert not missing_contract, (
+        f"SKILL.md missing no-injection static contract: {missing_contract}"
+    )
+
+    matches = {
+        name: re.findall(pattern, text, flags=re.IGNORECASE)
+        for name, pattern in forbidden_mutations.items()
+    }
+    matches = {name: found for name, found in matches.items() if found}
+    assert not matches, f"SKILL.md contains forbidden project hook injection mutations: {matches}"
 
 
 def test_simulated_new_project_no_settings_hooks_field(tmp_path):

@@ -4,21 +4,87 @@ import json
 import os
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
 
-SCRIPT_DIR = Path.home() / ".claude" / "scripts"
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 CODEX_TOOL = "mcp__plugin_oh-my-claudecode_x__ask_codex"
 GEMINI_TOOL = "mcp__plugin_oh-my-claudecode_g__ask_gemini"
 
 
-def _script_path(name: str) -> Path:
-    path = SCRIPT_DIR / name
-    if not path.exists():
-        pytest.skip(f"user-global script is not installed: {path}")
-    return path
+@pytest.fixture()
+def global_scripts(tmp_path: Path) -> dict[str, Path]:
+    script_dir = tmp_path / ".claude" / "scripts"
+    script_dir.mkdir(parents=True)
+
+    guard = script_dir / "maestro-guard.sh"
+    guard.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            if command -v jq >/dev/null 2>&1 && ! jq --version >/dev/null 2>&1; then
+              exit 0
+            fi
+            payload="$(cat || true)"
+            python3 - "{CODEX_TOOL}" "{GEMINI_TOOL}" "$payload" <<'PY'
+            import json
+            import pathlib
+            import sys
+
+            codex, gemini, payload = sys.argv[1], sys.argv[2], sys.argv[3]
+            try:
+                data = json.loads(payload) if payload.strip() else {{}}
+            except Exception:
+                raise SystemExit(0)
+            if not isinstance(data, dict):
+                raise SystemExit(0)
+            cwd = data.get("cwd")
+            tool_name = data.get("tool_name")
+            if not isinstance(cwd, str) or tool_name not in {{codex, gemini}}:
+                raise SystemExit(0)
+            try:
+                mode = json.loads((pathlib.Path(cwd) / ".gran-maestro" / "mode.json").read_text())
+            except Exception:
+                raise SystemExit(0)
+            if not isinstance(mode, dict) or mode.get("active") is not True:
+                raise SystemExit(0)
+            skill = "mst:codex" if tool_name == codex else "mst:gemini"
+            print(f'BLOCKED: use Skill(skill: "{{skill}}")')
+            raise SystemExit(2)
+            PY
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    log_prompt = script_dir / "log-prompt.sh"
+    log_prompt.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            log_dir="${HOME:-}/.claude"
+            mkdir -p "$log_dir" >/dev/null 2>&1 || exit 0
+            printf 'prompt received\n' >> "$log_dir/prompt.log" 2>/dev/null || true
+            exit 0
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    check_version = script_dir / "check-version.sh"
+    shutil.copy2(REPO_ROOT / "scripts" / "check-version.sh", check_version)
+
+    for path in (guard, log_prompt, check_version):
+        path.chmod(0o755)
+
+    return {
+        "maestro-guard.sh": guard,
+        "log-prompt.sh": log_prompt,
+        "check-version.sh": check_version,
+    }
 
 
 def _run_script(path: Path, stdin: str = "", env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -48,8 +114,8 @@ def _payload(cwd: Path | None = None, tool_name: str = CODEX_TOOL) -> str:
     return json.dumps(payload)
 
 
-def test_maestro_guard_malformed_or_empty_stdin_passes():
-    script = _script_path("maestro-guard.sh")
+def test_maestro_guard_malformed_or_empty_stdin_passes(global_scripts: dict[str, Path]):
+    script = global_scripts["maestro-guard.sh"]
 
     empty = _run_script(script, "")
     malformed = _run_script(script, "{not-json")
@@ -60,8 +126,8 @@ def test_maestro_guard_malformed_or_empty_stdin_passes():
     assert "BLOCKED" not in malformed.stdout + malformed.stderr
 
 
-def test_maestro_guard_non_mst_or_mode_missing_passes(tmp_path: Path):
-    script = _script_path("maestro-guard.sh")
+def test_maestro_guard_non_mst_or_mode_missing_passes(tmp_path: Path, global_scripts: dict[str, Path]):
+    script = global_scripts["maestro-guard.sh"]
     non_mst = tmp_path / "non-mst"
     non_mst.mkdir()
     active_project = tmp_path / "active"
@@ -80,8 +146,8 @@ def test_maestro_guard_non_mst_or_mode_missing_passes(tmp_path: Path):
     assert "BLOCKED" not in outside_matcher.stdout + outside_matcher.stderr
 
 
-def test_maestro_guard_active_false_or_inactive_passes(tmp_path: Path):
-    script = _script_path("maestro-guard.sh")
+def test_maestro_guard_active_false_or_inactive_passes(tmp_path: Path, global_scripts: dict[str, Path]):
+    script = global_scripts["maestro-guard.sh"]
     inactive_project = tmp_path / "inactive"
     inactive_project.mkdir()
     _write_mode(inactive_project, active=False)
@@ -92,10 +158,10 @@ def test_maestro_guard_active_false_or_inactive_passes(tmp_path: Path):
     assert "BLOCKED" not in proc.stdout + proc.stderr
 
 
-def test_global_hooks_dependency_logging_user_prompt_fail_open(tmp_path: Path):
-    guard = _script_path("maestro-guard.sh")
-    log_prompt = _script_path("log-prompt.sh")
-    check_version = _script_path("check-version.sh")
+def test_global_hooks_dependency_logging_user_prompt_fail_open(tmp_path: Path, global_scripts: dict[str, Path]):
+    guard = global_scripts["maestro-guard.sh"]
+    log_prompt = global_scripts["log-prompt.sh"]
+    check_version = global_scripts["check-version.sh"]
 
     active_project = tmp_path / "active"
     active_project.mkdir()
@@ -131,10 +197,8 @@ def test_global_hooks_dependency_logging_user_prompt_fail_open(tmp_path: Path):
     assert version_failure.returncode == 0
 
 
-def test_maestro_guard_active_and_block_policy_violation(tmp_path: Path):
-    if shutil.which("jq") is None:
-        pytest.skip("jq is required to exercise the policy block path")
-    script = _script_path("maestro-guard.sh")
+def test_maestro_guard_active_and_block_policy_violation(tmp_path: Path, global_scripts: dict[str, Path]):
+    script = global_scripts["maestro-guard.sh"]
     active_project = tmp_path / "active"
     active_project.mkdir()
     _write_mode(active_project, active=True)
@@ -150,10 +214,10 @@ def test_maestro_guard_active_and_block_policy_violation(tmp_path: Path):
     assert 'Skill(skill: "mst:gemini"' in gemini.stdout
 
 
-def test_user_global_settings_read_only(tmp_path: Path):
-    guard = _script_path("maestro-guard.sh")
-    log_prompt = _script_path("log-prompt.sh")
-    check_version = _script_path("check-version.sh")
+def test_user_global_settings_read_only(tmp_path: Path, global_scripts: dict[str, Path]):
+    guard = global_scripts["maestro-guard.sh"]
+    log_prompt = global_scripts["log-prompt.sh"]
+    check_version = global_scripts["check-version.sh"]
     before = SETTINGS_PATH.read_bytes() if SETTINGS_PATH.exists() else None
 
     project = tmp_path / "project"
