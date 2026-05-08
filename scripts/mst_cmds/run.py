@@ -9,12 +9,14 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.mst_cmds import session as session_mod
-from scripts.mst_cmds._common import load_json, resolve_started_by_pid
+from scripts.mst_cmds._common import is_path_safe_mst_session_id, load_json, resolve_started_by_pid
 from scripts.mst_cmds.dispatch import _coerce_positive_int, _dispatch_state_path, _load_dispatch_config, _now_iso
+from scripts.mst_cmds.dispatch import _process_start_time, record_delegate_io_attention
 
 
 def _atomic_save_json(path: Path, payload: dict) -> None:
@@ -64,9 +66,12 @@ def _started_by_pid() -> int:
 
 def _register_state(args) -> str:
     now = _now_iso()
+    pid = os.getpid()
+    pid_start_time = _process_start_time(pid) or f"pid:{pid}:started_at:{now}"
     payload = {
         "task_id": str(args.task_id).strip(),
-        "pid": os.getpid(),
+        "pid": pid,
+        "pid_start_time": pid_start_time,
         "started_by_pid": _started_by_pid(),
         "started_at": now,
         "phase": "running",
@@ -141,8 +146,26 @@ def _write_trace_file(
     trace_path.write_text("\n".join(content), encoding="utf-8")
 
 
-def _tee_output(proc: subprocess.Popen, log_fd: int) -> None:
+def _child_env_with_run_session_id() -> dict[str, str]:
+    try:
+        return session_mod.child_env_with_session_id()
+    except ValueError as exc:
+        message = str(exc)
+        if "missing MST_SESSION_ID" not in message and "invalid structured mst_session_id" not in message:
+            raise
+
+    session_id = os.environ.get("MST_SESSION_ID", "").strip() or str(uuid.uuid4())
+    if not is_path_safe_mst_session_id(session_id):
+        raise ValueError("invalid MST_SESSION_ID for run wrapper")
+    child_env = os.environ.copy()
+    child_env["MST_SESSION_ID"] = session_id
+    os.environ["MST_SESSION_ID"] = session_id
+    return child_env
+
+
+def _tee_output(proc: subprocess.Popen, log_fd: int, stream_log_fds: dict[int, int] | None = None) -> None:
     stream_map: dict[int, int] = {}
+    stream_log_fds = stream_log_fds or {}
 
     if proc.stdout is not None:
         out_fd = proc.stdout.fileno()
@@ -171,6 +194,8 @@ def _tee_output(proc: subprocess.Popen, log_fd: int) -> None:
 
             os.write(stream_map[src_fd], chunk)
             os.write(log_fd, chunk)
+            if src_fd in stream_log_fds:
+                os.write(stream_log_fds[src_fd], chunk)
 
 
 def cmd_run(args):
@@ -180,6 +205,8 @@ def cmd_run(args):
     log_dir = Path(args.log_dir).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
     running_log_path = log_dir / "running.log"
+    stdout_log_path = log_dir / "stdout.log"
+    stderr_log_path = log_dir / "stderr.log"
 
     command = list(getattr(args, "cli_command", []) or [])
     if command and command[0] == "--":
@@ -200,6 +227,19 @@ def cmd_run(args):
         while not stop_event.wait(heartbeat_interval):
             with state_lock:
                 _write_heartbeat(task_id, phase="running")
+                current_state = _load_state(task_id)
+                try:
+                    record_delegate_io_attention(
+                        _dispatch_state_path(task_id),
+                        {"stdout": stdout_log_path, "stderr": stderr_log_path},
+                        process_identity={
+                            "pid": os.getpid(),
+                            "pid_start_time": str(current_state.get("pid_start_time") or ""),
+                            "pid_alive": True,
+                        },
+                    )
+                except Exception:
+                    pass
 
     hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)
     hb_thread.start()
@@ -225,6 +265,8 @@ def cmd_run(args):
 
     try:
         log_fd = os.open(str(running_log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        stdout_log_fd = os.open(str(stdout_log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        stderr_log_fd = os.open(str(stderr_log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         try:
             proc = subprocess.Popen(
                 command,
@@ -233,13 +275,18 @@ def cmd_run(args):
                 stderr=subprocess.PIPE,
                 bufsize=0,
                 text=False,
-                env=session_mod.child_env_with_session_id(),
+                env=_child_env_with_run_session_id(),
             )
             tee_error: list[BaseException] = []
 
             def _tee_worker() -> None:
                 try:
-                    _tee_output(proc, log_fd)
+                    stream_log_fds = {}
+                    if proc.stdout is not None:
+                        stream_log_fds[proc.stdout.fileno()] = stdout_log_fd
+                    if proc.stderr is not None:
+                        stream_log_fds[proc.stderr.fileno()] = stderr_log_fd
+                    _tee_output(proc, log_fd, stream_log_fds)
                 except BaseException as exc:  # pragma: no cover - defensive guard
                     tee_error.append(exc)
 
@@ -265,6 +312,8 @@ def cmd_run(args):
                 if tee_error:
                     raise tee_error[0]
         finally:
+            os.close(stdout_log_fd)
+            os.close(stderr_log_fd)
             os.close(log_fd)
     except FileNotFoundError as exc:
         print(f"Error: failed to execute command ({exc})", file=sys.stderr)

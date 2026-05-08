@@ -2577,6 +2577,80 @@ $(exit_boundary_requests)
 EOF
 }
 
+pending_delegate_io_attention_context() {
+  python3 - "$PROJECT_ROOT" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+run_dir = project_root / ".gran-maestro" / "run"
+if not run_dir.is_dir():
+    raise SystemExit(0)
+
+def parse_dt(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+now = datetime.now(timezone.utc)
+pending = []
+for state_path in sorted(run_dir.glob("*.json")):
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(payload, dict):
+        continue
+    for event in payload.get("delegate_io_attention_events") or []:
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") != "delegate_io_attention":
+            continue
+        expires_at = parse_dt(event.get("expires_at"))
+        if expires_at is not None and expires_at <= now:
+            continue
+        pending.append(event)
+
+if not pending:
+    raise SystemExit(0)
+
+def observed_key(event):
+    return parse_dt(event.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc)
+
+event = sorted(pending, key=observed_key)[-1]
+allowed = ",".join(str(item) for item in event.get("allowed_actions") or [])
+forbidden = ",".join(str(item) for item in event.get("forbidden_reasons") or [])
+fields = {
+    "event_id": event.get("event_id", ""),
+    "task_id": event.get("task_id", ""),
+    "provider": event.get("provider", ""),
+    "pid": event.get("pid", ""),
+    "signal": event.get("signal", ""),
+    "confidence": event.get("confidence", ""),
+    "allowed_actions": allowed,
+    "forbidden_reasons": forbidden,
+}
+print(
+    " ".join(
+        f"{key}={str(value).replace(chr(9), ' ').replace(chr(10), ' ').strip()}"
+        for key, value in fields.items()
+        if str(value).strip()
+    )
+)
+PY
+}
+
 warn_session_id_mismatch_if_any
 refresh_snapshot_from_canonical_session
 fail_closed_canonical_mismatch_if_any
@@ -2869,6 +2943,15 @@ if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
     append_block_audit_entry "$REASON"
     emit_block_decision "$REASON"
     debug_log "block" "reason=state_missing_active_session_detected"
+    exit 0
+  fi
+  DELEGATE_IO_CONTEXT="$(pending_delegate_io_attention_context || true)"
+  if [ -n "$DELEGATE_IO_CONTEXT" ]; then
+    REASON="[DELEGATE-IO] pending delegate_io_attention event: $DELEGATE_IO_CONTEXT."
+    REASON="$REASON Treat this as low-priority re-entry context; inspect current state and choose an allowed action without writing child stdin."
+    append_block_audit_entry "$REASON"
+    debug_log "block" "reason=delegate_io_attention_pending context=$(sanitize_log_value "$DELEGATE_IO_CONTEXT")"
+    emit_block_decision "$REASON"
     exit 0
   fi
   if [ "${SNAPSHOT_PRESENT:-false}" != "true" ] && [ -z "${MST_SESSION_ID:-}" ] && [ -z "$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)" ] && [ "${SESSION_ID:-unknown}" != "unknown" ]; then
