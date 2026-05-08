@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -165,27 +164,6 @@ def _command_hook_name(command: str) -> str:
     return Path(command.strip().split()[0]).name if command.strip() else ""
 
 
-def _shell_tokens(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return [command]
-
-
-def _is_project_legacy_mst_hook_command(command: str, project_root: Path) -> bool:
-    if MST_HOOK_COMMAND_RE.search(command):
-        return True
-
-    legacy_paths = {
-        str((project_root / ".claude" / "hooks" / name).resolve(strict=False))
-        for name in MST_HOOK_FILE_EVENTS
-    }
-    for token in _shell_tokens(command):
-        if token.strip("\"'") in legacy_paths:
-            return True
-    return False
-
-
 def _acquire_lock(lock_path: Path) -> bool:
     """Lock 획득. stale lock(>60s)는 자동 무효화."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +192,7 @@ def _release_lock(lock_path: Path) -> None:
         pass
 
 
-def _filter_hooks_block(hooks: dict, project_root: Path) -> Tuple[dict, List[str]]:
+def _filter_hooks_block(hooks: dict) -> Tuple[dict, List[str]]:
     """settings.local.json hooks 블록에서 mst 4종 항목만 정규식 매칭으로 제거.
 
     Returns:
@@ -240,7 +218,7 @@ def _filter_hooks_block(hooks: dict, project_root: Path) -> Tuple[dict, List[str
             kept_inner: list = []
             for h in inner:
                 cmd = h.get("command", "") if isinstance(h, dict) else ""
-                if isinstance(cmd, str) and _is_project_legacy_mst_hook_command(cmd, project_root):
+                if isinstance(cmd, str) and MST_HOOK_COMMAND_RE.search(cmd):
                     removed.append(cmd)
                     continue
                 kept_inner.append(h)
@@ -265,7 +243,7 @@ def _plan_settings_changes(project_root: Path) -> dict:
     if not isinstance(original, dict):
         return {"path": str(settings_path), "exists": True, "removed": []}
     hooks = original.get("hooks", {})
-    _, removed = _filter_hooks_block(hooks, project_root)
+    _, removed = _filter_hooks_block(hooks)
     return {"path": str(settings_path), "exists": True, "removed": removed}
 
 
@@ -281,7 +259,7 @@ def _plan_file_deletions(project_root: Path) -> List[str]:
     return targets
 
 
-def _classify_environment(project_root: Path, diagnostics: List[dict]) -> dict:
+def _classify_environment(project_root: Path, diagnostics: List[dict], *, source_repo_opt_in: bool = False) -> dict:
     is_source = _is_plugin_source_repo(project_root)
     parts = project_root.resolve().parts
     is_worktree = ".gran-maestro" in parts and "worktrees" in parts
@@ -293,8 +271,12 @@ def _classify_environment(project_root: Path, diagnostics: List[dict]) -> dict:
 
     if is_source:
         kind = "source-dev"
-        status = "skipped"
-        reason = "plugin source repo (out of cleanup scope)"
+        if source_repo_opt_in:
+            status = "ok"
+            reason = "plugin source repo cleanup opt-in"
+        else:
+            status = "skipped"
+            reason = "plugin source repo (out of cleanup scope)"
     elif is_worktree:
         kind = "worktree"
         status = "diagnostic"
@@ -322,7 +304,7 @@ def _classify_environment(project_root: Path, diagnostics: List[dict]) -> dict:
         "reason": reason,
         "source_repo": is_source,
         "worktree_like": is_worktree,
-        "cleanup_scope": "skipped" if is_source else "project",
+        "cleanup_scope": "source-repo-opt-in" if is_source and source_repo_opt_in else "skipped" if is_source else "project",
     }
 
 
@@ -435,7 +417,7 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
         else:
             for item in _iter_settings_hook_commands(settings) or []:
                 command = item["command"]
-                if _is_project_legacy_mst_hook_command(command, project_root):
+                if MST_HOOK_COMMAND_RE.search(command):
                     project_legacy["settings"]["candidates"].append(
                         {
                             "classification": CLASS_PROJECT_LEGACY,
@@ -545,31 +527,25 @@ def _duplicate_risks(plugin_core: dict, project_legacy: dict) -> List[dict]:
     return risks
 
 
-def _mark_source_dev_project_legacy(project_legacy: dict) -> None:
+def _mark_source_dev_project_legacy(project_legacy: dict, *, opt_in: bool = False) -> None:
     for group in (
         project_legacy.get("settings", {}).get("candidates", []),
         project_legacy.get("files", {}).get("candidates", []),
     ):
         for item in group:
-            if isinstance(item, dict):
+            if isinstance(item, dict) and not opt_in:
                 item["status"] = "skipped"
                 item["reason"] = "source_dev_diagnostic_only"
 
 
-def _build_cleanup_inventory(
-    project_root: Path,
-    *,
-    dry_run: bool,
-    mutated: bool,
-    source_repo_opt_in: bool = False,
-) -> dict:
+def _build_cleanup_inventory(project_root: Path, *, dry_run: bool, mutated: bool, source_repo_opt_in: bool = False) -> dict:
     diagnostics: List[dict] = []
-    environment = _classify_environment(project_root, diagnostics)
+    environment = _classify_environment(project_root, diagnostics, source_repo_opt_in=source_repo_opt_in)
     plugin_core = _plugin_core_inventory(project_root, diagnostics)
     project_legacy, user_custom = _project_legacy_and_custom_inventory(project_root, diagnostics)
     user_global = _user_global_inventory(diagnostics)
-    if environment.get("source_repo") and not source_repo_opt_in:
-        _mark_source_dev_project_legacy(project_legacy)
+    if environment.get("source_repo"):
+        _mark_source_dev_project_legacy(project_legacy, opt_in=source_repo_opt_in)
 
     return {
         "mutation": {"dry_run": dry_run, "mutated": mutated},
@@ -609,8 +585,7 @@ def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[
     if not isinstance(original, dict):
         return True, []
     hooks = original.get("hooks", {})
-    project_root = settings_path.parent.parent
-    new_hooks, removed = _filter_hooks_block(hooks, project_root)
+    new_hooks, removed = _filter_hooks_block(hooks)
     if not removed:
         return True, []
     new_settings = dict(original)
@@ -921,6 +896,6 @@ def register(subparsers) -> None:
 
     cleanup = on_sub.add_parser("cleanup", help="기존 mst hook 사본·settings 항목 정리")
     cleanup.add_argument("--dry-run", action="store_true")
-    cleanup.add_argument("--source-repo", action="store_true", help="플러그인 소스 저장소 legacy hook cleanup을 명시적으로 허용")
     cleanup.add_argument("--silent", action="store_true")
     cleanup.add_argument("--json", action="store_true")
+    cleanup.add_argument("--source-repo", action="store_true", help="plugin source repo legacy project cleanup opt-in")

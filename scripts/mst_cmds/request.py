@@ -36,6 +36,78 @@ ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
     ]
 }
 
+def _advance_phase2_result(req_id: str, request_path: Path | None, request_data: dict | None) -> dict:
+    if not isinstance(request_data, dict):
+        return {
+            "req_id": req_id,
+            "ready": False,
+            "advanced": False,
+            "reason": "unknown_request",
+            "incomplete_tasks": [],
+        }
+
+    completion = _common.phase2_completion_state(request_data)
+    return {
+        "req_id": req_id,
+        "ready": completion["ready"],
+        "advanced": False,
+        "reason": completion["reason"],
+        "incomplete_tasks": completion["incomplete_tasks"],
+        "request_path": str(request_path) if request_path is not None else None,
+    }
+
+
+def advance_phase2_if_ready(req_id: str, *, check: bool = False) -> dict:
+    normalized_req_id = str(req_id).strip().upper()
+    request_path = _common.requests_dir() / normalized_req_id / "request.json"
+    request_data = _common.load_json(request_path)
+    result = _advance_phase2_result(normalized_req_id, request_path, request_data)
+    if not result["ready"] or check:
+        return result
+
+    review_summary = request_data.get("review_summary")
+    if not isinstance(review_summary, dict):
+        review_summary = {}
+    else:
+        review_summary = dict(review_summary)
+
+    review_status = str(review_summary.get("status") or "").strip().lower()
+    if review_status not in {"passed", "failed"}:
+        review_summary["status"] = "pending_phase3_review"
+
+    updated = copy.deepcopy(request_data)
+    updated["current_phase"] = 3
+    updated["status"] = "phase3_review"
+    updated["review_summary"] = review_summary
+    _common.save_json(request_path, updated)
+
+    result["advanced"] = True
+    return result
+
+
+def _print_advance_phase2_result(result: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    if result.get("advanced"):
+        print(f"{result.get('req_id')}: advanced to phase3_review")
+    elif result.get("ready"):
+        print(f"{result.get('req_id')}: ready for phase3_review")
+    else:
+        print(f"{result.get('req_id')}: not ready ({result.get('reason')})")
+
+
+def _advance_phase2_guard_blocked_result(req_id: str) -> dict:
+    return {
+        "req_id": str(req_id).strip().upper(),
+        "ready": False,
+        "advanced": False,
+        "reason": "guard_blocked",
+        "guard_blocked": True,
+        "guard_message": "canonical read-only guard blocked phase transition",
+        "incomplete_tasks": [],
+    }
+
 
 def _load_adversarial_review_config() -> dict:
     plugin_root = _common._plugin_root()
@@ -199,6 +271,23 @@ def cmd_request_set_phase(args):
     return 0
 
 
+def cmd_request_advance_phase2_if_ready(args):
+    if not args.check:
+        from scripts.mst_cmds.state import _check_read_only
+
+        read_only_status = _check_read_only(args.req_id)
+        if read_only_status:
+            if args.json:
+                _print_advance_phase2_result(
+                    _advance_phase2_guard_blocked_result(args.req_id),
+                    True,
+                )
+            return read_only_status
+    result = advance_phase2_if_ready(args.req_id, check=args.check)
+    _print_advance_phase2_result(result, args.json)
+    return 0
+
+
 def cmd_request_takeover(args):
     from scripts.mst_cmds.state import cmd_takeover_request
 
@@ -262,6 +351,11 @@ def register(subparsers):
     req_set_phase.add_argument("req_id")
     req_set_phase.add_argument("phase", type=int)
     req_set_phase.add_argument("status")
+
+    req_advance_phase2 = req_sub.add_parser("advance-phase2-if-ready")
+    req_advance_phase2.add_argument("req_id")
+    req_advance_phase2.add_argument("--check", action="store_true")
+    req_advance_phase2.add_argument("--json", action="store_true")
 
     req_review = req_sub.add_parser("review")
     req_review.add_argument("--req-path", required=True)

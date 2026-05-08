@@ -21,13 +21,21 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
-from scripts.mst_cmds import _common, on
+from scripts.mst_cmds import _common
 from scripts.mst_cmds._common import (
     _project_root,
 )
 
 
 FALLBACK_PROTECTED_BRANCHES = ["main", "master", "release/*"]
+MST_WORKTREE_HOOK_COMMAND_RE = re.compile(
+    r"(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]+\))/\.claude/hooks/"
+    r"mst-(stop-hook|session-init|pre-tool-use|auto-chain-context)\.sh"
+)
+MST_WORKTREE_HOOK_MARKER_FILES = {
+    ".mst-hook-version",
+    "stop-agile-gate-reasons.json",
+}
 
 
 def base_slug(base: str) -> str:
@@ -135,43 +143,119 @@ def _print_resolve_base_payload(detected_base: str, req_id: str | None, as_json:
     print(json.dumps(payload, ensure_ascii=False))
 
 
-def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int:
-    source_claude_dir = project_root / ".claude"
-    target_claude_dir = worktree_path / ".claude"
+def _is_mst_owned_worktree_hook_file(path: Path) -> bool:
+    name = path.name
+    return (name.startswith("mst-") and name.endswith(".sh")) or name in MST_WORKTREE_HOOK_MARKER_FILES
 
+
+def _filter_worktree_hooks_block(hooks: dict) -> tuple[dict, list[str]]:
+    removed: list[str] = []
+    if not isinstance(hooks, dict):
+        return {}, removed
+    new_hooks: dict[str, object] = {}
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            new_hooks[event] = entries
+            continue
+        kept_entries: list[object] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                kept_entries.append(entry)
+                continue
+            inner = entry.get("hooks") or []
+            if not isinstance(inner, list):
+                kept_entries.append(entry)
+                continue
+            kept_inner: list[object] = []
+            for hook in inner:
+                command = hook.get("command", "") if isinstance(hook, dict) else ""
+                if isinstance(command, str) and MST_WORKTREE_HOOK_COMMAND_RE.search(command):
+                    removed.append(command)
+                    continue
+                kept_inner.append(hook)
+            if kept_inner:
+                new_entry = dict(entry)
+                new_entry["hooks"] = kept_inner
+                kept_entries.append(new_entry)
+        if kept_entries:
+            new_hooks[event] = kept_entries
+    return new_hooks, removed
+
+
+def _filter_worktree_settings(settings: dict) -> dict:
+    filtered = copy.deepcopy(settings)
+    hooks = filtered.get("hooks")
+    if isinstance(hooks, dict):
+        filtered_hooks, _ = _filter_worktree_hooks_block(hooks)
+        if filtered_hooks:
+            filtered["hooks"] = filtered_hooks
+        else:
+            filtered.pop("hooks", None)
+    return filtered
+
+
+def _copy_custom_worktree_hook_files(source_hooks_dir: Path, target_hooks_dir: Path) -> int:
+    if not source_hooks_dir.is_dir():
+        return 0
+
+    hook_sources = sorted(
+        path for path in source_hooks_dir.iterdir()
+        if path.is_file() and not _is_mst_owned_worktree_hook_file(path)
+    )
+    if not hook_sources:
+        return 0
+
+    try:
+        target_hooks_dir.mkdir(parents=True, exist_ok=True)
+        for hook_source in hook_sources:
+            shutil.copy2(hook_source, target_hooks_dir / hook_source.name)
+    except Exception as exc:
+        print(f"Error: failed to copy worktree custom hook files ({exc})", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def _copy_filtered_worktree_settings(source_claude_dir: Path, target_claude_dir: Path) -> int:
     settings_source = source_claude_dir / "settings.local.json"
     if not settings_source.is_file():
         return 0
 
     try:
+        original = json.loads(settings_source.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"Error: failed to parse source settings file ({exc})", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Error: failed to read source settings file ({exc})", file=sys.stderr)
+        return 1
+
+    try:
         target_claude_dir.mkdir(parents=True, exist_ok=True)
         target_settings = target_claude_dir / "settings.local.json"
-        try:
-            settings = json.loads(settings_source.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        if isinstance(original, dict):
+            filtered = _filter_worktree_settings(original)
+            target_settings.write_text(json.dumps(filtered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        else:
             shutil.copy2(settings_source, target_settings)
-            return 0
-
-        if not isinstance(settings, dict):
-            shutil.copy2(settings_source, target_settings)
-            return 0
-
-        filtered = dict(settings)
-        hooks = filtered.get("hooks")
-        if isinstance(hooks, dict):
-            new_hooks, _removed = on._filter_hooks_block(hooks, project_root)
-            if new_hooks:
-                filtered["hooks"] = new_hooks
-            else:
-                filtered.pop("hooks", None)
-        with open(target_settings, "w", encoding="utf-8") as f:
-            json.dump(filtered, f, ensure_ascii=False, indent=2)
-            f.write("\n")
     except Exception as exc:
-        print(f"Error: failed to copy worktree support files ({exc})", file=sys.stderr)
+        print(f"Error: failed to copy worktree settings file ({exc})", file=sys.stderr)
         return 1
 
     return 0
+
+
+def _copy_worktree_support_files(project_root: Path, worktree_path: Path) -> int:
+    source_claude_dir = project_root / ".claude"
+    source_hooks_dir = source_claude_dir / "hooks"
+    target_claude_dir = worktree_path / ".claude"
+    target_hooks_dir = target_claude_dir / "hooks"
+
+    hook_result = _copy_custom_worktree_hook_files(source_hooks_dir, target_hooks_dir)
+    if hook_result != 0:
+        return hook_result
+
+    return _copy_filtered_worktree_settings(source_claude_dir, target_claude_dir)
 
 
 def _normalize_target_path(path_value) -> Path:
@@ -1471,16 +1555,15 @@ def _boundary_task_ids(request_data: dict, requested_task_id: str | None) -> lis
     return task_ids
 
 
-def _all_tasks_committed_or_done(request_data: dict) -> bool:
-    tasks = request_data.get("tasks") or []
+def _all_tasks_have_phase2_ready_terminal_status(request_data: dict) -> bool:
+    tasks = request_data.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         return False
-
     for task in tasks:
         if not isinstance(task, dict):
             return False
-        status = str(task.get("status") or "").strip().lower()
-        if status not in {"committed", "done"}:
+        status = str(task.get("status", "")).strip().lower()
+        if status not in _common.PHASE2_READY_TASK_STATUSES:
             return False
     return True
 
@@ -1599,13 +1682,13 @@ def _check_exit_boundary(
             current_ppid,
         ), 0
 
-    if _all_tasks_committed_or_done(request_data) and _all_task_metas_missing(req_id, task_ids):
+    if _all_tasks_have_phase2_ready_terminal_status(request_data) and _all_task_metas_missing(req_id, task_ids):
         return _boundary_payload(
             True,
             None,
             False,
             detected_base,
-            "legacy_no_meta: all tasks committed and no meta files (legacy CLI path)",
+            "legacy_no_meta: all tasks in phase2 ready terminal status and no meta files (legacy CLI path)",
             owner_ppid,
             current_ppid,
         ), 0

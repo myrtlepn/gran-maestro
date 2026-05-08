@@ -465,6 +465,64 @@ WORKFLOW_STALL_LIMIT = 3
 
 WORKFLOW_TERMINAL_STATUSES = frozenset(status.lower() for status in TERMINAL)
 
+PHASE2_READY_TASK_STATUSES = frozenset({"committed", "completed", "done", "accepted"})
+
+
+def _phase2_incomplete_task(task) -> dict | None:
+    if not isinstance(task, dict):
+        return {"id": None, "status": None}
+    task_id = task.get("id")
+    task_status = task.get("status")
+    status = str(task_status).strip().lower() if isinstance(task_status, str) else None
+    if status in PHASE2_READY_TASK_STATUSES:
+        return None
+    return {
+        "id": str(task_id).strip() if isinstance(task_id, str) and task_id.strip() else None,
+        "status": status,
+    }
+
+
+def phase2_completion_state(request_data: dict) -> dict:
+    phase, status = _phase_status_tuple(request_data)
+    if phase != 2 or status.strip().lower() != "phase2_execution":
+        return {
+            "ready": False,
+            "reason": "not_phase2_execution",
+            "incomplete_tasks": [],
+        }
+
+    tasks = request_data.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return {
+            "ready": False,
+            "reason": "missing_tasks",
+            "incomplete_tasks": [],
+        }
+
+    incomplete_tasks = []
+    for task in tasks:
+        incomplete = _phase2_incomplete_task(task)
+        if incomplete is not None:
+            incomplete_tasks.append(incomplete)
+
+    if incomplete_tasks:
+        return {
+            "ready": False,
+            "reason": "incomplete_tasks",
+            "incomplete_tasks": incomplete_tasks,
+        }
+
+    return {
+        "ready": True,
+        "reason": None,
+        "incomplete_tasks": [],
+    }
+
+
+def all_phase2_tasks_ready(data: dict) -> bool:
+    return phase2_completion_state(data).get("ready") is True
+
+
 def _request_json_path(req_id: str) -> Path:
     return BASE_DIR / "requests" / req_id / "request.json"
 

@@ -707,25 +707,14 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
 
 ##### 5.7-0. 진입 게이트 (source_plan Guard + 하위호환)
 
-```pseudo
-req = Read({PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json)
-source_plan = req.source_plan
-intent_cfg = JsonParse(Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification`)) or {}
-intent_enabled = intent_cfg.enabled if boolean else true
-max_iterations = intent_cfg.max_iterations if positive_integer else 5
-all_committed = every(req.tasks[].status in ["committed", "done"])
-
-if all_committed == false:
-  goto Step 6
-
-if source_plan is null or source_plan is empty:
-  echo "[Step 5.7 skip] source_plan 없음 (--plan 없는 REQ) → Step 6 진행"
-  goto Step 6
-
-if intent_enabled == false:
-  echo "[Step 5.7 skip] intent_verification.enabled=false → Step 6 진행"
-  goto Step 6
-```
+1. `Read({PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json)`로 `source_plan`을 확인한다.
+2. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification)`를 실행하고, stdout을 JSON으로 파싱한다. 파싱 실패 또는 빈 값이면 `{}`로 취급한다.
+   - `intent_enabled`: `intent_cfg.enabled`가 boolean이면 그 값을 사용하고, 아니면 `true`.
+   - `max_iterations`: `intent_cfg.max_iterations`가 양의 정수이면 그 값을 사용하고, 아니면 `5`.
+3. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --check --json)`를 실행하고, stdout JSON의 `ready` 값을 확인한다.
+   - `ready != true`이면 아직 모든 Phase 2 태스크가 완료 상태가 아니므로 Step 6으로 이동해 전환 명령이 `incomplete_tasks`를 보고하게 한다.
+4. `source_plan`이 없으면 `[Step 5.7 skip] source_plan 없음 (--plan 없는 REQ) → Step 6 진행`을 출력하고 Step 6으로 이동한다.
+5. `intent_enabled == false`이면 `[Step 5.7 skip] intent_verification.enabled=false → Step 6 진행`을 출력하고 Step 6으로 이동한다.
 
 ##### 5.7-1. 비교 대상 초기화 (AD/PAC/구조 명세)
 
@@ -865,18 +854,28 @@ else:
 
 #### Step 6: Phase 3 전환
 
-모든 태스크가 `committed` 상태에 도달하면:
-**스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 3 phase3_review`; 실패 시 fallback으로 `current_phase`=3, `status`=`phase3_review` 직접 업데이트 → Phase 3 진입.
+모든 Phase 2 태스크가 완료 상태(`committed`, `completed`, `done`, `accepted`)에 도달하면:
+
+1. **Read-only readiness 확인**:
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --check --json)`를 실행한다.
+   - Bash stdout JSON을 파싱해 `ready == true`이고 `advanced == false`인지 확인한다.
+   - `ready == false`이면 stdout JSON의 `reason`과 `incomplete_tasks`를 근거로 아직 Phase 3에 진입하지 않고 대기/수정 분기로 이동한다.
+2. **전환 실행**:
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --json)`를 실행한다.
+   - Bash stdout JSON을 먼저 파싱한다. canonical read-only/MST_SESSION_ID guard가 막으면 command는 non-zero exit code를 반환할 수 있지만, stdout JSON은 `reason == "guard_blocked"`, `advanced == false`로 구조화되어야 한다.
+   - exit code와 함께 stdout JSON을 확인해 `reason == "guard_blocked"`이면 takeover/manual recovery로 분기하고, readiness failure와 혼동하지 않는다.
+   - guard 차단이 없을 때는 Bash stdout JSON을 파싱해 `ready == true`이고 `advanced == true`인지 확인한다.
+   - 성공 시 request는 `current_phase=3`, `status=phase3_review`이며, `review_summary.status`는 기존 `passed`/`failed`가 아닌 경우 `pending_phase3_review`로 보장된다.
 
 ### Phase 3 리뷰 루프 (auto_review 활성화 시)
 
-모든 태스크가 `committed` 상태에 도달하고 `current_phase`가 3으로 전환된 후:
+모든 Phase 2 태스크가 완료 상태에 도달하고 `current_phase`가 3으로 전환된 후:
 
 1. `review.auto_review` 설정 확인 (`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get review.auto_review)`):
    - `AUTO_MODE`는 단건 프로토콜 진입 시 단일 초기화된 값을 그대로 사용한다 (이중 판단 금지).
    - `false` (기본): 아래 태스크 상태 검증 후 최종 수락 실행 (mst:review 미호출):
-     1. `request.json.tasks` 전체 확인: 모든 태스크가 `committed` 이상 상태인지 검증
-        - `committed` 미만 태스크 존재 시: "태스크 {TASK_ID}가 아직 committed 상태가 아닙니다" 경고 후 대기
+     1. `request.json.tasks` 전체 확인: 모든 Phase 2 태스크가 완료 상태(`committed`, `completed`, `done`, `accepted`)인지 검증
+        - 미완료 태스크 존재 시: "태스크 {TASK_ID}가 아직 Phase 2 완료 상태가 아닙니다" 경고 후 대기
      2. 검증 통과 시 `workflow.auto_accept_result` 설정에 따라 즉시 실행:
         - **`true` (기본)**: `Skill(skill: "mst:accept", args: "{REQ_ID}")` 호출 → accept 완료 후 DAG 연쇄 실행 판단
         - **`false`**: Phase 3 리뷰 PASS로 간주하고 멈추고, 사용자에게 `/mst:accept {REQ_ID}` 수동 호출 안내

@@ -128,6 +128,7 @@ DISPATCH = {
     ("request", "cancel"): request.cmd_request_cancel,
     ("request", "takeover"): request.cmd_request_takeover,
     ("request", "set-phase"): request.cmd_request_set_phase,
+    ("request", "advance-phase2-if-ready"): request.cmd_request_advance_phase2_if_ready,
     ("request", "review"): request.cmd_request_review,
     ("workflow", "run"): workflow.cmd_workflow_run,
     ("worktree", "create"): worktree.cmd_worktree_create,

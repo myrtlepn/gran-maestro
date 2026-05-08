@@ -38,3 +38,26 @@ def test_review_guard_metadata_contract_reaches_approve_and_accept():
     assert "guard_blocked == true" in approve_doc
     assert "guard_blocked == false" in approve_doc
     assert "approve의 auto-accept guard 차단은 AUTO_MODE와 별개" in accept_doc
+
+
+def test_approve_phase2_gate_uses_advance_phase2_stdout_json_contract():
+    skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
+    content = skill_doc.read_text(encoding="utf-8")
+
+    assert "request advance-phase2-if-ready {REQ_ID} --check --json" in content
+    assert "request advance-phase2-if-ready {REQ_ID} --json" in content
+    assert "Bash" in content
+    assert "stdout JSON" in content
+    assert "guard_blocked" in content
+    assert "exit code" in content
+    assert "JsonParse(Bash(" not in content
+    assert 'all_committed = every(... ["committed", "done"])' not in content
+
+
+def test_review_phase2_ready_gate_contract():
+    skill_doc = ROOT / "skills" / "review" / "SKILL.md"
+    content = skill_doc.read_text(encoding="utf-8")
+
+    assert "`committed`, `completed`, `done`, `accepted`" in content
+    assert "수동 호출 전제조건(`committed`, `completed`, `done`, `accepted` 상태 태스크)" in content
+    assert "수동 호출 전제조건(`committed` 태스크)" not in content

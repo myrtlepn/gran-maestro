@@ -14,14 +14,14 @@ argument-hint: "[REQ-ID] [--auto]"
 `/mst:review REQ-NNN` 직접 호출 시 실행 전 아래를 검증합니다.
 
 1. **REQ-ID 필수**: `$ARGUMENTS`에 `REQ-NNN` 패턴이 없으면 "REQ-ID를 지정하세요 (예: /mst:review REQ-001)" 안내 후 종료.
-2. **committed 태스크 존재**: `request.json.tasks` 배열에서 `status == "committed"` 태스크가 1개 이상이어야 실행. 미충족 시 "Phase 2 완료(commit) 후 실행하세요" 안내 후 종료.
-   - 이 조건은 approve 루프 내 호출 시에는 적용하지 않음 (approve가 사전 검증).
+2. **Phase 2 완료 태스크 존재**: `request.json.tasks` 배열에서 `status`가 `committed`, `completed`, `done`, `accepted` 중 하나인 태스크가 1개 이상이어야 실행. 미충족 시 "Phase 2 완료 후 실행하세요" 안내 후 종료.
+   - 이 조건은 approve 루프 내 호출 시에는 적용하지 않음 (approve가 `request advance-phase2-if-ready`로 사전 검증).
 
 ## Gate
 
 ### Entry
 
-- REQ-ID와 수동 호출 전제조건(`committed` 태스크)을 먼저 검증한다.
+- REQ-ID와 수동 호출 전제조건(`committed`, `completed`, `done`, `accepted` 상태 태스크)을 먼저 검증한다.
 - RV 회차 메타데이터(`review.json`, `request.json.review_iterations`)를 생성한 뒤 검증을 시작한다.
 - Spec AC/Plan AC 및 변경 파일 컨텍스트를 수집해 Pass A 판정 근거를 확보한다.
 

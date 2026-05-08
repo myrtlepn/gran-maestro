@@ -121,6 +121,8 @@ def test_exit_all_committed_tasks_with_no_meta_gracefully_bypasses(tmp_path: Pat
     assert payload["retry_possible"] is False
     assert payload["detected_base"] == "main"
     assert "legacy_no_meta" in payload["reason"]
+    assert "phase2 ready terminal status" in payload["reason"]
+    assert "all tasks committed" not in payload["reason"]
 
 
 def test_exit_all_done_tasks_with_no_meta_gracefully_bypasses(tmp_path: Path) -> None:
@@ -150,6 +152,41 @@ def test_exit_all_done_tasks_with_no_meta_gracefully_bypasses(tmp_path: Path) ->
     assert payload["violation"] is None
     assert payload["retry_possible"] is False
     assert "legacy_no_meta" in payload["reason"]
+    assert "phase2 ready terminal status" in payload["reason"]
+    assert "all tasks committed" not in payload["reason"]
+
+
+def test_exit_phase2_ready_tasks_with_completed_no_meta_gracefully_bypasses(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / ".gran-maestro" / "requests" / "REQ-682" / "request.json",
+        {
+            "id": "REQ-682",
+            "status": "done",
+            "current_phase": 5,
+            "tasks": [
+                {"id": "T01", "status": "committed"},
+                {"id": "T02", "status": "completed"},
+                {"id": "T03", "status": "done"},
+                {"id": "T04", "status": "accepted"},
+            ],
+        },
+    )
+
+    result, payload = run_check_boundary(
+        tmp_path,
+        "--req",
+        "REQ-682",
+        "--phase",
+        "exit",
+    )
+
+    assert result.returncode == 0
+    assert payload["ok"] is True
+    assert payload["violation"] is None
+    assert payload["retry_possible"] is False
+    assert "legacy_no_meta" in payload["reason"]
+    assert "phase2 ready terminal status" in payload["reason"]
+    assert "all tasks committed" not in payload["reason"]
 
 
 def test_exit_partial_meta_absence_keeps_worktree_missing_violation(tmp_path: Path) -> None:
