@@ -127,13 +127,8 @@ def _git_worktree_add_cwds(log_path: Path) -> list[Path]:
 
 
 def _assert_support_files_copied(source_root: Path, target_root: Path) -> None:
-    source_hooks = sorted((source_root / ".claude" / "hooks").glob("mst-*.sh"))
     copied_hooks = sorted((target_root / ".claude" / "hooks").glob("mst-*.sh"))
-
-    assert [path.name for path in copied_hooks] == [path.name for path in source_hooks]
-    for source_hook, copied_hook in zip(source_hooks, copied_hooks):
-        assert copied_hook.read_text(encoding="utf-8") == source_hook.read_text(encoding="utf-8")
-        assert copied_hook.stat().st_mode & 0o111
+    assert copied_hooks == []
 
     copied_settings = target_root / ".claude" / "settings.local.json"
     assert copied_settings.is_file()
