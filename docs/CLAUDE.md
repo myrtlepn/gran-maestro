@@ -462,7 +462,7 @@ python3 scripts/mst.py history head --session {mst_session_id}
 ## DOD-001 canonical hook responsibility contract
 
 - **Plugin core canonical runtime**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`가 `hooks/hooks.json`을 가리키고, 해당 파일의 command는 `${CLAUDE_PLUGIN_ROOT}/hooks/...`를 사용한다. 이것이 일반 프로젝트에서 MST core SessionStart / PreToolUse / Stop / UserPromptSubmit hook을 로드하는 canonical 경로다.
-- **Project legacy / source repo 개발 보조**: project-local `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...` 등록은 일반 프로젝트 canonical runtime이 아니다. 남아 있는 사본은 source repo 개발 보조, 레거시 호환, cleanup/doctor diagnostic 대상으로만 다룬다.
+- **Project legacy / source-dev helper**: project-local `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...` 등록은 일반 프로젝트 canonical runtime이 아니다. 남아 있는 사본은 source-dev helper, 레거시 호환, cleanup/doctor diagnostic 대상으로만 다룬다.
 - **User-global environment hook 계층**: `~/.claude/settings.json`의 `maestro-guard.sh`, `log-prompt.sh`, `check-version.sh` 같은 hook은 사용자 전역 환경 hook이며 MST core SessionStart/Stop hook이 아니다.
 - `/mst:on`은 일반 프로젝트에 `.claude/hooks` 사본을 만들거나 `settings.local.json` hooks block을 MST core canonical runtime으로 주입하지 않는다. hooks.json 자체 등록을 전제로 하고, legacy MST 사본·settings 항목이 발견되면 cleanup/diagnostic 대상으로 취급한다.
 

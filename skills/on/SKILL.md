@@ -223,7 +223,7 @@ fi
    **6a. MST core Hook 등록은 hooks.json 자체 등록으로 자동 처리됨**:
    - plugin core canonical runtime은 `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 플러그인 루트의 `hooks/hooks.json`입니다. `hooks/hooks.json`이 SessionStart / PreToolUse(matcher="Skill", "ScheduleWakeup") / Stop / UserPromptSubmit hook을 `${CLAUDE_PLUGIN_ROOT}/hooks/{스크립트명}` 형식으로 자체 등록합니다 (Claude Code 플러그인 표준 메커니즘, REQ-732 도입).
    - **/mst:on은 일반 프로젝트에 `.claude/hooks/` 사본을 만들지 않으며**, `settings.local.json`의 `hooks` 블록도 MST core canonical runtime으로 변경하지 않습니다. 사용자 정의 hook(`env`, `permissions`, 사용자 hook 등록 등) 기존 항목은 그대로 보존됩니다.
-   - project-local `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...` 등록은 일반 프로젝트 canonical runtime이 아니라 project legacy / source repo 개발 보조 / cleanup·diagnostic 대상입니다.
+   - project-local `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...` 등록은 일반 프로젝트 canonical runtime이 아니라 project legacy / source-dev helper / cleanup·diagnostic 대상입니다.
    - 결과: 플러그인 캐시 한 곳을 갱신하면 모든 등록 프로젝트가 `${CLAUDE_PLUGIN_ROOT}` 경유로 최신 MST core hook을 사용합니다 (stale 사본 발생 불가).
    - 기존 `.claude/hooks/` MST 사본이 남아있는 프로젝트는 canonical 주입 대상이 아니라 cleanup 대상입니다 — 본 단계는 `python3 {PLUGIN_ROOT}/scripts/mst.py on cleanup --silent || true`를 호출해 stale mst hook 사본·settings 항목을 안전하게 제거합니다 (사용자 정의 hook은 정규식 패턴 매칭으로 보존). 명시적 호출은 `python3 {PLUGIN_ROOT}/scripts/mst.py on cleanup`(또는 `--dry-run` 미리보기)으로 가능합니다.
 

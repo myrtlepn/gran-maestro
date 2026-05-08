@@ -8,7 +8,7 @@
 MST hook runtime은 3계층으로 구분합니다:
 
 1. **Plugin core canonical runtime**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command가 일반 프로젝트의 유일한 canonical MST core hook 등록 경로입니다.
-2. **Project legacy / source repo 개발 보조**: `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...`에 남아 있는 사본은 일반 프로젝트 canonical runtime이 아닙니다. 이 저장소에서 source 개발·레거시 호환·cleanup/doctor 진단 대상으로만 취급합니다.
+2. **Project legacy / source-dev helper**: `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...`에 남아 있는 사본은 일반 프로젝트 canonical runtime이 아닙니다. 이 저장소에서 source-dev 보조·레거시 호환·cleanup/doctor 진단 대상으로만 취급합니다.
 3. **User-global environment hooks**: `~/.claude/settings.json`의 `maestro-guard.sh`, `log-prompt.sh`, `check-version.sh` 등은 사용자 전역 환경 hook 계층이며 MST core SessionStart/Stop hook이 아닙니다.
 
 `.claude/hooks/` 파일은 **직접 수정 금지**. `/mst:on`은 일반 프로젝트에 `.claude/hooks` 사본이나 `settings.local.json` hooks block을 canonical runtime으로 주입하면 안 됩니다.

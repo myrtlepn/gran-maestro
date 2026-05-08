@@ -41,6 +41,23 @@ cat .claude-plugin/plugin.json | grep "agents/"
 `skills/`는 디렉토리 경로로 자동 탐색되므로 별도 매니페스트 수정 불필요.
 새 스킬 추가 시 `skills/<name>/SKILL.md` 파일만 생성하면 됩니다.
 
+### Hook 변경 체크리스트
+
+Hook 관련 변경이 포함된 릴리스에서는 아래 항목을 함께 확인합니다:
+
+- plugin manifest `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"` reference와 `hooks/hooks.json` 등록이 변경 의도와 일치하는지 확인합니다.
+- source hooks인 프로젝트 루트 `hooks/` 원본 파일이 최종 source of truth이며, plugin core canonical runtime command가 `${CLAUDE_PLUGIN_ROOT}/hooks/...`를 가리키는지 확인합니다.
+- plugin cache packaging에 source hooks와 `hooks/hooks.json`이 포함되어 캐시 버전에 반영되는지 확인합니다.
+- docs/tests consistency를 위해 hook boundary 문서와 문서 테스트를 함께 갱신합니다.
+- hook 변경 후 아래 검증을 실행합니다:
+  ```bash
+  python3 -m pytest tests/test_mst_on_no_hook_injection.py tests/test_plugin_manifest_hooks.py  # no-injection / manifest
+  python3 -m pytest tests/test_mst_on_cleanup.py                                             # cleanup
+  bash tests/hooks/test_sync_plugin_cache.sh                                                  # hooks sync / plugin cache
+  python3 -m pytest tests/test_worktree_create_regression.py                                  # worktree
+  python3 -m pytest tests/test_global_user_hooks_safety.py                                    # global hook / user-global
+  ```
+
 ## 4. 빌드 검증 (src/ 변경 시)
 
 ```bash
