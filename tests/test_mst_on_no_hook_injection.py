@@ -11,10 +11,89 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_PATH = REPO_ROOT / "skills" / "on" / "SKILL.md"
 HOOKS_JSON_PATH = REPO_ROOT / "hooks" / "hooks.json"
+DOC_HOOK_MODEL_PATHS = [
+    REPO_ROOT / "CLAUDE.md",
+    REPO_ROOT / "docs" / "CLAUDE.md",
+    REPO_ROOT / "skills" / "on" / "SKILL.md",
+    REPO_ROOT / "skills" / "_shared" / "hooks-sync.md",
+]
+DOC_LEGACY_HOOK_REFERENCE_PATHS = [
+    *DOC_HOOK_MODEL_PATHS,
+    REPO_ROOT / "docs" / "RELEASE.md",
+]
+CANONICAL_HOOK_TIER_TERMS = [
+    "plugin core canonical runtime",
+    "project legacy / source-dev helper",
+    "user-global environment hook",
+]
+DOC_HOOK_MODEL_REQUIRED_TERMS = {
+    REPO_ROOT / "CLAUDE.md": CANONICAL_HOOK_TIER_TERMS,
+    REPO_ROOT / "docs" / "CLAUDE.md": CANONICAL_HOOK_TIER_TERMS,
+    REPO_ROOT / "skills" / "on" / "SKILL.md": CANONICAL_HOOK_TIER_TERMS,
+    REPO_ROOT / "skills" / "_shared" / "hooks-sync.md": [
+        "project legacy / source-dev helper",
+    ],
+}
+LEGACY_HOOK_ALLOWED_CONTEXT_PATTERNS = [
+    r"\blegacy\b",
+    r"레거시",
+    r"source-dev",
+    r"source repo",
+    r"source 개발",
+    r"\bcleanup\b",
+    r"정리",
+    r"\brepair\b",
+    r"명시",
+    r"\bexplicit\b",
+    r"\bsync\b",
+    r"historical",
+    r"history",
+    r"\bdiagnostic\b",
+    r"진단",
+    r"\bdoctor\b",
+    r"not canonical",
+    r"canonical runtime이 아니",
+    r"canonical runtime 아님",
+    r"canonical runtime으로 주입하면 안",
+    r"canonical runtime으로 변경하지 않습니다",
+    r"직접 수정 금지",
+    r"보조",
+    r"호환",
+]
+PROJECT_HOOK_CANONICAL_PATTERNS = [
+    r"\.claude/hooks[^.\n]*(?:canonical runtime|canonical MST core|MST core canonical|유일한 canonical)",
+    r"\$CLAUDE_PROJECT_DIR/\.claude/hooks[^.\n]*(?:canonical runtime|canonical MST core|MST core canonical|유일한 canonical)",
+    r"settings\.local\.json[^.\n]*(?:canonical runtime|canonical MST core|MST core canonical|유일한 canonical|hook 등록 경로)",
+]
+PROJECT_HOOK_NEGATION_PATTERNS = [
+    r"not canonical",
+    r"아니",
+    r"아님",
+    r"안 됩니다",
+    r"않",
+    r"금지",
+    r"cleanup",
+    r"legacy",
+    r"레거시",
+]
 
 
 def _skill_text() -> str:
     return SKILL_PATH.read_text(encoding="utf-8")
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _relative(path: Path) -> str:
+    return str(path.relative_to(REPO_ROOT))
+
+
+def _line_context(lines: list[str], index: int, radius: int = 1) -> str:
+    start = max(0, index - radius)
+    end = min(len(lines), index + radius + 1)
+    return "\n".join(lines[start:end])
 
 
 def test_skill_md_no_hook_copy_patterns():
@@ -66,6 +145,154 @@ def test_skill_md_announces_hooks_json_self_registration():
     assert "${CLAUDE_PLUGIN_ROOT}" in text, (
         "${CLAUDE_PLUGIN_ROOT} 변수 안내 누락"
     )
+
+
+def test_docs_use_canonical_hook_tier_terminology():
+    """DOD-008 문서는 hook 책임 경계를 같은 3계층 용어로 설명해야 한다."""
+    failures = []
+    for path, required_terms in DOC_HOOK_MODEL_REQUIRED_TERMS.items():
+        text = _read_text(path).lower()
+        missing = [
+            term
+            for term in required_terms
+            if term.lower() not in text
+        ]
+        if missing:
+            failures.append(f"{_relative(path)} missing terms: {missing}")
+
+    assert not failures, "\n".join(failures)
+
+
+def test_skill_md_distinguishes_hooks_json_cleanup_and_user_global_boundaries():
+    """`/mst:on` 문서는 plugin core, cleanup, user-global hook 경계를 분리해야 한다."""
+    text = _skill_text()
+    required = {
+        "plugin manifest hooks reference": r'"hooks": "\./hooks/hooks\.json"',
+        "hooks.json self-registration": r"hooks\.json 자체 등록",
+        "plugin-root commands": r"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/",
+        "legacy cleanup target": r"(cleanup 대상|cleanup.*stale|legacy.*cleanup)",
+        "project legacy tier": r"project legacy / source-dev helper",
+        "user-global tier": r"user-global environment hook",
+        "user-global install target": r"~/.claude/(?:scripts|settings\.json)",
+    }
+    missing = [
+        name
+        for name, pattern in required.items()
+        if not re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    ]
+
+    assert not missing, f"SKILL.md missing hook boundary wording: {missing}"
+
+
+def test_hooks_sync_docs_present_explicit_legacy_repair_boundary():
+    """hooks sync 문서는 자동 canonical setup이 아닌 legacy/source-dev repair여야 한다."""
+    path = REPO_ROOT / "skills" / "_shared" / "hooks-sync.md"
+    text = _read_text(path)
+    lower = text.lower()
+
+    required_terms = {
+        "hooks sync": r"hooks sync",
+        "project legacy / source-dev helper": r"project legacy / source-dev helper",
+        "repair": r"repair",
+        "source-dev": r"source-dev",
+        "non-canonical boundary": (
+            r"(not canonical|canonical setup이 아니라|canonical runtime이 아니|"
+            r"canonical runtime 아님)"
+        ),
+    }
+    missing = [
+        term
+        for term, pattern in required_terms.items()
+        if not re.search(pattern, lower, flags=re.IGNORECASE)
+    ]
+    assert not missing, f"{_relative(path)} missing hooks sync boundary terms: {missing}"
+
+    forbidden = [
+        r"canonical runtime으로 자동",
+        r"일반 프로젝트.*자동 동기화",
+    ]
+    for pattern in forbidden:
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        assert not matches, (
+            f"{_relative(path)} presents hooks sync like automatic canonical setup: "
+            f"{pattern!r} matches={matches}"
+        )
+
+
+def test_release_docs_include_hook_change_checklist_requirements():
+    """릴리스 문서는 hook 변경 시 필요한 manifest/cache/test 검증을 모두 안내해야 한다."""
+    path = REPO_ROOT / "docs" / "RELEASE.md"
+    text = _read_text(path)
+    required = {
+        "plugin manifest": r"(plugin manifest|\.claude-plugin/plugin\.json|plugin\.json)",
+        "hooks.json registration": r"hooks/hooks\.json",
+        "source hooks": r"(source hooks|source `?hooks/`?|원본.*hooks)",
+        "plugin cache packaging": r"(plugin cache packaging|cache packaging|plugin cache|캐시.*패키징)",
+        "docs/tests consistency": r"(docs/tests|docs.*tests|문서.*테스트)",
+        "no-injection tests": r"(no-injection|no hook injection|test_mst_on_no_hook_injection)",
+        "cleanup tests": r"(cleanup|test_mst_on_cleanup)",
+        "sync tests": r"(sync|hooks sync|test_sync_plugin_cache)",
+        "worktree tests": r"(worktree|워크트리)",
+        "global hook tests": r"(global hook|user-global|전역.*hook|test_global_user_hooks_safety)",
+    }
+    missing = [
+        name
+        for name, pattern in required.items()
+        if not re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    ]
+
+    assert not missing, f"{_relative(path)} missing hook release checklist items: {missing}"
+
+
+def test_docs_legacy_claude_hooks_references_have_allowed_context():
+    """.claude/hooks 언급은 legacy/source-dev/cleanup/repair 등 허용 맥락이어야 한다."""
+    failures = []
+    allowed = [
+        re.compile(pattern, flags=re.IGNORECASE)
+        for pattern in LEGACY_HOOK_ALLOWED_CONTEXT_PATTERNS
+    ]
+
+    for path in DOC_LEGACY_HOOK_REFERENCE_PATHS:
+        lines = _read_text(path).splitlines()
+        for index, line in enumerate(lines):
+            if ".claude/hooks" not in line:
+                continue
+            context = _line_context(lines, index)
+            if not any(pattern.search(context) for pattern in allowed):
+                failures.append(
+                    f"{_relative(path)}:{index + 1} lacks allowed legacy context:\n"
+                    f"{context}"
+                )
+
+    assert not failures, "\n\n".join(failures)
+
+
+def test_docs_do_not_present_project_hooks_or_settings_as_canonical_runtime():
+    """일반 프로젝트 .claude/hooks/settings hooks block은 canonical runtime으로 보이면 안 된다."""
+    failures = []
+    canonical_patterns = [
+        re.compile(pattern, flags=re.IGNORECASE)
+        for pattern in PROJECT_HOOK_CANONICAL_PATTERNS
+    ]
+    negation_patterns = [
+        re.compile(pattern, flags=re.IGNORECASE)
+        for pattern in PROJECT_HOOK_NEGATION_PATTERNS
+    ]
+
+    for path in DOC_LEGACY_HOOK_REFERENCE_PATHS:
+        lines = _read_text(path).splitlines()
+        for index, line in enumerate(lines):
+            if not any(pattern.search(line) for pattern in canonical_patterns):
+                continue
+            context = _line_context(lines, index)
+            if any(pattern.search(context) for pattern in negation_patterns):
+                continue
+            failures.append(
+                f"{_relative(path)}:{index + 1} presents project hook as canonical:\n"
+                f"{context}"
+            )
+
+    assert not failures, "\n\n".join(failures)
 
 
 def test_simulated_new_project_no_hooks_dir(tmp_path):
