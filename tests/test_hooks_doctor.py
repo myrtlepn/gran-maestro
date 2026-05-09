@@ -100,9 +100,11 @@ def test_doctor_reports_zero_candidate_clean_state(tmp_path, monkeypatch, capsys
 
 
 def test_output_contains_required_fields(tmp_path, monkeypatch, capsys):
-    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
     _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
     _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3","hooks":"./hooks/hooks.json"}\n')
+    _write(plugin_root / "hooks" / "hooks.json", json.dumps({"hooks": {"Stop": [{"hooks": [{"command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"}]}]}}))
 
     return_code = hooks.doctor(argparse.Namespace())
     captured = capsys.readouterr()
@@ -112,6 +114,17 @@ def test_output_contains_required_fields(tmp_path, monkeypatch, capsys):
     assert "Source hooks:" in captured.out
     assert "Installed version:" in captured.out
     assert "Expected version:" in captured.out
+    for label in (
+        "skill_base_dir:",
+        "enabled_plugin:",
+        "active_plugin_root:",
+        "active_plugin_version:",
+        "active_manifest_hooks_field:",
+        "active_hooks_json_exists:",
+        "active_stop_registration:",
+        "active_stop_command:",
+    ):
+        assert label in captured.out
 
 
 def test_doctor_fixtures_model_project_legacy_not_canonical(tmp_path, monkeypatch, capsys):
@@ -129,6 +142,158 @@ def test_doctor_fixtures_model_project_legacy_not_canonical(tmp_path, monkeypatc
     assert "${CLAUDE_PLUGIN_ROOT}" not in captured.out
     assert "Installed hooks:" in captured.out
     assert "Source hooks:" in captured.out
+
+
+def test_doctor_reports_enabled_plugin_from_user_global_settings(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _write(Path.home() / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mst@gran-maestro": True}}))
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3","hooks":"./hooks/hooks.json"}\n')
+    _write(plugin_root / "hooks" / "hooks.json", json.dumps({"hooks": {"Stop": [{"hooks": [{"command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"}]}]}}))
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "enabled_plugin: true" in captured.out
+
+
+def test_doctor_reports_user_global_stop_without_canonical_guarantee(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, _ = _arrange_hooks(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _write(
+        Path.home() / ".claude" / "settings.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/tmp/user-global/mst-stop-hook.sh",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+    )
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "user_global_environment_hook:" in captured.out
+    assert "stop_registration: True" in captured.out
+    assert "mst_core_stop_guarantee: false (user-global is not MST core canonical)" in captured.out
+
+
+def test_doctor_reports_hook_responsibility_layers(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(installed_path / "mst-stop-hook.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-stop-hook.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3","hooks":"./hooks/hooks.json"}\n')
+    _write(plugin_root / "hooks" / "hooks.json", json.dumps({"hooks": {"Stop": [{"hooks": [{"command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"}]}]}}))
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "canonical_plugin_hook:" in captured.out
+    assert "project_local_legacy_source_dev_hook:" in captured.out
+    assert "user_global_environment_hook:" in captured.out
+    assert "mst_core_stop_guarantee: true" in captured.out
+    assert "mst_core_stop_guarantee: false (legacy/source-dev is not canonical)" in captured.out
+    assert "mst_core_stop_guarantee: false (user-global is not MST core canonical)" in captured.out
+
+
+def test_doctor_warns_when_active_manifest_has_no_hooks_field(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3"}\n')
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "canonical_stop_registration_status: WARNING" in captured.out
+    assert "active plugin cache manifest/registry lacks canonical Stop registration" in captured.out
+
+
+def test_doctor_warns_when_hooks_registry_missing(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3","hooks":"./hooks/missing.json"}\n')
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "active_hooks_json_exists: False" in captured.out
+    assert "canonical_stop_registration_status: WARNING" in captured.out
+
+
+def test_doctor_warns_when_registry_lacks_stop(tmp_path, monkeypatch, capsys):
+    installed_path, source_path, plugin_root = _arrange_hooks(tmp_path, monkeypatch)
+    _write(installed_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(source_path / "mst-example.sh", "#!/bin/sh\nexit 0\n")
+    _write(plugin_root / ".claude-plugin" / "plugin.json", '{"name":"mst","version":"1.2.3","hooks":"./hooks/hooks.json"}\n')
+    _write(plugin_root / "hooks" / "hooks.json", json.dumps({"hooks": {"SessionStart": [{"hooks": [{"command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh"}]}]}}))
+
+    return_code = hooks.doctor(argparse.Namespace())
+    captured = capsys.readouterr()
+
+    assert return_code == 0
+    assert "active_stop_registration: False" in captured.out
+    assert "canonical_stop_registration_status: WARNING" in captured.out
+
+
+def test_stop_dispatcher_smoke_requires_event_dispatch_evidence():
+    result = hooks.evaluate_stop_dispatcher_smoke(True, None)
+
+    assert result["script_direct_execution"] == "PASS"
+    assert result["claude_code_stop_event_dispatch"] == "INCONCLUSIVE"
+    assert result["overall"] != "PASS"
+
+
+def test_stop_dispatcher_smoke_passes_with_complete_event_evidence():
+    result = hooks.evaluate_stop_dispatcher_smoke(
+        True,
+        {
+            "event_type": "Stop",
+            "hook_command_path": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+            "timestamp": "2026-05-09T00:00:00Z",
+            "test_sentinel": "sentinel",
+        },
+    )
+
+    assert result["claude_code_stop_event_dispatch"] == "PASS"
+    assert result["overall"] == "PASS"
+
+
+def test_stop_dispatcher_smoke_rejects_incomplete_event_evidence():
+    result = hooks.evaluate_stop_dispatcher_smoke(
+        True,
+        {
+            "event_type": "Stop",
+            "hook_command_path": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+            "timestamp": "2026-05-09T00:00:00Z",
+        },
+    )
+
+    assert result["claude_code_stop_event_dispatch"] == "INCONCLUSIVE"
+    assert result["overall"] != "PASS"
 
 
 def test_doctor_output_contains_legacy_env_alias_migration_tokens(tmp_path, monkeypatch, capsys):

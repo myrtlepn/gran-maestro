@@ -160,6 +160,11 @@ def test_mst_request_creates_request_json_with_owner_session_id(tmp_path: Path, 
     )
 
     assert result.returncode == 0, result.stderr
+    result_payload = json.loads(result.stdout)
+    assert result_payload["status"] == "partial"
+    assert result_payload["code"] == "owner_metadata_injected_without_workflow_state"
+    assert result_payload["mutation_performed"] is True
+    assert result_payload["workflow_state_written"] is False
     payload = _read_json(request_path)
 
     assert "owner_session_id" in payload
@@ -208,6 +213,11 @@ def test_mst_plan_branch_injects_owner_metadata(tmp_path: Path, monkeypatch) -> 
     )
 
     assert result.returncode == 0, result.stderr
+    result_payload = json.loads(result.stdout)
+    assert result_payload["status"] == "partial"
+    assert result_payload["code"] == "owner_metadata_injected_without_workflow_state"
+    assert result_payload["mutation_performed"] is True
+    assert result_payload["workflow_state_written"] is False
     payload = _read_json(plan_path)
 
     assert "owner_session_id" in payload

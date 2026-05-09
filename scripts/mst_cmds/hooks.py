@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import env_alias_compat
+from scripts.mst_cmds import on as on_cmd
 from scripts.mst_cmds import skill as skill_cmd
 from scripts.mst_cmds.worktree import inspect_lineage_unknown_worktree_meta
 from scripts.mst_cmds._common import (
@@ -296,6 +297,179 @@ def _detect_legacy_ppid_state(base_dir: Path) -> int:
     return count
 
 
+def _load_json_quiet(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _manifest_hooks_path(plugin_root: Path, manifest: dict) -> Path | None:
+    hooks_field = manifest.get("hooks")
+    if not isinstance(hooks_field, str) or not hooks_field.strip():
+        return None
+    return (plugin_root / hooks_field).resolve()
+
+
+def _iter_registry_commands(registry: object):
+    if not isinstance(registry, dict):
+        return
+    hooks_obj = registry.get("hooks")
+    if not isinstance(hooks_obj, dict):
+        return
+    for event, entries in hooks_obj.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            inner = entry.get("hooks")
+            if not isinstance(inner, list):
+                continue
+            for hook in inner:
+                if not isinstance(hook, dict):
+                    continue
+                command = hook.get("command")
+                if isinstance(command, str) and command.strip():
+                    yield str(event), command
+
+
+def _first_stop_command(registry: object) -> str:
+    for event, command in _iter_registry_commands(registry) or []:
+        if event == "Stop":
+            return command
+    return ""
+
+
+def _enabled_plugin_state(plugin_id: str = "mst@gran-maestro") -> str:
+    settings = _load_json_quiet(Path.home() / ".claude" / "settings.json")
+    if not isinstance(settings, dict):
+        return "unknown"
+    enabled_plugins = settings.get("enabledPlugins")
+    if not isinstance(enabled_plugins, dict) or plugin_id not in enabled_plugins:
+        return "unknown"
+    value = enabled_plugins.get(plugin_id)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "unknown"
+
+
+def _active_plugin_diagnostic(plugin_root: Path) -> dict:
+    manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    manifest = _load_json_quiet(manifest_path)
+    if not isinstance(manifest, dict):
+        manifest = {}
+    registry_path = _manifest_hooks_path(plugin_root, manifest)
+    registry = _load_json_quiet(registry_path) if registry_path is not None else None
+    stop_command = _first_stop_command(registry)
+    hooks_field = manifest.get("hooks", "")
+    hooks_json_exists = bool(registry_path and registry_path.exists())
+    has_canonical_stop = stop_command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+    status = "OK" if has_canonical_stop else "WARNING"
+    message = "" if status == "OK" else "active plugin cache manifest/registry lacks canonical Stop registration"
+    return {
+        "skill_base_dir": str(plugin_root / "skills"),
+        "enabled_plugin": _enabled_plugin_state(),
+        "active_plugin_root": str(plugin_root),
+        "active_plugin_version": str(manifest.get("version") or "unknown"),
+        "active_manifest_hooks_field": str(hooks_field) if hooks_field else "<missing>",
+        "active_hooks_json_exists": hooks_json_exists,
+        "active_stop_registration": has_canonical_stop,
+        "active_stop_command": stop_command or "<missing>",
+        "canonical_stop_registration_status": status,
+        "canonical_stop_registration_message": message,
+        "registry_path": str(registry_path) if registry_path is not None else "<missing>",
+    }
+
+
+def _settings_has_stop_registration(settings: object) -> bool:
+    if not isinstance(settings, dict):
+        return False
+    for item in on_cmd._iter_settings_hook_commands(settings) or []:
+        if item.get("event") == "Stop" or "mst-stop-hook.sh" in item.get("command", ""):
+            return True
+    return False
+
+
+def _layer_diagnostics(project_root: Path, plugin_root: Path, installed_path: Path, active: dict) -> list[dict]:
+    canonical_path = Path(str(active.get("registry_path") or "")) if active.get("registry_path") != "<missing>" else plugin_root / "hooks" / "hooks.json"
+    legacy_settings_path = project_root / ".claude" / "settings.local.json"
+    legacy_settings = _load_json_quiet(legacy_settings_path)
+    legacy_file_stop = (installed_path / "mst-stop-hook.sh").exists()
+    legacy_settings_stop = _settings_has_stop_registration(legacy_settings)
+    user_global_path = Path.home() / ".claude" / "settings.json"
+    user_global_settings = _load_json_quiet(user_global_path)
+    user_global_stop = _settings_has_stop_registration(user_global_settings)
+    return [
+        {
+            "name": "canonical_plugin_hook",
+            "source_path": str(canonical_path),
+            "found": canonical_path.exists(),
+            "stop_registration": bool(active.get("active_stop_registration")),
+            "mst_core_stop_guarantee": "true" if active.get("active_stop_registration") else "false",
+        },
+        {
+            "name": "project_local_legacy_source_dev_hook",
+            "source_path": f"{installed_path} ; {legacy_settings_path}",
+            "found": installed_path.exists() or legacy_settings_path.exists(),
+            "stop_registration": legacy_file_stop or legacy_settings_stop,
+            "mst_core_stop_guarantee": "false (legacy/source-dev is not canonical)",
+        },
+        {
+            "name": "user_global_environment_hook",
+            "source_path": str(user_global_path),
+            "found": user_global_path.exists(),
+            "stop_registration": user_global_stop,
+            "mst_core_stop_guarantee": "false (user-global is not MST core canonical)",
+        },
+    ]
+
+
+def evaluate_stop_dispatcher_smoke(script_direct_execution: bool, event_dispatch_evidence: dict | None = None) -> dict:
+    evidence = event_dispatch_evidence if isinstance(event_dispatch_evidence, dict) else {}
+    required = ("event_type", "hook_command_path", "timestamp")
+    identity_present = bool(evidence.get("process_invocation_id") or evidence.get("test_sentinel"))
+    dispatch_pass = all(bool(evidence.get(key)) for key in required) and identity_present and evidence.get("event_type") == "Stop"
+    overall = "PASS" if script_direct_execution and dispatch_pass else "INCONCLUSIVE" if script_direct_execution else "FAIL"
+    return {
+        "script_direct_execution": "PASS" if script_direct_execution else "FAIL",
+        "claude_code_stop_event_dispatch": "PASS" if dispatch_pass else "INCONCLUSIVE",
+        "overall": overall,
+        "required_evidence": [*required, "process_invocation_id_or_test_sentinel"],
+    }
+
+
+def _print_active_plugin_report(active: dict, layers: list[dict], smoke: dict) -> None:
+    print()
+    print("Active plugin diagnostic:")
+    for key in (
+        "skill_base_dir",
+        "enabled_plugin",
+        "active_plugin_root",
+        "active_plugin_version",
+        "active_manifest_hooks_field",
+        "active_hooks_json_exists",
+        "active_stop_registration",
+        "active_stop_command",
+        "canonical_stop_registration_status",
+    ):
+        print(f"  {key}: {active.get(key)}")
+    if active.get("canonical_stop_registration_message"):
+        print(f"  message: {active['canonical_stop_registration_message']}")
+    print()
+    print("Hook responsibility layers:")
+    for layer in layers:
+        print(f"  {layer['name']}:")
+        print(f"    source_path: {layer['source_path']}")
+        print(f"    found: {layer['found']}")
+        print(f"    stop_registration: {layer['stop_registration']}")
+        print(f"    mst_core_stop_guarantee: {layer['mst_core_stop_guarantee']}")
+    print()
+    print("Stop dispatcher smoke:")
+    for key, value in smoke.items():
+        print(f"  {key}: {value}")
+
+
 def doctor(args: argparse.Namespace) -> int:
     installed_path, source_path, plugin_root = _resolve_hooks_paths()
     installed_version = _read_text_file(installed_path / ".mst-hook-version")
@@ -342,6 +516,12 @@ def doctor(args: argparse.Namespace) -> int:
     print(f"Expected version:  {source_version}")
     print()
     print(f"Checked at: {checked_at}")
+
+    project_root = Path(os.getcwd()).resolve()
+    active = _active_plugin_diagnostic(plugin_root)
+    layers = _layer_diagnostics(project_root, plugin_root, installed_path, active)
+    smoke = evaluate_stop_dispatcher_smoke(script_direct_execution=False, event_dispatch_evidence=None)
+    _print_active_plugin_report(active, layers, smoke)
 
     _print_legacy_env_alias_report(_detect_legacy_env_aliases())
 

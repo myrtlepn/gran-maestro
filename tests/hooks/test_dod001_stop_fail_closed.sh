@@ -98,6 +98,7 @@ bash -c '
   MST_CLAUDE_HOME="$2" \
   MST_SESSION_ID="$3" \
   MST_STOP_HOOK_CLEANUP_DISABLE=1 \
+  MST_HOOK_LEDGER_DISABLE=1 \
   bash "$4/hooks/mst-stop-hook.sh" >"$5" 2>"$6" <<JSON
 {"hook_event_name":"Stop","mst_session_id":"$3","session_id":"claude-diagnostic"}
 JSON

@@ -11,134 +11,37 @@ case "$script_dir" in
   *) script_dir="$(cd "$script_dir" && pwd)" ;;
 esac
 
-_mst_hooks_dir_is_valid() {
-  local dir="$1" parent
-  case "$dir" in
-    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
-    */.claude/plugins/cache/*/hooks) return 0 ;;
-    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
-  esac
-  if [ -f "$dir/lib/sha256.bash" ]; then
-    return 0
-  fi
-  case "$dir" in
-    */.claude/hooks)
-      parent="${dir%/.claude/hooks}"
-      [ -d "$parent/.gran-maestro" ] && return 0
-      ;;
-    */hooks)
-      parent="${dir%/hooks}"
-      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
-      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
-        case "$dir" in
-          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
-        esac
-      fi
-      ;;
-  esac
-  return 1
-}
-
 case "$script_dir" in
   *'${CLAUDE_PLUGIN_ROOT}'*)
-    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+    printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
     exit 0
     ;;
 esac
 
-if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
-  echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/session_identity.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
+  printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
   exit 0
 fi
 
-resolve_project_root() {
-  local git_top candidate parent
-  git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/lib/bootstrap.bash"
+# shellcheck source=/dev/null
+source "$script_dir/lib/session_identity.bash"
+# shellcheck source=/dev/null
+source "$script_dir/lib/logging.bash"
 
-  if [ -f "${git_top}/.git" ]; then
-    candidate="$git_top"
-    while [ -n "$candidate" ] && [ "$candidate" != "/" ]; do
-      if [ -d "${candidate}/.gran-maestro" ] && [ -e "${candidate}/.git" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-      parent="$(dirname "$candidate")"
-      if [ "$parent" = "$candidate" ]; then
-        break
-      fi
-      candidate="$parent"
-    done
-  fi
-
-  printf '%s\n' "$git_top"
-}
-
-PROJECT_ROOT="$(resolve_project_root)"
+mst_validate_hook_script_dir_or_exit "$script_dir"
+PROJECT_ROOT="$(mst_resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
+MST_HOOK_LOG_PREFIX="mst-pre-tool-use"
 
 STDIN_RAW="$(cat || true)"
-is_structured_mst_session_id() {
-  local value="${1:-}"
-  case "$value" in
-    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
-  esac
-  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
-}
-
-extract_stdin_mst_session_id_literal() {
-  local raw="$1" rest value
-  case "$raw" in
-    *\"mst_session_id\"*)
-      rest="${raw#*\"mst_session_id\"}"
-      rest="${rest#*:}"
-      rest="${rest#*\"}"
-      value="${rest%%\"*}"
-      value="${value//$'\n'/}"
-      value="${value//$'\r'/}"
-      value="${value//$'\t'/}"
-      case "$value" in
-        ""|*[!A-Za-z0-9_-]*) return 0 ;;
-      esac
-      if is_structured_mst_session_id "$value"; then
-        printf '%s\n' "$value"
-      fi
-      ;;
-  esac
-}
-
-resolve_canonical_mst_session_id_or_exit() {
-  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
-  if [ -n "$env_raw" ] && is_structured_mst_session_id "$env_raw"; then
-    env_id="$env_raw"
-  fi
-  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
-
-  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
-    echo "[mst-pre-tool-use] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
-    return 1
-  fi
-  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
-    echo "[mst-pre-tool-use] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
-    return 2
-  fi
-  if [ -n "$env_id" ]; then
-    MST_CANONICAL_SESSION_ID="$env_id"
-    return 0
-  fi
-  if [ -n "$stdin_id" ]; then
-    MST_CANONICAL_SESSION_ID="$stdin_id"
-    return 0
-  fi
-
-  echo "[mst-pre-tool-use] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2
-  return 2
-}
-
 MST_CANONICAL_SESSION_ID=""
-if resolve_canonical_mst_session_id_or_exit; then
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
+  MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
   MST_SESSION_RESOLUTION_STATUS=0
 else
   MST_SESSION_RESOLUTION_STATUS=$?
@@ -147,6 +50,8 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  mkdir -p "$MST_TMP" 2>/dev/null || true
+  mst_warn_legacy_session_id_mismatch_once "$PROJECT_ROOT" "$MST_TMP" "$STDIN_RAW" "$MST_HOOK_LOG_PREFIX" "$PPID" ""
   exit 0
 fi
 MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
@@ -346,39 +251,6 @@ resolve_repo_script() {
 
 FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
 
-debug_log() {
-  [ "${MST_DEBUG:-0}" = "1" ] || return 0
-  local event="${1:-event}"
-  shift || true
-  local detail="${*:-}"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
-  printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
-}
-
-sanitize_log_value() {
-  local value="${1:-}"
-  value="${value//$'\n'/ }"
-  value="${value//$'\r'/ }"
-  value="${value//$'\t'/ }"
-  printf '%s' "$value"
-}
-
-warn_helper_failed() {
-  local helper="$1"
-  local status="${2:-1}"
-  local detail="${3:-}"
-
-  helper="$(sanitize_log_value "$helper")"
-  status="$(sanitize_log_value "$status")"
-  detail="$(sanitize_log_value "$detail")"
-  if [ -n "$detail" ]; then
-    printf '[mst-pre-tool-use] helper_failed helper=%s exit=%s %s\n' "$helper" "$status" "$detail" >&2
-  else
-    printf '[mst-pre-tool-use] helper_failed helper=%s exit=%s\n' "$helper" "$status" >&2
-  fi
-}
-
 SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${SESSION_ID:-unknown}/snapshot.json"
 STDIN_DIGEST="${MST_HOOK_STDIN_DIGEST:-}"
 
@@ -490,30 +362,6 @@ PY
 
 warn_session_id_mismatch_once_if_any() {
   return 0
-}
-
-log_boundary_event() {
-  local event_type="${1:-event}"
-  local task_id="${2:-unknown}"
-  local result="${3:-unknown}"
-  local message="${4:-}"
-  local ts log_dir
-
-  event_type="${event_type//$'\n'/ }"
-  task_id="${task_id//$'\n'/ }"
-  result="${result//$'\n'/ }"
-  message="${message//$'\n'/ }"
-  event_type="${event_type//$'\r'/ }"
-  task_id="${task_id//$'\r'/ }"
-  result="${result//$'\r'/ }"
-  message="${message//$'\r'/ }"
-
-  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +%FT%TZ)"
-  log_dir="$(dirname "$BOUNDARY_LOG_FILE")"
-  mkdir -p "$log_dir" 2>/dev/null || return 0
-  printf '%s | %s | %s | %s | %s | %s\n' \
-    "$ts" "$HOOK_NAME" "$event_type" "$task_id" "$result" "$message" \
-    >> "$BOUNDARY_LOG_FILE" 2>/dev/null || true
 }
 
 emit_block_json() {

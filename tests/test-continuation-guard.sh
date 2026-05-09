@@ -18,13 +18,15 @@ INFILE="/tmp/mst-stop-hook-in-$$.txt"
 MY_PID="$$"
 ROOT_MST_SESSION_ID="MST-AGI-030-20260503T130813382Z-k7f3q9x2"
 OTHER_MST_SESSION_ID="MST-AGI-030-20260503T130813382Z-z9y8x7w6"
-MST_TMP="${SCRIPT_DIR}/.gran-maestro/tmp"
+TEST_PROJECT_ROOT="$(mktemp -d)"
+MST_TMP="${TEST_PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE="${MST_TMP}/mst-state-${ROOT_MST_SESSION_ID}.json"
-REQUEST_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/requests/REQ-TEST-CONTINUATION-GUARD"
+REQUEST_FIXTURE_DIR="${TEST_PROJECT_ROOT}/.gran-maestro/requests/REQ-TEST-CONTINUATION-GUARD"
 REQUEST_FIXTURE_FILE="${REQUEST_FIXTURE_DIR}/request.json"
-PLAN_FIXTURE_DIR="${SCRIPT_DIR}/.gran-maestro/plans/PLN-TEST-CONTINUATION-GUARD"
+PLAN_FIXTURE_DIR="${TEST_PROJECT_ROOT}/.gran-maestro/plans/PLN-TEST-CONTINUATION-GUARD"
 PLAN_FIXTURE_FILE="${PLAN_FIXTURE_DIR}/plan.json"
-mkdir -p "$MST_TMP"
+mkdir -p "$MST_TMP" "$TEST_PROJECT_ROOT/.claude/hooks" "$TEST_PROJECT_ROOT/.claude-plugin"
+printf '%s\n' '{"version":"0.0.1"}' > "$TEST_PROJECT_ROOT/.claude-plugin/plugin.json"
 
 cleanup() {
   rm -f "$OUTFILE" "$ERRFILE" "$INFILE" "$STATE_FILE" "${STATE_FILE}.tmp" 2>/dev/null || true
@@ -40,10 +42,15 @@ cleanup() {
     "${MST_TMP}/mst-transcript-${MY_PID}.path" \
     2>/dev/null || true
   rm -rf "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR" 2>/dev/null || true
-  rm -f "$SCRIPT_DIR/.claude/hooks/.mst-hook-version" 2>/dev/null || true
+  rm -f "$TEST_PROJECT_ROOT/.claude/hooks/.mst-hook-version" 2>/dev/null || true
 }
 
-trap cleanup EXIT
+cleanup_all() {
+  cleanup
+  rm -rf "$TEST_PROJECT_ROOT" 2>/dev/null || true
+}
+
+trap cleanup_all EXIT
 
 assert_eq() {
   local test_name="$1" expected="$2" actual="$3"
@@ -105,7 +112,7 @@ run_stop() {
   printf '%s' "$input" > "$INFILE"
   set +e
   (
-    cd "$SCRIPT_DIR" || exit 1
+    cd "$TEST_PROJECT_ROOT" || exit 1
     MST_SESSION_ID="$ROOT_MST_SESSION_ID" bash "$STOP_SCRIPT" < "$INFILE"
   ) > "$OUTFILE" 2> "$ERRFILE"
   STOP_EXIT=$?
@@ -115,7 +122,7 @@ run_stop() {
 run_session_init() {
   set +e
   (
-    cd "$SCRIPT_DIR" || exit 1
+    cd "$TEST_PROJECT_ROOT" || exit 1
     MST_SESSION_ID="$ROOT_MST_SESSION_ID" bash "$SESSION_INIT_SCRIPT"
   ) > "$OUTFILE" 2> "$ERRFILE"
   SESSION_EXIT=$?
@@ -125,7 +132,7 @@ run_session_init() {
 run_set_workflow() {
   set +e
   (
-    cd "$SCRIPT_DIR" || exit 1
+    cd "$TEST_PROJECT_ROOT" || exit 1
     MST_SESSION_ID="$ROOT_MST_SESSION_ID" python3 "$MST_SCRIPT" state set-workflow "$@"
   ) > "$OUTFILE" 2> "$ERRFILE"
   SET_WORKFLOW_EXIT=$?
@@ -306,12 +313,14 @@ echo ""
 echo "=== Test Suite: session-init + statusline ==="
 
 cleanup
+legacy_markers_before="$(ls -1 "${MST_TMP}"/mst-* 2>/dev/null | grep -E 'mst-(call-stack|pending-continuation|next-action|next-action-count|next-action-state|stop-hook-count|hook-debug|hook-check-done|transcript)-' || true)"
 run_session_init
 assert_eq "session-init exits 0" "0" "$SESSION_EXIT"
 state_files="$(ls -1 "${MST_TMP}"/mst-state-*.json 2>/dev/null || true)"
 assert_contains "session-init creates mst-state file" "mst-state-" "$state_files"
 
-legacy_markers="$(ls -1 "${MST_TMP}"/mst-* 2>/dev/null | grep -E 'mst-(call-stack|pending-continuation|next-action|next-action-count|next-action-state|stop-hook-count|hook-debug|hook-check-done|transcript)-' || true)"
+legacy_markers_after="$(ls -1 "${MST_TMP}"/mst-* 2>/dev/null | grep -E 'mst-(call-stack|pending-continuation|next-action|next-action-count|next-action-state|stop-hook-count|hook-debug|hook-check-done|transcript)-' || true)"
+legacy_markers="$(comm -13 <(printf '%s\n' "$legacy_markers_before" | sort) <(printf '%s\n' "$legacy_markers_after" | sort) | grep . || true)"
 assert_empty "legacy marker files are absent after session-init" "$legacy_markers"
 
 cleanup
@@ -352,8 +361,8 @@ echo ""
 echo "=== Test Suite: session-init version gate warning ==="
 
 cleanup
-mkdir -p "$SCRIPT_DIR/.claude/hooks"
-printf '0.0.0\n' > "$SCRIPT_DIR/.claude/hooks/.mst-hook-version"
+mkdir -p "$TEST_PROJECT_ROOT/.claude/hooks"
+printf '0.0.0\n' > "$TEST_PROJECT_ROOT/.claude/hooks/.mst-hook-version"
 run_session_init
 stderr_output="$(cat "$ERRFILE" 2>/dev/null || true)"
 assert_eq "version mismatch still exits 0" "0" "$SESSION_EXIT"

@@ -26,134 +26,37 @@ case "$script_dir" in
   *) script_dir="$(cd "$script_dir" && pwd)" ;;
 esac
 
-_mst_hooks_dir_is_valid() {
-  local dir="$1" parent
-  case "$dir" in
-    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
-    */.claude/plugins/cache/*/hooks) return 0 ;;
-    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
-  esac
-  if [ -f "$dir/lib/sha256.bash" ]; then
-    return 0
-  fi
-  case "$dir" in
-    */.claude/hooks)
-      parent="${dir%/.claude/hooks}"
-      [ -d "$parent/.gran-maestro" ] && return 0
-      ;;
-    */hooks)
-      parent="${dir%/hooks}"
-      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
-      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
-        case "$dir" in
-          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
-        esac
-      fi
-      ;;
-  esac
-  return 1
-}
-
 case "$script_dir" in
   *'${CLAUDE_PLUGIN_ROOT}'*)
-    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+    printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
     exit 0
     ;;
 esac
 
-if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
-  echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
+if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/session_identity.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
+  printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
   exit 0
 fi
 
-resolve_project_root() {
-  local git_top candidate parent
-  git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/lib/bootstrap.bash"
+# shellcheck source=/dev/null
+source "$script_dir/lib/session_identity.bash"
+# shellcheck source=/dev/null
+source "$script_dir/lib/logging.bash"
 
-  if [ -f "${git_top}/.git" ]; then
-    candidate="$git_top"
-    while [ -n "$candidate" ] && [ "$candidate" != "/" ]; do
-      if [ -d "${candidate}/.gran-maestro" ] && [ -e "${candidate}/.git" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-      parent="$(dirname "$candidate")"
-      if [ "$parent" = "$candidate" ]; then
-        break
-      fi
-      candidate="$parent"
-    done
-  fi
-
-  printf '%s\n' "$git_top"
-}
-
-PROJECT_ROOT="$(resolve_project_root)"
+mst_validate_hook_script_dir_or_exit "$script_dir"
+PROJECT_ROOT="$(mst_resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STATE_FILE=""
 SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
+MST_HOOK_LOG_PREFIX="mst-session-init"
 
 STDIN_RAW="$(cat || true)"
-is_structured_mst_session_id() {
-  local value="${1:-}"
-  case "$value" in
-    ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;;
-  esac
-  [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
-}
-
-extract_stdin_mst_session_id_literal() {
-  local raw="$1" rest value
-  case "$raw" in
-    *\"mst_session_id\"*)
-      rest="${raw#*\"mst_session_id\"}"
-      rest="${rest#*:}"
-      rest="${rest#*\"}"
-      value="${rest%%\"*}"
-      value="${value//$'\n'/}"
-      value="${value//$'\r'/}"
-      value="${value//$'\t'/}"
-      case "$value" in
-        ""|*[!A-Za-z0-9_-]*) return 0 ;;
-      esac
-      if is_structured_mst_session_id "$value"; then
-        printf '%s\n' "$value"
-      fi
-      ;;
-  esac
-}
-
-resolve_canonical_mst_session_id_or_exit() {
-  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
-  if [ -n "$env_raw" ] && is_structured_mst_session_id "$env_raw"; then
-    env_id="$env_raw"
-  fi
-  stdin_id="$(extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)"
-
-  if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
-    echo "[mst-session-init] error: mst_session_id mismatch: env:MST_SESSION_ID=$env_id stdin:mst_session_id=$stdin_id" >&2
-    return 1
-  fi
-  if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
-    echo "[mst-session-init] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id." >&2
-    return 2
-  fi
-  if [ -n "$env_id" ]; then
-    MST_CANONICAL_SESSION_ID="$env_id"
-    return 0
-  fi
-  if [ -n "$stdin_id" ]; then
-    echo "[mst-session-init] diagnostic: structured hook stdin mst_session_id ignored without inherited MST_SESSION_ID." >&2
-    return 2
-  fi
-
-  echo "[mst-session-init] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation." >&2
-  return 2
-}
-
 MST_CANONICAL_SESSION_ID=""
-if resolve_canonical_mst_session_id_or_exit; then
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
+  MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
   MST_SESSION_RESOLUTION_STATUS=0
 else
   MST_SESSION_RESOLUTION_STATUS=$?
@@ -209,17 +112,6 @@ if [ -n "$HISTORY_LIB" ]; then
 else
   echo "[mst-session-init] warning: history library not found; skipped history sentinel initialization." >&2
 fi
-
-
-debug_log() {
-  [ "${MST_DEBUG:-0}" = "1" ] || return 0
-  local event="${1:-event}"
-  shift || true
-  local detail="${*:-}"
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)"
-  printf '%s event=%s %s\n' "$ts" "$event" "$detail" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
-}
 
 stdin_session_id() {
   printf '%s\n' "${MST_SESSION_ID:-}"

@@ -1920,16 +1920,20 @@ def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optio
     os.replace(tmp_path, json_path)
 
 
-def _inject_owner_metadata_if_missing(args) -> None:
+def _inject_owner_metadata_if_missing(args) -> bool:
     ppid = _resolve_owner_ppid()
     session_id = canonical_session_id_from_env() or _resolve_owner_session_id(ppid)
+    injected = False
 
     req_id = (getattr(args, "req", "") or "").strip()
     if req_id.startswith("REQ-") and _common.BASE_DIR:
         req_json = _common.BASE_DIR / "requests" / req_id / "request.json"
         if req_json.exists():
             try:
+                before = _common.load_json(req_json)
                 _inject_owner_metadata_to_json(req_json, ppid, session_id)
+                after = _common.load_json(req_json)
+                injected = injected or before != after
             except Exception as exc:
                 print(f"[mst] warning: failed to inject owner metadata into {req_json}: {exc}", file=sys.stderr)
 
@@ -1939,9 +1943,14 @@ def _inject_owner_metadata_if_missing(args) -> None:
         plan_json = _common.BASE_DIR / "plans" / next_source / "plan.json"
         if plan_json.exists():
             try:
+                before = _common.load_json(plan_json)
                 _inject_owner_metadata_to_json(plan_json, ppid, session_id)
+                after = _common.load_json(plan_json)
+                injected = injected or before != after
             except Exception as exc:
                 print(f"[mst] warning: failed to inject owner metadata into {plan_json}: {exc}", file=sys.stderr)
+
+    return injected
 
 
 def _state_migration_base_dir() -> Path:
@@ -2277,6 +2286,7 @@ def migrate(args: argparse.Namespace) -> int:
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     now = _workflow_state_timestamp()
+    owner_metadata_injected = _inject_owner_metadata_if_missing(args)
 
     try:
         session_id = _common.require_mst_session_id_for_mutation("workflow state write")
@@ -2396,6 +2406,14 @@ def cmd_state_set_workflow(args):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     except ValueError as exc:
         if _common.is_missing_canonical_session_error(exc):
+            if owner_metadata_injected:
+                print(json.dumps({
+                    "status": "partial",
+                    "code": "owner_metadata_injected_without_workflow_state",
+                    "mutation_performed": True,
+                    "workflow_state_written": False,
+                }, ensure_ascii=False))
+                return 0
             return _common.emit_session_identity_non_success("workflow state write")
         print(f"Error: {exc}", file=sys.stderr)
         return 1

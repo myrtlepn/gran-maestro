@@ -47,6 +47,15 @@ for hook_name in mst-session-init.sh mst-pre-tool-use.sh mst-stop-hook.sh mst-au
   done < <(find "$HOME/.claude/plugins/cache/gran-maestro/mst" -path "*/hooks/$hook_name" -type f 2>/dev/null | sort || true)
 done
 
+for helper_name in bootstrap.bash logging.bash session_identity.bash; do
+  [ -f "$REPO_ROOT/.claude/hooks/lib/$helper_name" ] || fail "missing .claude hook lib helper: $helper_name"
+  assert_hash_match_if_exists ".claude hook lib $helper_name" "$REPO_ROOT/hooks/lib/$helper_name" "$REPO_ROOT/.claude/hooks/lib/$helper_name"
+  while IFS= read -r cache_file; do
+    [ -n "$cache_file" ] || continue
+    assert_hash_match_if_accessible "plugin cache hook lib $helper_name" "$REPO_ROOT/hooks/lib/$helper_name" "$cache_file"
+  done < <(find "$HOME/.claude/plugins/cache/gran-maestro/mst" -path "*/hooks/lib/$helper_name" -type f 2>/dev/null | sort || true)
+done
+
 while IFS= read -r cache_file; do
   [ -n "$cache_file" ] || continue
   assert_hash_match_if_accessible "plugin cache hook lib pre_tool_use_fast.py" "$REPO_ROOT/hooks/lib/pre_tool_use_fast.py" "$cache_file"
