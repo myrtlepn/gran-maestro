@@ -2398,15 +2398,28 @@ PY
 }
 
 exit_boundary_requests() {
-  python3 - "$PROJECT_ROOT" <<'PY'
+  python3 - "$PROJECT_ROOT" "$PPID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 project_root = Path(sys.argv[1])
+try:
+    current_ppid = int(sys.argv[2])
+except (IndexError, TypeError, ValueError):
+    raise SystemExit(0)
+
 requests_root = project_root / ".gran-maestro" / "requests"
 if not requests_root.is_dir():
     raise SystemExit(0)
+
+def parse_int(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 for request_path in sorted(requests_root.glob("REQ-*/request.json")):
     try:
@@ -2415,15 +2428,14 @@ for request_path in sorted(requests_root.glob("REQ-*/request.json")):
         continue
     if not isinstance(data, dict):
         continue
-    try:
-        phase = int(data.get("current_phase"))
-    except (TypeError, ValueError):
+    phase = parse_int(data.get("current_phase"))
+    if phase is None:
         continue
     status = str(data.get("status") or "").strip().lower()
-    owner_ppid = data.get("owner_ppid")
+    owner_ppid = parse_int(data.get("owner_ppid"))
     if owner_ppid is None:
         continue
-    if phase == 5 and status == "done":
+    if phase == 5 and status == "done" and owner_ppid == current_ppid:
         req_id = str(data.get("id") or request_path.parent.name).strip()
         if req_id:
             print(req_id)

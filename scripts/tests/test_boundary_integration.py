@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MST = REPO_ROOT / "scripts" / "mst.py"
 PRE_TOOL_HOOK = REPO_ROOT / "hooks" / "mst-pre-tool-use.sh"
 STOP_HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
+TEST_MST_SESSION_ID = "MST-AGI-030-20260509T000000000Z-test0000"
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -29,12 +30,15 @@ def run_hook(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
+    merged_env.setdefault("MST_SESSION_ID", TEST_MST_SESSION_ID)
+    merged_env.setdefault("MST_POLICY_HOME", str(cwd / ".gran-maestro" / "policy"))
     if env:
         merged_env.update(env)
+    hook_payload = {**payload, "mst_session_id": merged_env["MST_SESSION_ID"]}
     return subprocess.run(
         ["bash", str(hook)],
         cwd=cwd,
-        input=json.dumps(payload),
+        input=json.dumps(hook_payload),
         capture_output=True,
         text=True,
         env=merged_env,
@@ -290,20 +294,29 @@ def test_stop_hook_keeps_active_workflow_session_block(status: str, tmp_path: Pa
     write_request(tmp_path, req_id, status=status)
     request_path = tmp_path / ".gran-maestro" / "requests" / req_id / "request.json"
     request_data = json.loads(request_path.read_text(encoding="utf-8"))
-    request_data["mst_session_id"] = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
+    request_data["mst_session_id"] = TEST_MST_SESSION_ID
     write_json(request_path, request_data)
 
-    result = run_hook(
-        STOP_HOOK,
-        tmp_path,
-        {"mst_session_id": "MST-AGI-030-20260503T130813382Z-k7f3q9x2"},
-    )
+    result = run_hook(STOP_HOOK, tmp_path, {})
     payload = parse_stdout_json(result)
 
     assert result.returncode == 0
     assert payload["decision"] == "block"
     assert "active workflow session detected" in payload["reason"]
     assert "boundary_violation" not in payload["reason"]
+
+
+def test_stop_hook_ignores_exit_boundary_for_other_owner_ppid(tmp_path: Path) -> None:
+    req_id = "REQ-685"
+    write_request(tmp_path, req_id, status="done", current_phase=5, owner_ppid=1)
+
+    result = run_hook(STOP_HOOK, tmp_path, {})
+    payload = parse_stdout_json(result)
+
+    assert result.returncode == 0
+    assert payload["decision"] == "approve"
+    assert payload["reason"] == "workflow_inactive snapshot_present=false"
+    assert not (tmp_path / ".gran-maestro" / "logs" / "boundary-guard.log").exists()
 
 
 def test_stop_hook_logs_exit_retry_success(tmp_path: Path) -> None:
