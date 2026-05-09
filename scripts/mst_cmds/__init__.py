@@ -267,6 +267,7 @@ DISPATCH = {
     ("hook", "repair"): hook.cmd_hook_repair,
     ("hook", "log"): hook.cmd_hook_log,
     ("hook", "allow"): hook.cmd_hook_allow,
+    ("hook", "stop"): hook.cmd_hook_stop,
     ("history", "log"): hook.cmd_history_log,
     ("history", "verify"): hook.cmd_history_verify,
     ("history", "head"): hook.cmd_history_head,

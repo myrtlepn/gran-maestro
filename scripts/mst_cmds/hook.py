@@ -15,6 +15,7 @@ from pathlib import Path
 
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import session as session_cmds
+from scripts.mst_cmds import stop_judge
 from scripts.mst_cmds._provenance import require_user_tty
 
 
@@ -1148,6 +1149,13 @@ def cmd_hook_allow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hook_stop(args: argparse.Namespace) -> int:
+    if getattr(args, "stop_subcommand", None) == "judge":
+        return stop_judge.cmd_hook_stop_judge(args)
+    print("hook stop requires a subcommand", file=sys.stderr)
+    return 2
+
+
 def register(subparsers):
     hook = subparsers.add_parser("hook")
     hook_sub = hook.add_subparsers(dest="subcommand")
@@ -1231,3 +1239,15 @@ def register(subparsers):
     allow.add_argument("--list", action="store_true")
     allow.add_argument("--remove")
     allow.set_defaults(func=cmd_hook_allow)
+
+    stop = hook_sub.add_parser("stop")
+    stop_sub = stop.add_subparsers(dest="stop_subcommand")
+    judge = stop_sub.add_parser("judge")
+    judge.add_argument("--stdin-file", required=True, help="Path to the captured Stop hook stdin payload JSON.")
+    judge.add_argument(
+        "--hook-timeout-ms",
+        type=int,
+        default=stop_judge.DEFAULT_HOOK_TIMEOUT_MS,
+        help="Timeout budget passed by the shell wrapper for fail-safe diagnostics.",
+    )
+    judge.set_defaults(func=cmd_hook_stop)

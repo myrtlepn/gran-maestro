@@ -42,6 +42,11 @@ cleanup() {
     "${MST_TMP}/mst-transcript-${MY_PID}.path" \
     2>/dev/null || true
   rm -rf "$REQUEST_FIXTURE_DIR" "$PLAN_FIXTURE_DIR" 2>/dev/null || true
+  rm -rf \
+    "$TEST_PROJECT_ROOT/.gran-maestro/state" \
+    "$TEST_PROJECT_ROOT/.gran-maestro/run" \
+    "$TEST_PROJECT_ROOT/.gran-maestro/logs" \
+    2>/dev/null || true
   rm -f "$TEST_PROJECT_ROOT/.claude/hooks/.mst-hook-version" 2>/dev/null || true
 }
 
@@ -107,6 +112,42 @@ assert_not_contains() {
   fi
 }
 
+assert_stop_stdout_contract() {
+  local test_name="$1" output_file="$2" expected_decision="$3" expected_reason_substring="$4"
+  TOTAL=$((TOTAL + 1))
+  if python3 - "$output_file" "$expected_decision" "$expected_reason_substring" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+output_path, expected_decision, expected_reason_substring = sys.argv[1:4]
+lines = [line for line in Path(output_path).read_text(encoding="utf-8").splitlines() if line.strip()]
+if len(lines) != 1:
+    raise SystemExit(f"expected exactly one non-empty stdout line, got {lines!r}")
+
+payload = json.loads(lines[0])
+if set(payload) != {"decision", "reason"}:
+    raise SystemExit(f"unexpected stdout keys: {sorted(payload)}")
+if payload.get("decision") != expected_decision:
+    raise SystemExit(f"expected decision={expected_decision}, got {payload!r}")
+reason = payload.get("reason")
+if not isinstance(reason, str) or not reason.strip():
+    raise SystemExit(f"missing reason: {payload!r}")
+if expected_reason_substring and expected_reason_substring not in reason:
+    raise SystemExit(
+        f"expected reason to contain {expected_reason_substring!r}, got {reason!r}"
+    )
+PY
+  then
+    echo "  PASS: $test_name"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $test_name"
+    echo "    stdout: $(cat "$output_file" 2>/dev/null || true)"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 run_stop() {
   local input="$1"
   printf '%s' "$input" > "$INFILE"
@@ -152,6 +193,7 @@ run_stop '{"stop_hook_active":true}'
 output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "stop_hook_active=true exits 0" "0" "$STOP_EXIT"
 assert_contains "stop_hook_active=true -> approve" '"decision": "approve"' "$output"
+assert_stop_stdout_contract "stop_hook_active=true stdout contract" "$OUTFILE" "approve" ""
 
 cleanup
 run_stop '{"stop_hook_active":false,"last_assistant_message":"AskUserQuestion"}'
@@ -243,6 +285,7 @@ output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "workflow_active=true exits 0" "0" "$STOP_EXIT"
 assert_contains "workflow_active=true -> block" '"decision": "block"' "$output"
 assert_contains "block reason includes next skill" 'mst:request' "$output"
+assert_stop_stdout_contract "workflow_active=true stdout contract" "$OUTFILE" "block" "Workflow active, continue current skill"
 
 cleanup
 write_state '{"workflow_active":true,"current_skill":"mst:plan","active_req":"REQ-500","iteration":1,"updated_at":"2026-03-28T10:30:45Z","next_action":{"skill":"mst:request","source":"PLN-400","auto":false}}'
@@ -293,6 +336,35 @@ output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "agile_resume_after_accept exits 0" "0" "$STOP_EXIT"
 assert_contains "agile_resume_after_accept -> AGILE-CONTINUE" "AGILE-CONTINUE" "$output"
 assert_contains "agile_resume_after_accept -> objective-check" "objective-check" "$output"
+assert_stop_stdout_contract "agile_resume_after_accept stdout contract" "$OUTFILE" "block" "[AGILE-CONTINUE]"
+
+cleanup
+run_stop '{"stop_hook_active":false,"last_assistant_message":"return_to=mst:plan/step-2"}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "workflow_inactive return_to exits 0" "0" "$STOP_EXIT"
+assert_contains "workflow_inactive return_to -> block" '"decision": "block"' "$output"
+assert_contains "workflow_inactive return_to -> reason includes resume hint" '/mst:resume --wakeup-hint stop-recover' "$output"
+assert_stop_stdout_contract "workflow_inactive return_to stdout contract" "$OUTFILE" "block" "[RETURN-TO] Sub-skill returned with return_to=mst:plan/step-2"
+
+cleanup
+mkdir -p "$TEST_PROJECT_ROOT/.gran-maestro/state/$ROOT_MST_SESSION_ID"
+printf '%s\n' "{\"mst_session_id\":\"${ROOT_MST_SESSION_ID}\",\"currentSkill\":\"mst:request\",\"currentStep\":0,\"totalSteps\":3}" > "$TEST_PROJECT_ROOT/.gran-maestro/state/$ROOT_MST_SESSION_ID/snapshot.json"
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "snapshot step progress exits 0" "0" "$STOP_EXIT"
+assert_contains "snapshot step progress -> block" '"decision": "block"' "$output"
+assert_contains "snapshot step progress -> reason includes skill" '[SNAPSHOT][step_progress] skill mst:request step 1/3' "$output"
+assert_stop_stdout_contract "snapshot step progress stdout contract" "$OUTFILE" "block" "[SNAPSHOT][step_progress]"
+
+cleanup
+mkdir -p "$TEST_PROJECT_ROOT/.gran-maestro/run"
+printf '%s\n' '{"delegate_io_attention_events":[{"kind":"delegate_io_attention","event_id":"evt-1","task_id":"REQ-850-T01","provider":"claude","pid":123,"signal":"stdin_timeout","confidence":"high","allowed_actions":["resume"],"forbidden_reasons":["write_child_stdin"],"observed_at":"2099-01-01T00:00:00Z","expires_at":"2099-01-02T00:00:00Z"}]}' > "$TEST_PROJECT_ROOT/.gran-maestro/run/attention.json"
+run_stop '{"stop_hook_active":false}'
+output="$(cat "$OUTFILE" 2>/dev/null || true)"
+assert_eq "delegate io attention exits 0" "0" "$STOP_EXIT"
+assert_contains "delegate io attention -> block" '"decision": "block"' "$output"
+assert_contains "delegate io attention -> reason includes context" 'event_id=evt-1 task_id=REQ-850-T01' "$output"
+assert_stop_stdout_contract "delegate io attention stdout contract" "$OUTFILE" "block" "[DELEGATE-IO] pending delegate_io_attention event:"
 
 cleanup
 write_state '{"workflow_active":false,"agile_loop_active":false,"current_skill":"","active_req":"REQ-627","iteration":2,"updated_at":"2026-04-14T00:00:00Z","next_action":{"skill":"","source":"","auto":false}}'
@@ -394,6 +466,7 @@ output="$(cat "$OUTFILE" 2>/dev/null || true)"
 assert_eq "same_session_req_still_blocks exits 0" "0" "$STOP_EXIT"
 assert_contains "same_session_req_still_blocks -> block" '"decision": "block"' "$output"
 assert_contains "same_session_req_still_blocks reason" 'active workflow session detected' "$output"
+assert_stop_stdout_contract "same_session_req_still_blocks stdout contract" "$OUTFILE" "block" "active workflow session detected"
 
 # AC-003: legacy_request_without_canonical_session_does_not_block
 # canonical mst_session_id 없는 레거시 파일은 최근 mtime이어도 diagnostic-only로 처리 → pass-through

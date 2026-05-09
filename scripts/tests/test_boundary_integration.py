@@ -50,6 +50,19 @@ def parse_stdout_json(result: subprocess.CompletedProcess[str]) -> dict:
     return json.loads(result.stdout)
 
 
+def parse_stop_hook_stdout_json(result: subprocess.CompletedProcess[str]) -> dict:
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 1, (
+        "stop hook stdout must contain exactly one non-empty JSON decision line\n"
+        f"stdout:\n{result.stdout!r}\n"
+        f"stderr:\n{result.stderr!r}"
+    )
+    payload = json.loads(lines[0])
+    assert set(payload) == {"decision", "reason"}
+    assert isinstance(payload["reason"], str) and payload["reason"].strip()
+    return payload
+
+
 def boundary_log_lines(root: Path) -> list[str]:
     log_path = root / ".gran-maestro" / "logs" / "boundary-guard.log"
     assert log_path.is_file()
@@ -298,7 +311,7 @@ def test_stop_hook_keeps_active_workflow_session_block(status: str, tmp_path: Pa
     write_json(request_path, request_data)
 
     result = run_hook(STOP_HOOK, tmp_path, {})
-    payload = parse_stdout_json(result)
+    payload = parse_stop_hook_stdout_json(result)
 
     assert result.returncode == 0
     assert payload["decision"] == "block"
@@ -311,7 +324,7 @@ def test_stop_hook_ignores_exit_boundary_for_other_owner_ppid(tmp_path: Path) ->
     write_request(tmp_path, req_id, status="done", current_phase=5, owner_ppid=1)
 
     result = run_hook(STOP_HOOK, tmp_path, {})
-    payload = parse_stdout_json(result)
+    payload = parse_stop_hook_stdout_json(result)
 
     assert result.returncode == 0
     assert payload["decision"] == "approve"
@@ -340,10 +353,9 @@ def test_stop_hook_logs_exit_retry_success(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    if result.stdout.strip():
-        payload = parse_stdout_json(result)
-        assert payload["decision"] == "approve"
-        assert payload["reason"] == "workflow_inactive snapshot_present=false"
+    payload = parse_stop_hook_stdout_json(result)
+    assert payload["decision"] == "approve"
+    assert payload["reason"] == "workflow_inactive snapshot_present=false"
     assert meta["state"] == "cleaned"
     assert_boundary_log(
         tmp_path,
@@ -377,7 +389,7 @@ def test_stop_hook_logs_exit_merge_conflict_block(tmp_path: Path) -> None:
     )
 
     result = run_hook(STOP_HOOK, tmp_path, {})
-    payload = parse_stdout_json(result)
+    payload = parse_stop_hook_stdout_json(result)
 
     assert result.returncode == 0
     assert payload["decision"] == "block"
@@ -421,10 +433,9 @@ def test_stop_boundary_log_then_detect_orphans_migrates_cleaned_meta(tmp_path: P
 
     stop_result = run_hook(STOP_HOOK, tmp_path, {})
     assert stop_result.returncode == 0
-    if stop_result.stdout.strip():
-        payload = parse_stdout_json(stop_result)
-        assert payload["decision"] == "approve"
-        assert payload["reason"] == "workflow_inactive snapshot_present=false"
+    payload = parse_stop_hook_stdout_json(stop_result)
+    assert payload["decision"] == "approve"
+    assert payload["reason"] == "workflow_inactive snapshot_present=false"
     assert json.loads(meta_path.read_text(encoding="utf-8"))["state"] == "cleaned"
     assert not worktree_path.exists()
     assert_boundary_log(
