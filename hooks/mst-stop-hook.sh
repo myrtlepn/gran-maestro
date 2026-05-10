@@ -83,6 +83,8 @@ fi
 # shellcheck source=/dev/null
 source "$script_dir/lib/bootstrap.bash"
 # shellcheck source=/dev/null
+source "$script_dir/lib/session_identity.bash"
+# shellcheck source=/dev/null
 source "$script_dir/lib/logging.bash"
 
 mst_validate_hook_script_dir_or_exit "$script_dir"
@@ -95,6 +97,24 @@ MST_HOOK_LOG_PREFIX="mst-stop-hook"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
+  export MST_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
+  MST_LEDGER_HOOK_EVENT="Stop"
+  if [ -f "${script_dir}/lib/ledger.bash" ]; then
+    # shellcheck source=/dev/null
+    source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+  fi
+  if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+    emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+    _mst_ledger_complete_once() {
+      local status="${1:-$?}"
+      [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+      MST_LEDGER_COMPLETED=1
+      emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+    }
+    trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
+  fi
+fi
 
 resolve_mst_script() {
   local candidate
@@ -184,9 +204,10 @@ except Exception:
 if not isinstance(payload, dict):
     payload = {}
 
-session_id = os.environ.get("MST_SESSION_ID") or payload.get("mst_session_id") or payload.get("session_id") or "unknown"
+safe_mst_re = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
+session_id = os.environ.get("MST_SESSION_ID") or payload.get("mst_session_id") or "unknown"
 session_id = str(session_id or "unknown")
-if "/" in session_id or ".." in session_id:
+if "/" in session_id or ".." in session_id or not safe_mst_re.match(session_id):
     session_id = "unknown"
 path = root / ".gran-maestro" / "state" / session_id / "flow-detail.ndjson"
 path.parent.mkdir(parents=True, exist_ok=True)
