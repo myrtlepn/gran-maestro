@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRE_TOOL_HOOK = REPO_ROOT / "hooks" / "mst-pre-tool-use.sh"
+TEST_MST_SESSION_ID = "MST-AGI-034-20260510T000000000Z-boundary00"
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -55,12 +56,15 @@ def init_git_project(root: Path) -> None:
 
 def run_hook(cwd: Path, payload: dict, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
+    merged_env.setdefault("MST_SESSION_ID", TEST_MST_SESSION_ID)
+    merged_env.setdefault("MST_POLICY_HOME", str(cwd / ".gran-maestro" / "policy"))
     if env:
         merged_env.update(env)
+    hook_payload = {**payload, "mst_session_id": merged_env["MST_SESSION_ID"]}
     return subprocess.run(
         ["bash", str(PRE_TOOL_HOOK)],
         cwd=cwd,
-        input=json.dumps(payload),
+        input=json.dumps(hook_payload),
         capture_output=True,
         text=True,
         env=merged_env,
@@ -92,4 +96,3 @@ def test_repair_entry_once_captures_create_failure_status_and_stderr(tmp_path: P
     assert "details" in payload
     assert "summary" in payload["details"]
     assert "stderr:" in payload["details"]["summary"]
-

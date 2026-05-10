@@ -1584,9 +1584,60 @@ def acquire_lock(lock_dir: Path) -> bool:
     return False
 
 
+def history_has_idempotency_key(history_file: Path, idempotency_key: str) -> bool:
+    if not idempotency_key or not history_file.is_file():
+        return False
+    try:
+        lines = history_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        event = row.get("event") if isinstance(row, dict) else None
+        if isinstance(event, dict) and event.get("idempotency_key") == idempotency_key:
+            return True
+    return False
+
+
 def build_history_row(event: dict, prev_hash: str, seq: int, session_id: str) -> Tuple[dict, str]:
     stamped_event = dict(event)
-    stamped_event["session_id"] = session_id
+    parts = session_id.rsplit("-", 2)
+    if len(parts) != 3 or not parts[0].startswith("MST-"):
+        raise ValueError("history ledger mismatch: invalid structured mst_session_id")
+    root_mst_id = parts[0][4:]
+    stamped_event.pop("session_id", None)
+    stamped_event["mst_session_id"] = session_id
+    existing_root = stamped_event.get("root_mst_id")
+    if existing_root is not None and existing_root != root_mst_id:
+        raise ValueError("history ledger mismatch: root_mst_id")
+    stamped_event["root_mst_id"] = root_mst_id
+    existing_schema = stamped_event.get("schema_version")
+    if existing_schema is not None and existing_schema != 1:
+        raise ValueError("history ledger mismatch: schema_version")
+    stamped_event["schema_version"] = 1
+    event_type = stamped_event.get("event_type") or stamped_event.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        raise ValueError("history ledger mismatch: event_type")
+    stamped_event["event_type"] = event_type.strip()
+    created_at = stamped_event.get("created_at") or stamped_event.get("timestamp")
+    if not isinstance(created_at, str) or not created_at.strip():
+        created_at = format_utc(utc_now())
+    stamped_event["created_at"] = created_at.strip()
+    idempotency_key = stamped_event.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        stable_event = {
+            key: value
+            for key, value in stamped_event.items()
+            if key not in {"timestamp", "created_at", "idempotency_key"}
+        }
+        stable_json = canonical_json(stable_event)
+        idempotency_key = f"{session_id}:{stamped_event['event_type']}:{sha256_text(stable_json)}"
+    stamped_event["idempotency_key"] = idempotency_key.strip()
     canonical_event = canonical_json(stamped_event)
     event_hash = sha256_text(prev_hash + "\n" + canonical_event)
     row = {
@@ -1594,9 +1645,18 @@ def build_history_row(event: dict, prev_hash: str, seq: int, session_id: str) ->
         "event_hash": event_hash,
         "prev_hash": prev_hash,
         "seq": seq,
-        "session_id": session_id,
+        "mst_session_id": session_id,
     }
-    for key in ("tool", "args_sha256", "timestamp"):
+    for key in (
+        "schema_version",
+        "root_mst_id",
+        "event_type",
+        "created_at",
+        "idempotency_key",
+        "tool",
+        "args_sha256",
+        "timestamp",
+    ):
         if key in stamped_event:
             row[key] = stamped_event[key]
     return row, event_hash
@@ -1632,11 +1692,17 @@ def append_tool_call(project_root: Path, home: Path, session_id: str, tool_name:
             "tool": tool_name or "unknown",
             "type": "tool_call",
         }
-        row, event_hash = build_history_row(event, prev_hash, seq + 1, clean_sid)
+        try:
+            row, event_hash = build_history_row(event, prev_hash, seq + 1, clean_sid)
+        except ValueError as exc:
+            stderr(str(exc))
+            return 2
+        if history_has_idempotency_key(history_file, str(row.get("idempotency_key") or "")):
+            return 0
         with history_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
-        local_head.write_text(event_hash + "\n", encoding="utf-8")
+            handle.write(canonical_json(row) + "\n")
         mirror_head.write_text(event_hash + "\n", encoding="utf-8")
+        local_head.write_text(event_hash + "\n", encoding="utf-8")
         write_verify_state(verify_state, event_hash, file_fingerprint(history_file), seq + 1)
         return 0
     finally:
@@ -1651,6 +1717,7 @@ def append_tool_call_after_verified(project_root: Path, home: Path, session_id: 
         return 0
 
     history_file, local_head, mirror_head, verify_state = history_paths(project_root, home, session_id)
+    history_file.parent.mkdir(parents=True, exist_ok=True)
     mirror_head.parent.mkdir(parents=True, exist_ok=True)
 
     prev_hash = read_head(local_head) or ZERO_HASH
@@ -1673,11 +1740,17 @@ def append_tool_call_after_verified(project_root: Path, home: Path, session_id: 
         "tool": tool_name or "unknown",
         "type": "tool_call",
     }
-    row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
+    try:
+        row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
+    except ValueError as exc:
+        stderr(str(exc))
+        return 2
+    if history_has_idempotency_key(history_file, str(row.get("idempotency_key") or "")):
+        return 0
     with history_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
-    local_head.write_text(event_hash + "\n", encoding="utf-8")
+        handle.write(canonical_json(row) + "\n")
     mirror_head.write_text(event_hash + "\n", encoding="utf-8")
+    local_head.write_text(event_hash + "\n", encoding="utf-8")
     write_verify_state(verify_state, event_hash, file_fingerprint(history_file), seq + 1)
     return 0
 
@@ -1702,11 +1775,17 @@ def append_event_after_verified(project_root: Path, home: Path, session_id: str,
         except OSError:
             seq = 0
 
-    row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
+    try:
+        row, event_hash = build_history_row(event, prev_hash, seq + 1, session_id)
+    except ValueError as exc:
+        stderr(str(exc))
+        return 2
+    if history_has_idempotency_key(history_file, str(row.get("idempotency_key") or "")):
+        return 0
     with history_file.open("a", encoding="utf-8") as handle:
         handle.write(canonical_json(row) + "\n")
-    local_head.write_text(event_hash + "\n", encoding="utf-8")
     mirror_head.write_text(event_hash + "\n", encoding="utf-8")
+    local_head.write_text(event_hash + "\n", encoding="utf-8")
     write_verify_state(verify_state, event_hash, file_fingerprint(history_file), seq + 1)
     return 0
 

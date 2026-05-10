@@ -82,6 +82,19 @@ def assert_boundary_log(
     assert any(line.endswith(expected) for line in boundary_log_lines(root))
 
 
+def count_boundary_log(
+    root: Path,
+    *,
+    hook_name: str,
+    event_type: str,
+    task_id: str,
+    result: str,
+    message: str,
+) -> int:
+    expected = f" | {hook_name} | {event_type} | {task_id} | {result} | {message}"
+    return sum(1 for line in boundary_log_lines(root) if line.endswith(expected))
+
+
 def assert_boundary_log_format(root: Path) -> None:
     pattern = re.compile(
         r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
@@ -243,6 +256,31 @@ def test_pre_tool_hook_repairs_missing_worktree_when_retry_possible(tmp_path: Pa
     )
 
 
+def test_pre_tool_hook_repairs_entry_boundary_only_once(tmp_path: Path) -> None:
+    req_id = "REQ-6811"
+    init_git_project(tmp_path)
+    write_request(tmp_path, req_id, detected_base="main")
+
+    first = run_hook(PRE_TOOL_HOOK, tmp_path, approve_payload(req_id))
+    second = run_hook(PRE_TOOL_HOOK, tmp_path, approve_payload(req_id))
+    meta_path = tmp_path / ".gran-maestro" / "worktrees" / f"{req_id}-T01.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+    assert first.stdout == ""
+    assert second.stdout == ""
+    assert meta["state"] == "active"
+    assert count_boundary_log(
+        tmp_path,
+        hook_name="mst-pre-tool-use.sh",
+        event_type="retry_success",
+        task_id=req_id,
+        result="ok",
+        message="entry repair succeeded",
+    ) == 1
+
+
 @pytest.mark.parametrize("violation", ["merge_conflict", "unknown_req"])
 def test_pre_tool_hook_maps_non_retryable_boundary_violations_to_block_json(
     tmp_path: Path,
@@ -302,7 +340,7 @@ def test_pre_tool_hook_ignores_owner_ppid_mismatch_diagnostically(tmp_path: Path
 
 
 @pytest.mark.parametrize("status", ["executing", "pending", "review", "feedback"])
-def test_stop_hook_keeps_active_workflow_session_block(status: str, tmp_path: Path) -> None:
+def test_stop_hook_stdout_keeps_active_workflow_session_block(status: str, tmp_path: Path) -> None:
     req_id = "REQ-684"
     write_request(tmp_path, req_id, status=status)
     request_path = tmp_path / ".gran-maestro" / "requests" / req_id / "request.json"
@@ -373,6 +411,42 @@ def test_stop_hook_logs_exit_retry_success(tmp_path: Path) -> None:
         result="ok",
         message="exit repair succeeded",
     )
+
+
+def test_stop_hook_repairs_exit_boundary_only_once(tmp_path: Path) -> None:
+    req_id = "REQ-6851"
+    write_request(tmp_path, req_id, status="done", current_phase=5, owner_ppid=os.getpid())
+    write_json(
+        tmp_path / ".gran-maestro" / "worktrees" / f"{req_id}-T01.meta.json",
+        {
+            "taskId": f"{req_id}-T01",
+            "path": f".gran-maestro/worktrees/{req_id}-T01",
+            "branch": f"gran-maestro/main/{req_id}-T01",
+            "state": "clean_failed",
+        },
+    )
+
+    first = run_hook(STOP_HOOK, tmp_path, {})
+    second = run_hook(STOP_HOOK, tmp_path, {})
+    meta = json.loads(
+        (tmp_path / ".gran-maestro" / "worktrees" / f"{req_id}-T01.meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+    assert parse_stop_hook_stdout_json(first)["decision"] == "approve"
+    assert parse_stop_hook_stdout_json(second)["decision"] == "approve"
+    assert meta["state"] == "cleaned"
+    assert count_boundary_log(
+        tmp_path,
+        hook_name="mst-stop-hook.sh",
+        event_type="retry_success",
+        task_id=req_id,
+        result="ok",
+        message="exit repair succeeded",
+    ) == 1
 
 
 def test_stop_hook_logs_exit_merge_conflict_block(tmp_path: Path) -> None:

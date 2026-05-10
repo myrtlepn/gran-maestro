@@ -291,6 +291,7 @@ mst_history_verify_chain_unlocked() {
   python3 - "$history_file" "$local_head" "$mirror_head" "$MST_HISTORY_ZERO_HASH" "$session_id" <<'PY'
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -305,6 +306,13 @@ def read_head(path: Path):
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8").strip()
+
+
+def atomic_write_head(path: Path, value: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp_path.write_text(value + "\n", encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def fail(message: str):
@@ -362,10 +370,47 @@ if has_entries and local_head == zero_hash:
 if has_entries and mirror_head == zero_hash:
     fail("home mirror head")
 
-if local_head is not None and local_head != last_hash:
-    fail("history.head")
-if mirror_head is not None and mirror_head != last_hash:
-    fail("home mirror head")
+def head_within_ndjson(head):
+    if head is None or head == last_hash or head == zero_hash:
+        return True
+    if not history_path.exists():
+        return False
+    with history_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict) and row.get("event_hash") == head:
+                return True
+    return False
+
+if local_head is not None and not head_within_ndjson(local_head):
+    fail("self-heal failed: head ahead of ndjson last_hash")
+if mirror_head is not None and not head_within_ndjson(mirror_head):
+    fail("self-heal failed: head ahead of ndjson last_hash")
+
+if last_hash != zero_hash and (
+    (local_head is not None and local_head != last_hash)
+    or (mirror_head is not None and mirror_head != last_hash)
+):
+    prev_local = local_head or zero_hash
+    prev_mirror = mirror_head or zero_hash
+    targets = []
+    if mirror_head != last_hash:
+        atomic_write_head(mirror_head_path, last_hash)
+        targets.append("mirror")
+    if local_head != last_hash:
+        atomic_write_head(local_head_path, last_hash)
+        targets.append("local")
+    print(
+        f"[mst-history-self-heal] session={session_id} restored={last_hash[:12]} "
+        f"targets={','.join(targets)} prev_local={prev_local[:12]} prev_mirror={prev_mirror[:12]}",
+        file=sys.stderr,
+    )
 PY
   if [ "$?" -eq 0 ]; then
     mst_history_write_verify_state \
