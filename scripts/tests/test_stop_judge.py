@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -266,18 +267,97 @@ def test_reduce_stop_judge_documents_timeout_and_startup_fallbacks(
     assert decision["diagnostics"]["failsafe"] == failsafe
 
 
-def test_apply_stop_judge_side_effects_uses_precomputed_side_effects_only(tmp_path: Path) -> None:
+def test_apply_stop_judge_side_effects_persists_precomputed_block_state(tmp_path: Path) -> None:
     project_root = _project_root(tmp_path)
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{SESSION_ID}.json"
+    _write_json(state_path, _canonical_state_payload(SESSION_ID, block_count=1, last_block_reason="previous"))
     decision = {
         "decision": "block",
         "reason": "queued next_action present",
-        "diagnostics": {"source": "test"},
+        "diagnostics": {"state_path": str(state_path), "canonical_mst_session_id": SESSION_ID},
         "side_effects": [
-            {"kind": "persist_block_state", "session_id": SESSION_ID},
-            {"kind": "append_audit", "event": "core_block"},
+            {"kind": "persist_block_state", "reason": "queued_next_action"},
         ],
     }
 
     applied = stop_judge.apply_stop_judge_side_effects(project_root=project_root, decision=decision)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
 
-    assert applied == decision["side_effects"]
+    assert applied == [{"kind": "persist_block_state", "reason": "queued_next_action", "block_count": 2}]
+    assert payload["block_count"] == 2
+    assert payload["last_block_reason"] == "queued next_action present"
+    assert payload["mst_session_id"] == SESSION_ID
+
+
+def test_apply_stop_judge_side_effects_applies_boundary_repair_in_order(tmp_path: Path) -> None:
+    project_root = _project_root(tmp_path)
+    meta_path = project_root / ".gran-maestro" / "worktrees" / "REQ-900-T01.meta.json"
+    _write_json(
+        meta_path,
+        {
+            "taskId": "REQ-900-T01",
+            "path": ".gran-maestro/worktrees/REQ-900-T01",
+            "branch": "",
+            "state": "clean_failed",
+        },
+    )
+    decision = {
+        "decision": "approve",
+        "reason": "workflow_inactive snapshot_present=false",
+        "diagnostics": {},
+        "side_effects": [
+            {
+                "kind": "append_boundary_log",
+                "event_type": "detected",
+                "task_id": "REQ-900",
+                "result": "not_cleaned",
+                "message": "exit boundary violation detected",
+            },
+            {"kind": "boundary_repair", "reason": "clean_failed", "task_id": "REQ-900", "meta_path": str(meta_path)},
+        ],
+    }
+
+    applied = stop_judge.apply_stop_judge_side_effects(project_root=project_root, decision=decision)
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    log_lines = (project_root / ".gran-maestro" / "logs" / "boundary-guard.log").read_text(encoding="utf-8").splitlines()
+
+    assert [item["kind"] for item in applied] == ["append_boundary_log", "boundary_repair"]
+    assert meta["state"] == "cleaned"
+    assert "last_activity_at" in meta
+    assert log_lines[0].endswith(" | mst-stop-hook.sh | detected | REQ-900 | not_cleaned | exit boundary violation detected")
+    assert log_lines[1].endswith(" | mst-stop-hook.sh | retry_success | REQ-900 | ok | exit repair succeeded")
+
+
+def test_cmd_hook_stop_judge_applies_side_effects_before_strict_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_root = _project_root(tmp_path)
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{SESSION_ID}.json"
+    _write_json(state_path, _canonical_state_payload(SESSION_ID, workflow_active=True, current_skill="mst:agile"))
+    stdin_file = _stdin_file(
+        project_root,
+        {
+            "mst_session_id": SESSION_ID,
+            "last_assistant_message": "continue sprint execution",
+            "stop_hook_active": False,
+        },
+    )
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("MST_SESSION_ID", SESSION_ID)
+    monkeypatch.setenv("MST_STOP_HOOK_WRAPPER", "1")
+
+    rc = stop_judge.cmd_hook_stop_judge(SimpleNamespace(stdin_file=str(stdin_file), hook_timeout_ms=5000))
+    captured = capsys.readouterr()
+    stdout_lines = [line for line in captured.out.splitlines() if line.strip()]
+    payload = json.loads(stdout_lines[0])
+    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert len(stdout_lines) == 1
+    assert set(payload) == {"decision", "reason"}
+    assert payload["decision"] == "block"
+    assert state_payload["block_count"] == 1
+    assert state_payload["last_block_reason"] == payload["reason"]
+    assert "applied_side_effects" in captured.err

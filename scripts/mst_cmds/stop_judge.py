@@ -279,37 +279,27 @@ def _evaluate_boundary(project_root: Path) -> tuple[str | None, list[dict[str, A
                 continue
             state = _safe_text(meta.get("state"))
             if state == "conflict":
-                _log_boundary_event(project_root, "blocked", req_id, "merge_conflict", "boundary_violation:merge_conflict")
+                side_effects.append(
+                    {
+                        "kind": "append_boundary_log",
+                        "event_type": "blocked",
+                        "task_id": req_id,
+                        "result": "merge_conflict",
+                        "message": "boundary_violation:merge_conflict",
+                    }
+                )
                 return "boundary_violation:merge_conflict", side_effects
             if state == "clean_failed":
-                _log_boundary_event(project_root, "detected", req_id, "not_cleaned", "exit boundary violation detected")
-                worktree = meta.get("path")
-                if isinstance(worktree, str) and worktree.strip():
-                    target = Path(worktree)
-                    if not target.is_absolute():
-                        target = project_root / target
-                    if target.exists():
-                        subprocess.run(
-                            ["git", "worktree", "remove", "--force", str(target)],
-                            cwd=project_root,
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                        )
-                    shutil.rmtree(target, ignore_errors=True)
-                meta["state"] = "cleaned"
-                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-                branch = _safe_text(meta.get("branch"))
-                if branch:
-                    subprocess.run(
-                        ["git", "branch", "-D", branch],
-                        cwd=project_root,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                _log_boundary_event(project_root, "retry_success", req_id, "ok", "exit repair succeeded")
-                side_effects.append({"kind": "boundary_repair", "reason": "clean_failed", "task_id": req_id})
+                side_effects.append(
+                    {
+                        "kind": "append_boundary_log",
+                        "event_type": "detected",
+                        "task_id": req_id,
+                        "result": "not_cleaned",
+                        "message": "exit boundary violation detected",
+                    }
+                )
+                side_effects.append({"kind": "boundary_repair", "reason": "clean_failed", "task_id": req_id, "meta_path": str(meta_path)})
     return None, side_effects
 
 
@@ -557,18 +547,19 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
         return _decision("block", "corrupted mandatory state", diagnostics=diagnostics, side_effects=side_effects)
 
     if signals.get("stop_hook_active"):
-        _append_agile_audit(Path(str(context.get("project_root"))), "pass_through", "stop_hook_active_true", message)
+        side_effects.append({"kind": "append_agile_audit", "classification": "pass_through", "block_reason": "stop_hook_active_true", "message": message})
         return _decision("approve", _with_snapshot("stop_hook_active_true", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
     if signals.get("legitimate_stop_intent"):
-        _append_agile_audit(Path(str(context.get("project_root"))), "allowed", None, message)
+        side_effects.append({"kind": "append_agile_audit", "classification": "allowed", "block_reason": None, "message": message})
         return _decision("approve", _with_snapshot("workflow_inactive", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
 
     active_agile = signals.get("agile_loop_active") or current_skill == "mst:agile"
     if active_agile and ASK_USER_RE.search(message):
         if any(marker in message for marker in ALLOW_MARKERS):
-            _append_agile_audit(Path(str(context.get("project_root"))), "allowed", None, message)
+            side_effects.append({"kind": "append_agile_audit", "classification": "allowed", "block_reason": None, "message": message})
             return _decision("approve", _with_snapshot("agile_allow_pattern_whitelisted", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
         side_effects.append({"kind": "persist_block_state", "reason": "ask_user_question"})
+        side_effects.append({"kind": "append_agile_audit", "classification": "blocked", "block_reason": "ask_user_question", "message": message})
         return _decision("block", "AskUserQuestion is allowed only with agile whitelist markers.", diagnostics=diagnostics, side_effects=side_effects)
     agile_auto = context.get("payload", {}).get("agile_auto_mode") if isinstance(context.get("payload"), Mapping) else None
     queued_for_message = signals.get("queued_next_action")
@@ -669,9 +660,128 @@ def format_stop_judge_wrapper_payload(decision: Mapping[str, Any]) -> dict[str, 
     return {"decision": str(decision.get("decision") or "approve"), "reason": str(decision.get("reason") or "approved")}
 
 
+def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload, _error = _load_json_file(path)
+    return dict(payload or {})
+
+
+def _state_path_for_block(project_root: Path, diagnostics: Mapping[str, Any]) -> Path:
+    raw_path = _safe_text(diagnostics.get("state_path"))
+    if raw_path:
+        path = Path(raw_path)
+        return path if path.is_absolute() else project_root / path
+    parent_ppid = _safe_text(os.environ.get("MST_STOP_HOOK_PARENT_PPID"))
+    if parent_ppid.isdigit():
+        return _base_dir(project_root) / "tmp" / f"mst-state-{parent_ppid}.json"
+    canonical = _safe_session_path(diagnostics.get("canonical_mst_session_id"))
+    if canonical:
+        return _base_dir(project_root) / "tmp" / f"mst-state-{canonical}.json"
+    return _base_dir(project_root) / "tmp" / f"mst-state-{os.getpid()}.json"
+
+
+def _persist_block_state(project_root: Path, diagnostics: Mapping[str, Any], reason: str) -> int:
+    state_path = _state_path_for_block(project_root, diagnostics)
+    payload = _load_json_object(state_path)
+    block_count = payload.get("block_count")
+    if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
+        block_count = 0
+    block_count += 1
+    payload["block_count"] = block_count
+    payload["last_block_reason"] = reason
+    _atomic_write_json(state_path, payload)
+    return block_count
+
+
+def _apply_boundary_repair(project_root: Path, effect: Mapping[str, Any]) -> None:
+    task_id = _safe_text(effect.get("task_id"))
+    meta_path_text = _safe_text(effect.get("meta_path"))
+    if not task_id or not meta_path_text:
+        return
+    meta_path = Path(meta_path_text)
+    if not meta_path.is_absolute():
+        meta_path = project_root / meta_path
+    meta = _load_json_object(meta_path)
+    if not meta:
+        return
+    worktree = meta.get("path")
+    if isinstance(worktree, str) and worktree.strip():
+        target = Path(worktree)
+        if not target.is_absolute():
+            target = project_root / target
+        if target.exists():
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(target)],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        shutil.rmtree(target, ignore_errors=True)
+    meta["state"] = "cleaned"
+    meta["last_activity_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    _atomic_write_json(meta_path, meta)
+    branch = _safe_text(meta.get("branch"))
+    if branch:
+        subprocess.run(
+            ["git", "branch", "-D", branch],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    _log_boundary_event(project_root, "retry_success", task_id, "ok", "exit repair succeeded")
+
+
+def _apply_side_effect(project_root: Path, decision: Mapping[str, Any], effect: Mapping[str, Any]) -> dict[str, Any] | None:
+    kind = _safe_text(effect.get("kind"))
+    applied = deepcopy(dict(effect))
+    if kind == "persist_block_state":
+        applied["block_count"] = _persist_block_state(project_root, decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}, str(decision.get("reason") or ""))
+        return applied
+    if kind == "append_boundary_log":
+        _log_boundary_event(
+            project_root,
+            _safe_text(effect.get("event_type")),
+            _safe_text(effect.get("task_id")),
+            _safe_text(effect.get("result")),
+            _safe_text(effect.get("message")),
+        )
+        return applied
+    if kind == "boundary_repair":
+        _apply_boundary_repair(project_root, effect)
+        return applied
+    if kind == "append_agile_audit":
+        diagnostics = decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}
+        _append_agile_audit(
+            project_root,
+            _safe_text(effect.get("classification")),
+            effect.get("block_reason") if isinstance(effect.get("block_reason"), str) else None,
+            _safe_text(effect.get("message") or diagnostics.get("last_assistant_message")),
+        )
+        return applied
+    return applied if kind else None
+
+
 def apply_stop_judge_side_effects(*, project_root: Path, decision: Mapping[str, Any]) -> list[dict[str, Any]]:
-    del project_root
-    return [deepcopy(item) for item in list(decision.get("side_effects") or []) if isinstance(item, dict)]
+    applied: list[dict[str, Any]] = []
+    for item in list(decision.get("side_effects") or []):
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            applied_item = _apply_side_effect(project_root, decision, item)
+        except Exception as exc:  # pragma: no cover - fail-safe diagnostics only
+            print(f"[mst-stop-hook] side_effect_failed kind={_safe_text(item.get('kind'))} error={exc}", file=sys.stderr)
+            continue
+        if applied_item is not None:
+            applied.append(applied_item)
+    return applied
 
 
 def evaluate_stop_judge(
@@ -723,6 +833,11 @@ def cmd_hook_stop_judge(args: Any) -> int:
                 "hook_timeout_ms": int(getattr(args, "hook_timeout_ms", DEFAULT_HOOK_TIMEOUT_MS) or DEFAULT_HOOK_TIMEOUT_MS),
             }
         )
+    applied_side_effects = apply_stop_judge_side_effects(project_root=project_root, decision=decision)
+    if applied_side_effects:
+        diagnostics = decision.setdefault("diagnostics", {}) if isinstance(decision, dict) else None
+        if isinstance(diagnostics, dict):
+            diagnostics["applied_side_effects"] = applied_side_effects
     print(json.dumps(format_stop_judge_wrapper_payload(decision), ensure_ascii=False))
     _emit_runtime_diagnostics(decision)
     return 0
