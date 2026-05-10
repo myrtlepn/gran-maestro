@@ -12,6 +12,7 @@ from hooks.lib import pre_tool_use_fast
 
 BLOCK_REASON = "ScheduleWakeup is blocked during MST workflow chain (workflow_active=true)."
 PPID = "75701"
+SID = "MST-REQ-851-20260510T104009000Z-a1b2c3d4"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST = REPO_ROOT / "scripts" / "mst.py"
 
@@ -23,7 +24,7 @@ def _project(tmp_path: Path) -> Path:
 
 
 def _state_path(project: Path) -> Path:
-    return project / ".gran-maestro" / "tmp" / f"mst-state-{PPID}.json"
+    return project / ".gran-maestro" / "tmp" / f"mst-state-{SID}.json"
 
 
 def _timestamp(delta_seconds: int = 0) -> str:
@@ -36,7 +37,11 @@ def _write_state(project: Path, payload: dict) -> None:
 
 
 def _payload() -> dict:
-    return {"tool_name": "ScheduleWakeup", "tool_input": {"delaySeconds": 1500}}
+    return {
+        "mst_session_id": SID,
+        "tool_name": "ScheduleWakeup",
+        "tool_input": {"delaySeconds": 1500},
+    }
 
 
 def _run(project: Path, home: Path) -> int:
@@ -44,7 +49,11 @@ def _run(project: Path, home: Path) -> int:
 
 
 def _set_workflow(project: Path, *args: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "MST_STATE_PPID": PPID}
+    env = {
+        **os.environ,
+        "MST_SESSION_ID": SID,
+        "MST_STATE_PPID": PPID,
+    }
     return subprocess.run(
         [sys.executable, str(MST), "state", "set-workflow", *args],
         cwd=project,
@@ -58,6 +67,7 @@ def _set_workflow(project: Path, *args: str) -> subprocess.CompletedProcess:
 def test_block_when_workflow_active(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(project, {"workflow_active": True, "updated_at": _timestamp()})
 
     result = _run(project, tmp_path / "home")
@@ -74,6 +84,7 @@ def test_block_when_workflow_active(tmp_path, monkeypatch, capsys):
 def test_pass_when_workflow_inactive(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(project, {"workflow_active": False, "updated_at": _timestamp()})
 
     result = _run(project, tmp_path / "home")
@@ -85,6 +96,7 @@ def test_pass_when_workflow_inactive(tmp_path, monkeypatch, capsys):
 def test_grace_period_within_30s(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(
         project,
         {
@@ -103,6 +115,7 @@ def test_grace_period_within_30s(tmp_path, monkeypatch, capsys):
 def test_grace_period_after_30s(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(
         project,
         {
@@ -121,14 +134,9 @@ def test_grace_period_after_30s(tmp_path, monkeypatch, capsys):
 def test_grace_period_after_active_to_inactive_transition(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
-    _write_state(
-        project,
-        {
-            "workflow_active": True,
-            "last_active_at": _timestamp(-31 * 60),
-            "updated_at": _timestamp(),
-        },
-    )
+    monkeypatch.setenv("MST_SESSION_ID", SID)
+    initial = _set_workflow(project, "--active", "true", "--skill", "mst:request", "--auto", "false")
+    assert initial.returncode == 0, initial.stderr
     transition = _set_workflow(project, "--active", "false", "--auto", "false")
     assert transition.returncode == 0, transition.stderr
 
@@ -141,6 +149,7 @@ def test_grace_period_after_active_to_inactive_transition(tmp_path, monkeypatch,
 def test_no_last_active_at_field(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(project, {"workflow_active": True, "updated_at": _timestamp()})
 
     result = _run(project, tmp_path / "home")
@@ -152,6 +161,7 @@ def test_no_last_active_at_field(tmp_path, monkeypatch, capsys):
 def test_escape_hatch_env(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     monkeypatch.setenv("MST_ALLOW_SCHEDULE_WAKEUP", "1")
     _write_state(project, {"workflow_active": True, "updated_at": _timestamp()})
 
@@ -164,6 +174,7 @@ def test_escape_hatch_env(tmp_path, monkeypatch, capsys):
 def test_loop_user_protected(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     assert _run(project, tmp_path / "home") == 0
 
     _write_state(project, {"workflow_active": False, "updated_at": _timestamp()})
@@ -174,6 +185,7 @@ def test_loop_user_protected(tmp_path, monkeypatch, capsys):
 def test_expired_workflow_state_passes(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("MST_STATE_PPID", PPID)
+    monkeypatch.setenv("MST_SESSION_ID", SID)
     _write_state(project, {"workflow_active": True, "updated_at": _timestamp(-31 * 60)})
 
     result = _run(project, tmp_path / "home")

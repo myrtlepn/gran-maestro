@@ -21,7 +21,7 @@ setup() {
   [ "$(jq -r '.consumed' "$(pending_file "$sid")")" = "false" ]
   [ "$(jq -r '.id | startswith("cf_")' "$(pending_file "$sid")")" = "true" ]
   [ "$(jq -S -c '.args_canonical' "$(pending_file "$sid")")" = "$(jq -S -c '.tool_input' <<<"$payload")" ]
-  python3 - "$WORKSPACE/.gran-maestro/sessions/$sid" "$(pending_file "$sid")" <<'PY'
+  python3 - "$(session_dir "$sid")" "$(pending_file "$sid")" <<'PY'
 import stat
 import sys
 from pathlib import Path

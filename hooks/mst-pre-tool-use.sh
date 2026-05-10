@@ -39,6 +39,22 @@ HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 MST_HOOK_LOG_PREFIX="mst-pre-tool-use"
 
 STDIN_RAW="$(cat || true)"
+if ! MST_HOOK_STDIN_RAW="$STDIN_RAW" python3 - <<'PY' >/dev/null 2>&1
+import json
+import os
+import sys
+
+raw = os.environ.get("MST_HOOK_STDIN_RAW", "")
+try:
+    payload = json.loads(raw or "{}")
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(payload, dict) else 1)
+PY
+then
+  printf '[policy-block] payload_parse_failure invalid hook payload JSON\n' >&2
+  exit 2
+fi
 MST_CANONICAL_SESSION_ID=""
 if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
   MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"

@@ -11,7 +11,7 @@ grant_override() {
   local pending_id="$2"
   local tool="$3"
   local args_sha="$4"
-  PYTHONPATH="$REPO_ROOT" python3 - "$WORKSPACE" "$HOME_DIR" "$sid" "$pending_id" "$tool" "$args_sha" <<'PY'
+  PYTHONPATH="$REPO_ROOT" python3 - "$WORKSPACE" "$HOME_DIR" "$(canonical_test_sid "$sid")" "$pending_id" "$tool" "$args_sha" <<'PY'
 import sys
 from pathlib import Path
 from hooks.lib.pre_tool_use_fast import append_event_after_verified, format_utc, utc_now
@@ -56,6 +56,7 @@ PY
   run run_pre_tool_hook "$payload"
 
   [ "$status" -eq 2 ]
+  [[ "$output" == *"reused-grant"* ]]
   [ "$(jq -r '[.event.type] | @tsv' "$(history_file "$sid")" | grep -c override_consumed)" -eq 1 ]
   [ "$(jq -r '.consumed' "$(pending_file "$sid")")" = "false" ]
 }

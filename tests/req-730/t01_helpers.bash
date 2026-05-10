@@ -8,6 +8,54 @@ setup_req730_workspace() {
   export HOME="$HOME_DIR"
 }
 
+canonical_test_sid() {
+  python3 - "$1" <<'PY'
+import hashlib
+import sys
+
+raw = (sys.argv[1] or "").strip() or "missing"
+digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+print(f"MST-REQ-730-20260510T104009000Z-{digest}")
+PY
+}
+
+prepare_fast_path_cursor() {
+  local sid="$1"
+  local canonical_sid history_head verify_state mirror_head
+  canonical_sid="$(canonical_test_sid "$sid")"
+  history_head="$WORKSPACE/.gran-maestro/sessions/$canonical_sid/history.head"
+  verify_state="$WORKSPACE/.gran-maestro/sessions/$canonical_sid/history.verify"
+  mirror_head="$HOME_DIR/.claude/gran-maestro-policy/ledger-heads/$canonical_sid.head"
+
+  mkdir -p "$(dirname "$history_head")" "$(dirname "$mirror_head")"
+  [ -f "$history_head" ] || printf '%064d\n' 0 > "$history_head"
+  [ -f "$mirror_head" ] || printf '%064d\n' 0 > "$mirror_head"
+  [ -f "$verify_state" ] || printf '%064d\tmissing\t0\n' 0 > "$verify_state"
+}
+
+session_dir() {
+  printf '%s/.gran-maestro/sessions/%s\n' "$WORKSPACE" "$(canonical_test_sid "$1")"
+}
+
+raw_session_dir() {
+  printf '%s/.gran-maestro/sessions/%s\n' "$WORKSPACE" "$1"
+}
+
+prepare_pre_tool_payload() {
+  python3 - "$1" <<'PY'
+import hashlib
+import json
+import sys
+
+raw = sys.argv[1]
+payload = json.loads(raw)
+sid = str(payload.get("mst_session_id") or payload.get("session_id") or "").strip() or "missing"
+canonical = f"MST-REQ-730-20260510T104009000Z-{hashlib.sha256(sid.encode('utf-8')).hexdigest()[:12]}"
+payload["mst_session_id"] = canonical
+print(json.dumps(payload, ensure_ascii=False))
+PY
+}
+
 run_mst() {
   (cd "$WORKSPACE" && HOME="$HOME_DIR" python3 "$REPO_ROOT/scripts/mst.py" "$@")
 }
@@ -53,7 +101,26 @@ PY
 
 run_pre_tool_hook() {
   local payload="$1"
-  (cd "$WORKSPACE" && HOME="$HOME_DIR" bash "$REPO_ROOT/hooks/mst-pre-tool-use.sh" <<<"$payload")
+  local prepared_payload raw_sid canonical_sid
+  prepared_payload="$(prepare_pre_tool_payload "$payload")"
+  raw_sid="$(python3 - "$prepared_payload" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+print(str(payload.get("session_id") or payload.get("mst_session_id") or "").strip())
+PY
+)"
+  canonical_sid="$(python3 - "$prepared_payload" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+print(str(payload.get("mst_session_id") or "").strip())
+PY
+)"
+  prepare_fast_path_cursor "$raw_sid"
+  (cd "$WORKSPACE" && HOME="$HOME_DIR" MST_SESSION_ID="$canonical_sid" bash "$REPO_ROOT/hooks/mst-pre-tool-use.sh" <<<"$prepared_payload")
 }
 
 policy_project_dir() {
@@ -139,11 +206,11 @@ PY
 }
 
 history_file() {
-  printf '%s/.gran-maestro/sessions/%s/history.ndjson\n' "$WORKSPACE" "$1"
+  printf '%s/history.ndjson\n' "$(session_dir "$1")"
 }
 
 pending_file() {
-  printf '%s/.gran-maestro/sessions/%s/pending-confirm.json\n' "$WORKSPACE" "$1"
+  printf '%s/pending-confirm.json\n' "$(session_dir "$1")"
 }
 
 args_sha256_for_payload() {
@@ -165,7 +232,7 @@ PY
 append_history_event() {
   local sid="$1"
   local event_json="$2"
-  python3 - "$REPO_ROOT" "$WORKSPACE" "$HOME_DIR" "$sid" "$event_json" <<'PY'
+  python3 - "$REPO_ROOT" "$WORKSPACE" "$HOME_DIR" "$(canonical_test_sid "$sid")" "$event_json" <<'PY'
 import importlib.util
 import json
 import sys

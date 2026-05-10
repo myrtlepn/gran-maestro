@@ -88,6 +88,22 @@ PHASE_MUTATING_PYTHON_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+PHASE_MUTATING_RUBY_RE = re.compile(
+    r"("
+    r"\bFile\.(write|open|delete|unlink|rename)\s*\(|"
+    r"\bDir\.(mkdir|rmdir)\s*\(|"
+    r"\bFileUtils\.(rm|rm_rf|mv|cp|mkdir_p)\s*\("
+    r")",
+    re.IGNORECASE,
+)
+PHASE_MUTATING_NODE_RE = re.compile(
+    r"("
+    r"\bfs\.(writeFileSync|appendFileSync|rmSync|unlinkSync|renameSync|mkdirSync|rmdirSync|copyFileSync)\s*\(|"
+    r"\brequire\s*\(\s*['\"]fs['\"]\s*\)\s*\."
+    r"(writeFileSync|appendFileSync|rmSync|unlinkSync|renameSync|mkdirSync|rmdirSync|copyFileSync)\s*\("
+    r")",
+    re.IGNORECASE,
+)
 PHASE_SHELL_SEPARATORS = {";", "&&", "||", "|", "|&"}
 PHASE_SHELL_CONTROL_TOKENS = {"(", ")", "{", "}"}
 
@@ -147,6 +163,15 @@ def is_mst_script_token(token: str) -> bool:
 def is_python_token(token: str) -> bool:
     name = command_basename(token)
     return bool(re.match(r"^python[0-9.]*$", name))
+
+
+def is_ruby_token(token: str) -> bool:
+    name = command_basename(token)
+    return bool(re.match(r"^ruby[0-9.]*$", name))
+
+
+def is_node_token(token: str) -> bool:
+    return command_basename(token) in {"node", "nodejs"}
 
 
 def is_shell_wrapper_token(token: str) -> bool:
@@ -967,6 +992,19 @@ def is_phase_readonly_python(args: List[str]) -> bool:
     return False
 
 
+def is_phase_readonly_interpreter(args: List[str], mutating_re: re.Pattern) -> bool:
+    if not args:
+        return False
+    if args in (["-v"], ["--version"]):
+        return True
+    for index, arg in enumerate(args):
+        if arg == "-e":
+            if index + 1 >= len(args):
+                return False
+            return mutating_re.search(args[index + 1]) is None
+    return False
+
+
 def is_phase_readonly_shell_wrapper(args: List[str]) -> bool:
     for index, arg in enumerate(args):
         if arg == "-c" or (arg.startswith("-") and "c" in arg[1:]):
@@ -990,6 +1028,10 @@ def is_phase_readonly_segment(segment: List[str]) -> bool:
         return is_phase_readonly_git(args)
     if is_python_token(command):
         return is_phase_readonly_python(args)
+    if is_ruby_token(command):
+        return is_phase_readonly_interpreter(args, PHASE_MUTATING_RUBY_RE)
+    if is_node_token(command):
+        return is_phase_readonly_interpreter(args, PHASE_MUTATING_NODE_RE)
     if is_shell_wrapper_token(command):
         return is_phase_readonly_shell_wrapper(args)
     return False
@@ -1689,15 +1731,18 @@ def parse_utc(value: str) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def workflow_state_file(project_root: Path) -> Path:
-    # MST_STATE_PPID is a deprecated diagnostic alias only; it must not select
-    # workflow state or alter pre-tool-use block/allow return codes.
-    parent_pid = str(os.getppid())
-    return project_root / ".gran-maestro" / "tmp" / f"mst-state-{parent_pid}.json"
+def workflow_state_file(project_root: Path, payload: Optional[dict] = None) -> Optional[Path]:
+    session_id = canonical_mst_session_id_from_payload(payload or {})
+    clean_sid = sanitize_session_id(session_id) if session_id else None
+    if not clean_sid:
+        return None
+    return project_root / ".gran-maestro" / "tmp" / f"mst-state-{clean_sid}.json"
 
 
-def load_workflow_state(project_root: Path) -> Optional[dict]:
-    path = workflow_state_file(project_root)
+def load_workflow_state(project_root: Path, payload: Optional[dict] = None) -> Optional[dict]:
+    path = workflow_state_file(project_root, payload)
+    if path is None:
+        return None
     if not path.is_file():
         return None
     try:
@@ -1707,8 +1752,8 @@ def load_workflow_state(project_root: Path) -> Optional[dict]:
     return payload if isinstance(payload, dict) else None
 
 
-def schedule_wakeup_block_active(project_root: Path, now: Optional[datetime] = None) -> bool:
-    payload = load_workflow_state(project_root)
+def schedule_wakeup_block_active(project_root: Path, payload: Optional[dict] = None, now: Optional[datetime] = None) -> bool:
+    payload = load_workflow_state(project_root, payload)
     if not isinstance(payload, dict):
         return False
 
@@ -1854,13 +1899,18 @@ def consume_pending_override(
 ) -> Optional[int]:
     path = pending_confirm_path(project_root, session_id)
     pending = read_pending_confirm(path)
-    if not pending or pending.get("consumed") is not False:
+    if not pending:
         return None
 
     pending_id = str(pending.get("id") or "")
     pending_tool = str(pending.get("tool") or "")
     pending_args_sha = str(pending.get("args_sha256") or "")
     args_sha256 = sha256_text(canonical_json(tool_input if isinstance(tool_input, dict) else {}))
+    if pending_tool == tool_name and pending_args_sha == args_sha256 and pending.get("consumed") is True:
+        stderr("[policy-block] reused-grant pending override already consumed")
+        return None
+    if pending.get("consumed") is not False:
+        return None
     if pending_tool != tool_name:
         return None
 
@@ -2564,14 +2614,14 @@ def hardcoded_core_check(project_root: Path, home: Path, payload: dict) -> int:
             reason,
         )
 
-    if tool_name == "ScheduleWakeup" and schedule_wakeup_block_active(project_root):
+    if tool_name == "ScheduleWakeup" and schedule_wakeup_block_active(project_root, payload):
         if os.environ.get("MST_ALLOW_SCHEDULE_WAKEUP") == "1":
             stderr("[mst] ScheduleWakeup escape hatch used")
             return 0
         stderr(SCHEDULE_WAKEUP_RESUME_HINT)
         return core_block(SCHEDULE_WAKEUP_BLOCK_RULE_ID, SCHEDULE_WAKEUP_BLOCK_REASON)
 
-    if tool_name == "AskUserQuestion" and schedule_wakeup_block_active(project_root):
+    if tool_name == "AskUserQuestion" and schedule_wakeup_block_active(project_root, payload):
         return core_block(ASK_USER_QUESTION_BLOCK_RULE_ID, ASK_USER_QUESTION_BLOCK_REASON)
 
     if tool_name in {"Write", "Edit", "MultiEdit"} and file_path.startswith(policy_root + "/"):
@@ -2657,9 +2707,11 @@ def main() -> int:
     try:
         payload = json.loads(raw or "{}")
     except Exception:
-        payload = {}
+        stderr("[policy-block] payload_parse_failure invalid hook payload JSON")
+        return 2
     if not isinstance(payload, dict):
-        payload = {}
+        stderr("[policy-block] payload_parse_failure hook payload must be a JSON object")
+        return 2
 
     session_id = canonical_mst_session_id_from_payload(payload)
     clean_sid = ""

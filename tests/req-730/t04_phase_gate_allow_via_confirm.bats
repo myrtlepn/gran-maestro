@@ -11,7 +11,7 @@ setup() {
   sid="73000000-0000-4000-8000-000000000403"
   payload='{"session_id":"73000000-0000-4000-8000-000000000403","req_id":"REQ-730","task_id":"T04","tool_name":"MultiEdit","tool_input":{"file_path":"out.txt","edits":[{"old_string":"a","new_string":"b"}]}}'
   expected_sha="$(args_sha256_for_payload "$payload")"
-  session_dir="$WORKSPACE/.gran-maestro/sessions/$sid"
+  session_dir="$(session_dir "$sid")"
   mkdir -p "$session_dir"
   chmod 700 "$session_dir"
   python3 - "$(pending_file "$sid")" "$expected_sha" <<'PY'

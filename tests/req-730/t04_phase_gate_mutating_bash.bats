@@ -33,3 +33,21 @@ setup() {
   [ "$status" -eq 2 ]
   [ "$(jq -r 'select(.event.type=="policy_block") | .event.rule_id' "$(history_file "$sid")")" = "GM-PHASE-GATE" ]
 }
+
+@test "AC-004 Ruby one-liner filesystem mutation blocks without phase evidence" {
+  sid="73000000-0000-4000-8000-000000000407"
+
+  run run_pre_tool_hook '{"session_id":"73000000-0000-4000-8000-000000000407","req_id":"REQ-730","task_id":"T04","tool_name":"Bash","tool_input":{"command":"ruby -e \"File.write(''out.txt'', ''x'')\""}}'
+
+  [ "$status" -eq 2 ]
+  [ "$(jq -r 'select(.event.type=="policy_block") | .event.rule_id' "$(history_file "$sid")")" = "GM-PHASE-GATE" ]
+}
+
+@test "AC-004 Node one-liner filesystem mutation blocks without phase evidence" {
+  sid="73000000-0000-4000-8000-000000000408"
+
+  run run_pre_tool_hook '{"session_id":"73000000-0000-4000-8000-000000000408","req_id":"REQ-730","task_id":"T04","tool_name":"Bash","tool_input":{"command":"node -e \"const fs=require(''fs''); fs.writeFileSync(''out.txt'', ''x'')\""}}'
+
+  [ "$status" -eq 2 ]
+  [ "$(jq -r 'select(.event.type=="policy_block") | .event.rule_id' "$(history_file "$sid")")" = "GM-PHASE-GATE" ]
+}
