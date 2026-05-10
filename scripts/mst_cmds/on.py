@@ -8,14 +8,17 @@ hook은 100% 보존, 변경은 단일 트랜잭션, lock 파일로 동시 실행
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -73,12 +76,14 @@ USER_GLOBAL_HOOK_NAMES = {
 }
 
 LOCK_STALE_SECONDS = 60
+CLEANUP_SCHEMA_VERSION = "mst.on.cleanup.v1"
+CLEANUP_DRY_RUN_ARTIFACT = "mst-on-cleanup-dry-run.json"
 
 
 def _project_root() -> Path:
     env_root = os.environ.get("MST_PROJECT_ROOT", "").strip()
     if env_root:
-        return Path(env_root).resolve()
+        return Path(env_root).expanduser().absolute()
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -90,7 +95,7 @@ def _project_root() -> Path:
             return Path(out)
     except Exception:
         pass
-    return Path.cwd()
+    return Path.cwd().absolute()
 
 
 def _diagnostic(code: str, message: str, path: Optional[Path] = None) -> dict:
@@ -164,6 +169,27 @@ def _command_hook_name(command: str) -> str:
     return Path(command.strip().split()[0]).name if command.strip() else ""
 
 
+def _shell_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command, posix=True)
+    except ValueError:
+        return [command]
+
+
+def _is_project_legacy_mst_hook_command(command: str, project_root: Path) -> bool:
+    if MST_HOOK_COMMAND_RE.search(command):
+        return True
+
+    legacy_paths = {
+        str((project_root / ".claude" / "hooks" / name).resolve(strict=False))
+        for name in MST_HOOK_FILE_EVENTS
+    }
+    for token in _shell_tokens(command):
+        if token.strip("\"'") in legacy_paths:
+            return True
+    return False
+
+
 def _acquire_lock(lock_path: Path) -> bool:
     """Lock 획득. stale lock(>60s)는 자동 무효화."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,12 +218,14 @@ def _release_lock(lock_path: Path) -> None:
         pass
 
 
-def _filter_hooks_block(hooks: dict) -> Tuple[dict, List[str]]:
+def _filter_hooks_block(hooks: dict, project_root: Optional[Path] = None) -> Tuple[dict, List[str]]:
     """settings.local.json hooks 블록에서 mst 4종 항목만 정규식 매칭으로 제거.
 
     Returns:
         (filtered_hooks, removed_commands_list)
     """
+    if project_root is None:
+        project_root = _project_root()
     removed: List[str] = []
     if not isinstance(hooks, dict):
         return {}, removed
@@ -218,7 +246,7 @@ def _filter_hooks_block(hooks: dict) -> Tuple[dict, List[str]]:
             kept_inner: list = []
             for h in inner:
                 cmd = h.get("command", "") if isinstance(h, dict) else ""
-                if isinstance(cmd, str) and MST_HOOK_COMMAND_RE.search(cmd):
+                if isinstance(cmd, str) and _is_project_legacy_mst_hook_command(cmd, project_root):
                     removed.append(cmd)
                     continue
                 kept_inner.append(h)
@@ -243,7 +271,7 @@ def _plan_settings_changes(project_root: Path) -> dict:
     if not isinstance(original, dict):
         return {"path": str(settings_path), "exists": True, "removed": []}
     hooks = original.get("hooks", {})
-    _, removed = _filter_hooks_block(hooks)
+    _, removed = _filter_hooks_block(hooks, project_root)
     return {"path": str(settings_path), "exists": True, "removed": removed}
 
 
@@ -259,17 +287,70 @@ def _plan_file_deletions(project_root: Path) -> List[str]:
     return targets
 
 
+def _has_user_global_settings() -> bool:
+    return (Path.home() / ".claude" / "settings.json").exists()
+
+
+def _source_repo_unknown_reasons(project_root: Path) -> List[str]:
+    reasons: List[str] = []
+    plugin_dir = project_root / ".claude-plugin"
+    hooks_dir = project_root / "hooks"
+    plugin_json = plugin_dir / "plugin.json"
+    hooks_json = hooks_dir / "hooks.json"
+
+    if plugin_dir.exists() and not plugin_json.exists():
+        reasons.append("partial_checkout")
+    if plugin_json.exists() and not hooks_json.exists():
+        reasons.append(DIAGNOSTIC_MISSING_HOOKS_REGISTRY)
+    if hooks_dir.exists() and plugin_dir.exists() and not hooks_json.exists():
+        reasons.append("missing_plugin_files")
+    return sorted(set(reasons))
+
+
 def _classify_environment(project_root: Path, diagnostics: List[dict], *, source_repo_opt_in: bool = False) -> dict:
     is_source = _is_plugin_source_repo(project_root)
-    parts = project_root.resolve().parts
+    resolved_root = project_root.resolve()
+    parts = set(project_root.parts) | set(resolved_root.parts)
     is_worktree = ".gran-maestro" in parts and "worktrees" in parts
     has_base = (project_root / ".gran-maestro").is_dir()
     has_project_surface = any(
         (project_root / rel).exists()
         for rel in (".claude", ".claude-plugin", "hooks")
     )
+    unknown_reasons: List[str] = []
 
-    if is_source:
+    try:
+        if project_root.is_symlink():
+            unknown_reasons.append("symlink_project_root")
+    except OSError as exc:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), project_root))
+        unknown_reasons.append("project_root_unreadable")
+
+    claude_project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if claude_project_dir:
+        try:
+            if Path(claude_project_dir).expanduser().resolve() != resolved_root:
+                unknown_reasons.append("claude_project_dir_mismatch")
+        except OSError:
+            unknown_reasons.append("claude_project_dir_mismatch")
+
+    unknown_reasons.extend(_source_repo_unknown_reasons(project_root))
+    unknown_reasons = sorted(set(unknown_reasons))
+
+    if unknown_reasons:
+        project_kind = "unknown"
+        kind = "unknown"
+        status = "diagnostic"
+        reason = DIAGNOSTIC_UNKNOWN_ENVIRONMENT
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_UNKNOWN_ENVIRONMENT,
+                "cleanup environment is ambiguous: " + ", ".join(unknown_reasons),
+                project_root,
+            )
+        )
+    elif is_source:
+        project_kind = "source_repo"
         kind = "source-dev"
         if source_repo_opt_in:
             status = "ok"
@@ -278,27 +359,45 @@ def _classify_environment(project_root: Path, diagnostics: List[dict], *, source
             status = "skipped"
             reason = "plugin source repo (out of cleanup scope)"
     elif is_worktree:
+        project_kind = "worktree"
         kind = "worktree"
         status = "diagnostic"
         reason = "worktree-like environment"
-    elif has_base or has_project_surface:
+    elif has_base:
+        project_kind = "normal_project"
         kind = "project"
         status = "ok"
         reason = "project cleanup inventory"
+    elif has_project_surface:
+        project_kind = "non_mst"
+        kind = "non_mst"
+        status = "skipped"
+        reason = "non-MST project fail-open"
     else:
-        kind = "unknown"
-        status = "diagnostic"
-        reason = DIAGNOSTIC_UNKNOWN_ENVIRONMENT
-        diagnostics.append(
-            _diagnostic(
-                DIAGNOSTIC_UNKNOWN_ENVIRONMENT,
-                "no .gran-maestro, .claude, or plugin metadata found",
-                project_root,
-            )
-        )
+        project_kind = "non_mst"
+        kind = "non_mst"
+        status = "skipped"
+        reason = "non-MST project fail-open"
+
+    if project_kind == "unknown":
+        mst_mode = "unknown"
+    elif project_kind == "source_repo":
+        mst_mode = "source_repo"
+    elif project_kind == "worktree":
+        mst_mode = "worktree"
+    elif project_kind == "normal_project":
+        mst_mode = "active"
+    else:
+        mst_mode = "inactive"
 
     return {
         "project_root": str(project_root),
+        "project_kind": project_kind,
+        "is_source_repo": is_source,
+        "is_worktree": is_worktree,
+        "mst_mode": mst_mode,
+        "user_global_present": _has_user_global_settings(),
+        "unknown_environment_reasons": unknown_reasons,
         "kind": kind,
         "status": status,
         "reason": reason,
@@ -417,7 +516,7 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
         else:
             for item in _iter_settings_hook_commands(settings) or []:
                 command = item["command"]
-                if MST_HOOK_COMMAND_RE.search(command):
+                if _is_project_legacy_mst_hook_command(command, project_root):
                     project_legacy["settings"]["candidates"].append(
                         {
                             "classification": CLASS_PROJECT_LEGACY,
@@ -527,25 +626,31 @@ def _duplicate_risks(plugin_core: dict, project_legacy: dict) -> List[dict]:
     return risks
 
 
-def _mark_source_dev_project_legacy(project_legacy: dict, *, opt_in: bool = False) -> None:
+def _mark_source_dev_project_legacy(project_legacy: dict) -> None:
     for group in (
         project_legacy.get("settings", {}).get("candidates", []),
         project_legacy.get("files", {}).get("candidates", []),
     ):
         for item in group:
-            if isinstance(item, dict) and not opt_in:
+            if isinstance(item, dict):
                 item["status"] = "skipped"
                 item["reason"] = "source_dev_diagnostic_only"
 
 
-def _build_cleanup_inventory(project_root: Path, *, dry_run: bool, mutated: bool, source_repo_opt_in: bool = False) -> dict:
+def _build_cleanup_inventory(
+    project_root: Path,
+    *,
+    dry_run: bool,
+    mutated: bool,
+    source_repo_opt_in: bool = False,
+) -> dict:
     diagnostics: List[dict] = []
     environment = _classify_environment(project_root, diagnostics, source_repo_opt_in=source_repo_opt_in)
     plugin_core = _plugin_core_inventory(project_root, diagnostics)
     project_legacy, user_custom = _project_legacy_and_custom_inventory(project_root, diagnostics)
     user_global = _user_global_inventory(diagnostics)
-    if environment.get("source_repo"):
-        _mark_source_dev_project_legacy(project_legacy, opt_in=source_repo_opt_in)
+    if environment.get("source_repo") and not source_repo_opt_in:
+        _mark_source_dev_project_legacy(project_legacy)
 
     return {
         "mutation": {"dry_run": dry_run, "mutated": mutated},
@@ -574,6 +679,327 @@ def _settings_diagnostics_block_mutation(project_root: Path, diagnostics: List[d
     return False
 
 
+def _diagnostics_block_mutation(project_root: Path, inventory: dict) -> bool:
+    environment = inventory.get("environment", {})
+    if environment.get("project_kind") == "unknown" or environment.get("unknown_environment_reasons"):
+        return True
+    return _settings_diagnostics_block_mutation(project_root, inventory.get("diagnostics", []))
+
+
+def _candidate_set(settings_removed: List[str], file_targets: List[str], project_root: Path) -> List[dict]:
+    settings_path = project_root / ".claude" / "settings.local.json"
+    candidates: List[dict] = []
+    for command in sorted(settings_removed):
+        candidates.append(
+            {
+                "type": "settings_hook",
+                "path": str(settings_path),
+                "command": command,
+            }
+        )
+    for target in sorted(file_targets):
+        target_path = Path(target)
+        candidates.append(
+            {
+                "type": "hook_file",
+                "path": str(target_path),
+                "name": target_path.name,
+            }
+        )
+    return candidates
+
+
+def _candidate_hash(candidate_set: List[dict]) -> str:
+    encoded = json.dumps(candidate_set, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _created_at() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _cleanup_artifact_path(project_root: Path) -> Optional[Path]:
+    base_dir = project_root / ".gran-maestro"
+    if not base_dir.exists():
+        return None
+    return _common.tmp_dir(project_root) / CLEANUP_DRY_RUN_ARTIFACT
+
+
+def _rollback_plan(project_root: Path, candidate_set: List[dict]) -> dict:
+    backup_path = _common.tmp_dir(project_root) / "mst-on-cleanup-rollback.json"
+    inverse_operations: List[dict] = []
+    restore_targets: List[str] = []
+    for candidate in candidate_set:
+        candidate_path = candidate.get("path")
+        if isinstance(candidate_path, str) and candidate_path not in restore_targets:
+            restore_targets.append(candidate_path)
+        if candidate.get("type") == "settings_hook":
+            inverse_operations.append(
+                {
+                    "type": "restore_settings_hook",
+                    "path": candidate_path,
+                    "command": candidate.get("command"),
+                }
+            )
+        elif candidate.get("type") == "hook_file":
+            inverse_operations.append(
+                {
+                    "type": "restore_hook_file",
+                    "path": candidate_path,
+                }
+            )
+    return {
+        "available": bool(candidate_set),
+        "backup_path": str(backup_path),
+        "restore_targets": restore_targets,
+        "inverse_operations": inverse_operations,
+    }
+
+
+def _post_check_required(environment: dict) -> List[str]:
+    checks = [
+        "stale_cleanup_candidates_absent",
+        "plugin_core_canonical_command",
+        "user_custom_preserved",
+    ]
+    project_kind = environment.get("project_kind")
+    if project_kind == "source_repo":
+        checks.append("source_repo_default_skip_or_opt_in")
+    if project_kind == "worktree":
+        checks.append("worktree_no_legacy_propagation")
+    if project_kind == "non_mst" or environment.get("user_global_present"):
+        checks.append("non_mst_user_global_fail_open")
+    return checks
+
+
+def _preserved_user_hooks(user_custom: dict) -> List[dict]:
+    preserved: List[dict] = []
+    for item in user_custom.get("settings", []):
+        if isinstance(item, dict):
+            preserved.append(
+                {
+                    "type": "settings_hook",
+                    "event": item.get("event"),
+                    "matcher": item.get("matcher", ""),
+                    "command": item.get("command"),
+                    "reason": item.get("reason", "user_custom_settings_hook"),
+                }
+            )
+    for item in user_custom.get("files", []):
+        if isinstance(item, dict):
+            preserved.append(
+                {
+                    "type": "hook_file",
+                    "path": item.get("path"),
+                    "name": item.get("name"),
+                    "reason": item.get("reason", "user_custom_hook_file"),
+                }
+            )
+    return preserved
+
+
+def _status_items(diagnostics: List[dict], status: str) -> List[dict]:
+    return [
+        {
+            "status": status,
+            "reason": item.get("reason") or item.get("reason_code") or item.get("code"),
+            "reason_code": item.get("reason_code") or item.get("code"),
+            "message": item.get("message", ""),
+            "path": item.get("path"),
+        }
+        for item in diagnostics
+    ]
+
+
+def _enrich_cleanup_payload(
+    payload: dict,
+    *,
+    project_root: Path,
+    inventory: dict,
+    settings_removed: List[str],
+    file_targets: List[str],
+    dry_run: bool,
+) -> None:
+    candidates = _candidate_set(settings_removed, file_targets, project_root)
+    candidate_hash = _candidate_hash(candidates)
+    created_at = _created_at()
+    dry_run_id = hashlib.sha256(
+        json.dumps(
+            {
+                "schema_version": CLEANUP_SCHEMA_VERSION,
+                "project_root": str(project_root),
+                "created_at": created_at,
+                "candidate_hash": candidate_hash,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    environment = inventory.get("environment", {})
+    rollback = _rollback_plan(project_root, candidates)
+    diagnostics = inventory.get("diagnostics", [])
+    blocked = _status_items(diagnostics, "blocked") if diagnostics else []
+    skipped = []
+    if environment.get("project_kind") in {"source_repo", "non_mst", "worktree"} and not candidates:
+        skipped.append(
+            {
+                "status": "skipped",
+                "reason": environment.get("reason"),
+                "reason_code": environment.get("project_kind"),
+            }
+        )
+
+    payload.update(
+        {
+            "schema_version": CLEANUP_SCHEMA_VERSION,
+            "dry_run_id": dry_run_id,
+            "dry_run": dry_run,
+            "created_at": created_at,
+            "candidate_set": candidates,
+            "candidate_hash": candidate_hash,
+            "preserved_user_hooks": _preserved_user_hooks(inventory.get("user_custom", {})),
+            "skipped": skipped,
+            "blocked": blocked,
+            "rollback": rollback,
+            "rollback_available": rollback["available"],
+            "post_check_required": _post_check_required(environment),
+        }
+    )
+
+
+def _write_dry_run_artifact(project_root: Path, payload: dict) -> None:
+    artifact_path = _cleanup_artifact_path(project_root)
+    if artifact_path is None:
+        return
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_dry_run_artifact(project_root: Path, args: argparse.Namespace, diagnostics: List[dict]) -> Optional[dict]:
+    explicit_path = getattr(args, "dry_run_artifact", None)
+    artifact_path = Path(explicit_path).expanduser() if explicit_path else _cleanup_artifact_path(project_root)
+    if artifact_path is None or not artifact_path.exists():
+        if explicit_path or getattr(args, "dry_run_id", None):
+            diagnostics.append(_diagnostic("dry_run_artifact_missing", "dry-run artifact not found", artifact_path))
+        return None
+    artifact = _read_json_diagnostic(artifact_path, diagnostics)
+    return artifact if isinstance(artifact, dict) else None
+
+
+def _validate_dry_run_artifact(
+    project_root: Path,
+    args: argparse.Namespace,
+    artifact: Optional[dict],
+    current_candidate_set: List[dict],
+    current_candidate_hash: str,
+) -> List[str]:
+    if artifact is None:
+        return []
+
+    mismatches: List[str] = []
+    if artifact.get("schema_version") != CLEANUP_SCHEMA_VERSION:
+        mismatches.append("schema_version_mismatch")
+    if artifact.get("project_root") != str(project_root):
+        mismatches.append("project_root_mismatch")
+    expected_dry_run_id = getattr(args, "dry_run_id", None)
+    if expected_dry_run_id and artifact.get("dry_run_id") != expected_dry_run_id:
+        mismatches.append("dry_run_id_mismatch")
+    if artifact.get("candidate_set") != current_candidate_set:
+        mismatches.append("candidate_set_mismatch")
+    if artifact.get("candidate_hash") != current_candidate_hash:
+        mismatches.append("candidate_hash_mismatch")
+    for required in ("dry_run_id", "candidate_set", "candidate_hash"):
+        if required not in artifact:
+            mismatches.append(f"{required}_missing")
+    return sorted(set(mismatches))
+
+
+def _post_check(project_root: Path, environment: dict) -> dict:
+    return _post_check_with_context(
+        project_root,
+        environment=environment,
+        expected_preserved_user_hooks=None,
+        expected_candidate_set=None,
+    )
+
+
+def _post_check_with_context(
+    project_root: Path,
+    *,
+    environment: dict,
+    expected_preserved_user_hooks: Optional[List[dict]],
+    expected_candidate_set: Optional[List[dict]],
+    allow_expected_candidates: bool = False,
+) -> dict:
+    inventory = _build_cleanup_inventory(project_root, dry_run=False, mutated=False)
+    settings_removed = _plan_settings_changes(project_root).get("removed", [])
+    file_targets = _plan_file_deletions(project_root)
+    current_candidate_set = _candidate_set(settings_removed, file_targets, project_root)
+    current_preserved = _preserved_user_hooks(inventory.get("user_custom", {}))
+    plugin_core = inventory.get("plugin_core", {})
+    plugin_core_commands = [
+        item.get("command")
+        for item in plugin_core.get("hooks", [])
+        if isinstance(item, dict) and isinstance(item.get("command"), str)
+    ]
+    plugin_core_canonical = all(
+        command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+        for command in plugin_core_commands
+    )
+    user_custom_preserved = (
+        current_preserved == expected_preserved_user_hooks
+        if expected_preserved_user_hooks is not None
+        else True
+    )
+
+    if not current_candidate_set:
+        candidate_state = "absent"
+    elif expected_candidate_set is not None and current_candidate_set == expected_candidate_set:
+        candidate_state = "restored"
+    else:
+        candidate_state = "present"
+
+    expected_candidates_restored = allow_expected_candidates and candidate_state == "restored"
+    checks = {
+        "stale_cleanup_candidates_absent": not current_candidate_set,
+        "unexpected_cleanup_candidates_absent": not current_candidate_set or expected_candidates_restored,
+        "plugin_core_canonical_command": plugin_core_canonical,
+        "user_custom_preserved": user_custom_preserved,
+    }
+    if allow_expected_candidates:
+        checks["rollback_restored_pre_mutation_state"] = expected_candidates_restored
+        checks["stale_cleanup_reinjection_absent"] = expected_candidates_restored
+
+    project_kind = environment.get("project_kind")
+    if project_kind == "source_repo":
+        checks["source_repo_default_skip_or_opt_in"] = all(
+            not str(item.get("path", "")).startswith(str(project_root / "hooks"))
+            and "hooks/hooks.json" not in str(item.get("path", ""))
+            for item in current_candidate_set
+        )
+    if project_kind == "worktree":
+        checks["worktree_no_legacy_propagation"] = not current_candidate_set
+    if project_kind == "non_mst" or environment.get("user_global_present"):
+        checks["non_mst_user_global_fail_open"] = True
+
+    required_checks = dict(checks)
+    if expected_candidates_restored:
+        required_checks["stale_cleanup_candidates_absent"] = True
+
+    return {
+        "passed": all(required_checks.values()),
+        "checks": checks,
+        "candidate_state": candidate_state,
+        "evidence": {
+            "remaining_settings_removed": settings_removed,
+            "remaining_file_targets": file_targets,
+            "current_candidate_set": current_candidate_set,
+            "plugin_core_commands": plugin_core_commands,
+            "preserved_user_hooks": current_preserved,
+        },
+    }
+
+
 def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[bool, List[str]]:
     """settings.local.json hooks 정리 적용. atomic via tempfile + os.replace."""
     if original_text is None:
@@ -585,7 +1011,8 @@ def _apply_settings(settings_path: Path, original_text: Optional[str]) -> Tuple[
     if not isinstance(original, dict):
         return True, []
     hooks = original.get("hooks", {})
-    new_hooks, removed = _filter_hooks_block(hooks)
+    project_root = settings_path.parent.parent
+    new_hooks, removed = _filter_hooks_block(hooks, project_root)
     if not removed:
         return True, []
     new_settings = dict(original)
@@ -707,6 +1134,24 @@ def _emit(args: argparse.Namespace, payload: dict) -> None:
             print(f"  remove settings hook: {cmd}")
         for f in payload.get("files", {}).get("targets", []):
             print(f"  remove file: {f}")
+        for item in payload.get("preserved_user_hooks", []):
+            value = item.get("command") or item.get("path")
+            if value:
+                print(f"  preserve user hook: {value}")
+        for item in payload.get("skipped", []):
+            print(f"  skipped: {item.get('reason', '')}")
+        for item in payload.get("blocked", []):
+            print(f"  blocked: {item.get('reason_code') or item.get('reason', '')}")
+        rollback = payload.get("rollback", {})
+        if rollback:
+            print(f"  rollback available: {str(rollback.get('available')).lower()}")
+            if rollback.get("backup_path"):
+                print(f"  rollback backup: {rollback.get('backup_path')}")
+        for check in payload.get("post_check_required", []):
+            print(f"  post-check required: {check}")
+        return
+    if payload.get("status") in {"blocked", "diagnostic"}:
+        print(f"[mst:on cleanup] {payload.get('status')}: {payload.get('reason', '')}")
         return
     if payload.get("status") == "ok":
         print(
@@ -744,9 +1189,28 @@ def cmd_on_cleanup(args) -> int:
             mutated=False,
             source_repo_opt_in=source_repo_opt_in,
         )
-        if inventory.get("environment", {}).get("source_repo") and not source_repo_opt_in:
+        environment = inventory.get("environment", {})
+        if environment.get("source_repo") and not source_repo_opt_in:
             payload["status"] = "skipped"
             payload["reason"] = "plugin source repo (out of cleanup scope)"
+            payload["settings"] = {
+                "path": str(project_root / ".claude" / "settings.local.json"),
+                "exists": (project_root / ".claude" / "settings.local.json").exists(),
+                "removed": [],
+            }
+            payload["files"] = {"targets": []}
+        elif _diagnostics_block_mutation(project_root, inventory):
+            payload["status"] = "diagnostic"
+            payload["reason"] = "cleanup environment cannot be safely mutated"
+            payload["settings"] = {
+                "path": str(project_root / ".claude" / "settings.local.json"),
+                "exists": (project_root / ".claude" / "settings.local.json").exists(),
+                "removed": [],
+            }
+            payload["files"] = {"targets": []}
+        elif environment.get("project_kind") == "non_mst":
+            payload["status"] = "skipped"
+            payload["reason"] = "non-MST project fail-open"
             payload["settings"] = {
                 "path": str(project_root / ".claude" / "settings.local.json"),
                 "exists": (project_root / ".claude" / "settings.local.json").exists(),
@@ -758,6 +1222,28 @@ def cmd_on_cleanup(args) -> int:
             payload["settings"] = _plan_settings_changes(project_root)
             payload["files"] = {"targets": _plan_file_deletions(project_root)}
         payload.update(inventory)
+        payload["status"] = payload.get("status")
+        _enrich_cleanup_payload(
+            payload,
+            project_root=project_root,
+            inventory=inventory,
+            settings_removed=payload.get("settings", {}).get("removed", []),
+            file_targets=payload.get("files", {}).get("targets", []),
+            dry_run=True,
+        )
+        if payload.get("status") == "dry_run":
+            try:
+                _write_dry_run_artifact(project_root, payload)
+            except OSError as exc:
+                payload.setdefault("diagnostics", []).append(
+                    _diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), _cleanup_artifact_path(project_root))
+                )
+        payload["post_check"] = _post_check_with_context(
+            project_root,
+            environment=inventory.get("environment", {}),
+            expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+            expected_candidate_set=payload.get("candidate_set"),
+        )
         _emit(args, payload)
         return 0
 
@@ -770,10 +1256,24 @@ def cmd_on_cleanup(args) -> int:
             "exists": (project_root / ".claude" / "settings.local.json").exists(),
             "removed": [],
         }
-        payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+        payload["files"] = {"targets": [], "deleted": []}
         payload.update(inventory)
         payload["status"] = "skipped"
         payload["reason"] = "plugin source repo (out of cleanup scope)"
+        _enrich_cleanup_payload(
+            payload,
+            project_root=project_root,
+            inventory=inventory,
+            settings_removed=[],
+            file_targets=[],
+            dry_run=False,
+        )
+        payload["post_check"] = _post_check_with_context(
+            project_root,
+            environment=inventory.get("environment", {}),
+            expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+            expected_candidate_set=payload.get("candidate_set"),
+        )
         _emit(args, payload)
         return 0
 
@@ -791,6 +1291,20 @@ def cmd_on_cleanup(args) -> int:
         payload.update(inventory)
         payload["status"] = "skipped"
         payload["reason"] = "another cleanup in progress (lock held)"
+        _enrich_cleanup_payload(
+            payload,
+            project_root=project_root,
+            inventory=inventory,
+            settings_removed=[],
+            file_targets=[],
+            dry_run=False,
+        )
+        payload["post_check"] = _post_check_with_context(
+            project_root,
+            environment=inventory.get("environment", {}),
+            expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+            expected_candidate_set=payload.get("candidate_set"),
+        )
         _emit(args, payload)
         return 0
 
@@ -801,12 +1315,71 @@ def cmd_on_cleanup(args) -> int:
             mutated=False,
             source_repo_opt_in=source_repo_opt_in,
         )
-        if _settings_diagnostics_block_mutation(project_root, inventory.get("diagnostics", [])):
+        if _diagnostics_block_mutation(project_root, inventory):
             payload.update(inventory)
             payload["status"] = "diagnostic"
-            payload["reason"] = "settings.local.json cannot be safely mutated"
+            payload["reason"] = "cleanup environment cannot be safely mutated"
             payload["settings"] = {"removed": []}
-            payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+            payload["files"] = {"targets": [], "deleted": []}
+            _enrich_cleanup_payload(
+                payload,
+                project_root=project_root,
+                inventory=inventory,
+                settings_removed=[],
+                file_targets=[],
+                dry_run=False,
+            )
+            payload["post_check"] = _post_check_with_context(
+                project_root,
+                environment=inventory.get("environment", {}),
+                expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+                expected_candidate_set=payload.get("candidate_set"),
+            )
+            _emit(args, payload)
+            return 0
+
+        planned_settings = _plan_settings_changes(project_root).get("removed", [])
+        planned_files = _plan_file_deletions(project_root)
+        current_candidates = _candidate_set(planned_settings, planned_files, project_root)
+        current_candidate_hash = _candidate_hash(current_candidates)
+        artifact_diagnostics: List[dict] = []
+        artifact = _read_dry_run_artifact(project_root, args, artifact_diagnostics)
+        if artifact is None and current_candidates:
+            artifact_diagnostics.append(
+                _diagnostic("dry_run_artifact_missing", "dry-run artifact not found", project_root)
+            )
+        mismatches = _validate_dry_run_artifact(
+            project_root,
+            args,
+            artifact,
+            current_candidates,
+            current_candidate_hash,
+        )
+        if artifact_diagnostics or mismatches:
+            for mismatch in mismatches:
+                artifact_diagnostics.append(
+                    _diagnostic(mismatch, f"dry-run artifact validation failed: {mismatch}", project_root)
+                )
+            inventory["diagnostics"].extend(artifact_diagnostics)
+            payload.update(inventory)
+            payload["status"] = "blocked"
+            payload["reason"] = "dry_run_candidate_mismatch" if mismatches else "dry_run_artifact_unavailable"
+            payload["settings"] = {"removed": []}
+            payload["files"] = {"targets": planned_files, "deleted": []}
+            _enrich_cleanup_payload(
+                payload,
+                project_root=project_root,
+                inventory=inventory,
+                settings_removed=planned_settings,
+                file_targets=planned_files,
+                dry_run=False,
+            )
+            payload["post_check"] = _post_check_with_context(
+                project_root,
+                environment=inventory.get("environment", {}),
+                expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+                expected_candidate_set=payload.get("candidate_set"),
+            )
             _emit(args, payload)
             return 0
 
@@ -820,7 +1393,21 @@ def cmd_on_cleanup(args) -> int:
                 payload["status"] = "diagnostic"
                 payload["reason"] = "settings.local.json cannot be read"
                 payload["settings"] = {"removed": []}
-                payload["files"] = {"targets": _plan_file_deletions(project_root), "deleted": []}
+                payload["files"] = {"targets": planned_files, "deleted": []}
+                _enrich_cleanup_payload(
+                    payload,
+                    project_root=project_root,
+                    inventory=inventory,
+                    settings_removed=[],
+                    file_targets=[],
+                    dry_run=False,
+                )
+                payload["post_check"] = _post_check_with_context(
+                    project_root,
+                    environment=inventory.get("environment", {}),
+                    expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+                    expected_candidate_set=payload.get("candidate_set"),
+                )
                 _emit(args, payload)
                 return 0
 
@@ -831,10 +1418,24 @@ def cmd_on_cleanup(args) -> int:
             payload["reason"] = "settings.local.json write failed"
             payload["settings"] = {"removed": [], "failed": removed}
             payload["files"] = {"deleted": []}
+            _enrich_cleanup_payload(
+                payload,
+                project_root=project_root,
+                inventory=inventory,
+                settings_removed=[],
+                file_targets=[],
+                dry_run=False,
+            )
+            payload["post_check"] = _post_check_with_context(
+                project_root,
+                environment=inventory.get("environment", {}),
+                expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+                expected_candidate_set=payload.get("candidate_set"),
+            )
             _emit(args, payload)
             return 1
 
-        targets = _plan_file_deletions(project_root)
+        targets = planned_files
         deleted, failed = _apply_file_deletions(targets)
 
         if failed:
@@ -867,6 +1468,29 @@ def cmd_on_cleanup(args) -> int:
             if settings_rollback_error is not None:
                 payload["settings"]["rollback_error"] = settings_rollback_error
             payload["files"] = {"deleted": deleted, "failed": failed}
+            _enrich_cleanup_payload(
+                payload,
+                project_root=project_root,
+                inventory=inventory,
+                settings_removed=removed,
+                file_targets=targets,
+                dry_run=False,
+            )
+            rollback = payload.get("rollback")
+            if isinstance(rollback, dict):
+                failed_path, failed_reason = failed[0]
+                rollback["failed_operation"] = {
+                    "type": "file_delete",
+                    "path": failed_path,
+                    "reason": failed_reason,
+                }
+            payload["post_check"] = _post_check_with_context(
+                project_root,
+                environment=inventory.get("environment", {}),
+                expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+                expected_candidate_set=payload.get("candidate_set"),
+                allow_expected_candidates=True,
+            )
             _emit(args, payload)
             return 1
 
@@ -884,6 +1508,20 @@ def cmd_on_cleanup(args) -> int:
         payload["status"] = "ok"
         payload["settings"] = {"removed": removed}
         payload["files"] = {"deleted": deleted}
+        _enrich_cleanup_payload(
+            payload,
+            project_root=project_root,
+            inventory=inventory,
+            settings_removed=removed,
+            file_targets=targets,
+            dry_run=False,
+        )
+        payload["post_check"] = _post_check_with_context(
+            project_root,
+            environment=inventory.get("environment", {}),
+            expected_preserved_user_hooks=payload.get("preserved_user_hooks"),
+            expected_candidate_set=payload.get("candidate_set"),
+        )
         _emit(args, payload)
         return 0
     finally:
@@ -896,6 +1534,8 @@ def register(subparsers) -> None:
 
     cleanup = on_sub.add_parser("cleanup", help="기존 mst hook 사본·settings 항목 정리")
     cleanup.add_argument("--dry-run", action="store_true")
+    cleanup.add_argument("--source-repo", action="store_true", help="플러그인 소스 저장소 legacy hook cleanup을 명시적으로 허용")
+    cleanup.add_argument("--dry-run-id", help="직전 dry-run artifact id와 일치할 때만 apply 허용")
+    cleanup.add_argument("--dry-run-artifact", help="검증할 cleanup dry-run JSON artifact 경로")
     cleanup.add_argument("--silent", action="store_true")
     cleanup.add_argument("--json", action="store_true")
-    cleanup.add_argument("--source-repo", action="store_true", help="plugin source repo legacy project cleanup opt-in")

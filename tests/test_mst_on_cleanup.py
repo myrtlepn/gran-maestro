@@ -44,6 +44,12 @@ DOD002_DIAGNOSTIC_CODES = {
     "permission_denied",
     "unknown_environment",
 }
+DOD010_SCHEMA_VERSION = "mst.on.cleanup.v1"
+DOD010_POST_CHECK_BASE_CHECKS = {
+    "stale_cleanup_candidates_absent",
+    "plugin_core_canonical_command",
+    "user_custom_preserved",
+}
 
 
 def _run_cleanup(cwd: Path, *extra_args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -62,16 +68,42 @@ def _run_cleanup(cwd: Path, *extra_args: str, env: Optional[dict] = None) -> sub
     )
 
 
-def _run_cleanup_dry_run_json(cwd: Path, env: Optional[dict] = None) -> dict:
-    proc = _run_cleanup(cwd, "--dry-run", env=env)
+def _run_cleanup_dry_run_json(cwd: Path, env: Optional[dict] = None, source_repo: bool = False) -> dict:
+    extra_args = ["--dry-run"]
+    if source_repo:
+        extra_args.append("--source-repo")
+    proc = _run_cleanup(cwd, *extra_args, env=env)
     assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
     return json.loads(proc.stdout)
 
 
-def _run_cleanup_apply_json(cwd: Path, env: Optional[dict] = None) -> dict:
+def _run_cleanup_apply_json(cwd: Path, env: Optional[dict] = None, dry_run_payload: Optional[dict] = None) -> dict:
+    dry_run = dry_run_payload or _run_cleanup_dry_run_json(cwd, env=env)
+    proc = _run_cleanup(cwd, "--dry-run-id", dry_run["dry_run_id"], env=env)
+    assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
+    return json.loads(proc.stdout)
+
+
+def _run_cleanup_apply_without_dry_run_json(cwd: Path, env: Optional[dict] = None) -> dict:
     proc = _run_cleanup(cwd, env=env)
     assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
     return json.loads(proc.stdout)
+
+
+def _run_cleanup_human(cwd: Path, *extra_args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    cmd = MST_CLI + ["on", "cleanup", *extra_args]
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    full_env.setdefault("MST_PROJECT_ROOT", str(cwd))
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        env=full_env,
+        timeout=15,
+    )
 
 
 def _setup_dod002_inventory_project(tmp_path: Path) -> Path:
@@ -148,6 +180,14 @@ def _diagnostic_codes(payload: dict) -> set[str]:
             if isinstance(value, str):
                 codes.add(value)
     return codes
+
+
+def _post_check_checks(payload: dict) -> dict:
+    post_check = payload.get("post_check")
+    assert isinstance(post_check, dict), f"post_check missing from payload: {payload}"
+    checks = post_check.get("checks")
+    assert isinstance(checks, dict), f"post_check.checks missing from payload: {payload}"
+    return checks
 
 
 def _write_user_global_settings(home: Path) -> None:
@@ -290,9 +330,7 @@ def test_pattern_matches_claude_project_dir_variant(tmp_path):
         },
         hook_files=["mst-session-init.sh"],
     )
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0, f"stderr: {proc.stderr}"
-    payload = json.loads(proc.stdout)
+    payload = _run_cleanup_apply_json(project)
     assert payload["status"] == "ok"
     assert any("mst-session-init" in r for r in payload["settings"]["removed"])
 
@@ -318,9 +356,7 @@ def test_pattern_matches_git_rev_parse_variant(tmp_path):
         },
         hook_files=["mst-stop-hook.sh"],
     )
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0
-    payload = json.loads(proc.stdout)
+    payload = _run_cleanup_apply_json(project)
     assert payload["status"] == "ok"
     assert len(payload["settings"]["removed"]) == 1
 
@@ -349,8 +385,8 @@ def test_user_custom_hook_preserved(tmp_path):
         },
         hook_files=["mst-session-init.sh"],
     )
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0
+    payload = _run_cleanup_apply_json(project)
+    assert payload["status"] == "ok"
 
     settings = json.loads((project / ".claude" / "settings.local.json").read_text())
     hooks = settings.get("hooks", {})
@@ -375,8 +411,8 @@ def test_mst_files_removed(tmp_path):
             ".mst-hook-version",
         ],
     )
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0
+    payload = _run_cleanup_apply_json(project)
+    assert payload["status"] == "ok"
 
     hooks_dir = project / ".claude" / "hooks"
     for name in ["mst-stop-hook.sh", "mst-session-init.sh", "mst-pre-tool-use.sh", "mst-auto-chain-context.sh", ".mst-hook-version"]:
@@ -389,8 +425,8 @@ def test_user_files_in_hooks_dir_preserved(tmp_path):
         settings_hooks={},
         hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
     )
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0
+    payload = _run_cleanup_apply_json(project)
+    assert payload["status"] == "ok"
 
     hooks_dir = project / ".claude" / "hooks"
     assert hooks_dir.exists()
@@ -433,9 +469,7 @@ def test_stale_lock_invalidated(tmp_path):
     old = time.time() - 120
     os.utime(str(lock_path), (old, old))
 
-    proc = _run_cleanup(project)
-    assert proc.returncode == 0
-    payload = json.loads(proc.stdout)
+    payload = _run_cleanup_apply_json(project)
     assert payload["status"] == "ok", f"expected ok after stale lock invalidation, got {payload}"
 
 
@@ -462,6 +496,210 @@ def test_dry_run_no_changes(tmp_path):
     assert (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
     settings = json.loads((project / ".claude" / "settings.local.json").read_text())
     assert "Stop" in settings.get("hooks", {})
+
+
+def test_environment_contract_reports_priority_fields_for_normal_source_worktree_and_non_mst(tmp_path):
+    normal = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+    source = _setup_plugin_source_repo(tmp_path)
+    worktree = tmp_path / ".gran-maestro" / "worktrees" / "REQ-1-T01"
+    worktree.mkdir(parents=True)
+    (worktree / ".gran-maestro").mkdir()
+    (worktree / ".claude").mkdir()
+    (worktree / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
+    non_mst = tmp_path / "plain"
+    non_mst.mkdir()
+
+    cases = [
+        (normal, "normal_project", False, False, "active"),
+        (source, "source_repo", True, False, "source_repo"),
+        (worktree, "worktree", False, True, "worktree"),
+        (non_mst, "non_mst", False, False, "inactive"),
+    ]
+
+    for project, project_kind, is_source_repo, is_worktree, mst_mode in cases:
+        payload = _run_cleanup_dry_run_json(project)
+        environment = payload["environment"]
+        assert environment["project_kind"] == project_kind
+        assert environment["is_source_repo"] is is_source_repo
+        assert environment["is_worktree"] is is_worktree
+        assert environment["mst_mode"] == mst_mode
+        assert isinstance(environment["user_global_present"], bool)
+        assert environment["unknown_environment_reasons"] == []
+
+
+def test_environment_unknown_priority_blocks_symlink_and_claude_project_dir_mismatch(tmp_path):
+    real_project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=["mst-stop-hook.sh"])
+    symlink_project = tmp_path / "linked-project"
+    symlink_project.symlink_to(real_project, target_is_directory=True)
+    payload = _run_cleanup_dry_run_json(symlink_project)
+
+    assert payload["environment"]["project_kind"] == "unknown"
+    assert "symlink_project_root" in payload["environment"]["unknown_environment_reasons"]
+    assert payload["status"] in {"blocked", "diagnostic", "skipped"}
+    assert payload["rollback_available"] is False
+    assert payload["post_check_required"]
+
+    payload = _run_cleanup_dry_run_json(
+        real_project,
+        env={"CLAUDE_PROJECT_DIR": str(tmp_path / "other-project")},
+    )
+
+    assert payload["environment"]["project_kind"] == "unknown"
+    assert "claude_project_dir_mismatch" in payload["environment"]["unknown_environment_reasons"]
+    assert payload["status"] in {"blocked", "diagnostic", "skipped"}
+    assert (real_project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+
+
+def test_dry_run_json_schema_candidate_hash_rollback_and_preserved_hooks(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert payload["schema_version"] == DOD010_SCHEMA_VERSION
+    assert re.fullmatch(r"[0-9a-f]{64}", payload["dry_run_id"])
+    assert payload["dry_run"] is True
+    assert payload["project_root"] == str(project)
+    assert payload["created_at"].endswith("Z")
+    assert payload["settings"]["removed"]
+    assert payload["files"]["targets"]
+    assert payload["preserved_user_hooks"]
+    assert payload["candidate_set"]
+    assert re.fullmatch(r"[0-9a-f]{64}", payload["candidate_hash"])
+    assert payload["rollback"]["available"] is True
+    assert payload["rollback"]["backup_path"]
+    assert payload["rollback"]["inverse_operations"]
+    assert payload["rollback_available"] is True
+    assert payload["post_check_required"]
+    assert isinstance(payload["skipped"], list)
+    assert isinstance(payload["blocked"], list)
+
+
+def test_human_dry_run_summary_is_derived_from_json_candidate_fields(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    json_payload = _run_cleanup_dry_run_json(project)
+    proc = _run_cleanup_human(project, "--dry-run")
+
+    assert proc.returncode == 0
+    summary = proc.stdout
+    assert json_payload["settings"]["removed"][0] in summary
+    assert json_payload["files"]["targets"][0] in summary
+    assert json_payload["rollback"]["backup_path"] in summary
+    for candidate in json_payload["candidate_set"]:
+        value = candidate.get("command") or candidate.get("path")
+        if value:
+            assert value in summary
+    assert "hooks/hooks.json" not in summary
+
+
+def test_non_mst_dry_run_reports_post_check_fail_open_evidence(tmp_path):
+    project = tmp_path / "plain"
+    project.mkdir()
+    home = tmp_path / "home"
+    _write_user_global_settings(home)
+
+    payload = _run_cleanup_dry_run_json(project, env={"HOME": str(home)})
+    checks = _post_check_checks(payload)
+
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "non-MST project fail-open"
+    assert payload["post_check"]["passed"] is True
+    assert checks["stale_cleanup_candidates_absent"] is True
+    assert checks["non_mst_user_global_fail_open"] is True
+    assert checks["plugin_core_canonical_command"] is True
+    assert checks["user_custom_preserved"] is True
+
+
+def test_apply_blocks_without_dry_run_artifact_when_candidates_exist(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    before_settings = (project / ".claude" / "settings.local.json").read_bytes()
+
+    payload = _run_cleanup_apply_without_dry_run_json(project)
+    settings = _read_project_settings(project)
+
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "dry_run_artifact_unavailable"
+    assert "dry_run_artifact_missing" in _diagnostic_codes(payload)
+    assert (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert _commands_for(settings, "Stop") == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        "/usr/local/bin/my-custom-stop-hook.sh",
+    ]
+    assert (project / ".claude" / "settings.local.json").read_bytes() == before_settings
+
+
+
+def test_apply_blocks_when_candidate_set_drifts_after_dry_run_and_preserves_custom(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "mst-session-init.sh", "my-user-hook.sh"],
+    )
+    dry_run = _run_cleanup_dry_run_json(project)
+    assert dry_run["candidate_hash"]
+
+    (project / ".claude" / "hooks" / "mst-session-init.sh").unlink()
+    before_settings = (project / ".claude" / "settings.local.json").read_bytes()
+    before_custom = (project / ".claude" / "hooks" / "my-user-hook.sh").read_bytes()
+
+    payload = _run_cleanup_apply_json(project, dry_run_payload=dry_run)
+    settings = _read_project_settings(project)
+
+    assert payload["status"] in {"blocked", "diagnostic"}
+    assert payload["reason"] == "dry_run_candidate_mismatch"
+    assert "candidate_hash_mismatch" in _diagnostic_codes(payload)
+    assert (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert _commands_for(settings, "Stop") == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        "/usr/local/bin/my-custom-stop-hook.sh",
+    ]
+    assert (project / ".claude" / "settings.local.json").read_bytes() == before_settings
+    assert (project / ".claude" / "hooks" / "my-user-hook.sh").read_bytes() == before_custom
+
+
+def test_source_repo_default_skip_excludes_plugin_core_hooks_from_candidates(tmp_path):
+    plugin_repo = _setup_plugin_source_repo(tmp_path)
+
+    payload = _run_cleanup_dry_run_json(plugin_repo)
+    payload_text = json.dumps(
+        {
+            "settings": payload["settings"],
+            "files": payload["files"],
+            "candidate_set": payload["candidate_set"],
+            "rollback": payload["rollback"],
+        },
+        ensure_ascii=False,
+    )
+
+    assert payload["status"] == "skipped"
+    assert payload["environment"]["project_kind"] == "source_repo"
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["targets"] == []
+    assert "hooks/hooks.json" not in payload_text
+    assert str(plugin_repo / "hooks" / "mst-stop-hook.sh") not in payload_text
 
 
 def test_cleanup_apply_preserves_custom_command_in_mixed_matcher_and_reports_inventory(tmp_path):
@@ -658,9 +896,10 @@ def test_cleanup_settings_write_failure_reports_reason_without_file_deletion(tmp
         project / ".claude" / "hooks" / "my-user-hook.sh",
     ]
     before = _read_bytes_by_path(watched_paths)
+    dry_run = _run_cleanup_dry_run_json(project)
     claude_dir.chmod(0o555)
     try:
-        proc = _run_cleanup(project)
+        proc = _run_cleanup(project, "--dry-run-id", dry_run["dry_run_id"])
     finally:
         claude_dir.chmod(0o755)
     payload = json.loads(proc.stdout)
@@ -696,9 +935,10 @@ def test_cleanup_file_delete_failure_reports_reason_and_rolls_back_settings(tmp_
         hooks_dir / "my-user-hook.sh",
     ]
     before = _read_bytes_by_path(watched_paths)
+    dry_run = _run_cleanup_dry_run_json(project)
     hooks_dir.chmod(0o555)
     try:
-        proc = _run_cleanup(project)
+        proc = _run_cleanup(project, "--dry-run-id", dry_run["dry_run_id"])
     finally:
         hooks_dir.chmod(0o755)
     payload = json.loads(proc.stdout)
@@ -802,7 +1042,8 @@ def test_cleanup_settings_rollback_failure_reports_error(tmp_path, monkeypatch, 
         return [], [(str(project / ".claude" / "hooks" / "mst-stop-hook.sh"), "simulated delete failure")]
 
     monkeypatch.setattr(on, "_apply_file_deletions", fake_file_deletions)
-    args = type("Args", (), {"dry_run": False, "json": True, "silent": False})()
+    _run_cleanup_dry_run_json(project)
+    args = type("Args", (), {"dry_run": False, "source_repo": False, "dry_run_id": None, "dry_run_artifact": None, "json": True, "silent": False})()
 
     rc = on.cmd_on_cleanup(args)
     payload = json.loads(capsys.readouterr().out)
@@ -933,10 +1174,12 @@ def test_diagnostic_permission_denied_reports_stable_reason_code(tmp_path):
 def test_diagnostic_unknown_environment_reports_stable_reason_code(tmp_path):
     project = tmp_path / "unknown"
     project.mkdir()
+    (project / ".claude-plugin").mkdir()
 
     payload = _run_cleanup_dry_run_json(project)
 
     assert "unknown_environment" in _diagnostic_codes(payload)
+    assert payload["environment"]["project_kind"] == "unknown"
 
 
 def test_diagnostic_reason_code_enum_is_locked() -> None:
@@ -1011,7 +1254,8 @@ def test_source_repo_cleanup_opt_in_apply_preserves_plugin_source_and_user_custo
     payload = _run_cleanup_apply_json(plugin_repo)
 
     assert payload["status"] == "skipped"
-    opt_in_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo").stdout)
+    opt_in_dry_run = _run_cleanup_dry_run_json(plugin_repo, source_repo=True)
+    opt_in_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo", "--dry-run-id", opt_in_dry_run["dry_run_id"]).stdout)
     assert opt_in_payload["status"] == "ok"
     assert opt_in_payload["environment"]["cleanup_scope"] == "source-repo-opt-in"
     assert opt_in_payload["mutation"] == {"dry_run": False, "mutated": True}
@@ -1032,9 +1276,11 @@ def test_source_repo_cleanup_opt_in_apply_is_idempotent(tmp_path):
         plugin_repo / ".claude-plugin" / "plugin.json",
     ]
 
-    first_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo").stdout)
+    first_dry_run = _run_cleanup_dry_run_json(plugin_repo, source_repo=True)
+    first_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo", "--dry-run-id", first_dry_run["dry_run_id"]).stdout)
     after_first = _read_bytes_by_path(preserved_paths)
-    second_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo").stdout)
+    second_dry_run = _run_cleanup_dry_run_json(plugin_repo, source_repo=True)
+    second_payload = json.loads(_run_cleanup(plugin_repo, "--source-repo", "--dry-run-id", second_dry_run["dry_run_id"]).stdout)
 
     assert first_payload["status"] == "ok"
     assert second_payload["status"] in {"ok", "no_op"}
@@ -1058,12 +1304,13 @@ def test_source_repo_cleanup_opt_in_file_failure_rolls_back_without_canonical_de
     ]
     before = _read_bytes_by_path(watched_paths)
 
+    _run_cleanup_dry_run_json(plugin_repo, source_repo=True)
     monkeypatch.setattr(
         on,
         "_apply_file_deletions",
         lambda targets: ([], [(str(plugin_repo / ".claude" / "hooks" / "mst-stop-hook.sh"), "simulated delete failure")]),
     )
-    args = type("Args", (), {"dry_run": False, "json": True, "silent": False, "source_repo": True})()
+    args = type("Args", (), {"dry_run": False, "source_repo": True, "dry_run_id": None, "dry_run_artifact": None, "json": True, "silent": False})()
 
     rc = on.cmd_on_cleanup(args)
     payload = json.loads(capsys.readouterr().out)
