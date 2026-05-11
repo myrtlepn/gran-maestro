@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "request_id": "REQ-856-T01",
+  "source_of_truth": {
+    "plugin_manifest": ".claude-plugin/plugin.json",
+    "hooks_registration": "hooks/hooks.json"
+  },
+  "maintenance_catalog": [
+    {
+      "id": "plugin_cache_sync",
+      "current_event": "SessionStart",
+      "classification": "maintenance_runtime",
+      "target_boundary": "extract_from_hook_hot_path"
+    },
+    {
+      "id": "gardening_auto_archive",
+      "current_event": "SessionStart",
+      "classification": "maintenance_runtime",
+      "target_boundary": "extract_from_hook_hot_path"
+    },
+    {
+      "id": "run_marker_gc",
+      "current_event": "SessionStart",
+      "classification": "maintenance_runtime",
+      "target_boundary": "extract_from_hook_hot_path"
+    },
+    {
+      "id": "migration_cleanup",
+      "current_event": "SessionStart",
+      "classification": "maintenance_runtime",
+      "target_boundary": "extract_from_hook_hot_path"
+    }
+  ],
+  "canonical_entrypoints": [
+    {
+      "event": "SessionStart",
+      "matchers": [
+        ""
+      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh",
+      "script": "mst-session-init.sh",
+      "shell_wrapper_retained": true,
+      "wrapper_reason": "The shell wrapper still owns plugin-root bootstrap validation, fail-open startup guards, and hook lifecycle process control until SessionStart domain logic is migrated behind a thinner runtime boundary.",
+      "adapter_allowed": [
+        "Resolve the hook script directory and fail-open when ${CLAUDE_PLUGIN_ROOT} substitution or required bootstrap files are invalid.",
+        "Capture stdin and canonical MST session identity, then normalize PROJECT_ROOT, MST_TMP, and MST_SESSION_ID for downstream runtime calls.",
+        "Source shared bootstrap/session/logging helpers and prepare one-shot wrapper state needed before delegation."
+      ],
+      "process_control_allowed": [
+        "Apply fail-open startup guards such as Claude Code version checks and missing-runtime dependency checks.",
+        "Install EXIT traps for hook lifecycle ledger completion without changing the canonical hook command surface.",
+        "Preserve stderr diagnostics while keeping SessionStart stdout free of non-contract payload noise."
+      ],
+      "domain_logic_to_move": [
+        "Initial state snapshot creation and next_action bootstrap payload assembly.",
+        "History sentinel initialization and session lifecycle event append behavior.",
+        "Plan next_action cleanup across .gran-maestro/plans/*/plan.json files."
+      ],
+      "maintenance_to_extract": [
+        {
+          "id": "plugin_cache_sync",
+          "status": "present_in_shell_hot_path",
+          "reason": "SessionStart currently syncs plugin cache state from inside the shell hook."
+        },
+        {
+          "id": "gardening_auto_archive",
+          "status": "present_in_shell_hot_path",
+          "reason": "SessionStart currently triggers gardening auto-archive from the shell hook."
+        },
+        {
+          "id": "run_marker_gc",
+          "status": "present_in_shell_hot_path",
+          "reason": "SessionStart currently archives or terminates stale run markers inside the shell hook."
+        },
+        {
+          "id": "migration_cleanup",
+          "status": "present_in_shell_hot_path",
+          "reason": "SessionStart currently runs hook version mismatch migration cleanup from the shell hook."
+        }
+      ],
+      "contract_tests": [
+        {
+          "kind": "registration",
+          "target": "tests/test_plugin_manifest_hooks.py"
+        },
+        {
+          "kind": "registration",
+          "target": "tests/test_hooks_json_registration.py"
+        },
+        {
+          "kind": "fail_open_guard",
+          "target": "tests/test_claude_code_version_guard.py"
+        },
+        {
+          "kind": "no_injection",
+          "target": "tests/test_mst_on_no_hook_injection.py"
+        },
+        {
+          "kind": "maintenance_smoke",
+          "target": "tests/hooks/test_sync_plugin_cache.sh"
+        },
+        {
+          "kind": "maintenance_smoke",
+          "target": "tests/hooks/test_run_gc_and_anchor.sh"
+        }
+      ]
+    },
+    {
+      "event": "PreToolUse",
+      "matchers": [
+        "Skill",
+        "ScheduleWakeup"
+      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh",
+      "script": "mst-pre-tool-use.sh",
+      "shell_wrapper_retained": true,
+      "wrapper_reason": "The shell wrapper still preserves PreToolUse fast-path routing and existing exit-code or block-payload compatibility while policy, history, and boundary logic are still shell-resident.",
+      "adapter_allowed": [
+        "Validate the hook execution path and required bootstrap libraries before continuing.",
+        "Parse the raw stdin envelope just enough to reject malformed JSON and resolve canonical MST session identity.",
+        "Route non-Skill or fast-path tool calls to the shared pre_tool_use_fast.py entrypoint without changing the canonical command."
+      ],
+      "process_control_allowed": [
+        "Map invalid payload and session-resolution failures to the established hook exit-code contract.",
+        "Install EXIT traps needed for hook lifecycle completion around delegated runtime work.",
+        "Preserve the canonical stdout or stderr boundary so block payloads remain observable to Claude Code."
+      ],
+      "domain_logic_to_move": [
+        "Tool payload parsing that constructs policy, skill, command, and file-path evaluation context.",
+        "History ledger verification and append-on-exit behavior.",
+        "Policy preflight, worktree boundary checks, repair attempts, and block JSON detail synthesis."
+      ],
+      "maintenance_to_extract": [
+        {
+          "id": "plugin_cache_sync",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Plugin cache sync is maintenance work and must remain outside PreToolUse hot-path evaluation."
+        },
+        {
+          "id": "gardening_auto_archive",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Gardening auto-archive is maintenance work and must remain outside PreToolUse hot-path evaluation."
+        },
+        {
+          "id": "run_marker_gc",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Run marker GC is maintenance work and must remain outside PreToolUse hot-path evaluation."
+        },
+        {
+          "id": "migration_cleanup",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Migration cleanup is maintenance work and must remain outside PreToolUse hot-path evaluation."
+        }
+      ],
+      "contract_tests": [
+        {
+          "kind": "registration",
+          "target": "tests/test_hooks_json_registration.py"
+        },
+        {
+          "kind": "no_injection",
+          "target": "tests/test_mst_on_no_hook_injection.py"
+        },
+        {
+          "kind": "policy_contract",
+          "target": "tests/test_pre_tool_use_policy_contract.py"
+        },
+        {
+          "kind": "boundary_integration",
+          "target": "scripts/tests/test_boundary_integration.py"
+        },
+        {
+          "kind": "block_payload_contract",
+          "target": "scripts/tests/test_boundary_block_message.py"
+        },
+        {
+          "kind": "repair_capture",
+          "target": "scripts/tests/test_boundary_repair_capture.py"
+        }
+      ]
+    },
+    {
+      "event": "Stop",
+      "matchers": [
+        ""
+      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+      "script": "mst-stop-hook.sh",
+      "shell_wrapper_retained": true,
+      "wrapper_reason": "The Stop shell wrapper is intentionally retained to enforce timeout fencing, process-tree cleanup, and the strict single-line stdout decision contract around the Python judge.",
+      "adapter_allowed": [
+        "Resolve the canonical session identity and normalize project runtime paths before invoking the Python stop judge.",
+        "Invoke scripts/mst.py hook stop judge and capture its stdout or stderr into temporary wrapper files.",
+        "Emit only the final hook decision payload back to Claude Code after wrapper validation."
+      ],
+      "process_control_allowed": [
+        "Enforce the judge timeout budget and kill the subprocess tree on timeout.",
+        "Validate strict stdout schema and fence duplicate emissions before returning a decision.",
+        "Apply fail-open fallback mapping for timeout or startup failure and clean up temporary runtime files."
+      ],
+      "domain_logic_to_move": [
+        "Timeout diagnostic persistence into flow-detail.ndjson should move behind a dedicated runtime diagnostics boundary.",
+        "Wrapper-owned ledger lifecycle start or complete hooks should move into shared runtime orchestration once Stop no longer depends on shell lifecycle control.",
+        "Judge-status to fallback-reason mapping should converge with the Python runtime contract instead of remaining duplicated in shell control flow."
+      ],
+      "maintenance_to_extract": [
+        {
+          "id": "plugin_cache_sync",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Plugin cache sync is not part of the Stop decision contract and must stay outside the Stop wrapper."
+        },
+        {
+          "id": "gardening_auto_archive",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Gardening auto-archive is not part of the Stop decision contract and must stay outside the Stop wrapper."
+        },
+        {
+          "id": "run_marker_gc",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Run marker GC is not part of the Stop decision contract and must stay outside the Stop wrapper."
+        },
+        {
+          "id": "migration_cleanup",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Migration cleanup is not part of the Stop decision contract and must stay outside the Stop wrapper."
+        }
+      ],
+      "contract_tests": [
+        {
+          "kind": "registration",
+          "target": "tests/test_hooks_json_registration.py"
+        },
+        {
+          "kind": "wrapper_contract",
+          "target": "scripts/tests/test_stop_hook_wrapper.py"
+        },
+        {
+          "kind": "emit_fence",
+          "target": "tests/test_stop_hook_timeout_emit_fence.py"
+        },
+        {
+          "kind": "fail_open_fail_closed",
+          "target": "tests/hooks/test_dod001_stop_fail_closed.sh"
+        },
+        {
+          "kind": "boundary_integration",
+          "target": "scripts/tests/test_boundary_integration.py"
+        },
+        {
+          "kind": "judge_contract",
+          "target": "scripts/tests/test_stop_judge.py"
+        }
+      ]
+    },
+    {
+      "event": "UserPromptSubmit",
+      "matchers": [
+        ""
+      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh",
+      "script": "mst-auto-chain-context.sh",
+      "shell_wrapper_retained": true,
+      "wrapper_reason": "The UserPromptSubmit shell wrapper still preserves canonical session validation and the existing hookSpecificOutput envelope while prompt-correlation and context-usage logic are migrated out of shell.",
+      "adapter_allowed": [
+        "Validate the hook execution path and canonical MST session identity before any runtime call.",
+        "Normalize PROJECT_ROOT, MST_TMP, and STATE_FILE so downstream runtime commands receive stable inputs.",
+        "Emit the final hookSpecificOutput JSON envelope back to Claude Code without changing the canonical command surface."
+      ],
+      "process_control_allowed": [
+        "Fail open with no stdout when canonical session resolution fails or workflow auto-chain is inactive.",
+        "Install EXIT traps for hook lifecycle completion around delegated runtime work.",
+        "Suppress optional runtime diagnostics that must not corrupt the hookSpecificOutput JSON payload."
+      ],
+      "domain_logic_to_move": [
+        "Prompt correlation append behavior that writes semantic UserPromptSubmit events.",
+        "Workflow-active and next_action auto_mode gating logic.",
+        "Context-usage lookup and additionalContext message rendering."
+      ],
+      "maintenance_to_extract": [
+        {
+          "id": "plugin_cache_sync",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Plugin cache sync is not part of the UserPromptSubmit context contract and must stay outside this event."
+        },
+        {
+          "id": "gardening_auto_archive",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Gardening auto-archive is not part of the UserPromptSubmit context contract and must stay outside this event."
+        },
+        {
+          "id": "run_marker_gc",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Run marker GC is not part of the UserPromptSubmit context contract and must stay outside this event."
+        },
+        {
+          "id": "migration_cleanup",
+          "status": "must_not_run_in_event_hot_path",
+          "reason": "Migration cleanup is not part of the UserPromptSubmit context contract and must stay outside this event."
+        }
+      ],
+      "contract_tests": [
+        {
+          "kind": "registration",
+          "target": "tests/test_hooks_json_registration.py"
+        },
+        {
+          "kind": "no_injection",
+          "target": "tests/test_mst_on_no_hook_injection.py"
+        },
+        {
+          "kind": "hook_output_contract",
+          "target": "tests/test_auto_chain_context_hook.py"
+        },
+        {
+          "kind": "schema_contract",
+          "target": "tests/test_auto_chain_context_schema.py"
+        },
+        {
+          "kind": "shell_contract",
+          "target": "tests/hooks/test_dod001_auto_chain_context.sh"
+        },
+        {
+          "kind": "prompt_correlation_contract",
+          "target": "tests/test_dod004_prompt_correlation_contract.py"
+        }
+      ]
+    }
+  ]
+}
