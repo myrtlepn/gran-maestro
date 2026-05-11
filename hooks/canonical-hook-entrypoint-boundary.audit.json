@@ -10,25 +10,33 @@
       "id": "plugin_cache_sync",
       "current_event": "SessionStart",
       "classification": "maintenance_runtime",
-      "target_boundary": "extract_from_hook_hot_path"
+      "target_boundary": "extract_from_hook_hot_path",
+      "follow_up_dod": "DOD-016",
+      "follow_up_marker": "maintenance_hot_path_extraction_follow_up"
     },
     {
       "id": "gardening_auto_archive",
       "current_event": "SessionStart",
       "classification": "maintenance_runtime",
-      "target_boundary": "extract_from_hook_hot_path"
+      "target_boundary": "extract_from_hook_hot_path",
+      "follow_up_dod": "DOD-016",
+      "follow_up_marker": "maintenance_hot_path_extraction_follow_up"
     },
     {
       "id": "run_marker_gc",
       "current_event": "SessionStart",
       "classification": "maintenance_runtime",
-      "target_boundary": "extract_from_hook_hot_path"
+      "target_boundary": "extract_from_hook_hot_path",
+      "follow_up_dod": "DOD-016",
+      "follow_up_marker": "maintenance_hot_path_extraction_follow_up"
     },
     {
       "id": "migration_cleanup",
       "current_event": "SessionStart",
       "classification": "maintenance_runtime",
-      "target_boundary": "extract_from_hook_hot_path"
+      "target_boundary": "extract_from_hook_hot_path",
+      "follow_up_dod": "DOD-016",
+      "follow_up_marker": "maintenance_hot_path_extraction_follow_up"
     }
   ],
   "canonical_entrypoints": [
@@ -86,6 +94,10 @@
         {
           "kind": "registration",
           "target": "tests/test_hooks_json_registration.py"
+        },
+        {
+          "kind": "wrapper_contract",
+          "target": "tests/test_claude_code_version_guard.py"
         },
         {
           "kind": "fail_open_guard",
@@ -160,6 +172,10 @@
         {
           "kind": "no_injection",
           "target": "tests/test_mst_on_no_hook_injection.py"
+        },
+        {
+          "kind": "shell_contract",
+          "target": "tests/test_pre_tool_use_policy_contract.py"
         },
         {
           "kind": "policy_contract",
@@ -325,5 +341,26 @@
         }
       ]
     }
-  ]
+  ],
+  "canonical_runtime_boundary": {
+    "plugin_core_canonical_runtime": {
+      "plugin_manifest": ".claude-plugin/plugin.json",
+      "hooks_registration": "hooks/hooks.json",
+      "command_root": "${CLAUDE_PLUGIN_ROOT}/hooks/"
+    },
+    "non_canonical_runtimes": [
+      {
+        "path": ".claude/hooks",
+        "classification": "project_legacy_source_dev_helper",
+        "canonical_mst_core_runtime": false,
+        "reason": "Project legacy hook helpers are retained only for source-dev compatibility, cleanup, or diagnostics and are not the plugin core canonical runtime."
+      },
+      {
+        "path": "~/.claude/settings.json",
+        "classification": "user_global_environment_hooks",
+        "canonical_mst_core_runtime": false,
+        "reason": "User-global environment hooks belong to the user environment layer and are not MST core SessionStart/Stop runtime registration."
+      }
+    ]
+  }
 }
