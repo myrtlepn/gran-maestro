@@ -315,6 +315,482 @@ def _setup_plugin_source_repo(tmp_path: Path) -> Path:
     return project
 
 
+MATRIX_ALLOWED_HOOK_LAYERS = tuple(sorted(DOD002_CLASSIFICATIONS))
+MATRIX_BASE_POST_CHECK_KEYS = (
+    "stale_cleanup_candidates_absent",
+    "plugin_core_canonical_command",
+    "user_custom_preserved",
+)
+SCENARIO_MATRIX_ROWS = [
+    {
+        "id": "matrix-source-default-source",
+        "scenario": "source repo default skip",
+        "axes": ("source",),
+        "setup": "source_default",
+        "project_kind": "source_repo",
+        "expected_action": "skip",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "skipped",
+        "expected_reason": "plugin source repo (out of cleanup scope)",
+        "expected_cleanup_scope": "skipped",
+        "expected_rollback_available": False,
+        "expected_settings_removed": (),
+        "expected_target_files": (),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS + ("source_repo_default_skip_or_opt_in",),
+        "expected_user_global_present": False,
+        "expected_user_global_hook": False,
+    },
+    {
+        "id": "matrix-source-opt-in-source",
+        "scenario": "source repo opt-in legacy-only cleanup",
+        "axes": ("source",),
+        "setup": "source_opt_in",
+        "project_kind": "source_repo",
+        "expected_action": "mutate_legacy_source_only",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "dry_run",
+        "expected_reason": None,
+        "expected_cleanup_scope": "source-repo-opt-in",
+        "expected_rollback_available": True,
+        "expected_settings_removed": (
+            "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        ),
+        "expected_target_files": ("mst-session-init.sh", "mst-stop-hook.sh"),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS + ("source_repo_default_skip_or_opt_in",),
+        "expected_user_global_present": False,
+        "expected_user_global_hook": False,
+    },
+    {
+        "id": "matrix-normal-project-normal",
+        "scenario": "normal MST project cleanup",
+        "axes": ("normal",),
+        "setup": "normal",
+        "project_kind": "normal_project",
+        "expected_action": "mutate_mst_legacy_only",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "dry_run",
+        "expected_reason": None,
+        "expected_cleanup_scope": "project",
+        "expected_rollback_available": True,
+        "expected_settings_removed": (
+            "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        ),
+        "expected_target_files": ("mst-stop-hook.sh",),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS,
+        "expected_user_global_present": False,
+        "expected_user_global_hook": False,
+    },
+    {
+        "id": "matrix-worktree-sync-worktree",
+        "scenario": "worktree no legacy propagation",
+        "axes": ("worktree", "sync"),
+        "setup": "worktree",
+        "project_kind": "worktree",
+        "expected_action": "skip_legacy_propagation",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "dry_run",
+        "expected_reason": None,
+        "expected_cleanup_scope": "project",
+        "expected_rollback_available": False,
+        "expected_settings_removed": (),
+        "expected_target_files": (),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS + ("worktree_no_legacy_propagation",),
+        "expected_user_global_present": False,
+        "expected_user_global_hook": False,
+    },
+    {
+        "id": "matrix-non_mst-non_mst",
+        "scenario": "non-MST fail-open skip",
+        "axes": ("non_mst",),
+        "setup": "non_mst",
+        "project_kind": "non_mst",
+        "expected_action": "fail_open_skip",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "skipped",
+        "expected_reason": "non-MST project fail-open",
+        "expected_cleanup_scope": "project",
+        "expected_rollback_available": False,
+        "expected_settings_removed": (),
+        "expected_target_files": (),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS + ("non_mst_user_global_fail_open",),
+        "expected_user_global_present": False,
+        "expected_user_global_hook": False,
+    },
+    {
+        "id": "matrix-global-non_mst-global",
+        "scenario": "user-global read-only fail-open",
+        "axes": ("global", "non_mst"),
+        "setup": "global",
+        "project_kind": "non_mst",
+        "expected_action": "read_only_fail_open",
+        "allowed_hook_layers": MATRIX_ALLOWED_HOOK_LAYERS,
+        "expected_status": "skipped",
+        "expected_reason": "non-MST project fail-open",
+        "expected_cleanup_scope": "project",
+        "expected_rollback_available": False,
+        "expected_settings_removed": (),
+        "expected_target_files": (),
+        "expected_post_check_required": MATRIX_BASE_POST_CHECK_KEYS + ("non_mst_user_global_fail_open",),
+        "expected_user_global_present": True,
+        "expected_user_global_hook": True,
+    },
+]
+EDGE_MATRIX_ROWS = [
+    {
+        "id": "edge-partial-source-sync",
+        "scenario": "partial checkout missing hooks registry",
+        "axes": ("source", "sync"),
+        "setup": "partial_missing_registry",
+        "destructive_mutation_allowed": False,
+        "expected_status": "diagnostic",
+        "expected_reason": "cleanup environment cannot be safely mutated",
+        "expected_rollback_available": False,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": {"missing_hooks_registry", "unknown_environment"},
+        "expected_mutation": {"dry_run": True, "mutated": False},
+    },
+    {
+        "id": "edge-permission-normal",
+        "scenario": "settings permission denied",
+        "axes": ("permission", "normal"),
+        "setup": "permission_denied",
+        "destructive_mutation_allowed": False,
+        "expected_status": "diagnostic",
+        "expected_reason": "cleanup environment cannot be safely mutated",
+        "expected_rollback_available": False,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": {"permission_denied"},
+        "expected_mutation": {"dry_run": True, "mutated": False},
+    },
+    {
+        "id": "edge-lock-normal-fresh-lock",
+        "scenario": "fresh cleanup lock skip",
+        "axes": ("lock", "normal"),
+        "setup": "fresh_lock",
+        "destructive_mutation_allowed": False,
+        "expected_status": "skipped",
+        "expected_reason": "another cleanup in progress (lock held)",
+        "expected_rollback_available": False,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": set(),
+        "expected_mutation": {"dry_run": False, "mutated": False},
+    },
+    {
+        "id": "edge-lock-normal-stale-lock",
+        "scenario": "stale cleanup lock invalidated",
+        "axes": ("lock", "normal"),
+        "setup": "stale_lock",
+        "destructive_mutation_allowed": True,
+        "expected_status": "ok",
+        "expected_reason": None,
+        "expected_rollback_available": True,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": set(),
+        "expected_mutation": {"dry_run": False, "mutated": True},
+        "expected_deleted_files": ("mst-stop-hook.sh",),
+    },
+    {
+        "id": "edge-malformed-normal",
+        "scenario": "malformed settings fail-open diagnostic",
+        "axes": ("normal",),
+        "setup": "malformed_settings",
+        "destructive_mutation_allowed": False,
+        "expected_status": "diagnostic",
+        "expected_reason": "cleanup environment cannot be safely mutated",
+        "expected_rollback_available": False,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": {"malformed_settings", "parse_error"},
+        "expected_mutation": {"dry_run": False, "mutated": False},
+    },
+    {
+        "id": "edge-repeated-normal-repeated",
+        "scenario": "repeated cleanup apply stays idempotent",
+        "axes": ("repeated", "normal"),
+        "setup": "repeated_cleanup_apply",
+        "destructive_mutation_allowed": True,
+        "first_expected_status": "ok",
+        "second_expected_status": "ok",
+        "expected_reason": None,
+        "first_expected_rollback_available": True,
+        "second_expected_rollback_available": False,
+        "expected_post_check_keys": MATRIX_BASE_POST_CHECK_KEYS,
+        "allow_post_check_omission": False,
+        "expected_diag_codes": set(),
+        "first_expected_mutation": {"dry_run": False, "mutated": True},
+        "second_expected_mutation": {"dry_run": False, "mutated": False},
+        "first_expected_settings_removed": (
+            "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        ),
+        "second_expected_settings_removed": (),
+        "first_expected_deleted_files": ("mst-stop-hook.sh",),
+        "second_expected_deleted_files": (),
+    },
+]
+
+
+def _matrix_home_env(tmp_path: Path, *, include_user_global: bool) -> dict:
+    home = tmp_path / ("home-global" if include_user_global else "home-empty")
+    home.mkdir(parents=True, exist_ok=True)
+    if include_user_global:
+        _write_user_global_settings(home)
+    return {"HOME": str(home)}
+
+
+def _setup_boundary_matrix_scenario(tmp_path: Path, setup: str) -> tuple[Path, dict, bool]:
+    if setup == "normal":
+        project = _setup_registered_project(
+            tmp_path,
+            settings_hooks={
+                "Stop": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                            {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                        ],
+                    }
+                ]
+            },
+            hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+        )
+        return project, _matrix_home_env(tmp_path, include_user_global=False), False
+
+    if setup == "source_default":
+        return (
+            _setup_plugin_source_repo(tmp_path),
+            _matrix_home_env(tmp_path, include_user_global=False),
+            False,
+        )
+
+    if setup == "source_opt_in":
+        return (
+            _setup_plugin_source_repo(tmp_path),
+            _matrix_home_env(tmp_path, include_user_global=False),
+            True,
+        )
+
+    if setup == "worktree":
+        project = tmp_path / ".gran-maestro" / "worktrees" / "REQ-853-T01"
+        project.mkdir(parents=True)
+        (project / ".gran-maestro").mkdir()
+        (project / ".claude").mkdir()
+        (project / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
+        return project, _matrix_home_env(tmp_path, include_user_global=False), False
+
+    if setup == "non_mst":
+        project = tmp_path / "plain"
+        project.mkdir()
+        return project, _matrix_home_env(tmp_path, include_user_global=False), False
+
+    if setup == "global":
+        project = tmp_path / "plain"
+        project.mkdir()
+        return project, _matrix_home_env(tmp_path, include_user_global=True), False
+
+    raise AssertionError(f"unsupported scenario setup: {setup}")
+
+
+def _execute_boundary_edge_case(tmp_path: Path, setup: str):
+    env = _matrix_home_env(tmp_path, include_user_global=False)
+
+    if setup == "partial_missing_registry":
+        project = tmp_path / "partial-checkout"
+        project.mkdir()
+        (project / ".gran-maestro").mkdir()
+        (project / ".claude-plugin").mkdir()
+        (project / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"hooks": "./hooks/hooks.json"}) + "\n",
+            encoding="utf-8",
+        )
+        (project / ".claude").mkdir()
+        (project / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
+        return _run_cleanup_dry_run_json(project, env=env)
+
+    if setup == "permission_denied":
+        project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
+        settings_path = project / ".claude" / "settings.local.json"
+        settings_path.chmod(0)
+        try:
+            return _run_cleanup_dry_run_json(project, env=env)
+        finally:
+            settings_path.chmod(0o644)
+
+    if setup == "fresh_lock":
+        project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=["mst-stop-hook.sh"])
+        lock_path = project / ".gran-maestro" / "tmp" / "cleanup.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("123", encoding="utf-8")
+        os.utime(str(lock_path), None)
+        proc = _run_cleanup(project, env=env)
+        assert proc.returncode == 0, proc.stderr
+        return json.loads(proc.stdout)
+
+    if setup == "stale_lock":
+        project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=["mst-stop-hook.sh"])
+        lock_path = project / ".gran-maestro" / "tmp" / "cleanup.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("123", encoding="utf-8")
+        old = time.time() - 120
+        os.utime(str(lock_path), (old, old))
+        return _run_cleanup_apply_json(project, env=env)
+
+    if setup == "malformed_settings":
+        project = _setup_registered_project(
+            tmp_path,
+            settings_hooks={},
+            hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+        )
+        settings_path = project / ".claude" / "settings.local.json"
+        settings_path.write_text('{"hooks": ', encoding="utf-8")
+        proc = _run_cleanup(project, env=env)
+        assert proc.returncode in {0, 1}, proc.stderr
+        return json.loads(proc.stdout)
+
+    if setup == "repeated_cleanup_apply":
+        project = _setup_registered_project(
+            tmp_path,
+            settings_hooks={
+                "Stop": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                            {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                        ],
+                    }
+                ]
+            },
+            hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+        )
+        return {
+            "first": _run_cleanup_apply_json(project, env=env),
+            "second": _run_cleanup_apply_json(project, env=env),
+        }
+
+    raise AssertionError(f"unsupported edge setup: {setup}")
+
+
+def _assert_boundary_axes_visible(nodeid: str, axes: tuple[str, ...], context: str) -> None:
+    for axis in axes:
+        assert axis in nodeid, f"{context}: missing axis {axis!r} in node id {nodeid}"
+
+
+@pytest.mark.parametrize("row", SCENARIO_MATRIX_ROWS, ids=[row["id"] for row in SCENARIO_MATRIX_ROWS])
+def test_boundary_scenario_matrix_rows_lock_expected_actions_and_hook_layers(tmp_path, request, row):
+    project, env, source_repo = _setup_boundary_matrix_scenario(tmp_path, row["setup"])
+    payload = _run_cleanup_dry_run_json(project, env=env, source_repo=source_repo)
+
+    _assert_boundary_axes_visible(request.node.nodeid, row["axes"], row["scenario"])
+
+    assert set(row["allowed_hook_layers"]).issubset(DOD002_CLASSIFICATIONS), (
+        f"{row['scenario']} uses unsupported hook layer vocabulary: {row['allowed_hook_layers']}"
+    )
+    assert set(_collect_classifications(payload)) == set(row["allowed_hook_layers"]), (
+        f"{row['scenario']} must converge to {row['allowed_hook_layers']}"
+    )
+    assert payload["environment"]["project_kind"] == row["project_kind"], row["scenario"]
+    assert payload["environment"]["cleanup_scope"] == row["expected_cleanup_scope"], row["scenario"]
+    assert payload["environment"]["user_global_present"] is row["expected_user_global_present"], row["scenario"]
+    assert payload["status"] == row["expected_status"], (
+        f"{row['scenario']} expected_action={row['expected_action']}"
+    )
+    assert payload.get("reason") == row["expected_reason"], row["scenario"]
+    assert payload["rollback_available"] is row["expected_rollback_available"], row["scenario"]
+    assert tuple(payload["settings"]["removed"]) == row["expected_settings_removed"], row["scenario"]
+    assert tuple(sorted(Path(path).name for path in payload["files"]["targets"])) == row["expected_target_files"], (
+        f"{row['scenario']} should only target MST legacy files"
+    )
+    assert tuple(payload["post_check_required"]) == row["expected_post_check_required"], row["scenario"]
+
+    user_global_text = json.dumps(payload["user_global"], ensure_ascii=False)
+    if row["expected_user_global_hook"]:
+        assert "check-version.sh" in user_global_text, row["scenario"]
+    else:
+        assert "check-version.sh" not in user_global_text, row["scenario"]
+
+
+def test_boundary_scenario_matrix_allowed_hook_layers_use_locked_vocabulary():
+    matrix_layers = {
+        layer
+        for row in SCENARIO_MATRIX_ROWS
+        for layer in row["allowed_hook_layers"]
+    }
+
+    assert matrix_layers == DOD002_CLASSIFICATIONS
+
+
+@pytest.mark.parametrize("row", EDGE_MATRIX_ROWS, ids=[row["id"] for row in EDGE_MATRIX_ROWS])
+def test_boundary_edge_matrix_rows_lock_status_reason_rollback_and_post_check(tmp_path, request, row):
+    payload = _execute_boundary_edge_case(tmp_path, row["setup"])
+
+    _assert_boundary_axes_visible(request.node.nodeid, row["axes"], row["scenario"])
+
+    if row["setup"] == "repeated_cleanup_apply":
+        first = payload["first"]
+        second = payload["second"]
+
+        for label, item, expected_status, expected_rollback, expected_mutation, expected_removed, expected_deleted in (
+            (
+                "first",
+                first,
+                row["first_expected_status"],
+                row["first_expected_rollback_available"],
+                row["first_expected_mutation"],
+                row["first_expected_settings_removed"],
+                row["first_expected_deleted_files"],
+            ),
+            (
+                "second",
+                second,
+                row["second_expected_status"],
+                row["second_expected_rollback_available"],
+                row["second_expected_mutation"],
+                row["second_expected_settings_removed"],
+                row["second_expected_deleted_files"],
+            ),
+        ):
+            assert item["status"] == expected_status, f"{row['scenario']} {label}"
+            assert item.get("reason") == row["expected_reason"], f"{row['scenario']} {label}"
+            assert item["rollback_available"] is expected_rollback, f"{row['scenario']} {label}"
+            assert item["mutation"] == expected_mutation, f"{row['scenario']} {label}"
+            assert tuple(item["settings"]["removed"]) == expected_removed, f"{row['scenario']} {label}"
+            assert tuple(sorted(Path(path).name for path in item["files"]["deleted"])) == expected_deleted, (
+                f"{row['scenario']} {label}"
+            )
+            assert row["expected_diag_codes"].issubset(_diagnostic_codes(item)), f"{row['scenario']} {label}"
+            checks = item.get("post_check", {}).get("checks")
+            assert isinstance(checks, dict), f"{row['scenario']} {label} missing post_check.checks"
+            assert set(row["expected_post_check_keys"]).issubset(checks), f"{row['scenario']} {label}"
+        return
+
+    assert payload["status"] == row["expected_status"], row["scenario"]
+    assert payload.get("reason") == row["expected_reason"], row["scenario"]
+    assert payload["rollback_available"] is row["expected_rollback_available"], row["scenario"]
+    assert payload["mutation"] == row["expected_mutation"], row["scenario"]
+    assert row["expected_diag_codes"].issubset(_diagnostic_codes(payload)), row["scenario"]
+
+    if row["destructive_mutation_allowed"]:
+        expected_deleted = row.get("expected_deleted_files", ())
+        assert tuple(sorted(Path(path).name for path in payload["files"]["deleted"])) == expected_deleted, (
+            f"{row['scenario']} deleted files"
+        )
+    else:
+        assert payload["files"].get("deleted", []) == [], f"{row['scenario']} must not delete files"
+        assert payload["files"].get("targets", []) == [], f"{row['scenario']} must not stage file deletion targets"
+        assert payload["settings"]["removed"] == [], f"{row['scenario']} must not remove settings hooks"
+
+    checks = payload.get("post_check", {}).get("checks")
+    if row["allow_post_check_omission"]:
+        assert checks is None or set(row["expected_post_check_keys"]).issubset(checks), row["scenario"]
+    else:
+        assert isinstance(checks, dict), f"{row['scenario']} missing post_check.checks"
+        assert set(row["expected_post_check_keys"]).issubset(checks), row["scenario"]
+
 def test_pattern_matches_claude_project_dir_variant(tmp_path):
     project = _setup_registered_project(
         tmp_path,
