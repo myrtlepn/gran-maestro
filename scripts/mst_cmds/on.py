@@ -98,7 +98,14 @@ def _project_root() -> Path:
     return Path.cwd().absolute()
 
 
-def _diagnostic(code: str, message: str, path: Optional[Path] = None) -> dict:
+def _diagnostic(
+    code: str,
+    message: str,
+    path: Optional[Path] = None,
+    *,
+    result: Optional[str] = None,
+    status: Optional[str] = None,
+) -> dict:
     item = {
         "code": code,
         "reason_code": code,
@@ -107,7 +114,21 @@ def _diagnostic(code: str, message: str, path: Optional[Path] = None) -> dict:
     }
     if path is not None:
         item["path"] = str(path)
+    if result is not None:
+        item["result"] = result
+        item["outcome"] = result
+    if status is not None:
+        item["status"] = status
     return item
+
+
+def _annotate_diagnostics(diagnostics: List[dict], *, result: str, status: str) -> None:
+    for diagnostic in diagnostics:
+        if not isinstance(diagnostic, dict):
+            continue
+        diagnostic.setdefault("result", result)
+        diagnostic.setdefault("outcome", result)
+        diagnostic.setdefault("status", status)
 
 
 def _read_json_diagnostic(path: Path, diagnostics: List[dict], *, malformed_settings: bool = False):
@@ -503,6 +524,19 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
     }
 
     settings = _read_json_diagnostic(settings_path, diagnostics, malformed_settings=True)
+    if settings_path.exists():
+        try:
+            mode = settings_path.stat().st_mode
+            if mode & 0o222 == 0:
+                diagnostics.append(
+                    _diagnostic(
+                        DIAGNOSTIC_PERMISSION_DENIED,
+                        "settings.local.json is not writable",
+                        settings_path,
+                    )
+                )
+        except OSError as exc:
+            diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), settings_path))
     if isinstance(settings, dict):
         hooks_value = settings.get("hooks")
         if "hooks" in settings and not isinstance(hooks_value, dict):
@@ -804,11 +838,132 @@ def _status_items(diagnostics: List[dict], status: str) -> List[dict]:
             "status": status,
             "reason": item.get("reason") or item.get("reason_code") or item.get("code"),
             "reason_code": item.get("reason_code") or item.get("code"),
+            "result": item.get("result") or item.get("outcome"),
+            "outcome": item.get("outcome") or item.get("result"),
             "message": item.get("message", ""),
             "path": item.get("path"),
         }
         for item in diagnostics
     ]
+
+
+def _migration_boundary_items(inventory: dict) -> List[dict]:
+    environment = inventory.get("environment", {})
+    plugin_core = inventory.get("plugin_core", {})
+    project_legacy = inventory.get("project_legacy", {})
+    user_global = inventory.get("user_global", {})
+    diagnostics = inventory.get("diagnostics", [])
+
+    settings_candidates = project_legacy.get("settings", {}).get("candidates", [])
+    file_candidates = project_legacy.get("files", {}).get("candidates", [])
+    legacy_candidate_count = len(settings_candidates) + len(file_candidates)
+    source_default_skip = bool(environment.get("source_repo")) and environment.get("cleanup_scope") == "skipped"
+    blocked = _diagnostics_block_mutation(Path(environment.get("project_root", "")), inventory)
+
+    if source_default_skip:
+        legacy_status = "SKIP"
+        legacy_result = "diagnostic-only"
+        legacy_message = "source-dev project-local hooks remain diagnostic-only unless --source-repo is used"
+    elif blocked:
+        legacy_status = "DIAGNOSTIC"
+        legacy_result = "safe-skip"
+        legacy_message = "legacy project-local hook cleanup is blocked and pre-mutation state is preserved"
+    else:
+        legacy_status = "PASS"
+        legacy_result = "reinjection-absent"
+        legacy_message = "legacy project-local hooks are candidates only; canonical runtime is not reinserted"
+
+    plugin_commands = [
+        item.get("command")
+        for item in plugin_core.get("hooks", [])
+        if isinstance(item, dict) and isinstance(item.get("command"), str)
+    ]
+    canonical = plugin_core.get("status") in {"canonical", "empty"} and all(
+        command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+        for command in plugin_commands
+    )
+    if canonical:
+        plugin_status = "PASS"
+        plugin_message = "canonical plugin registration is preserved"
+    else:
+        plugin_status = "DIAGNOSTIC"
+        plugin_message = "canonical plugin registration needs inspection"
+
+    user_settings = user_global.get("settings", {})
+    user_settings_path = user_settings.get("path")
+    user_global_diag = any(
+        isinstance(item, dict) and item.get("path") == user_settings_path
+        for item in diagnostics
+    )
+    if user_global_diag:
+        user_status = "DIAGNOSTIC"
+        user_result = "safe-skip"
+        user_message = "user-global hook settings could not be fully inspected and were not mutated"
+    elif user_settings.get("exists"):
+        user_status = "PASS"
+        user_result = "preserved-state"
+        user_message = "user-global hook settings are observed and preserved"
+    else:
+        user_status = "SKIP"
+        user_result = "absent"
+        user_message = "user-global hook settings are absent"
+
+    return [
+        {
+            "id": "legacy_project_local_hook_reinjection",
+            "status": legacy_status,
+            "result": legacy_result,
+            "message": legacy_message,
+            "classification": CLASS_PROJECT_LEGACY,
+            "candidate_count": legacy_candidate_count,
+            "settings_candidate_count": len(settings_candidates),
+            "file_candidate_count": len(file_candidates),
+            "prohibited_actions": [
+                "create_.claude_hooks_copy",
+                "reinsert_settings_local_hooks_as_canonical_runtime",
+            ],
+            "evidence": {
+                "cleanup_scope": environment.get("cleanup_scope"),
+                "project_kind": environment.get("project_kind"),
+            },
+        },
+        {
+            "id": "canonical_plugin_registration",
+            "status": plugin_status,
+            "result": "preserved-state" if canonical else "diagnostic",
+            "message": plugin_message,
+            "classification": CLASS_PLUGIN_CORE,
+            "manifest": plugin_core.get("manifest"),
+            "registry": plugin_core.get("registry"),
+            "canonical_command_count": len(
+                [command for command in plugin_commands if command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")]
+            ),
+            "command_prefix": "${CLAUDE_PLUGIN_ROOT}/hooks/",
+        },
+        {
+            "id": "user_global_hook_preservation",
+            "status": user_status,
+            "result": user_result,
+            "message": user_message,
+            "classification": CLASS_USER_GLOBAL,
+            "settings_path": user_settings_path,
+            "hook_count": len(user_global.get("hooks", [])),
+        },
+    ]
+
+
+def _migration_boundary(inventory: dict) -> dict:
+    items = _migration_boundary_items(inventory)
+    summary = {"PASS": 0, "SKIP": 0, "DIAGNOSTIC": 0}
+    for item in items:
+        status = item.get("status")
+        if status in summary:
+            summary[status] += 1
+    return {
+        "schema_version": "mst.on.cleanup.boundary.v1",
+        "items": items,
+        "summary": summary,
+    }
 
 
 def _enrich_cleanup_payload(
@@ -863,6 +1018,7 @@ def _enrich_cleanup_payload(
             "rollback": rollback,
             "rollback_available": rollback["available"],
             "post_check_required": _post_check_required(environment),
+            "migration_boundary": _migration_boundary(inventory),
         }
     )
 
@@ -1142,6 +1298,9 @@ def _emit(args: argparse.Namespace, payload: dict) -> None:
             print(f"  skipped: {item.get('reason', '')}")
         for item in payload.get("blocked", []):
             print(f"  blocked: {item.get('reason_code') or item.get('reason', '')}")
+        boundary = payload.get("migration_boundary", {})
+        for item in boundary.get("items", []):
+            print(f"  {item.get('status')} {item.get('id')}: {item.get('message', '')}")
         rollback = payload.get("rollback", {})
         if rollback:
             print(f"  rollback available: {str(rollback.get('available')).lower()}")
@@ -1200,6 +1359,7 @@ def cmd_on_cleanup(args) -> int:
             }
             payload["files"] = {"targets": []}
         elif _diagnostics_block_mutation(project_root, inventory):
+            _annotate_diagnostics(inventory.get("diagnostics", []), result="safe-skip", status="diagnostic")
             payload["status"] = "diagnostic"
             payload["reason"] = "cleanup environment cannot be safely mutated"
             payload["settings"] = {
@@ -1316,6 +1476,7 @@ def cmd_on_cleanup(args) -> int:
             source_repo_opt_in=source_repo_opt_in,
         )
         if _diagnostics_block_mutation(project_root, inventory):
+            _annotate_diagnostics(inventory.get("diagnostics", []), result="safe-skip", status="diagnostic")
             payload.update(inventory)
             payload["status"] = "diagnostic"
             payload["reason"] = "cleanup environment cannot be safely mutated"
@@ -1358,8 +1519,15 @@ def cmd_on_cleanup(args) -> int:
         if artifact_diagnostics or mismatches:
             for mismatch in mismatches:
                 artifact_diagnostics.append(
-                    _diagnostic(mismatch, f"dry-run artifact validation failed: {mismatch}", project_root)
+                    _diagnostic(
+                        mismatch,
+                        f"dry-run artifact validation failed: {mismatch}",
+                        project_root,
+                        result="preserved-state",
+                        status="blocked",
+                    )
                 )
+            _annotate_diagnostics(artifact_diagnostics, result="preserved-state", status="blocked")
             inventory["diagnostics"].extend(artifact_diagnostics)
             payload.update(inventory)
             payload["status"] = "blocked"
@@ -1468,6 +1636,15 @@ def cmd_on_cleanup(args) -> int:
             if settings_rollback_error is not None:
                 payload["settings"]["rollback_error"] = settings_rollback_error
             payload["files"] = {"deleted": deleted, "failed": failed}
+            payload.setdefault("diagnostics", []).append(
+                _diagnostic(
+                    "file_deletion_failed",
+                    "file deletion failed; restored pre-mutation state where possible",
+                    Path(failed[0][0]),
+                    result="preserved-state",
+                    status="rollback" if settings_rolled_back else "error",
+                )
+            )
             _enrich_cleanup_payload(
                 payload,
                 project_root=project_root,

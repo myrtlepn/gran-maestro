@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MST_CLI = [sys.executable, str(REPO_ROOT / "scripts" / "mst.py")]
 CODEX_TOOL = "mcp__plugin_oh-my-claudecode_x__ask_codex"
 GEMINI_TOOL = "mcp__plugin_oh-my-claudecode_g__ask_gemini"
 
@@ -105,6 +107,58 @@ def _write_mode(project: Path, *, active: bool) -> None:
     mode_dir = project / ".gran-maestro"
     mode_dir.mkdir(parents=True)
     (mode_dir / "mode.json").write_text(json.dumps({"active": active}) + "\n", encoding="utf-8")
+
+
+def _write_mixed_user_global_settings(home: Path) -> Path:
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "mcp__plugin_oh-my-claudecode_x__ask_codex",
+                    "hooks": [
+                        {"type": "command", "command": "~/.claude/scripts/maestro-guard.sh"}
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "~/.claude/scripts/log-prompt.sh"},
+                        {"type": "command", "command": "~/.claude/scripts/check-version.sh"},
+                    ],
+                }
+            ],
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "~/.claude/hooks/mst-stop-hook.sh --global-wrapper",
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return settings_path
+
+
+def _settings_commands_by_event(settings: dict) -> dict[tuple[str, str], list[str]]:
+    commands: dict[tuple[str, str], list[str]] = {}
+    for event, entries in settings.get("hooks", {}).items():
+        for entry in entries:
+            matcher = entry.get("matcher", "")
+            commands[(event, matcher)] = [
+                hook["command"]
+                for hook in entry.get("hooks", [])
+                if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+            ]
+    return commands
 
 
 def _payload(cwd: Path | None = None, tool_name: str = CODEX_TOOL) -> str:
@@ -229,3 +283,94 @@ def test_user_global_settings_read_only(tmp_path: Path, global_scripts: dict[str
 
     after = SETTINGS_PATH.read_bytes() if SETTINGS_PATH.exists() else None
     assert after == before
+
+
+def test_cleanup_preserves_mixed_user_global_hooks_and_event_membership(tmp_path: Path):
+    home = tmp_path / "home"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_bytes = user_settings_path.read_bytes()
+    before_commands = _settings_commands_by_event(json.loads(before_bytes))
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".gran-maestro").mkdir()
+    (project / ".claude" / "hooks").mkdir(parents=True)
+    (project / ".claude" / "hooks" / "mst-stop-hook.sh").write_text(
+        "#!/bin/sh\nexit 0\n",
+        encoding="utf-8",
+    )
+    (project / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": ["Read"]},
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "MST_PROJECT_ROOT": str(project)})
+    dry_run = subprocess.run(
+        MST_CLI + ["on", "cleanup", "--json", "--dry-run"],
+        cwd=str(project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_run_payload = json.loads(dry_run.stdout)
+
+    apply = subprocess.run(
+        MST_CLI + [
+            "on",
+            "cleanup",
+            "--json",
+            "--dry-run-id",
+            dry_run_payload["dry_run_id"],
+        ],
+        cwd=str(project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert apply.returncode == 0, apply.stderr
+    apply_payload = json.loads(apply.stdout)
+
+    after_bytes = user_settings_path.read_bytes()
+    after_commands = _settings_commands_by_event(json.loads(after_bytes))
+    assert after_bytes == before_bytes
+    assert after_commands == before_commands
+
+    observed = {
+        (hook["event"], hook["matcher"], hook["command"]): hook
+        for hook in dry_run_payload["user_global"]["hooks"]
+    }
+    for key, commands in before_commands.items():
+        event, matcher = key
+        for command in commands:
+            assert (event, matcher, command) in observed
+    assert observed[("Stop", "", "~/.claude/hooks/mst-stop-hook.sh --global-wrapper")][
+        "known_global"
+    ] is False
+    assert apply_payload["plugin_core"]["status"] == "canonical"
+    assert all(
+        hook["classification"] == "user_global"
+        for hook in dry_run_payload["user_global"]["hooks"]
+    )

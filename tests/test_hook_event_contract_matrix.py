@@ -186,6 +186,14 @@ def _audit_runtime_tuples() -> set[tuple[str, str, str, str, str]]:
     return tuples
 
 
+def _audit_entrypoints_by_script() -> dict[str, dict]:
+    payload = _load_json(AUDIT_JSON)
+    return {
+        entry["script"]: entry
+        for entry in payload["canonical_entrypoints"]
+    }
+
+
 def _matrix_payload() -> dict:
     return _load_json(MATRIX_JSON)
 
@@ -341,3 +349,42 @@ def test_matrix_negative_boundaries_stay_non_canonical() -> None:
 
     for path, classification in audit_boundaries.items():
         assert boundaries[path]["classification"] == classification
+
+
+def test_retained_shell_wrappers_have_machine_readable_rationale_and_boundary_contract() -> None:
+    hook_scripts = {path.name for path in (REPO_ROOT / "hooks").glob("*.sh")}
+    entrypoints = _audit_entrypoints_by_script()
+    runtime_scripts = {row["script"] for row in _runtime_rows() if row["case_id"] == "runtime_registration"}
+
+    assert hook_scripts == runtime_scripts == set(entrypoints)
+
+    for script in sorted(hook_scripts):
+        entry = entrypoints[script]
+        assert entry["shell_wrapper_retained"] is True
+        assert isinstance(entry["wrapper_reason"], str) and len(entry["wrapper_reason"]) >= 40
+        assert entry["command"] == f"{EXPECTED_COMMAND_ROOT}{script}"
+        assert entry["adapter_allowed"], script
+        assert entry["process_control_allowed"], script
+        assert entry["domain_logic_to_move"], script
+        assert entry["maintenance_to_extract"], script
+
+        contract_kinds = {
+            item["kind"]
+            for item in entry["contract_tests"]
+            if isinstance(item, dict) and isinstance(item.get("kind"), str)
+        }
+        assert "registration" in contract_kinds, script
+        assert contract_kinds & {
+            "wrapper_contract",
+            "shell_contract",
+            "hook_output_contract",
+            "schema_contract",
+            "policy_contract",
+        }, script
+
+        maintenance_ids = {
+            item["id"]
+            for item in entry["maintenance_to_extract"]
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        assert {"plugin_cache_sync", "migration_cleanup"} <= maintenance_ids

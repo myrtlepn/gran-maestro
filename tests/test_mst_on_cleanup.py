@@ -190,6 +190,24 @@ def _post_check_checks(payload: dict) -> dict:
     return checks
 
 
+def _boundary_item(payload: dict, item_id: str) -> dict:
+    boundary = payload.get("migration_boundary")
+    assert isinstance(boundary, dict), f"migration_boundary missing from payload: {payload}"
+    for item in boundary.get("items", []):
+        if item.get("id") == item_id:
+            return item
+    raise AssertionError(f"missing migration boundary item {item_id!r}: {boundary}")
+
+
+def _diagnostics_with_code(payload: dict, code: str) -> list[dict]:
+    return [
+        diagnostic
+        for diagnostic in payload.get("diagnostics", [])
+        if isinstance(diagnostic, dict)
+        and code in {diagnostic.get("code"), diagnostic.get("reason"), diagnostic.get("reason_code")}
+    ]
+
+
 def _write_user_global_settings(home: Path) -> None:
     settings_path = home / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1050,6 +1068,37 @@ def test_dry_run_json_schema_candidate_hash_rollback_and_preserved_hooks(tmp_pat
     assert isinstance(payload["blocked"], list)
 
 
+def test_dry_run_json_reports_reinjection_boundary_without_creating_canonical_runtime(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    legacy_boundary = _boundary_item(payload, "legacy_project_local_hook_reinjection")
+    assert legacy_boundary["status"] == "PASS"
+    assert legacy_boundary["result"] == "reinjection-absent"
+    assert legacy_boundary["settings_candidate_count"] == 1
+    assert legacy_boundary["file_candidate_count"] == 1
+    assert "create_.claude_hooks_copy" in legacy_boundary["prohibited_actions"]
+    assert "reinsert_settings_local_hooks_as_canonical_runtime" in legacy_boundary["prohibited_actions"]
+    assert payload["project_legacy"]["settings"]["candidates"]
+    assert payload["project_legacy"]["files"]["candidates"]
+    assert payload["settings"]["removed"] == ["$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"]
+    assert Path(payload["files"]["targets"][0]).name == "mst-stop-hook.sh"
+    assert _read_bytes_by_path(watched_paths) == before
+
+    settings = _read_project_settings(project)
+    assert _commands_for(settings, "Stop") == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        "/usr/local/bin/my-custom-stop-hook.sh",
+    ]
+
+
 def test_human_dry_run_summary_is_derived_from_json_candidate_fields(tmp_path):
     project = _setup_dod002_inventory_project(tmp_path)
     json_payload = _run_cleanup_dry_run_json(project)
@@ -1065,6 +1114,20 @@ def test_human_dry_run_summary_is_derived_from_json_candidate_fields(tmp_path):
         if value:
             assert value in summary
     assert "hooks/hooks.json" not in summary
+
+
+def test_human_dry_run_reports_diagnostic_boundary_pass_skip_items(tmp_path):
+    project = _setup_dod002_inventory_project(tmp_path)
+    home = tmp_path / "home"
+    _write_user_global_settings(home)
+
+    proc = _run_cleanup_human(project, "--dry-run", env={"HOME": str(home)})
+
+    assert proc.returncode == 0
+    summary = proc.stdout
+    assert "PASS legacy_project_local_hook_reinjection" in summary
+    assert "PASS canonical_plugin_registration" in summary
+    assert "PASS user_global_hook_preservation" in summary
 
 
 def test_non_mst_dry_run_reports_post_check_fail_open_evidence(tmp_path):
@@ -1115,6 +1178,9 @@ def test_apply_blocks_without_dry_run_artifact_when_candidates_exist(tmp_path):
         "/usr/local/bin/my-custom-stop-hook.sh",
     ]
     assert (project / ".claude" / "settings.local.json").read_bytes() == before_settings
+    diagnostics = _diagnostics_with_code(payload, "dry_run_artifact_missing")
+    assert diagnostics
+    assert diagnostics[0]["result"] == "preserved-state"
 
 
 
@@ -1154,6 +1220,9 @@ def test_apply_blocks_when_candidate_set_drifts_after_dry_run_and_preserves_cust
     ]
     assert (project / ".claude" / "settings.local.json").read_bytes() == before_settings
     assert (project / ".claude" / "hooks" / "my-user-hook.sh").read_bytes() == before_custom
+    diagnostics = _diagnostics_with_code(payload, "candidate_hash_mismatch")
+    assert diagnostics
+    assert diagnostics[0]["result"] == "preserved-state"
 
 
 def test_source_repo_default_skip_excludes_plugin_core_hooks_from_candidates(tmp_path):
@@ -1176,6 +1245,10 @@ def test_source_repo_default_skip_excludes_plugin_core_hooks_from_candidates(tmp
     assert payload["files"]["targets"] == []
     assert "hooks/hooks.json" not in payload_text
     assert str(plugin_repo / "hooks" / "mst-stop-hook.sh") not in payload_text
+    source_boundary = _boundary_item(payload, "legacy_project_local_hook_reinjection")
+    assert source_boundary["status"] == "SKIP"
+    assert source_boundary["result"] == "diagnostic-only"
+    assert _boundary_item(payload, "canonical_plugin_registration")["status"] == "PASS"
 
 
 def test_cleanup_apply_preserves_custom_command_in_mixed_matcher_and_reports_inventory(tmp_path):
@@ -1213,6 +1286,78 @@ def test_cleanup_apply_preserves_custom_command_in_mixed_matcher_and_reports_inv
     assert payload["status"] == "ok"
     assert payload["mutation"] == {"dry_run": False, "mutated": True}
     assert DOD002_TOP_LEVEL_FIELDS.issubset(payload)
+
+
+def test_cleanup_mixed_settings_removes_legacy_only_and_preserves_local_config(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "PreToolUse": [
+                {
+                    "matcher": "Skill",
+                    "hooks": [
+                        {"type": "command", "command": "$(git rev-parse --show-toplevel)/.claude/hooks/mst-pre-tool-use.sh"},
+                        {"type": "command", "command": "/opt/local/pre-tool-user-hook.sh"},
+                    ],
+                }
+            ],
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "/home/user/scripts/my-prompt-hook.sh"}
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "mst-pre-tool-use.sh", "my-user-hook.sh"],
+    )
+    settings_path = project / ".claude" / "settings.local.json"
+    mixed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    mixed_settings.update(
+        {
+            "env": {"GRAN_MAESTRO_TEST": "keep"},
+            "statusLine": {"type": "command", "command": "/usr/local/bin/status-line.sh"},
+            "permissions": {
+                "allow": ["Read", "Bash(git status:*)"],
+                "deny": ["Bash(rm -rf:*)"],
+            },
+        }
+    )
+    settings_path.write_text(json.dumps(mixed_settings, indent=2) + "\n", encoding="utf-8")
+
+    payload = _run_cleanup_apply_json(project)
+    settings = _read_project_settings(project)
+
+    assert payload["status"] == "ok"
+    assert sorted(payload["settings"]["removed"]) == [
+        "$(git rev-parse --show-toplevel)/.claude/hooks/mst-pre-tool-use.sh",
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+    ]
+    assert settings["env"] == mixed_settings["env"]
+    assert settings["permissions"] == mixed_settings["permissions"]
+    assert settings["statusLine"] == mixed_settings["statusLine"]
+    assert _commands_for(settings, "PreToolUse", "Skill") == [
+        "/opt/local/pre-tool-user-hook.sh"
+    ]
+    assert _commands_for(settings, "Stop") == ["/usr/local/bin/my-custom-stop-hook.sh"]
+    assert _commands_for(settings, "UserPromptSubmit") == [
+        "/home/user/scripts/my-prompt-hook.sh"
+    ]
+
+    serialized_settings = json.dumps(settings, sort_keys=True)
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in serialized_settings
+    assert "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-" not in serialized_settings
+    assert "$(git rev-parse --show-toplevel)/.claude/hooks/mst-" not in serialized_settings
 
 
 def test_cleanup_files_only_known_legacy_removed_and_preserved_user_mst_like_files(tmp_path):
@@ -1311,6 +1456,49 @@ def test_cleanup_malformed_settings_failure_reported_without_destructive_mutatio
     assert proc.returncode in {0, 1}
     assert payload["status"] in {"skipped", "error", "failed", "diagnostic"}
     assert {"malformed_settings", "parse_error"}.intersection(_diagnostic_codes(payload))
+    assert any(
+        diagnostic.get("result") == "safe-skip"
+        for diagnostic in payload.get("diagnostics", [])
+        if diagnostic.get("code") in {"malformed_settings", "parse_error"}
+    )
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_read_only_settings_failure_reports_safe_skip_without_destructive_mutation(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"}
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    settings_path = project / ".claude" / "settings.local.json"
+    watched_paths = [
+        settings_path,
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+    settings_path.chmod(0o444)
+    try:
+        payload = _run_cleanup_dry_run_json(project)
+    finally:
+        settings_path.chmod(0o644)
+
+    assert payload["status"] == "diagnostic"
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["targets"] == []
+    diagnostics = _diagnostics_with_code(payload, "permission_denied")
+    assert diagnostics
+    assert any(diagnostic.get("result") == "safe-skip" for diagnostic in diagnostics)
+    assert _boundary_item(payload, "legacy_project_local_hook_reinjection")["status"] == "DIAGNOSTIC"
     assert _read_bytes_by_path(watched_paths) == before
 
 
@@ -1424,6 +1612,14 @@ def test_cleanup_file_delete_failure_reports_reason_and_rolls_back_settings(tmp_
     assert payload["reason"] == "file deletion failed; settings rollback attempted"
     assert payload["settings"]["rolled_back"] is True
     assert payload["files"]["failed"]
+    assert _boundary_item(payload, "canonical_plugin_registration")["status"] == "PASS"
+    assert _boundary_item(payload, "legacy_project_local_hook_reinjection")["result"] == "reinjection-absent"
+    checks = _post_check_checks(payload)
+    assert checks["rollback_restored_pre_mutation_state"] is True
+    assert checks["stale_cleanup_reinjection_absent"] is True
+    diagnostics = _diagnostics_with_code(payload, "file_deletion_failed")
+    assert diagnostics
+    assert diagnostics[0]["result"] == "preserved-state"
     assert _read_bytes_by_path(watched_paths) == before
 
 
