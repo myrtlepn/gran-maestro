@@ -663,6 +663,10 @@ def record_phase2_dispatch_attempt(req_id: str, **kwargs) -> dict:
     matching_task["attempts"] = task_attempts
     request_data["background_task_ids"] = background_attempts
     save_json(request_path, request_data)
+    background_entry["reconcile_queue"] = upsert_reconcile_phase2_action(
+        normalized_req_id,
+        attempt=background_entry,
+    )
     return background_entry
 
 def _load_plan(pln_id: str):
@@ -927,6 +931,9 @@ def _queue_lock_path() -> Path:
 def _queue_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+def _is_workflow_queue_entry(entry: object) -> bool:
+    return isinstance(entry, dict) and bool(str(entry.get("skill") or "").strip())
+
 def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
     entries: list[dict] = []
     for line in raw_lines:
@@ -938,9 +945,10 @@ def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
-            entry_id = value.get("entry_id")
-            if not isinstance(entry_id, str) or not entry_id.strip():
-                value["entry_id"] = uuid.uuid4().hex
+            if _is_workflow_queue_entry(value):
+                entry_id = value.get("entry_id")
+                if not isinstance(entry_id, str) or not entry_id.strip():
+                    value["entry_id"] = uuid.uuid4().hex
             entries.append(value)
     return entries
 
@@ -1132,8 +1140,232 @@ def queue_enqueue(data: dict) -> dict:
 
     return entry
 
+def _build_reconcile_phase2_action(req_id: str, attempt: dict, *, source: str) -> dict:
+    return {
+        "kind": "reconcile_phase2",
+        "req_id": req_id,
+        "attempt_id": str(attempt.get("attempt_id") or "").strip(),
+        "created_at": _queue_timestamp(),
+        "source": source,
+        "status": "queued",
+        "task_num": _normalize_task_num(attempt.get("task_num")),
+        "task_id": str(attempt.get("task_id") or "").strip(),
+        "log_path": str(attempt.get("log_path") or "").strip(),
+        "worktree_path": str(attempt.get("worktree_path") or "").strip(),
+    }
+
+def upsert_reconcile_phase2_action(req_id: str, *, attempt: dict | None = None, **kwargs) -> dict:
+    normalized_req_id = _normalize_request_id(req_id)
+    attempt_data = dict(attempt or {})
+    for key, value in kwargs.items():
+        if key not in attempt_data and value is not None:
+            attempt_data[key] = value
+
+    required_fields = ("task_num", "task_id", "attempt_id", "log_path", "worktree_path")
+    missing_fields = [
+        field for field in required_fields if not str(attempt_data.get(field) or "").strip()
+    ]
+    if missing_fields:
+        return {
+            "created": False,
+            "noop": True,
+            "kind": "reconcile_phase2",
+            "req_id": normalized_req_id,
+            "attempt_id": str(attempt_data.get("attempt_id") or "").strip(),
+            "manual_reconcile_required": True,
+            "reason": f"missing_reconcile_action_fields:{','.join(missing_fields)}",
+            "action": None,
+        }
+
+    action = _build_reconcile_phase2_action(
+        normalized_req_id,
+        attempt_data,
+        source=str(attempt_data.get("source") or "phase2_dispatch").strip() or "phase2_dispatch",
+    )
+    terminal_statuses = {"done", "cancelled", "blocked", "version_skew_blocked"}
+
+    path = _queue_path()
+    lock_path = _queue_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    line = _compact_json(action) + "\n"
+
+    with open(lock_path, "a+", encoding="utf-8") as lock_f:
+        _lock_exclusive(lock_f)
+        try:
+            existing_entries: list[dict] = []
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    for raw_line in f.read().splitlines():
+                        text = raw_line.strip()
+                        if not text:
+                            continue
+                        try:
+                            value = json.loads(text)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(value, dict):
+                            existing_entries.append(value)
+
+            for existing_entry in existing_entries:
+                if str(existing_entry.get("kind") or "").strip() != "reconcile_phase2":
+                    continue
+                if str(existing_entry.get("req_id") or "").strip().upper() != normalized_req_id:
+                    continue
+                if str(existing_entry.get("attempt_id") or "").strip() != action["attempt_id"]:
+                    continue
+
+                existing_status = str(existing_entry.get("status") or "").strip().lower()
+                if existing_status in {"queued", "running"}:
+                    return {
+                        "created": False,
+                        "noop": True,
+                        "kind": "reconcile_phase2",
+                        "req_id": normalized_req_id,
+                        "attempt_id": action["attempt_id"],
+                        "reason": f"existing_reconcile_phase2_{existing_status}",
+                        "action": copy.deepcopy(existing_entry),
+                    }
+                if existing_status in terminal_statuses:
+                    return {
+                        "created": False,
+                        "noop": True,
+                        "kind": "reconcile_phase2",
+                        "req_id": normalized_req_id,
+                        "attempt_id": action["attempt_id"],
+                        "manual_reconcile_required": existing_status in {
+                            "blocked",
+                            "version_skew_blocked",
+                        },
+                        "reason": f"existing_reconcile_phase2_{existing_status}",
+                        "action": copy.deepcopy(existing_entry),
+                    }
+
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                os.fsync(f.fileno())
+        finally:
+            _unlock(lock_f)
+
+    return {
+        "created": True,
+        "noop": False,
+        "kind": "reconcile_phase2",
+        "req_id": normalized_req_id,
+        "attempt_id": action["attempt_id"],
+        "reason": None,
+        "action": copy.deepcopy(action),
+    }
+
+def queue_reconcile_phase2_action(req_id: str, *, attempt: dict | None = None, **kwargs) -> dict:
+    return upsert_reconcile_phase2_action(req_id, attempt=attempt, **kwargs)
+
+def ensure_reconcile_phase2_action(req_id: str, *, attempt: dict | None = None, **kwargs) -> dict:
+    return upsert_reconcile_phase2_action(req_id, attempt=attempt, **kwargs)
+
+def _task_level_phase2_attempts(request_data: dict) -> list[dict]:
+    tasks = request_data.get("tasks")
+    if not isinstance(tasks, list):
+        return []
+
+    attempts: list[dict] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        task_attempts = task.get("attempts")
+        if not isinstance(task_attempts, list):
+            continue
+        for attempt in task_attempts:
+            if not isinstance(attempt, dict):
+                continue
+            normalized_attempt = dict(attempt)
+            if not normalized_attempt.get("task_num"):
+                task_identity = task.get("task_num")
+                if task_identity is None:
+                    task_identity = task.get("id")
+                if task_identity is not None:
+                    normalized_attempt["task_num"] = task_identity
+            attempts.append(normalized_attempt)
+    return attempts
+
+
+def _phase2_reconcile_attempts(request_data: dict) -> list[dict]:
+    attempts_by_id: dict[str, dict] = {}
+    ordered_ids: list[str] = []
+
+    for attempt in _task_level_phase2_attempts(request_data):
+        attempt_id = str(attempt.get("attempt_id") or "").strip()
+        if not attempt_id or attempt_id in attempts_by_id:
+            continue
+        attempts_by_id[attempt_id] = dict(attempt)
+        ordered_ids.append(attempt_id)
+
+    background_attempts = request_data.get("background_task_ids")
+    if isinstance(background_attempts, list):
+        for attempt in background_attempts:
+            if not isinstance(attempt, dict):
+                continue
+            attempt_id = str(attempt.get("attempt_id") or "").strip()
+            if not attempt_id:
+                continue
+            if attempt_id not in attempts_by_id:
+                ordered_ids.append(attempt_id)
+            attempts_by_id[attempt_id] = dict(attempt)
+
+    return [attempts_by_id[attempt_id] for attempt_id in ordered_ids]
+
+def ensure_request_phase2_reconcile_actions(
+    req_id: str,
+    *,
+    request_data: dict | None = None,
+    source: str = "phase2_continuation",
+) -> dict:
+    normalized_req_id = _normalize_request_id(req_id)
+    data = request_data if isinstance(request_data, dict) else _load_request(normalized_req_id)
+    summary = {
+        "req_id": normalized_req_id,
+        "attempt_count": 0,
+        "created_count": 0,
+        "noop_count": 0,
+        "manual_reconcile_required": False,
+        "results": [],
+    }
+    if not isinstance(data, dict):
+        summary["reason"] = "unknown_request"
+        return summary
+
+    phase, status = _phase_status_tuple(data)
+    if phase != 2 or status.strip().lower() != "phase2_execution":
+        summary["reason"] = "not_phase2_execution"
+        return summary
+
+    attempts = _phase2_reconcile_attempts(data)
+    if not attempts:
+        summary["reason"] = "missing_phase2_dispatch_metadata"
+        return summary
+
+    for attempt in attempts:
+        result = upsert_reconcile_phase2_action(
+            normalized_req_id,
+            attempt=attempt,
+            source=source,
+        )
+        summary["results"].append(result)
+        summary["attempt_count"] += 1
+        if result.get("created") is True:
+            summary["created_count"] += 1
+        if result.get("noop") is True:
+            summary["noop_count"] += 1
+        if result.get("manual_reconcile_required") is True:
+            summary["manual_reconcile_required"] = True
+
+    summary["reason"] = None
+    return summary
+
 def queue_peek() -> dict | None:
     for entry in _queue_read_entries():
+        if not _is_workflow_queue_entry(entry):
+            continue
         if entry.get("status") == "queued":
             return copy.deepcopy(entry)
     return None
@@ -1145,6 +1377,8 @@ def queue_mark_running(entry_id: str) -> dict | None:
 
     def _mutator(entries):
         for entry in entries:
+            if not _is_workflow_queue_entry(entry):
+                continue
             if entry.get("entry_id") != target_entry_id:
                 continue
             if entry.get("status") != "queued":
@@ -1160,6 +1394,8 @@ def queue_pop() -> dict | None:
     while True:
         peeked = None
         for entry in _queue_read_entries():
+            if not _is_workflow_queue_entry(entry):
+                continue
             if entry.get("status") == "queued":
                 peeked = entry
                 break
@@ -1173,7 +1409,7 @@ def queue_pop() -> dict | None:
             return result
 
 def queue_list(status: str | None) -> list[dict]:
-    entries = _queue_read_entries()
+    entries = [entry for entry in _queue_read_entries() if _is_workflow_queue_entry(entry)]
     if not status or status == "all":
         return entries
     return [entry for entry in entries if entry.get("status") == status]
@@ -1186,6 +1422,8 @@ def queue_complete(action_id: str, result: str | None = None) -> dict | None:
     def _mutator(entries):
         nonlocal warn
         for entry in entries:
+            if not _is_workflow_queue_entry(entry):
+                continue
             matches_entry_id = entry.get("entry_id") == action_id
             matches_id = entry.get("id") == action_id
             if not (matches_entry_id or matches_id):
@@ -1215,6 +1453,8 @@ def queue_fail(action_id: str, error: str | None = None) -> dict | None:
     def _mutator(entries):
         nonlocal warn
         for entry in entries:
+            if not _is_workflow_queue_entry(entry):
+                continue
             matches_entry_id = entry.get("entry_id") == action_id
             matches_id = entry.get("id") == action_id
             if not (matches_entry_id or matches_id):

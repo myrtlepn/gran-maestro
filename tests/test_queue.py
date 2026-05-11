@@ -257,6 +257,49 @@ def test_parse_and_list_status(tmp_path, monkeypatch):
     assert len(all_items) == 2
 
 
+def test_workflow_queue_consumer_ignores_raw_reconcile_phase2_action(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mst = _load_mst_module()
+
+    first = mst.queue_enqueue({"skill": "mst:a", "args": "--a"})
+    raw_action = {
+        "kind": "reconcile_phase2",
+        "req_id": "REQ-855",
+        "attempt_id": "attempt-raw-001",
+        "created_at": "2026-05-11T00:00:30Z",
+        "source": "phase2_dispatch",
+        "status": "queued",
+        "task_num": "01",
+        "task_id": "bg-task-001",
+        "log_path": "/tmp/REQ-855-T01/running.log",
+        "worktree_path": "/tmp/REQ-855-T01",
+    }
+    pending_path = tmp_path / ".gran-maestro" / "pending.ndjson"
+    with pending_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(raw_action, ensure_ascii=False) + "\n")
+    second = mst.queue_enqueue({"skill": "mst:b", "args": "--b"})
+
+    assert mst.queue_peek()["id"] == first["id"]
+    popped_first = mst.queue_pop()
+    assert popped_first and popped_first["id"] == first["id"]
+    mst.queue_complete(first["id"], result="ok")
+
+    popped_second = mst.queue_pop()
+    assert popped_second and popped_second["id"] == second["id"]
+    mst.queue_fail(second["id"], error="boom")
+
+    assert mst.queue_pop() is None
+    assert mst.queue_count("queued") == 0
+    assert [item["id"] for item in mst.queue_list("all")] == [first["id"], second["id"]]
+
+    persisted_entries = [
+        json.loads(line)
+        for line in pending_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert raw_action in persisted_entries
+
+
 def test_enqueue_rejects_auto_without_dash_a(tmp_path, monkeypatch):
     workspace = _make_workspace(tmp_path)
     monkeypatch.chdir(workspace)

@@ -62,6 +62,12 @@ def advance_phase2_if_ready(req_id: str, *, check: bool = False) -> dict:
     request_path = _common.requests_dir() / normalized_req_id / "request.json"
     request_data = _common.load_json(request_path)
     result = _advance_phase2_result(normalized_req_id, request_path, request_data)
+    reconcile_queue = _common.ensure_request_phase2_reconcile_actions(
+        normalized_req_id,
+        request_data=request_data,
+    )
+    if reconcile_queue.get("attempt_count") or reconcile_queue.get("manual_reconcile_required"):
+        result["reconcile_queue"] = reconcile_queue
     if not result["ready"] or check:
         return result
 

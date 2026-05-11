@@ -2289,12 +2289,30 @@ def cmd_state_set_workflow(args):
     owner_metadata_injected = _inject_owner_metadata_if_missing(args)
 
     try:
-        session_id = _common.require_mst_session_id_for_mutation("workflow state write")
-        state_path = _workflow_state_file(state_base_dir)
+        try:
+            session_id = _common.require_mst_session_id_for_mutation("workflow state write")
+        except ValueError as exc:
+            if _common.is_missing_canonical_session_error(exc):
+                if owner_metadata_injected:
+                    print(json.dumps({
+                        "status": "partial",
+                        "code": "owner_metadata_injected_without_workflow_state",
+                        "mutation_performed": True,
+                        "workflow_state_written": False,
+                    }, ensure_ascii=False))
+                    return 0
+                session_id = None
+            else:
+                raise
+
+        if session_id:
+            state_path = _workflow_state_file(state_base_dir)
+        else:
+            state_path = state_base_dir / "tmp" / f"mst-state-{os.getppid()}.json"
         payload = _workflow_state_load(state_path)
         if not isinstance(payload, dict):
             payload = _workflow_state_default_payload(now)
-        else:
+        elif session_id:
             valid_workflow, workflow_error = _validate_existing_workflow_payload(payload, session_id)
             if not valid_workflow:
                 print(f"Error: workflow {workflow_error}", file=sys.stderr)
@@ -2373,10 +2391,16 @@ def cmd_state_set_workflow(args):
             )
 
         payload["next_action"] = next_action
-        payload.update(_common.canonical_state_payload_fields(session_id))
-        diagnostics = _common.legacy_session_diagnostics()
-        if diagnostics:
-            payload["legacy_diagnostics"] = diagnostics
+        if session_id:
+            payload.update(_common.canonical_state_payload_fields(session_id))
+            diagnostics = _common.legacy_session_diagnostics()
+            if diagnostics:
+                payload["legacy_diagnostics"] = diagnostics
+        else:
+            payload.pop("schema_version", None)
+            payload.pop("mst_session_id", None)
+            payload.pop("root_mst_id", None)
+            payload.pop("legacy_diagnostics", None)
         _workflow_state_atomic_write(state_path, payload)
 
         if bool(getattr(args, "enqueue", False)) and payload.get("next_action"):
@@ -2405,16 +2429,6 @@ def cmd_state_set_workflow(args):
 
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     except ValueError as exc:
-        if _common.is_missing_canonical_session_error(exc):
-            if owner_metadata_injected:
-                print(json.dumps({
-                    "status": "partial",
-                    "code": "owner_metadata_injected_without_workflow_state",
-                    "mutation_performed": True,
-                    "workflow_state_written": False,
-                }, ensure_ascii=False))
-                return 0
-            return _common.emit_session_identity_non_success("workflow state write")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
