@@ -8,10 +8,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK_SCRIPT = REPO_ROOT / "hooks" / "mst-auto-chain-context.sh"
+TEST_SESSION_ID = "MST-REQ-857-20260511T110121000Z-abcdef12"
 
 
 def _prepare_workspace(workspace: Path) -> None:
     (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    (workspace / ".git").write_text("gitdir: test\n", encoding="utf-8")
     for name in ("scripts", "templates"):
         target = workspace / name
         if not target.exists():
@@ -31,7 +33,7 @@ def _write_config(workspace: Path, *, auto_approve_on_unblock: bool) -> None:
 
 
 def _write_state(workspace: Path, payload: dict) -> Path:
-    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{os.getpid()}.json"
+    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{TEST_SESSION_ID}.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return state_path
@@ -57,6 +59,7 @@ def _run_hook(workspace: Path, payload: dict | str) -> subprocess.CompletedProce
         **os.environ,
         "HOME": str(workspace / "home"),
         "CLAUDE_CONFIG_DIR": str(workspace / "home" / ".claude"),
+        "MST_SESSION_ID": TEST_SESSION_ID,
     }
     if isinstance(payload, str):
         stdin = payload

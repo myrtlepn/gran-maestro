@@ -71,10 +71,10 @@ def test_anchor_emitted_to_stderr_when_present():
     assert stderr.splitlines() == ["[stop-hook] anchor=docs/X.md#section"]
 
 
-def test_emit_allow_json_no_details_anchor():
-    """L488 inline approve path (emit_allow_json) keeps the same schema."""
-    stdout, _, rc = _call_emit("emit_allow_json", "soft approve")
+def test_emit_approve_json_soft_reason_schema():
+    stdout, _, rc = _call_emit("emit_approve_json", "soft approve", "")
     assert rc == 0
     obj = json.loads(stdout)
     assert set(obj.keys()) == ALLOWED_FIELDS
     assert obj["decision"] == "approve"
+    assert obj["reason"] == "soft approve"

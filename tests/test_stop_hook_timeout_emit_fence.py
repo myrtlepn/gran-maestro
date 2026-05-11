@@ -15,7 +15,7 @@ mode="$1"
 hook="$2"
 
 eval "$(awk '
-/^(emit_approve_json|emit_block_json|emit_allow_json|details_anchor_for_reason|claim_judge_timeout_emit)\(\)/ { printing = 1 }
+/^(emit_approve_json|emit_block_json|emit_final_file_once|details_anchor_for_reason|claim_judge_timeout_emit)\(\)/ { printing = 1 }
 printing { print }
 printing && /^}/ { printing = 0 }
 ' "$hook")"
@@ -44,19 +44,37 @@ case "$mode" in
     test ! -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
   claimed-timeout-allow)
-    claim_judge_timeout_emit
-    emit_allow_json "hook judge timeout (>1ms) fail-open"
+    final_file="$tmpdir/final.json"
+    python3 - "$final_file" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"decision": "approve", "reason": "hook judge timeout (>1ms) fail-open"}, ensure_ascii=False) + "\n")
+PY
+    emit_final_file_once "$final_file"
     test -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
   claimed-timeout-then-main-approve)
-    claim_judge_timeout_emit
-    emit_allow_json "hook judge timeout (>1ms) fail-open"
+    final_file="$tmpdir/final.json"
+    python3 - "$final_file" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"decision": "approve", "reason": "hook judge timeout (>1ms) fail-open"}, ensure_ascii=False) + "\n")
+PY
+    emit_final_file_once "$final_file"
     emit_approve_json "approved" ""
     test -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;
   claimed-timeout-then-main-block)
-    claim_judge_timeout_emit
-    emit_allow_json "hook judge timeout (>1ms) fail-open"
+    final_file="$tmpdir/final.json"
+    python3 - "$final_file" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"decision": "approve", "reason": "hook judge timeout (>1ms) fail-open"}, ensure_ascii=False) + "\n")
+PY
+    emit_final_file_once "$final_file"
     emit_block_json "blocked" ""
     test -f "$HOOK_JUDGE_TIMEOUT_DONE"
     ;;

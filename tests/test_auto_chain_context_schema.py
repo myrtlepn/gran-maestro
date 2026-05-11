@@ -11,7 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK_SCRIPT = REPO_ROOT / "hooks" / "mst-auto-chain-context.sh"
-STATE_PPID = "auto-chain-context-test"
+TEST_SESSION_ID = "MST-REQ-857-20260511T110121000Z-abcdef12"
 
 
 def _copy_hook_to_plugin_cache(tmp_path: Path) -> Path:
@@ -34,6 +34,7 @@ def _copy_hook_to_plugin_cache(tmp_path: Path) -> Path:
 def _prepare_project_root(tmp_path: Path, *, use_real_mst: bool = True) -> Path:
     project_root = tmp_path / "project"
     (project_root / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
+    (project_root / ".git").write_text("gitdir: test\n", encoding="utf-8")
 
     if use_real_mst:
         (project_root / "scripts").symlink_to(REPO_ROOT / "scripts", target_is_directory=True)
@@ -59,7 +60,7 @@ def _write_config(project_root: Path, *, auto_approve_on_unblock: bool = True) -
 
 
 def _write_state(project_root: Path, payload: dict) -> Path:
-    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{STATE_PPID}.json"
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{TEST_SESSION_ID}.json"
     state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return state_path
 
@@ -92,7 +93,7 @@ def _run_hook(
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "MST_STATE_PPID": STATE_PPID},
+        env={**os.environ, "MST_SESSION_ID": TEST_SESSION_ID},
     )
 
 
