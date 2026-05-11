@@ -85,6 +85,20 @@ def advance_phase2_if_ready(req_id: str, *, check: bool = False) -> dict:
     return result
 
 
+def record_phase2_dispatch_attempt(req_id: str, **kwargs) -> dict:
+    return _common.record_phase2_dispatch_attempt(req_id, **kwargs)
+
+
+def _print_phase2_dispatch_attempt_result(result: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    print(
+        f"{result.get('task_num')}: recorded phase2 dispatch attempt "
+        f"{result.get('attempt_id')} ({result.get('task_id')})"
+    )
+
+
 def _print_advance_phase2_result(result: dict, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result, ensure_ascii=False))
@@ -288,6 +302,30 @@ def cmd_request_advance_phase2_if_ready(args):
     return 0
 
 
+def cmd_request_record_phase2_dispatch_attempt(args):
+    from scripts.mst_cmds.state import _check_read_only
+
+    read_only_status = _check_read_only(args.req_id)
+    if read_only_status:
+        return read_only_status
+
+    result = record_phase2_dispatch_attempt(
+        args.req_id,
+        task_num=args.task_num,
+        task_id=args.task_id,
+        attempt_id=args.attempt_id,
+        dispatched_at=args.dispatched_at,
+        agent=args.agent,
+        worktree_path=args.worktree_path,
+        log_path=args.log_path,
+        expected_task_status_before=args.expected_task_status_before,
+        status=args.status,
+        run_state_path=args.run_state_path,
+    )
+    _print_phase2_dispatch_attempt_result(result, args.json)
+    return 0
+
+
 def cmd_request_takeover(args):
     from scripts.mst_cmds.state import cmd_takeover_request
 
@@ -356,6 +394,20 @@ def register(subparsers):
     req_advance_phase2.add_argument("req_id")
     req_advance_phase2.add_argument("--check", action="store_true")
     req_advance_phase2.add_argument("--json", action="store_true")
+
+    req_record_phase2_dispatch_attempt = req_sub.add_parser("record-phase2-dispatch-attempt")
+    req_record_phase2_dispatch_attempt.add_argument("req_id")
+    req_record_phase2_dispatch_attempt.add_argument("--task-num", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--task-id", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--attempt-id", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--dispatched-at", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--agent", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--worktree-path", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--log-path", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--expected-task-status-before", required=True)
+    req_record_phase2_dispatch_attempt.add_argument("--status")
+    req_record_phase2_dispatch_attempt.add_argument("--run-state-path")
+    req_record_phase2_dispatch_attempt.add_argument("--json", action="store_true")
 
     req_review = req_sub.add_parser("review")
     req_review.add_argument("--req-path", required=True)

@@ -54,6 +54,36 @@ def test_approve_phase2_gate_uses_advance_phase2_stdout_json_contract():
     assert 'all_committed = every(... ["committed", "done"])' not in content
 
 
+def test_approve_phase2_dispatch_metadata_contract_matches_request_writer():
+    skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
+    content = skill_doc.read_text(encoding="utf-8")
+
+    for token in (
+        "python3 {PLUGIN_ROOT}/scripts/mst.py request record-phase2-dispatch-attempt {REQ_ID}",
+        "--task-num",
+        "--task-id",
+        "--attempt-id",
+        "--dispatched-at",
+        "--agent",
+        "--worktree-path",
+        "--log-path",
+        "--expected-task-status-before",
+        "--json",
+        "background_task_ids",
+        "attempts",
+        "attempt_id",
+        "dispatched_at",
+        "agent",
+        "worktree_path",
+        "log_path",
+        "expected_task_status_before",
+        "task_id",
+        "task_num",
+        "record_phase2_dispatch_attempt",
+    ):
+        assert token in content
+
+
 def test_review_phase2_ready_gate_contract():
     skill_doc = ROOT / "skills" / "review" / "SKILL.md"
     content = skill_doc.read_text(encoding="utf-8")

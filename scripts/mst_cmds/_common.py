@@ -532,6 +532,139 @@ def _plan_json_path(pln_id: str) -> Path:
 def _load_request(req_id: str):
     return load_json(_request_json_path(req_id))
 
+
+def _normalize_request_id(req_id: object) -> str:
+    text = str(req_id).strip().upper()
+    if not text:
+        raise ValueError("req_id is required")
+    return text
+
+
+def _normalize_task_num(task_num: object) -> str:
+    text = str(task_num).strip()
+    if not text:
+        raise ValueError("task_num is required")
+    match = re.search(r"(\d+)$", text)
+    if match:
+        return match.group(1).zfill(2)
+    return text.upper()
+
+
+def _task_matches_task_num(task: object, task_num: str) -> bool:
+    if not isinstance(task, dict):
+        return False
+    candidates = []
+    for key in ("task_num", "id"):
+        value = task.get(key)
+        if value is not None:
+            candidates.append(value)
+    for candidate in candidates:
+        try:
+            if _normalize_task_num(candidate) == task_num:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def record_phase2_dispatch_attempt(req_id: str, **kwargs) -> dict:
+    normalized_req_id = _normalize_request_id(req_id)
+    request_path = _request_json_path(normalized_req_id)
+    request_data = load_json(request_path)
+    if not isinstance(request_data, dict):
+        raise FileNotFoundError(f"request.json not found or invalid for {normalized_req_id}")
+
+    required_fields = (
+        "task_num",
+        "task_id",
+        "attempt_id",
+        "dispatched_at",
+        "agent",
+        "worktree_path",
+        "log_path",
+        "expected_task_status_before",
+    )
+    missing_fields = [field for field in required_fields if not str(kwargs.get(field) or "").strip()]
+    if missing_fields:
+        raise ValueError(f"missing required phase2 dispatch metadata fields: {', '.join(missing_fields)}")
+
+    task_num = _normalize_task_num(kwargs["task_num"])
+    attempt_id = str(kwargs["attempt_id"]).strip()
+
+    background_attempts = request_data.get("background_task_ids")
+    if background_attempts is None:
+        background_attempts = []
+    elif not isinstance(background_attempts, list):
+        raise ValueError("request background_task_ids must be a list")
+
+    for entry in background_attempts:
+        if isinstance(entry, dict) and str(entry.get("attempt_id") or "").strip() == attempt_id:
+            raise ValueError(
+                f"duplicate phase2 dispatch attempt_id for {normalized_req_id}: {attempt_id}"
+            )
+
+    tasks = request_data.get("tasks")
+    if not isinstance(tasks, list):
+        raise ValueError(f"request tasks missing or invalid for {normalized_req_id}")
+
+    matching_task = None
+    for task in tasks:
+        task_attempts = task.get("attempts")
+        if task_attempts is None:
+            task_attempts = []
+        elif not isinstance(task_attempts, list):
+            task_label = str(task.get("id") or task.get("task_num") or "?").strip() or "?"
+            raise ValueError(
+                f"request task attempts must be a list for {normalized_req_id} task {task_label}"
+            )
+
+        for entry in task_attempts:
+            if isinstance(entry, dict) and str(entry.get("attempt_id") or "").strip() == attempt_id:
+                raise ValueError(
+                    f"duplicate phase2 dispatch attempt_id for {normalized_req_id}: {attempt_id}"
+                )
+
+        if matching_task is None and _task_matches_task_num(task, task_num):
+            matching_task = task
+    if matching_task is None:
+        raise ValueError(f"task_num {task_num} not found in request {normalized_req_id}")
+
+    task_attempts = matching_task.get("attempts")
+    if task_attempts is None:
+        task_attempts = []
+    elif not isinstance(task_attempts, list):
+        raise ValueError(f"request task attempts must be a list for {normalized_req_id} task {task_num}")
+
+    background_entry = {}
+    for key, value in kwargs.items():
+        if value is not None:
+            background_entry[key] = value
+    background_entry["task_num"] = task_num
+    background_entry["status"] = str(kwargs.get("status") or "running").strip() or "running"
+
+    task_attempt = {
+        "attempt_id": attempt_id,
+        "task_id": str(kwargs["task_id"]).strip(),
+        "task_num": task_num,
+        "dispatched_at": str(kwargs["dispatched_at"]).strip(),
+        "agent": str(kwargs["agent"]).strip(),
+        "worktree_path": str(kwargs["worktree_path"]).strip(),
+        "log_path": str(kwargs["log_path"]).strip(),
+        "expected_task_status_before": str(kwargs["expected_task_status_before"]).strip(),
+        "status": background_entry["status"],
+    }
+    for optional_key in ("run_state_path",):
+        optional_value = kwargs.get(optional_key)
+        if optional_value is not None:
+            task_attempt[optional_key] = optional_value
+
+    background_attempts.append(background_entry)
+    task_attempts.append(task_attempt)
+    matching_task["attempts"] = task_attempts
+    request_data["background_task_ids"] = background_attempts
+    save_json(request_path, request_data)
+    return background_entry
+
 def _load_plan(pln_id: str):
     return load_json(_plan_json_path(pln_id))
 

@@ -585,13 +585,62 @@ else:
   Skill(skill: "mst:claude", args: "--trace {REQ-ID}/{TASK-NUM}/phase2-impl")
 ```
 
-각 실행의 `task_id`를 `request.json`에 영구 저장:
+각 실행에서 background `task_id`를 받은 직후, 아래 실제 CLI를 즉시 호출해 dispatch attempt metadata를 `request.json`에 영구 저장:
 
-```json
-{ "background_task_ids": [{ "task_id": "{bg_task_id}", "task_num": "01", "agent": "codex-dev", "status": "running" }] }
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py request record-phase2-dispatch-attempt {REQ_ID} \
+  --task-num {TASK_NUM} \
+  --task-id {bg_task_id} \
+  --attempt-id {attempt_id} \
+  --dispatched-at {UTC ISO8601} \
+  --agent {agent_slug} \
+  --worktree-path {worktree_path} \
+  --log-path {task_dir}/running.log \
+  --expected-task-status-before {dispatch 직전 task.status} \
+  --json
 ```
 
-> **세션 간 추적**: task_id를 기록하여 세션 전환 후에도 추적 가능. 필요 시 `TaskStop(task_id)`로 취소.
+이 CLI는 내부적으로 `record_phase2_dispatch_attempt(req_id, **kwargs)` writer를 호출하며, 저장 결과는 아래 구조를 따라야 한다:
+
+```json
+{
+  "background_task_ids": [
+    {
+      "task_id": "{bg_task_id}",
+      "task_num": "01",
+      "attempt_id": "{attempt_id}",
+      "dispatched_at": "{UTC ISO8601}",
+      "agent": "codex-dev",
+      "worktree_path": "{worktree_path}",
+      "log_path": "{task_dir}/running.log",
+      "expected_task_status_before": "{dispatch 직전 task.status}",
+      "status": "running"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T01",
+      "attempts": [
+        {
+          "attempt_id": "{attempt_id}",
+          "task_id": "{bg_task_id}",
+          "task_num": "01",
+          "dispatched_at": "{UTC ISO8601}",
+          "agent": "codex-dev",
+          "worktree_path": "{worktree_path}",
+          "log_path": "{task_dir}/running.log",
+          "expected_task_status_before": "{dispatch 직전 task.status}",
+          "status": "running"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`background_task_ids`는 계속 배열 계약을 유지하고 additive metadata만 보강한다. `tasks[].attempts[]`는 같은 attempt를 task 관점에서 다시 관찰하는 용도이며, 같은 REQ 내 기존 `attempt_id`와 충돌하면 dispatch를 즉시 실패시켜야 한다.
+
+> **세션 간 추적**: `task_id`와 `attempt_id`를 기록하여 세션 전환, 재외주, append 로그 혼재 후에도 같은 시도를 식별한다. 필요 시 `TaskStop(task_id)`로 취소.
 
 > ⚠️ **CONTINUATION GUARD**: 서브스킬 반환 후 즉시 다음 Step 진행 (hook이 자동 강제). approve는 Phase 5 완료 시에만 종료.
 

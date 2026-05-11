@@ -289,6 +289,30 @@ def test_apply_stop_judge_side_effects_persists_precomputed_block_state(tmp_path
     assert payload["mst_session_id"] == SESSION_ID
 
 
+def test_reduce_stop_judge_phase2_queue_gap_only_persists_block_state() -> None:
+    decision = stop_judge.reduce_stop_judge_decision(
+        {
+            "signals": {
+                "queued_next_action": {
+                    "skill": "mst:request",
+                    "command": "request reconcile-phase2 REQ-854 --check --json",
+                    "req_id": "REQ-854",
+                    "attempt_id": "attempt-001",
+                }
+            },
+            "diagnostics": {"canonical_mst_session_id": SESSION_ID},
+            "side_effects": [],
+            "hook_timeout_ms": 5000,
+        }
+    )
+
+    assert decision["decision"] == "block"
+    assert "queued next_action present" in decision["reason"]
+    assert decision["side_effects"] == [
+        {"kind": "persist_block_state", "reason": "queued_next_action"}
+    ]
+
+
 def test_apply_stop_judge_side_effects_applies_boundary_repair_in_order(tmp_path: Path) -> None:
     project_root = _project_root(tmp_path)
     meta_path = project_root / ".gran-maestro" / "worktrees" / "REQ-900-T01.meta.json"
