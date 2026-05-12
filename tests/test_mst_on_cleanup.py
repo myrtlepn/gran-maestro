@@ -240,6 +240,80 @@ def _write_user_global_settings(home: Path) -> None:
     )
 
 
+def _write_mixed_user_global_settings(home: Path) -> Path:
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "mcp__plugin_oh-my-claudecode_x__ask_codex",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "~/.claude/scripts/maestro-guard.sh",
+                                }
+                            ],
+                        }
+                    ],
+                    "UserPromptSubmit": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "~/.claude/scripts/log-prompt.sh",
+                                },
+                                {
+                                    "type": "command",
+                                    "command": "~/.claude/scripts/check-version.sh",
+                                },
+                            ],
+                        }
+                    ],
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "~/.claude/hooks/mst-stop-hook.sh --global-wrapper",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return settings_path
+
+
+def _settings_commands_by_event(settings: dict) -> dict[tuple[str, str], list[str]]:
+    commands: dict[tuple[str, str], list[str]] = {}
+    for event, entries in settings.get("hooks", {}).items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            matcher = entry.get("matcher", "")
+            hooks = entry.get("hooks", [])
+            if not isinstance(hooks, list):
+                continue
+            commands[(event, matcher if isinstance(matcher, str) else "")] = [
+                hook.get("command")
+                for hook in hooks
+                if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+            ]
+    return commands
+
+
 def _setup_registered_project(tmp_path: Path, settings_hooks: dict, hook_files: list) -> Path:
     """플러그인 소스 저장소가 아닌 등록 프로젝트 시뮬레이션.
 
@@ -2054,6 +2128,97 @@ def test_unknown_hook_command_preserved_with_manual_review_diagnostic(tmp_path):
     assert diagnostics[0]["result"] == "safe-skip"
     assert diagnostics[0]["reason"] == "manual-review"
     assert diagnostics[0]["command"] == "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+
+
+def test_mixed_unknown_user_global_cleanup_flow_preserves_local_and_global_boundaries(tmp_path):
+    home = tmp_path / "home-mixed"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_user_bytes = user_settings_path.read_bytes()
+    before_user_membership = _settings_commands_by_event(json.loads(before_user_bytes))
+
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "Write",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict",
+                        }
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "project-unknown-hook.sh", "my-user-hook.sh"],
+    )
+    settings_path = project / ".claude" / "settings.local.json"
+    mixed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    mixed_settings.update(
+        {
+            "env": {"GRAN_MAESTRO_TEST": "keep"},
+            "statusLine": {"type": "command", "command": "/usr/local/bin/status-line.sh"},
+            "permissions": {
+                "allow": ["Read", "Bash(git status:*)"],
+                "deny": ["Bash(rm -rf:*)"],
+            },
+        }
+    )
+    settings_path.write_text(json.dumps(mixed_settings, indent=2) + "\n", encoding="utf-8")
+
+    env = {"HOME": str(home)}
+    dry_proc = _run_cleanup(project, "--dry-run", env=env)
+    assert dry_proc.returncode == 0, f"stderr: {dry_proc.stderr}\nstdout: {dry_proc.stdout}"
+    dry_payload = json.loads(dry_proc.stdout)
+
+    apply_proc = _run_cleanup(project, "--dry-run-id", dry_payload["dry_run_id"], env=env)
+    assert apply_proc.returncode == 0, f"stderr: {apply_proc.stderr}\nstdout: {apply_proc.stdout}"
+    apply_payload = json.loads(apply_proc.stdout)
+
+    after_user_bytes = user_settings_path.read_bytes()
+    after_user_membership = _settings_commands_by_event(json.loads(after_user_bytes))
+    assert after_user_bytes == before_user_bytes
+    assert after_user_membership == before_user_membership
+
+    settings = _read_project_settings(project)
+    assert settings["env"] == mixed_settings["env"]
+    assert settings["permissions"] == mixed_settings["permissions"]
+    assert settings["statusLine"] == mixed_settings["statusLine"]
+    assert _commands_for(settings, "Stop") == ["/usr/local/bin/my-custom-stop-hook.sh"]
+    assert _commands_for(settings, "PreToolUse", "Write") == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+    ]
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in settings_path.read_text(encoding="utf-8")
+    assert not (project / ".claude" / "hooks" / "mst-stop-hook.sh").exists()
+    assert (project / ".claude" / "hooks" / "project-unknown-hook.sh").exists()
+
+    dry_unknown = _diagnostics_with_code(dry_payload, "unknown_hook_command")
+    apply_unknown = _diagnostics_with_code(apply_payload, "unknown_hook_command")
+    assert dry_unknown and apply_unknown
+    for diagnostic in (dry_unknown[0], apply_unknown[0]):
+        assert diagnostic["status"] == "diagnostic"
+        assert diagnostic["result"] == "safe-skip"
+        assert diagnostic["reason"] == "manual-review"
+        assert diagnostic["command"] == "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+
+    assert _boundary_item(dry_payload, "legacy_project_local_hook_reinjection")["result"] == "reinjection-absent"
+    assert _boundary_item(apply_payload, "legacy_project_local_hook_reinjection")["result"] == "reinjection-absent"
+    assert _boundary_item(dry_payload, "user_global_hook_preservation")["result"] == "preserved-state"
+    assert _boundary_item(apply_payload, "user_global_hook_preservation")["result"] == "preserved-state"
+    assert dry_payload["plugin_core"]["status"] == "canonical"
+    assert apply_payload["plugin_core"]["status"] == "canonical"
+    assert all(hook["classification"] == "user_global" for hook in dry_payload["user_global"]["hooks"])
+    assert all(hook["classification"] == "user_global" for hook in apply_payload["user_global"]["hooks"])
 
 
 def test_diagnostic_malformed_settings_reports_stable_reason_codes(tmp_path):

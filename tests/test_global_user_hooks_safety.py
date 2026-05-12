@@ -172,6 +172,33 @@ def _plugin_version() -> str:
     return json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
 
 
+def _run_cleanup(
+    project: Path,
+    home: Path,
+    *args: str,
+    cwd: Path | None = None,
+) -> dict:
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "MST_PROJECT_ROOT": str(project)})
+    proc = subprocess.run(
+        MST_CLI + ["on", "cleanup", "--json", *args],
+        cwd=str(cwd or project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def _migration_boundary_item(payload: dict, item_id: str) -> dict:
+    for item in payload.get("migration_boundary", {}).get("items", []):
+        if item.get("id") == item_id:
+            return item
+    raise AssertionError(f"missing migration boundary item: {item_id}")
+
+
 def _write_registered_project(project: Path) -> None:
     (project / ".gran-maestro").mkdir(parents=True, exist_ok=True)
     (project / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
@@ -199,6 +226,41 @@ def _write_registered_project(project: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _write_mixed_local_cleanup_project(project: Path) -> Path:
+    _write_registered_project(project)
+    hooks_dir = project / ".claude" / "hooks"
+    (hooks_dir / "project-unknown-hook.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (hooks_dir / "my-user-hook.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    settings_path = project / ".claude" / "settings.local.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["hooks"]["Stop"][0]["hooks"].append(
+        {
+            "type": "command",
+            "command": "/usr/local/bin/my-custom-stop-hook.sh",
+        }
+    )
+    settings["hooks"]["PreToolUse"] = [
+        {
+            "matcher": "Write",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict",
+                }
+            ],
+        }
+    ]
+    settings["env"] = {"GRAN_MAESTRO_TEST": "keep"}
+    settings["statusLine"] = {"type": "command", "command": "/usr/local/bin/status-line.sh"}
+    settings["permissions"] = {
+        "allow": ["Read", "Bash(git status:*)"],
+        "deny": ["Bash(rm -rf:*)"],
+    }
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return settings_path
 
 
 def _write_cache_install(cache_root: Path, *, version: str, include_registry: bool) -> None:
@@ -444,6 +506,59 @@ def test_cleanup_preserves_mixed_user_global_hooks_and_event_membership(tmp_path
     )
 
 
+@pytest.mark.parametrize("cwd_name", ["project", "home"])
+def test_cleanup_classification_keeps_mixed_user_global_hooks_out_of_plugin_core(cwd_name: str, tmp_path: Path):
+    home = tmp_path / "home"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_commands = _settings_commands_by_event(json.loads(user_settings_path.read_text(encoding="utf-8")))
+
+    project = tmp_path / "project"
+    _write_registered_project(project)
+
+    dry_run_payload = _run_cleanup(
+        project,
+        home,
+        "--dry-run",
+        cwd=project if cwd_name == "project" else home,
+    )
+
+    observed = {
+        (hook["event"], hook["matcher"], hook["command"]): hook
+        for hook in dry_run_payload["user_global"]["hooks"]
+    }
+    for (event, matcher), commands in before_commands.items():
+        for command in commands:
+            assert (event, matcher, command) in observed
+
+    user_global_hooks = dry_run_payload["user_global"]["hooks"]
+    assert user_global_hooks
+    assert all(hook["classification"] == "user_global" for hook in user_global_hooks)
+    assert all(hook["preservation"] == "preserved-state" for hook in user_global_hooks)
+
+    stop_wrapper = observed[("Stop", "", "~/.claude/hooks/mst-stop-hook.sh --global-wrapper")]
+    assert stop_wrapper["known_global"] is False
+    assert stop_wrapper["classification"] == "user_global"
+
+    user_global_commands = {hook["command"] for hook in user_global_hooks}
+    plugin_core_commands = {
+        hook["command"]
+        for hook in dry_run_payload["plugin_core"]["hooks"]
+        if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+    }
+    project_legacy_commands = {
+        hook["command"]
+        for hook in dry_run_payload["project_legacy"]["settings"]["candidates"]
+        if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+    }
+    assert user_global_commands.isdisjoint(plugin_core_commands)
+    assert user_global_commands.isdisjoint(project_legacy_commands)
+
+    preservation = _migration_boundary_item(dry_run_payload, "user_global_hook_preservation")
+    assert preservation["classification"] == "user_global"
+    assert preservation["result"] == "preserved-state"
+    assert preservation["hook_count"] == len(user_global_hooks)
+
+
 @pytest.mark.parametrize("fixture_name", ["manifest_failure", "cache_failure"])
 def test_cleanup_user_global_membership_preserved_across_manifest_and_cache_failures(tmp_path: Path, fixture_name: str):
     home = tmp_path / f"home-{fixture_name}"
@@ -563,3 +678,135 @@ def test_cleanup_unknown_user_global_preserves_mixed_user_global_hooks_on_failur
     assert diagnostics
     assert diagnostics[0]["result"] == "safe-skip"
     assert diagnostics[0]["reason"] == "manual-review"
+
+
+@pytest.mark.parametrize("fixture_name", ["manifest_failure", "cache_failure"])
+def test_cleanup_user_global_classification_survives_diagnostic_paths(tmp_path: Path, fixture_name: str):
+    home = tmp_path / f"home-{fixture_name}"
+    _write_mixed_user_global_settings(home)
+
+    project = tmp_path / f"project-{fixture_name}"
+    project.mkdir()
+    _write_registered_project(project)
+
+    if fixture_name == "manifest_failure":
+        (project / ".claude-plugin").mkdir()
+    else:
+        cache_root = home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+        _write_cache_install(cache_root, version="0.57.6", include_registry=True)
+        _write_cache_install(cache_root, version=_plugin_version(), include_registry=False)
+
+    payload = _run_cleanup(project, home)
+
+    user_global_hooks = payload["user_global"]["hooks"]
+    assert user_global_hooks
+    assert all(hook["classification"] == "user_global" for hook in user_global_hooks)
+    assert all(hook["preservation"] == "preserved-state" for hook in user_global_hooks)
+
+    user_global_commands = {hook["command"] for hook in user_global_hooks}
+    plugin_core_commands = {
+        hook["command"]
+        for hook in payload["plugin_core"]["hooks"]
+        if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+    }
+    project_legacy_commands = {
+        hook["command"]
+        for hook in payload["project_legacy"]["settings"]["candidates"]
+        if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+    }
+    assert user_global_commands.isdisjoint(plugin_core_commands)
+    assert user_global_commands.isdisjoint(project_legacy_commands)
+
+    preservation = _migration_boundary_item(payload, "user_global_hook_preservation")
+    assert preservation["classification"] == "user_global"
+    assert preservation["result"] == "preserved-state"
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_code"),
+    [
+        ("manifest_failure", "missing_plugin_manifest"),
+        ("cache_failure", "cache_sync_failure"),
+    ],
+)
+def test_cleanup_mixed_unknown_user_global_failure_preserves_local_and_global_boundaries(
+    tmp_path: Path,
+    fixture_name: str,
+    expected_code: str,
+):
+    home = tmp_path / f"home-{fixture_name}-mixed"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_user_bytes = user_settings_path.read_bytes()
+    before_user_membership = _settings_commands_by_event(json.loads(before_user_bytes))
+
+    project = tmp_path / f"project-{fixture_name}-mixed"
+    project.mkdir()
+    settings_path = _write_mixed_local_cleanup_project(project)
+    before_local_bytes = settings_path.read_bytes()
+    before_local_settings = json.loads(before_local_bytes)
+
+    if fixture_name == "manifest_failure":
+        (project / ".claude-plugin").mkdir()
+    else:
+        cache_root = home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+        _write_cache_install(cache_root, version=_plugin_version(), include_registry=False)
+
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "MST_PROJECT_ROOT": str(project)})
+    proc = subprocess.run(
+        MST_CLI + ["on", "cleanup", "--json"],
+        cwd=str(project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+
+    after_user_bytes = user_settings_path.read_bytes()
+    after_user_membership = _settings_commands_by_event(json.loads(after_user_bytes))
+    assert after_user_bytes == before_user_bytes
+    assert after_user_membership == before_user_membership
+
+    after_local_bytes = settings_path.read_bytes()
+    after_local_settings = json.loads(after_local_bytes)
+    assert after_local_bytes == before_local_bytes
+    assert after_local_settings["permissions"] == before_local_settings["permissions"]
+    assert after_local_settings["env"] == before_local_settings["env"]
+    assert after_local_settings["statusLine"] == before_local_settings["statusLine"]
+    assert _settings_commands_by_event(after_local_settings) == _settings_commands_by_event(before_local_settings)
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in settings_path.read_text(encoding="utf-8")
+
+    diagnostics = [
+        item
+        for item in payload.get("diagnostics", [])
+        if item.get("code") == "unknown_hook_command"
+    ]
+    assert diagnostics
+    assert diagnostics[0]["status"] == "diagnostic"
+    assert diagnostics[0]["result"] == "safe-skip"
+    assert diagnostics[0]["reason"] == "manual-review"
+    assert expected_code in json.dumps(payload["diagnostics"], ensure_ascii=False)
+    assert _settings_commands_by_event(before_local_settings)[("PreToolUse", "Write")] == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+    ]
+    assert _settings_commands_by_event(after_local_settings)[("Stop", "")] == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+        "/usr/local/bin/my-custom-stop-hook.sh",
+    ]
+
+    legacy_boundary = next(
+        item
+        for item in payload["migration_boundary"]["items"]
+        if item["id"] == "legacy_project_local_hook_reinjection"
+    )
+    user_global_boundary = next(
+        item
+        for item in payload["migration_boundary"]["items"]
+        if item["id"] == "user_global_hook_preservation"
+    )
+    assert legacy_boundary["status"] == "DIAGNOSTIC"
+    assert legacy_boundary["result"] == "safe-skip"
+    assert user_global_boundary["status"] == "PASS"
+    assert user_global_boundary["result"] == "preserved-state"

@@ -893,6 +893,7 @@ def _user_global_inventory(diagnostics: List[dict]) -> dict:
                     "classification": CLASS_USER_GLOBAL,
                     "status": "observed",
                     "reason": "user_global_settings_hook",
+                    "preservation": "preserved-state",
                     "known_global": hook_name in USER_GLOBAL_HOOK_NAMES,
                     "name": hook_name,
                     **item,
