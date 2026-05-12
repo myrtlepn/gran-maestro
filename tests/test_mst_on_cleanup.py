@@ -38,11 +38,19 @@ DOD002_CLASSIFICATIONS = {
     "user_custom",
 }
 DOD002_DIAGNOSTIC_CODES = {
+    "broken_canonical_registration",
+    "cache_sync_failure",
     "malformed_settings",
     "missing_hooks_registry",
+    "missing_plugin_manifest",
     "parse_error",
     "permission_denied",
+    "stale_plugin_cache",
     "unknown_environment",
+    "duplicate_registration",
+    "duplicate_canonical_registration",
+    "duplicate_legacy_registration",
+    "unknown_hook_command",
 }
 DOD010_SCHEMA_VERSION = "mst.on.cleanup.v1"
 DOD010_POST_CHECK_BASE_CHECKS = {
@@ -330,6 +338,141 @@ def _setup_plugin_source_repo(tmp_path: Path) -> Path:
     (legacy_hooks_dir / "mst-stop-hook.sh").write_text("#!/bin/bash\necho legacy-stop\n", encoding="utf-8")
     (legacy_hooks_dir / "mst-session-init.sh").write_text("#!/bin/bash\necho legacy-session\n", encoding="utf-8")
     (legacy_hooks_dir / "my-user-hook.sh").write_text("#!/bin/bash\necho custom\n", encoding="utf-8")
+    return project
+
+
+def _plugin_version() -> str:
+    return json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+
+
+def _setup_missing_manifest_cleanup_fixture(tmp_path: Path) -> tuple[Path, dict]:
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    (project / ".claude-plugin").mkdir()
+    env = _matrix_home_env(tmp_path, include_user_global=False)
+    return project, env
+
+
+def _setup_broken_canonical_cleanup_fixture(tmp_path: Path) -> tuple[Path, dict]:
+    project = _setup_plugin_source_repo(tmp_path)
+    hooks_payload = json.loads((project / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    hooks_payload["hooks"]["Stop"][0]["hooks"][0]["command"] = (
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"
+    )
+    (project / "hooks" / "hooks.json").write_text(
+        json.dumps(hooks_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    env = _matrix_home_env(tmp_path, include_user_global=False)
+    return project, env
+
+
+def _write_cache_install(cache_dir: Path, *, version: str, canonical: bool = True, include_registry: bool = True) -> Path:
+    install_root = cache_dir / version
+    (install_root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    (install_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "mst", "version": version, "hooks": "./hooks/hooks.json"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    hooks_dir = install_root / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    if include_registry:
+        command = (
+            "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"
+            if canonical
+            else "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"
+        )
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "matcher": "",
+                                "hooks": [{"type": "command", "command": command}],
+                            }
+                        ]
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    (hooks_dir / "mst-stop-hook.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    return install_root
+
+
+def _setup_stale_cache_cleanup_fixture(tmp_path: Path) -> tuple[Path, dict, Path]:
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    home = tmp_path / "home-stale-cache"
+    cache_root = home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+    _write_cache_install(cache_root, version="0.57.6")
+    env = {"HOME": str(home)}
+    return project, env, cache_root
+
+
+def _setup_cache_sync_failure_cleanup_fixture(tmp_path: Path) -> tuple[Path, dict, Path]:
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+    home = tmp_path / "home-cache-sync-failure"
+    cache_root = home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+    _write_cache_install(cache_root, version=_plugin_version(), include_registry=False)
+    env = {"HOME": str(home)}
+    return project, env, cache_root
+
+
+def _setup_duplicate_canonical_plugin_source_repo(tmp_path: Path) -> Path:
+    project = _setup_plugin_source_repo(tmp_path)
+    registry_path = project / "hooks" / "hooks.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["hooks"]["Stop"][0]["hooks"].append(
+        {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+        }
+    )
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
     return project
 
 
@@ -1800,6 +1943,119 @@ def test_duplicate_risk_observable_for_plugin_core_and_project_legacy_same_event
     assert "reason" in duplicate_text
 
 
+def test_duplicate_canonical_registration_diagnostic_dedupes_plugin_core_output(tmp_path):
+    project = _setup_duplicate_canonical_plugin_source_repo(tmp_path)
+
+    payload = _run_cleanup_dry_run_json(project, source_repo=True)
+
+    stop_commands = [
+        hook["command"]
+        for hook in payload["plugin_core"]["hooks"]
+        if hook.get("event") == "Stop"
+    ]
+    assert stop_commands == ["${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"]
+    diagnostics = _diagnostics_with_code(payload, "duplicate_canonical_registration")
+    assert diagnostics
+    assert diagnostics[0]["result"] in {"diagnostic", "safe-skip"}
+    assert diagnostics[0]["status"] == "diagnostic"
+    duplicate_sources = diagnostics[0].get("duplicate_sources")
+    assert isinstance(duplicate_sources, list) and len(duplicate_sources) >= 2
+    assert any("hooks/hooks.json" in source for source in duplicate_sources)
+
+
+def test_duplicate_legacy_registration_diagnostic_dedupes_candidate_output(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ]
+        },
+        hook_files=["mst-stop-hook.sh", "my-user-hook.sh"],
+    )
+
+    payload = _run_cleanup_dry_run_json(project)
+
+    assert payload["settings"]["removed"] == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"
+    ]
+    diagnostics = _diagnostics_with_code(payload, "duplicate_legacy_registration")
+    assert diagnostics
+    assert diagnostics[0]["status"] == "diagnostic"
+    assert diagnostics[0]["result"] == "safe-skip"
+    duplicate_sources = diagnostics[0].get("duplicate_sources")
+    assert isinstance(duplicate_sources, list) and len(duplicate_sources) == 2
+    assert all("settings.local.json" in source for source in duplicate_sources)
+
+
+def test_unknown_hook_command_preserved_with_manual_review_diagnostic(tmp_path):
+    project = _setup_registered_project(
+        tmp_path,
+        settings_hooks={
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh"},
+                        {"type": "command", "command": "/usr/local/bin/my-custom-stop-hook.sh"},
+                    ],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "Write",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict",
+                        }
+                    ],
+                }
+            ],
+        },
+        hook_files=["mst-stop-hook.sh", "project-unknown-hook.sh", "my-user-hook.sh"],
+    )
+    settings_path = project / ".claude" / "settings.local.json"
+    mixed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    mixed_settings.update(
+        {
+            "env": {"GRAN_MAESTRO_TEST": "keep"},
+            "statusLine": {"type": "command", "command": "/usr/local/bin/status-line.sh"},
+            "permissions": {
+                "allow": ["Read", "Bash(git status:*)"],
+                "deny": ["Bash(rm -rf:*)"],
+            },
+        }
+    )
+    settings_path.write_text(json.dumps(mixed_settings, indent=2) + "\n", encoding="utf-8")
+
+    payload = _run_cleanup_apply_json(project)
+    settings = _read_project_settings(project)
+
+    assert payload["status"] == "ok"
+    assert settings["env"] == mixed_settings["env"]
+    assert settings["permissions"] == mixed_settings["permissions"]
+    assert settings["statusLine"] == mixed_settings["statusLine"]
+    assert _commands_for(settings, "Stop") == ["/usr/local/bin/my-custom-stop-hook.sh"]
+    assert _commands_for(settings, "PreToolUse", "Write") == [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+    ]
+    assert (project / ".claude" / "hooks" / "project-unknown-hook.sh").exists()
+    diagnostics = _diagnostics_with_code(payload, "unknown_hook_command")
+    assert diagnostics
+    assert diagnostics[0]["status"] == "diagnostic"
+    assert diagnostics[0]["result"] == "safe-skip"
+    assert diagnostics[0]["reason"] == "manual-review"
+    assert diagnostics[0]["command"] == "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict"
+
+
 def test_diagnostic_malformed_settings_reports_stable_reason_codes(tmp_path):
     project = _setup_registered_project(tmp_path, settings_hooks={}, hook_files=[])
     settings_path = project / ".claude" / "settings.local.json"
@@ -1856,12 +2112,101 @@ def test_diagnostic_unknown_environment_reports_stable_reason_code(tmp_path):
 
 def test_diagnostic_reason_code_enum_is_locked() -> None:
     assert DOD002_DIAGNOSTIC_CODES == {
+        "broken_canonical_registration",
+        "cache_sync_failure",
         "malformed_settings",
         "missing_hooks_registry",
+        "missing_plugin_manifest",
         "parse_error",
         "permission_denied",
+        "stale_plugin_cache",
         "unknown_environment",
+        "duplicate_registration",
+        "duplicate_canonical_registration",
+        "duplicate_legacy_registration",
+        "unknown_hook_command",
     }
+
+
+def test_cleanup_missing_manifest_failure_preserves_state_without_reinjection(tmp_path):
+    project, env = _setup_missing_manifest_cleanup_fixture(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_dry_run_json(project, env=env)
+
+    assert payload["status"] == "diagnostic"
+    assert "missing_plugin_manifest" in _diagnostic_codes(payload)
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["targets"] == []
+    assert _boundary_item(payload, "legacy_project_local_hook_reinjection")["status"] == "DIAGNOSTIC"
+    assert _read_bytes_by_path(watched_paths) == before
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in watched_paths[0].read_text(encoding="utf-8")
+
+
+def test_cleanup_broken_canonical_registration_failure_preserves_state_without_reinjection(tmp_path):
+    project, env = _setup_broken_canonical_cleanup_fixture(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / "hooks" / "hooks.json",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_dry_run_json(project, env=env, source_repo=True)
+
+    assert payload["status"] == "diagnostic"
+    assert "broken_canonical_registration" in _diagnostic_codes(payload)
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["targets"] == []
+    assert _boundary_item(payload, "canonical_plugin_registration")["status"] == "DIAGNOSTIC"
+    assert _read_bytes_by_path(watched_paths) == before
+
+
+def test_cleanup_stale_cache_failure_preserves_state_without_reinjection(tmp_path):
+    project, env, cache_root = _setup_stale_cache_cleanup_fixture(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+        cache_root / "0.57.6" / ".claude-plugin" / "plugin.json",
+        cache_root / "0.57.6" / "hooks" / "hooks.json",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_apply_without_dry_run_json(project, env=env)
+
+    assert payload["status"] in {"blocked", "diagnostic"}
+    assert "stale_plugin_cache" in _diagnostic_codes(payload)
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["deleted"] == []
+    assert _read_bytes_by_path(watched_paths) == before
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in watched_paths[0].read_text(encoding="utf-8")
+
+
+def test_cleanup_cache_sync_failure_preserves_state_without_reinjection(tmp_path):
+    project, env, cache_root = _setup_cache_sync_failure_cleanup_fixture(tmp_path)
+    watched_paths = [
+        project / ".claude" / "settings.local.json",
+        project / ".claude" / "hooks" / "mst-stop-hook.sh",
+        project / ".claude" / "hooks" / "my-user-hook.sh",
+        cache_root / _plugin_version() / ".claude-plugin" / "plugin.json",
+        cache_root / _plugin_version() / "hooks" / "mst-stop-hook.sh",
+    ]
+    before = _read_bytes_by_path(watched_paths)
+
+    payload = _run_cleanup_apply_without_dry_run_json(project, env=env)
+
+    assert payload["status"] in {"blocked", "diagnostic"}
+    assert "cache_sync_failure" in _diagnostic_codes(payload)
+    assert payload["settings"]["removed"] == []
+    assert payload["files"]["deleted"] == []
+    assert _read_bytes_by_path(watched_paths) == before
+    assert "${CLAUDE_PLUGIN_ROOT}/hooks/" not in watched_paths[0].read_text(encoding="utf-8")
 
 
 def test_plugin_source_repo_skipped(tmp_path):

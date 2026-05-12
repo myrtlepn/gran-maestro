@@ -29,6 +29,10 @@ MST_HOOK_COMMAND_RE = re.compile(
     r"(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]+\))/\.claude/hooks/"
     r"mst-(stop-hook|session-init|pre-tool-use|auto-chain-context)\.sh"
 )
+PROJECT_LOCAL_HOOK_COMMAND_RE = re.compile(
+    r"(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]+\))/\.claude/hooks/"
+    r"(?P<name>[^/\s\"']+)"
+)
 
 MST_HOOK_FILES = [
     "mst-stop-hook.sh",
@@ -52,15 +56,31 @@ HOOK_CLASSIFICATIONS = (
 
 DIAGNOSTIC_MALFORMED_SETTINGS = "malformed_settings"
 DIAGNOSTIC_MISSING_HOOKS_REGISTRY = "missing_hooks_registry"
+DIAGNOSTIC_MISSING_PLUGIN_MANIFEST = "missing_plugin_manifest"
+DIAGNOSTIC_BROKEN_CANONICAL_REGISTRATION = "broken_canonical_registration"
 DIAGNOSTIC_PARSE_ERROR = "parse_error"
 DIAGNOSTIC_PERMISSION_DENIED = "permission_denied"
+DIAGNOSTIC_STALE_PLUGIN_CACHE = "stale_plugin_cache"
+DIAGNOSTIC_CACHE_SYNC_FAILURE = "cache_sync_failure"
 DIAGNOSTIC_UNKNOWN_ENVIRONMENT = "unknown_environment"
+DIAGNOSTIC_DUPLICATE_REGISTRATION = "duplicate_registration"
+DIAGNOSTIC_DUPLICATE_CANONICAL_REGISTRATION = "duplicate_canonical_registration"
+DIAGNOSTIC_DUPLICATE_LEGACY_REGISTRATION = "duplicate_legacy_registration"
+DIAGNOSTIC_UNKNOWN_HOOK_COMMAND = "unknown_hook_command"
 DIAGNOSTIC_REASON_CODES = (
+    DIAGNOSTIC_BROKEN_CANONICAL_REGISTRATION,
+    DIAGNOSTIC_CACHE_SYNC_FAILURE,
     DIAGNOSTIC_MALFORMED_SETTINGS,
     DIAGNOSTIC_MISSING_HOOKS_REGISTRY,
+    DIAGNOSTIC_MISSING_PLUGIN_MANIFEST,
     DIAGNOSTIC_PARSE_ERROR,
     DIAGNOSTIC_PERMISSION_DENIED,
+    DIAGNOSTIC_STALE_PLUGIN_CACHE,
     DIAGNOSTIC_UNKNOWN_ENVIRONMENT,
+    DIAGNOSTIC_DUPLICATE_REGISTRATION,
+    DIAGNOSTIC_DUPLICATE_CANONICAL_REGISTRATION,
+    DIAGNOSTIC_DUPLICATE_LEGACY_REGISTRATION,
+    DIAGNOSTIC_UNKNOWN_HOOK_COMMAND,
 )
 
 MST_HOOK_FILE_EVENTS = {
@@ -103,13 +123,16 @@ def _diagnostic(
     message: str,
     path: Optional[Path] = None,
     *,
+    reason_code: Optional[str] = None,
+    reason: Optional[str] = None,
     result: Optional[str] = None,
     status: Optional[str] = None,
+    **extra,
 ) -> dict:
     item = {
         "code": code,
-        "reason_code": code,
-        "reason": code,
+        "reason_code": reason_code or code,
+        "reason": reason or reason_code or code,
         "message": message,
     }
     if path is not None:
@@ -119,6 +142,9 @@ def _diagnostic(
         item["outcome"] = result
     if status is not None:
         item["status"] = status
+    for key, value in extra.items():
+        if value is not None:
+            item[key] = value
     return item
 
 
@@ -190,6 +216,10 @@ def _command_hook_name(command: str) -> str:
     return Path(command.strip().split()[0]).name if command.strip() else ""
 
 
+def _is_canonical_plugin_command(command: str) -> bool:
+    return command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+
+
 def _shell_tokens(command: str) -> list[str]:
     try:
         return shlex.split(command, posix=True)
@@ -209,6 +239,20 @@ def _is_project_legacy_mst_hook_command(command: str, project_root: Path) -> boo
         if token.strip("\"'") in legacy_paths:
             return True
     return False
+
+
+def _project_local_hook_name(command: str, project_root: Path) -> Optional[str]:
+    match = PROJECT_LOCAL_HOOK_COMMAND_RE.search(command)
+    if match:
+        return match.group("name")
+
+    hooks_dir = str((project_root / ".claude" / "hooks").resolve(strict=False))
+    prefix = hooks_dir + os.sep
+    for token in _shell_tokens(command):
+        stripped = token.strip("\"'")
+        if stripped.startswith(prefix):
+            return Path(stripped).name
+    return None
 
 
 def _acquire_lock(lock_path: Path) -> bool:
@@ -248,6 +292,7 @@ def _filter_hooks_block(hooks: dict, project_root: Optional[Path] = None) -> Tup
     if project_root is None:
         project_root = _project_root()
     removed: List[str] = []
+    removed_seen: set[str] = set()
     if not isinstance(hooks, dict):
         return {}, removed
     new_hooks: Dict[str, list] = {}
@@ -268,7 +313,9 @@ def _filter_hooks_block(hooks: dict, project_root: Optional[Path] = None) -> Tup
             for h in inner:
                 cmd = h.get("command", "") if isinstance(h, dict) else ""
                 if isinstance(cmd, str) and _is_project_legacy_mst_hook_command(cmd, project_root):
-                    removed.append(cmd)
+                    if cmd not in removed_seen:
+                        removed.append(cmd)
+                        removed_seen.add(cmd)
                     continue
                 kept_inner.append(h)
             if kept_inner:
@@ -429,7 +476,7 @@ def _classify_environment(project_root: Path, diagnostics: List[dict], *, source
 
 
 def _plugin_inventory_root(project_root: Path) -> Path:
-    if (project_root / ".claude-plugin" / "plugin.json").exists():
+    if (project_root / ".claude-plugin").exists():
         return project_root
     return _common._plugin_root()
 
@@ -446,6 +493,17 @@ def _plugin_core_inventory(project_root: Path, diagnostics: List[dict]) -> dict:
         "registry": None,
         "hooks": hooks,
     }
+
+    if not manifest_path.exists():
+        result["status"] = "missing_manifest"
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_MISSING_PLUGIN_MANIFEST,
+                "plugin manifest not found",
+                manifest_path,
+            )
+        )
+        return result
 
     manifest = _read_json_diagnostic(manifest_path, diagnostics)
     if not isinstance(manifest, dict):
@@ -477,28 +535,37 @@ def _plugin_core_inventory(project_root: Path, diagnostics: List[dict]) -> dict:
         diagnostics.append(_diagnostic(DIAGNOSTIC_PARSE_ERROR, "plugin hook registry has no hooks object", registry_path))
         return result
 
+    duplicate_sources: Dict[Tuple[str, str, str], List[str]] = {}
     for event, entries in registry_hooks.items():
         if not isinstance(entries, list):
             continue
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             if not isinstance(entry, dict):
                 continue
             matcher = entry.get("matcher", "")
             inner = entry.get("hooks", [])
             if not isinstance(inner, list):
                 continue
-            for hook in inner:
+            for hook_index, hook in enumerate(inner):
                 if not isinstance(hook, dict):
                     continue
                 command = hook.get("command")
                 if not isinstance(command, str):
+                    continue
+                dedupe_key = (str(event), matcher if isinstance(matcher, str) else "", command)
+                source_ref = (
+                    f"{registry_path}::event={event}::matcher={matcher if isinstance(matcher, str) else ''}"
+                    f"::entry={entry_index}::hook={hook_index}"
+                )
+                duplicate_sources.setdefault(dedupe_key, []).append(source_ref)
+                if len(duplicate_sources[dedupe_key]) > 1:
                     continue
                 hook_name = _command_hook_name(command)
                 expected_path = plugin_root / "hooks" / hook_name if hook_name else None
                 hooks.append(
                     {
                         "classification": CLASS_PLUGIN_CORE,
-                        "status": "canonical" if command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/") else "observed",
+                        "status": "canonical" if _is_canonical_plugin_command(command) else "observed",
                         "event": str(event),
                         "matcher": matcher if isinstance(matcher, str) else "",
                         "command": command,
@@ -506,8 +573,162 @@ def _plugin_core_inventory(project_root: Path, diagnostics: List[dict]) -> dict:
                     }
                 )
 
+    if hooks and any(not _is_canonical_plugin_command(item.get("command", "")) for item in hooks):
+        result["status"] = "broken_canonical"
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_BROKEN_CANONICAL_REGISTRATION,
+                "plugin hook registry contains non-canonical commands",
+                registry_path,
+            )
+        )
+        return result
+
     result["status"] = "canonical" if hooks else "empty"
+    for (event, matcher, command), sources in duplicate_sources.items():
+        if len(sources) < 2:
+            continue
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_DUPLICATE_CANONICAL_REGISTRATION,
+                "duplicate canonical plugin registration observed; inventory output was deduplicated",
+                registry_path,
+                reason_code=DIAGNOSTIC_DUPLICATE_REGISTRATION,
+                reason=DIAGNOSTIC_DUPLICATE_REGISTRATION,
+                result="diagnostic",
+                status="diagnostic",
+                event=event,
+                matcher=matcher,
+                command=command,
+                duplicate_sources=sources,
+            )
+        )
     return result
+
+
+def _plugin_cache_root() -> Path:
+    return Path.home() / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+
+
+def _plugin_cache_inventory_diagnostics(diagnostics: List[dict]) -> None:
+    cache_root = _plugin_cache_root()
+    if not cache_root.exists():
+        return
+
+    try:
+        installs = sorted(path for path in cache_root.iterdir() if path.is_dir())
+    except OSError as exc:
+        diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), cache_root))
+        return
+
+    if not installs:
+        return
+
+    manifest_path = _common._plugin_root() / ".claude-plugin" / "plugin.json"
+    manifest = _read_json_diagnostic(manifest_path, diagnostics)
+    if not isinstance(manifest, dict):
+        return
+
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version.strip():
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache sync cannot resolve active plugin version",
+                manifest_path,
+            )
+        )
+        return
+    version = version.strip()
+
+    current_install = cache_root / version
+    if not current_install.exists():
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_STALE_PLUGIN_CACHE,
+                f"plugin cache does not contain active version {version}",
+                cache_root,
+            )
+        )
+        return
+
+    current_manifest_path = current_install / ".claude-plugin" / "plugin.json"
+    if not current_manifest_path.exists():
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache manifest is missing",
+                current_manifest_path,
+            )
+        )
+        return
+
+    current_manifest = _read_json_diagnostic(current_manifest_path, diagnostics)
+    if not isinstance(current_manifest, dict):
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache manifest is invalid",
+                current_manifest_path,
+            )
+        )
+        return
+
+    registry_ref = current_manifest.get("hooks")
+    registry_path = (
+        current_install / registry_ref
+        if isinstance(registry_ref, str)
+        else current_install / "hooks" / "hooks.json"
+    )
+    if not registry_path.exists():
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache hooks registry is missing",
+                registry_path,
+            )
+        )
+        return
+
+    registry = _read_json_diagnostic(registry_path, diagnostics)
+    if not isinstance(registry, dict):
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache hooks registry is invalid",
+                registry_path,
+            )
+        )
+        return
+
+    registry_hooks = registry.get("hooks")
+    if not isinstance(registry_hooks, dict):
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache hooks registry has no hooks object",
+                registry_path,
+            )
+        )
+        return
+
+    commands = [
+        hook.get("command")
+        for entries in registry_hooks.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict)
+        for hook in entry.get("hooks", [])
+        if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+    ]
+    if commands and any(not _is_canonical_plugin_command(command) for command in commands):
+        diagnostics.append(
+            _diagnostic(
+                DIAGNOSTIC_CACHE_SYNC_FAILURE,
+                "plugin cache hooks registry contains non-canonical commands",
+                registry_path,
+            )
+        )
 
 
 def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[dict]) -> tuple[dict, dict]:
@@ -538,6 +759,7 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
         except OSError as exc:
             diagnostics.append(_diagnostic(DIAGNOSTIC_PERMISSION_DENIED, str(exc), settings_path))
     if isinstance(settings, dict):
+        legacy_settings_duplicates: Dict[Tuple[str, str, str], List[str]] = {}
         hooks_value = settings.get("hooks")
         if "hooks" in settings and not isinstance(hooks_value, dict):
             diagnostics.append(
@@ -548,9 +770,16 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
                 )
             )
         else:
-            for item in _iter_settings_hook_commands(settings) or []:
+            for index, item in enumerate(_iter_settings_hook_commands(settings) or []):
                 command = item["command"]
                 if _is_project_legacy_mst_hook_command(command, project_root):
+                    dedupe_key = (item["event"], item["matcher"], command)
+                    source_ref = (
+                        f"{settings_path}::event={item['event']}::matcher={item['matcher']}::hook={index}"
+                    )
+                    legacy_settings_duplicates.setdefault(dedupe_key, []).append(source_ref)
+                    if len(legacy_settings_duplicates[dedupe_key]) > 1:
+                        continue
                     project_legacy["settings"]["candidates"].append(
                         {
                             "classification": CLASS_PROJECT_LEGACY,
@@ -560,14 +789,54 @@ def _project_legacy_and_custom_inventory(project_root: Path, diagnostics: List[d
                         }
                     )
                 else:
+                    hook_name = _project_local_hook_name(command, project_root)
                     user_custom["settings"].append(
                         {
                             "classification": CLASS_USER_CUSTOM,
                             "status": "preserved",
-                            "reason": "user_custom_settings_hook",
+                            "reason": (
+                                "unknown_project_local_hook_command"
+                                if hook_name
+                                else "user_custom_settings_hook"
+                            ),
+                            "project_local": bool(hook_name),
+                            "hook_name": hook_name,
                             **item,
                         }
                     )
+                    if hook_name:
+                        diagnostics.append(
+                            _diagnostic(
+                                DIAGNOSTIC_UNKNOWN_HOOK_COMMAND,
+                                "unknown project-local hook command preserved for manual review",
+                                settings_path,
+                                reason="manual-review",
+                                result="safe-skip",
+                                status="diagnostic",
+                                event=item["event"],
+                                matcher=item["matcher"],
+                                command=command,
+                                hook_name=hook_name,
+                            )
+                        )
+            for (event, matcher, command), sources in legacy_settings_duplicates.items():
+                if len(sources) < 2:
+                    continue
+                diagnostics.append(
+                    _diagnostic(
+                        DIAGNOSTIC_DUPLICATE_LEGACY_REGISTRATION,
+                        "duplicate legacy settings registration observed; cleanup candidates were deduplicated",
+                        settings_path,
+                        reason_code=DIAGNOSTIC_DUPLICATE_REGISTRATION,
+                        reason=DIAGNOSTIC_DUPLICATE_REGISTRATION,
+                        result="safe-skip",
+                        status="diagnostic",
+                        event=event,
+                        matcher=matcher,
+                        command=command,
+                        duplicate_sources=sources,
+                    )
+                )
     elif settings_path.exists() and not any(d.get("path") == str(settings_path) for d in diagnostics):
         diagnostics.append(_diagnostic(DIAGNOSTIC_MALFORMED_SETTINGS, "settings.local.json is not a JSON object", settings_path))
 
@@ -683,6 +952,7 @@ def _build_cleanup_inventory(
     plugin_core = _plugin_core_inventory(project_root, diagnostics)
     project_legacy, user_custom = _project_legacy_and_custom_inventory(project_root, diagnostics)
     user_global = _user_global_inventory(diagnostics)
+    _plugin_cache_inventory_diagnostics(diagnostics)
     if environment.get("source_repo") and not source_repo_opt_in:
         _mark_source_dev_project_legacy(project_legacy)
 
@@ -717,7 +987,16 @@ def _diagnostics_block_mutation(project_root: Path, inventory: dict) -> bool:
     environment = inventory.get("environment", {})
     if environment.get("project_kind") == "unknown" or environment.get("unknown_environment_reasons"):
         return True
-    return _settings_diagnostics_block_mutation(project_root, inventory.get("diagnostics", []))
+    diagnostics = inventory.get("diagnostics", [])
+    blocking_codes = {
+        DIAGNOSTIC_BROKEN_CANONICAL_REGISTRATION,
+        DIAGNOSTIC_CACHE_SYNC_FAILURE,
+        DIAGNOSTIC_MISSING_PLUGIN_MANIFEST,
+        DIAGNOSTIC_STALE_PLUGIN_CACHE,
+    }
+    if any(isinstance(item, dict) and item.get("code") in blocking_codes for item in diagnostics):
+        return True
+    return _settings_diagnostics_block_mutation(project_root, diagnostics)
 
 
 def _candidate_set(settings_removed: List[str], file_targets: List[str], project_root: Path) -> List[dict]:
@@ -879,7 +1158,7 @@ def _migration_boundary_items(inventory: dict) -> List[dict]:
         if isinstance(item, dict) and isinstance(item.get("command"), str)
     ]
     canonical = plugin_core.get("status") in {"canonical", "empty"} and all(
-        command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+        _is_canonical_plugin_command(command)
         for command in plugin_commands
     )
     if canonical:
@@ -936,7 +1215,7 @@ def _migration_boundary_items(inventory: dict) -> List[dict]:
             "manifest": plugin_core.get("manifest"),
             "registry": plugin_core.get("registry"),
             "canonical_command_count": len(
-                [command for command in plugin_commands if command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")]
+                [command for command in plugin_commands if _is_canonical_plugin_command(command)]
             ),
             "command_prefix": "${CLAUDE_PLUGIN_ROOT}/hooks/",
         },
@@ -1099,7 +1378,7 @@ def _post_check_with_context(
         if isinstance(item, dict) and isinstance(item.get("command"), str)
     ]
     plugin_core_canonical = all(
-        command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/")
+        _is_canonical_plugin_command(command)
         for command in plugin_core_commands
     )
     user_custom_preserved = (

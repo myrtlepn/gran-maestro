@@ -168,6 +168,74 @@ def _payload(cwd: Path | None = None, tool_name: str = CODEX_TOOL) -> str:
     return json.dumps(payload)
 
 
+def _plugin_version() -> str:
+    return json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+
+
+def _write_registered_project(project: Path) -> None:
+    (project / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    (project / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+    (project / ".claude" / "hooks" / "mst-stop-hook.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (project / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": ["Read"]},
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_cache_install(cache_root: Path, *, version: str, include_registry: bool) -> None:
+    install_root = cache_root / version
+    (install_root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    (install_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "mst", "version": version, "hooks": "./hooks/hooks.json"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    hooks_dir = install_root / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    if include_registry:
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    (hooks_dir / "mst-stop-hook.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+
 def test_maestro_guard_malformed_or_empty_stdin_passes(global_scripts: dict[str, Path]):
     script = global_scripts["maestro-guard.sh"]
 
@@ -374,3 +442,124 @@ def test_cleanup_preserves_mixed_user_global_hooks_and_event_membership(tmp_path
         hook["classification"] == "user_global"
         for hook in dry_run_payload["user_global"]["hooks"]
     )
+
+
+@pytest.mark.parametrize("fixture_name", ["manifest_failure", "cache_failure"])
+def test_cleanup_user_global_membership_preserved_across_manifest_and_cache_failures(tmp_path: Path, fixture_name: str):
+    home = tmp_path / f"home-{fixture_name}"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_bytes = user_settings_path.read_bytes()
+    before_commands = _settings_commands_by_event(json.loads(before_bytes))
+
+    project = tmp_path / f"project-{fixture_name}"
+    project.mkdir()
+    _write_registered_project(project)
+
+    if fixture_name == "manifest_failure":
+        (project / ".claude-plugin").mkdir()
+    else:
+        cache_root = home / ".claude" / "plugins" / "cache" / "gran-maestro" / "mst"
+        _write_cache_install(cache_root, version="0.57.6", include_registry=True)
+        _write_cache_install(cache_root, version=_plugin_version(), include_registry=False)
+
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "MST_PROJECT_ROOT": str(project)})
+    proc = subprocess.run(
+        MST_CLI + ["on", "cleanup", "--json"],
+        cwd=str(project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+
+    after_bytes = user_settings_path.read_bytes()
+    after_commands = _settings_commands_by_event(json.loads(after_bytes))
+    assert after_bytes == before_bytes
+    assert after_commands == before_commands
+    if fixture_name == "manifest_failure":
+        assert "missing_plugin_manifest" in json.dumps(payload["diagnostics"], ensure_ascii=False)
+    else:
+        assert "cache_sync_failure" in json.dumps(payload["diagnostics"], ensure_ascii=False)
+
+
+def test_cleanup_unknown_user_global_preserves_mixed_user_global_hooks_on_failure_path(tmp_path: Path):
+    home = tmp_path / "home"
+    user_settings_path = _write_mixed_user_global_settings(home)
+    before_bytes = user_settings_path.read_bytes()
+    before_commands = _settings_commands_by_event(json.loads(before_bytes))
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".gran-maestro").mkdir()
+    (project / ".claude" / "hooks").mkdir(parents=True)
+    (project / ".claude" / "hooks" / "mst-stop-hook.sh").write_text(
+        "#!/bin/sh\nexit 0\n",
+        encoding="utf-8",
+    )
+    (project / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": ["Read"]},
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/mst-stop-hook.sh",
+                                }
+                            ],
+                        }
+                    ],
+                    "PreToolUse": [
+                        {
+                            "matcher": "Write",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/project-unknown-hook.sh --mode strict",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project / ".claude" / "hooks" / "project-unknown-hook.sh").write_text(
+        "#!/bin/sh\nexit 0\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"HOME": str(home), "MST_PROJECT_ROOT": str(project)})
+    dry_run = subprocess.run(
+        MST_CLI + ["on", "cleanup", "--json", "--dry-run"],
+        cwd=str(project),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=15,
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_run_payload = json.loads(dry_run.stdout)
+
+    after_bytes = user_settings_path.read_bytes()
+    after_commands = _settings_commands_by_event(json.loads(after_bytes))
+    assert after_bytes == before_bytes
+    assert after_commands == before_commands
+    diagnostics = [
+        item
+        for item in dry_run_payload.get("diagnostics", [])
+        if item.get("code") == "unknown_hook_command"
+    ]
+    assert diagnostics
+    assert diagnostics[0]["result"] == "safe-skip"
+    assert diagnostics[0]["reason"] == "manual-review"

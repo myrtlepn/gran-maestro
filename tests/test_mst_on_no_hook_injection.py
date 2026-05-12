@@ -463,3 +463,14 @@ def test_hooks_json_unchanged():
                 )
                 assert "$CLAUDE_PROJECT_DIR/.claude/hooks" not in cmd
                 assert ".claude/hooks" not in cmd
+
+
+def test_no_hook_injection_contract_keeps_unknown_or_mixed_project_hooks_non_canonical():
+    """/mst:on 문서는 unknown/mixed project hook을 canonical runtime으로 승격하지 않아야 한다."""
+    text = _skill_text()
+    required = [
+        r"settings\.local\.json`의 `hooks` 블록도 MST core canonical runtime으로 변경하지 않습니다",
+        r"project-local `\.claude/hooks/mst-\*\.sh`.*cleanup·diagnostic 대상",
+    ]
+    for pattern in required:
+        assert re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL), pattern
