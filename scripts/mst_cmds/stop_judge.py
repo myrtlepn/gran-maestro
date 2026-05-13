@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from scripts import _flow_logger
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import session as session_cmds
 
@@ -39,6 +41,28 @@ TEXT_QUESTION_PATTERNS = (
     "자연스럽게 쉬고",
     "자연스럽게 끊고",
     "멈추고 잠시",
+)
+SELF_PAUSE_RE = re.compile(
+    r"stash[^\x00-\x1f\x7f]{0,20}squash[^\x00-\x1f\x7f]{0,20}부담"
+    r"|반복\s*stash"
+    r"|paused로\s*전환"
+    r"|명시적으로\s*paused"
+    r"|Sprint[^\x00-\x1f\x7f]{0,40}paused[^\x00-\x1f\x7f]{0,20}boundary"
+    r"|sprint\s*[0-9]+\s*boundary"
+    r"|새\s*세션에서[^\n]*재개"
+    r"|--resume[^\n]{0,30}재개\s*권장"
+    r"|추천\s*경로[^\n]{0,30}재개\s*시점"
+    r"|사용자\s*검토에\s*자연스러운\s*지점"
+    r"|자연스러운\s*검토\s*지점"
+    r"|wakeup\s*사이클"
+    r"|wakeup\s*cycle"
+    r"|\d+\s*분\s*(뒤|후)[^.]*재개"
+    r"|다음\s*(사이클|턴)[^.]*재개"
+    r"|자동\s*(재개|재진입)"
+    r"|wakeup\s*(을|를)\s*(사용|호출)"
+    r"|ScheduleWakeup\s*(을|를)"
+    r"|wakeup\s*차단[^.]*(종료|마무리|다음\s*세션)",
+    re.IGNORECASE,
 )
 LEGITIMATE_STOP_REASONS = {"unrecoverable_external_failure", "fatal_user_judgment_required"}
 
@@ -156,6 +180,28 @@ def _snapshot_progress(snapshot: Mapping[str, Any] | None) -> tuple[bool, str, i
     if isinstance(current, int) and isinstance(total, int) and current < total and status != "committed":
         return True, skill, current, total, status
     return False, skill, current if isinstance(current, int) else None, total if isinstance(total, int) else None, status
+
+
+MST_BARE_SNAPSHOT_SKILLS = {
+    "accept",
+    "agile",
+    "approve",
+    "claude",
+    "codex",
+    "debug",
+    "discussion",
+    "feedback",
+    "gemini",
+    "ideation",
+    "plan",
+    "request",
+    "review",
+    "stitch",
+}
+
+
+def _is_mst_snapshot_skill(skill: str) -> bool:
+    return skill.startswith("mst:") or skill.startswith("agile-") or skill in MST_BARE_SNAPSHOT_SKILLS
 
 
 def _queued_next_action(payload: Mapping[str, Any], state_payload: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -384,6 +430,13 @@ def collect_stop_judge_context(
     snapshot_present = snapshot_path.is_file()
     context["diagnostics"]["snapshot_present"] = snapshot_present
     context["diagnostics"]["snapshot_session_id"] = snapshot_session_id
+    context["diagnostics"]["snapshot_path"] = str(snapshot_path)
+    context["diagnostics"]["stdin_digest"] = hashlib.sha256(raw_stdin.encode("utf-8", errors="replace")).hexdigest()
+    if snapshot_present:
+        try:
+            context["diagnostics"]["snapshot_digest"] = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+        except OSError:
+            context["diagnostics"]["snapshot_digest"] = ""
     if snapshot_error:
         context["diagnostics"]["snapshot_error"] = snapshot_error
     if snapshot_payload and canonical_session_id:
@@ -423,15 +476,18 @@ def collect_stop_judge_context(
 
     return_to = _extract_return_to(payload_dict, raw_stdin, snapshot_payload)
     snapshot_in_progress, snapshot_skill, snapshot_current, snapshot_total, snapshot_status = _snapshot_progress(snapshot_payload)
-    if return_to:
+    mst_snapshot_skill = _is_mst_snapshot_skill(snapshot_skill)
+    if snapshot_present and snapshot_payload and snapshot_skill and not mst_snapshot_skill:
+        context["signals"]["snapshot_non_mst_skill"] = snapshot_skill
+    elif return_to:
         context["signals"]["return_to"] = return_to
-    if snapshot_in_progress:
+    elif snapshot_in_progress:
         context["signals"]["snapshot_in_progress"] = {
             "skill": snapshot_skill,
             "current": snapshot_current,
             "total": snapshot_total,
         }
-    if snapshot_present and snapshot_payload and not snapshot_in_progress and not return_to:
+    elif snapshot_present and snapshot_payload:
         context["signals"]["snapshot_terminal_or_unhandled"] = {
             "current": snapshot_current,
             "total": snapshot_total,
@@ -565,10 +621,15 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
     queued_for_message = signals.get("queued_next_action")
     next_action_auto = isinstance(queued_for_message, Mapping) and queued_for_message.get("auto") is True
     steering_forces_block = agile_auto is True or next_action_auto or diagnostics.get("steering_disabled") is True
-    if (signals.get("workflow_active") or signals.get("agile_loop_active")) and active_agile and steering_forces_block and _message_has_text_question_pattern(message):
-        reason = "[SELF-PAUSE-DETECTED] text-based question patterns are blocked."
-        reason += " AUTO_MODE=true or STEERING_DISABLED=true"
-        return _decision("block", reason, diagnostics=diagnostics, side_effects=side_effects)
+    if (signals.get("workflow_active") or signals.get("agile_loop_active")) and active_agile and steering_forces_block:
+        if SELF_PAUSE_RE.search(message):
+            reason = "[CRITICAL][SELF-PAUSE-DETECTED] self-pause rationalization patterns are blocked."
+            reason += " Do not stop or hand off; continue the active sprint loop."
+            return _decision("block", reason, diagnostics=diagnostics, side_effects=side_effects)
+        if _message_has_text_question_pattern(message):
+            reason = "[SELF-PAUSE-DETECTED] text-based question patterns are blocked."
+            reason += " AUTO_MODE=true or STEERING_DISABLED=true"
+            return _decision("block", reason, diagnostics=diagnostics, side_effects=side_effects)
     if signals.get("workflow_active") and current_skill != "mst:agile" and ASK_USER_RE.search(message):
         return _decision("approve", _with_snapshot("workflow_inactive", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
 
@@ -583,6 +644,9 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
         side_effects.append({"kind": "persist_block_state", "reason": "return_to"})
         reason = f"[RETURN-TO] Sub-skill returned with return_to={return_to}. Do NOT stop or pause. Run /mst:resume --wakeup-hint stop-recover."
         return _decision("block", _with_snapshot(reason, diagnostics), diagnostics=diagnostics, side_effects=side_effects)
+    if signals.get("snapshot_non_mst_skill"):
+        skill = _safe_text(signals.get("snapshot_non_mst_skill")) or "unknown"
+        return _decision("approve", _with_snapshot(f"non-mst-skill {skill}", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
     if signals.get("snapshot_in_progress"):
         progress = signals["snapshot_in_progress"]
         if isinstance(progress, Mapping):
@@ -648,7 +712,8 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
         snap = signals["snapshot_terminal_or_unhandled"]
         if isinstance(snap, Mapping) and snap.get("current") == snap.get("total") and snap.get("status") == "committed":
             return _decision("approve", _with_snapshot("completion", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
-        if isinstance(snap, Mapping) and snap.get("status") in ("", "none"):
+        if isinstance(snap, Mapping) and snap.get("status") in ("", "none", "active"):
+            side_effects.append({"kind": "append_flow_event", "event_type": "unhandled_path"})
             return _decision("approve", _with_snapshot("unhandled_path fallback", diagnostics), diagnostics=diagnostics, side_effects=side_effects)
 
     if wrapper_mode:
@@ -765,6 +830,17 @@ def _apply_side_effect(project_root: Path, decision: Mapping[str, Any], effect: 
             effect.get("block_reason") if isinstance(effect.get("block_reason"), str) else None,
             _safe_text(effect.get("message") or diagnostics.get("last_assistant_message")),
         )
+        return applied
+    if kind == "append_flow_event":
+        diagnostics = decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}
+        session_id = _safe_session_path(diagnostics.get("canonical_mst_session_id")) or _safe_session_path(diagnostics.get("snapshot_session_id")) or "unknown"
+        data = {
+            "snapshot_digest": _safe_text(diagnostics.get("snapshot_digest")),
+            "stdin_digest": _safe_text(diagnostics.get("stdin_digest")),
+            "ppid": str(os.getppid()),
+        }
+        snapshot_path = _safe_text(diagnostics.get("snapshot_path"))
+        _flow_logger.append_event(project_root, session_id, _safe_text(effect.get("event_type")) or "event", data, snapshot_path=snapshot_path)
         return applied
     return applied if kind else None
 

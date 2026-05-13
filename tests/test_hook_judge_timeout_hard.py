@@ -6,17 +6,16 @@ import json
 import os
 import subprocess
 import time
-import uuid
 from pathlib import Path
 
-from tests.fixtures.session_helper import init_project_root
+from tests.fixtures.session_helper import init_project_root, make_session_id
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HOOK_PATH = PROJECT_ROOT / "hooks" / "mst-stop-hook.sh"
 
 
 def _session_id() -> str:
-    return str(uuid.uuid4())
+    return make_session_id()
 
 
 def _flow_detail_path(project_root: Path, session_id: str) -> Path:
@@ -36,6 +35,7 @@ def _read_flow_detail_records(project_root: Path, session_id: str) -> list[dict]
 
 def _hook_payload(project_root: Path, session_id: str) -> dict:
     return {
+        "mst_session_id": session_id,
         "session_id": session_id,
         "transcript_path": f"/tmp/{session_id}.jsonl",
         "hook_event_name": "Stop",
@@ -55,6 +55,7 @@ def _run_hook(
     env = {
         **os.environ,
         "MST_FLOW_DISABLE_ATEXIT": "1",
+        "MST_SESSION_ID": str(payload["mst_session_id"]),
         **(extra_env or {}),
     }
     stdin_json = json.dumps(payload, ensure_ascii=False)

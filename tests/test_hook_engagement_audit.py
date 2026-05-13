@@ -89,7 +89,7 @@ def test_hook_pass_through_for_non_mst_context_no_engagement(tmp_path):
     project_root = init_project_root(tmp_path)
     session_id = make_session_id()
 
-    # snapshot 없음 → no-mst-session 경로 → flow-detail 미기록
+    # snapshot 없음 → workflow_inactive 경로 → flow-detail 미기록
     payload = {
         "session_id": session_id,
         "hook_event_name": "Stop",
@@ -100,8 +100,8 @@ def test_hook_pass_through_for_non_mst_context_no_engagement(tmp_path):
     decision = stdout_json(result)
 
     assert decision["decision"] == "approve"
-    assert "no-mst-session" in decision["reason"], (
-        f"pass-through reason에 'no-mst-session'이 없다: {decision['reason']}"
+    assert "workflow_inactive" in decision["reason"], (
+        f"pass-through reason에 'workflow_inactive'이 없다: {decision['reason']}"
     )
 
     # pass-through 경로 → flow-detail 이벤트 없음 (engagement 미기록)

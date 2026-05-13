@@ -11,7 +11,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-AGI-036-20260513T120000000Z-hookfail"
 
 
 def _copy_hook_project(tmp_path: Path) -> Path:
@@ -23,13 +23,14 @@ def _copy_hook_project(tmp_path: Path) -> Path:
     (project_root / "scripts").mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(HOOK, project_root / "hooks" / "mst-stop-hook.sh")
+    shutil.copytree(REPO_ROOT / "hooks" / "lib", project_root / "hooks" / "lib")
     for script_name in ("_snapshot_probe.py", "_flow_logger.py", "_hook_patterns.py"):
         shutil.copy2(REPO_ROOT / "scripts" / script_name, project_root / "scripts" / script_name)
     return project_root
 
 
 def _write_state(project_root: Path, payload: dict) -> None:
-    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{os.getpid()}.json"
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{SESSION_ID}.json"
     state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
@@ -43,7 +44,7 @@ def _run_hook(project_root: Path, payload: dict, env: Optional[Dict[str, str]] =
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, **(env or {})},
+        env={**os.environ, "MST_SESSION_ID": SESSION_ID, **(env or {})},
     )
 
 
@@ -64,45 +65,33 @@ def test_err_trap_returns_allow(tmp_path):
 
     result = _run_hook(
         project_root,
-        {"session_id": SESSION_ID, "hook_event_name": "Stop"},
-        env={"MST_STOP_HOOK_TEST_INJECT_FAILURE": "after_snapshot_probe"},
+        {"mst_session_id": SESSION_ID, "session_id": SESSION_ID, "hook_event_name": "Stop"},
+        env={"MST_STOP_HOOK_TEST_JUDGE_STDOUT": "Traceback (most recent call last):\nboom\n", "MST_STOP_HOOK_TEST_JUDGE_EXIT": "1"},
     )
 
     payload = _stdout_json(result)
-    assert payload["decision"] == "approve"
-    assert payload["reason"].startswith("hook_failure:")
-    assert "snapshot_present=" in payload["reason"]
-    hook_failure_lines = [
-        line for line in result.stderr.splitlines() if "[mst-stop-hook] hook_failure" in line
-    ]
-    assert len(hook_failure_lines) == 1
+    assert payload == {"decision": "approve", "reason": "hook judge startup failure fail-open"}
+    assert "Traceback" not in result.stdout
+    assert "judge_invalid_output" in result.stderr
 
 
-def test_hook_failure_event_fields(tmp_path):
+def test_invalid_judge_output_does_not_write_hook_failure_event(tmp_path):
     project_root = _copy_hook_project(tmp_path)
 
     result = _run_hook(
         project_root,
-        {"session_id": SESSION_ID, "hook_event_name": "Stop"},
-        env={"MST_STOP_HOOK_TEST_INJECT_FAILURE": "after_snapshot_probe"},
+        {"mst_session_id": SESSION_ID, "session_id": SESSION_ID, "hook_event_name": "Stop"},
+        env={"MST_STOP_HOOK_TEST_JUDGE_STDOUT": "diagnostic only\n", "MST_STOP_HOOK_TEST_JUDGE_EXIT": "0"},
     )
 
-    _stdout_json(result)
-    event = _last_flow_event(project_root)
-    assert event["event_type"] == "hook_failure"
-    assert event["session_id"] == SESSION_ID
-    for field in ("exit_code", "line", "command", "funcname", "source", "signal", "ppid", "session_id"):
-        assert field in event["data"]
-    assert event["data"]["exit_code"] != 0
-    assert event["data"]["line"]
-    assert "REQ-692 injected failure" in event["data"]["command"]
-    assert event["data"]["ppid"]
-    assert event["data"]["session_id"] == SESSION_ID
+    payload = _stdout_json(result)
+    assert payload == {"decision": "approve", "reason": "hook judge startup failure fail-open"}
+    flow_path = project_root / ".gran-maestro" / "state" / SESSION_ID / "flow-detail.ndjson"
+    assert not flow_path.exists()
 
 
 def test_helper_missing_graceful_fallback(tmp_path):
     project_root = _copy_hook_project(tmp_path)
-    (project_root / "scripts" / "_hook_patterns.py").unlink()
     _write_state(
         project_root,
         {
@@ -117,6 +106,7 @@ def test_helper_missing_graceful_fallback(tmp_path):
     result = _run_hook(
         project_root,
         {
+            "mst_session_id": SESSION_ID,
             "session_id": SESSION_ID,
             "last_assistant_message": "계속할까요?",
             "agile_auto_mode": True,
@@ -125,9 +115,5 @@ def test_helper_missing_graceful_fallback(tmp_path):
 
     payload = _stdout_json(result)
     assert payload["decision"] == "approve"
-    assert "unhandled_path fallback" in payload["reason"]
-    assert "[mst-stop-hook] helper_failed helper=hook_patterns" in result.stderr
-
-    event = _last_flow_event(project_root)
-    assert event["event_type"] == "unhandled_path"
-    assert event["session_id"] == SESSION_ID
+    assert payload["reason"] == "hook judge startup failure fail-open"
+    assert "judge_invalid_output" in result.stderr

@@ -8,16 +8,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STOP_HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
+MST_SESSION_ID = "MST-AGI-036-20260513T120000000Z-wrapper1"
 
 
 def _run_wrapper(tmp_path: Path, *, env: dict[str, str], timeout: float = 5.0) -> subprocess.CompletedProcess[str]:
     (tmp_path / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".git").write_text("gitdir: .\n", encoding="utf-8")
     merged_env = os.environ.copy()
+    merged_env["MST_SESSION_ID"] = MST_SESSION_ID
     merged_env.update(env)
     return subprocess.run(
         ["bash", str(STOP_HOOK)],
-        input=json.dumps({"hook_event_name": "Stop", "stop_hook_active": False}),
+        input=json.dumps({"hook_event_name": "Stop", "stop_hook_active": False, "mst_session_id": MST_SESSION_ID}),
         cwd=tmp_path,
         capture_output=True,
         text=True,

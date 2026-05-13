@@ -17,6 +17,7 @@ from _flow_logger import append_event, safe_session_id
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+MST_SESSION_RE = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
 
 
 def _parse_stdin(raw: str) -> Dict[str, Any]:
@@ -32,7 +33,7 @@ def _session_id_from_transcript(transcript_path: Any) -> Tuple[str, str]:
         return "", ""
     basename = Path(transcript_path).name
     stem = basename[:-6] if basename.endswith(".jsonl") else Path(basename).stem
-    if UUID_RE.match(stem):
+    if UUID_RE.match(stem) or MST_SESSION_RE.match(stem):
         return stem, "transcript_path"
     return "", ""
 

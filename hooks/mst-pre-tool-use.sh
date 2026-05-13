@@ -56,7 +56,7 @@ then
   exit 2
 fi
 MST_CANONICAL_SESSION_ID=""
-if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-stdin" "$STDIN_RAW"; then
   MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
   MST_SESSION_RESOLUTION_STATUS=0
 else

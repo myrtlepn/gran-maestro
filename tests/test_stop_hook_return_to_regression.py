@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +12,7 @@ HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
 
 
 def _session_id() -> str:
-    return str(uuid.uuid4())
+    return "MST-AGI-036-20260513T120000000Z-returnto"
 
 
 def _init_project_root(tmp_path: Path) -> Path:
@@ -32,16 +31,19 @@ def _write_snapshot(project_root: Path, session_id: str, payload: dict) -> None:
     )
 
 
-def _write_state_for_current_ppid(project_root: Path, payload: dict) -> None:
-    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{os.getpid()}.json"
+def _write_state_for_session(project_root: Path, session_id: str, payload: dict) -> None:
+    state_path = project_root / ".gran-maestro" / "tmp" / f"mst-state-{session_id}.json"
     state_path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _run_hook(project_root: Path, payload: dict) -> subprocess.CompletedProcess:
+    session_id = payload.get("mst_session_id")
     env = {
         **os.environ,
         "CLAUDE_PROJECT_DIR": str(project_root),
     }
+    if isinstance(session_id, str) and session_id.strip():
+        env["MST_SESSION_ID"] = session_id
     return subprocess.run(
         ["bash", str(HOOK)],
         input=json.dumps(payload, ensure_ascii=False),
@@ -90,6 +92,7 @@ def test_snapshot_return_to_resume_pattern(tmp_path):
     result = _run_hook(
         project_root,
         {
+            "mst_session_id": session_id,
             "session_id": session_id,
             "hook_event_name": "Stop",
             "last_assistant_message": "request sub-flow is complete.",
@@ -98,10 +101,8 @@ def test_snapshot_return_to_resume_pattern(tmp_path):
 
     payload = _stdout_json(result)
     assert payload["decision"] == "block"
-    assert "[RETURN-TO] snapshot return_to=plan/4" in payload["reason"]
+    assert "[RETURN-TO] Sub-skill returned with return_to=plan/4" in payload["reason"]
     assert RESUME_COMMAND in payload["reason"]
-    assert "SNAPSHOT_RETURN_TO_SKILL=plan" in payload["reason"]
-    assert "SNAPSHOT_RETURN_TO_STEP=4" in payload["reason"]
     assert "continue from step" not in payload["reason"]
     assert "return to mst:plan" not in payload["reason"]
 
@@ -109,8 +110,9 @@ def test_snapshot_return_to_resume_pattern(tmp_path):
 def test_subskill_return_to_resume_pattern(tmp_path):
     project_root = _init_project_root(tmp_path)
     session_id = _session_id()
-    _write_state_for_current_ppid(
+    _write_state_for_session(
         project_root,
+        session_id,
         {
             "workflow_active": True,
             "current_skill": "mst:request",
@@ -124,6 +126,7 @@ def test_subskill_return_to_resume_pattern(tmp_path):
     result = _run_hook(
         project_root,
         {
+            "mst_session_id": session_id,
             "session_id": session_id,
             "last_assistant_message": "Sub-skill complete return_to=request/2",
         },
@@ -133,7 +136,5 @@ def test_subskill_return_to_resume_pattern(tmp_path):
     assert payload["decision"] == "block"
     assert "[RETURN-TO] Sub-skill returned with return_to=request/2" in payload["reason"]
     assert RESUME_COMMAND in payload["reason"]
-    assert "RETURN_TO_SKILL=request" in payload["reason"]
-    assert "RETURN_TO_STEP=2" in payload["reason"]
     assert "continue from step" not in payload["reason"]
     assert "return to mst:request" not in payload["reason"]

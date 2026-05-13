@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MST_SESSION_ID = "MST-AGI-036-20260513T120000000Z-ledgerint"
 HOOKS = {
     "SessionStart": REPO_ROOT / "hooks" / "mst-session-init.sh",
     "PreToolUse": REPO_ROOT / "hooks" / "mst-pre-tool-use.sh",
@@ -28,7 +29,7 @@ def _run_hook(workspace: Path, hook_event: str, payload: dict) -> subprocess.Com
         **os.environ,
         "HOME": str(workspace / "home"),
         "CLAUDE_CONFIG_DIR": str(workspace / "home" / ".claude"),
-        "MST_STATE_PPID": str(os.getpid()),
+        "MST_SESSION_ID": MST_SESSION_ID,
     }
     return subprocess.run(
         ["bash", str(HOOKS[hook_event])],
@@ -49,10 +50,10 @@ def _read_ledger(workspace: Path) -> list[dict]:
 
 def test_each_hook_writes_start_and_complete_ledger_records(tmp_path: Path) -> None:
     cases = {
-        "SessionStart": {"session_id": "123e4567-e89b-12d3-a456-426614174000"},
-        "PreToolUse": {"session_id": "sess-pre", "tool_name": "Read", "tool_input": {"file_path": "README.md"}},
-        "Stop": {"session_id": "sess-stop"},
-        "UserPromptSubmit": {"session_id": "sess-user", "transcript_path": str(tmp_path / "missing.jsonl")},
+        "SessionStart": {"mst_session_id": MST_SESSION_ID, "session_id": "123e4567-e89b-12d3-a456-426614174000"},
+        "PreToolUse": {"mst_session_id": MST_SESSION_ID, "session_id": "sess-pre", "tool_name": "Read", "tool_input": {"file_path": "README.md"}},
+        "Stop": {"mst_session_id": MST_SESSION_ID, "session_id": "sess-stop"},
+        "UserPromptSubmit": {"mst_session_id": MST_SESSION_ID, "session_id": "sess-user", "transcript_path": str(tmp_path / "missing.jsonl")},
     }
 
     for hook_event, payload in cases.items():
@@ -68,5 +69,6 @@ def test_each_hook_writes_start_and_complete_ledger_records(tmp_path: Path) -> N
         assert records[0]["exit_code"] is None
         assert records[1]["exit_code"] == 0
         assert records[0]["payload_digest"] == records[1]["payload_digest"]
-        assert records[0]["session_id"] == payload["session_id"]
+        assert records[0]["mst_session_id"] == MST_SESSION_ID
+        assert records[0]["claude_session_id"] == payload["session_id"]
         assert records[0]["invocation_source"] == "settings_local"

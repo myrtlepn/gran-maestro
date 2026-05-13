@@ -147,7 +147,7 @@ def test_truncate(tmp_path: Path) -> None:
 
 def test_manifest_recalc(tmp_path: Path) -> None:
     project_root, policy_home = _make_project(tmp_path)
-    sid = "sid-manifest"
+    sid = "MST-AGI-036-20260513T120000000Z-manifest"
     _seed_history(project_root, policy_home, sid, 1)
     policy_dir = policy_home / "projects" / _project_key(project_root)
     rules_dir = policy_dir / "rules.d"

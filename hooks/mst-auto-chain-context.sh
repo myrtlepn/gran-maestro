@@ -11,69 +11,16 @@ case "$script_dir" in
   *) script_dir="$(cd "$script_dir" && pwd)" ;;
 esac
 
-_mst_hooks_dir_is_valid() {
-  local dir="$1" parent
-  case "$dir" in
-    *'${CLAUDE_PLUGIN_ROOT}'*) return 1 ;;
-    */.claude/plugins/cache/*/hooks) return 0 ;;
-    */.claude/plugins/marketplaces/*/hooks) return 0 ;;
-  esac
-  if [ -f "$dir/lib/sha256.bash" ]; then
-    return 0
-  fi
-  case "$dir" in
-    */.claude/hooks)
-      parent="${dir%/.claude/hooks}"
-      [ -d "$parent/.gran-maestro" ] && return 0
-      ;;
-    */hooks)
-      parent="${dir%/hooks}"
-      { [ -d "$parent/.gran-maestro" ] || [ -e "$parent/.git" ]; } && return 0
-      if [ -n "${BATS_TEST_TMPDIR:-}" ]; then
-        case "$dir" in
-          "$BATS_TEST_TMPDIR"/master-baseline/hooks) return 0 ;;
-        esac
-      fi
-      ;;
-  esac
-  return 1
-}
-
-case "$script_dir" in
-  *'${CLAUDE_PLUGIN_ROOT}'*)
-    echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
-    exit 0
-    ;;
-esac
-
-if [ ! -f "$script_dir/lib/sha256.bash" ] && ! _mst_hooks_dir_is_valid "$script_dir"; then
+if [ ! -f "$script_dir/lib/bootstrap.bash" ]; then
   echo "[mst-hook] warning: unexpected execution path. Possible \${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open." >&2
   exit 0
 fi
 
-resolve_project_root() {
-  local git_top candidate parent
-  git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/lib/bootstrap.bash"
+mst_validate_hook_script_dir_or_exit "$script_dir"
 
-  if [ -f "${git_top}/.git" ]; then
-    candidate="$git_top"
-    while [ -n "$candidate" ] && [ "$candidate" != "/" ]; do
-      if [ -d "${candidate}/.gran-maestro" ] && [ -e "${candidate}/.git" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-      parent="$(dirname "$candidate")"
-      if [ "$parent" = "$candidate" ]; then
-        break
-      fi
-      candidate="$parent"
-    done
-  fi
-
-  printf '%s\n' "$git_top"
-}
-
-PROJECT_ROOT="$(resolve_project_root)"
+PROJECT_ROOT="$(mst_resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
 STDIN_RAW="$(cat || true)"
 mst_auto_chain_session_id() {

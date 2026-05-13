@@ -52,6 +52,7 @@ def _run_hook(project_root: Path, session_id: str) -> subprocess.CompletedProces
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "MST_SESSION_ID": session_id},
     )
 
 
@@ -100,7 +101,7 @@ def test_owner_session_id_foreign_session_allows(tmp_path):
 
     payload = _stdout_json(result)
     assert payload["decision"] == "approve"
-    assert "workflow_inactive" in payload["reason"]
+    assert "owner_ppid-only workflow state ignored" in payload["reason"]
 
 
 def test_legacy_owner_ppid_is_diagnostic_only(tmp_path):

@@ -29,19 +29,16 @@ def _hook_text(name: str) -> str:
 
 
 @pytest.mark.parametrize("hook_name", HOOK_NAMES)
-def test_hook_defines_resolve_project_root(hook_name):
+def test_hook_uses_shared_project_root_resolver(hook_name):
     text = _hook_text(hook_name)
-    assert re.search(r"^resolve_project_root\(\)\s*\{", text, re.MULTILINE), (
-        f"{hook_name}: resolve_project_root function definition missing"
-    )
+    assert "lib/bootstrap.bash" in text, f"{hook_name}: shared bootstrap source missing"
+    assert "mst_resolve_project_root" in text, f"{hook_name}: shared project-root resolver missing"
 
 
-@pytest.mark.parametrize("hook_name", HOOK_NAMES)
-def test_hook_uses_git_rev_parse_fallback(hook_name):
-    text = _hook_text(hook_name)
-    assert "git rev-parse --show-toplevel" in text, (
-        f"{hook_name}: git rev-parse fallback pattern missing"
-    )
+def test_shared_bootstrap_uses_git_rev_parse_fallback():
+    text = (HOOKS_DIR / "lib" / "bootstrap.bash").read_text(encoding="utf-8")
+    assert re.search(r"^mst_resolve_project_root\(\)\s*\{", text, re.MULTILINE)
+    assert "git rev-parse --show-toplevel" in text
 
 
 @pytest.mark.parametrize("hook_name", HOOK_NAMES)

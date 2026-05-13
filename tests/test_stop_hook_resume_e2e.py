@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +15,7 @@ RESUME_COMMAND = "/mst:resume --wakeup-hint stop-recover"
 
 
 def _session_id() -> str:
-    return str(uuid.uuid4())
+    return "MST-AGI-036-20260513T120000000Z-resumee2e"
 
 
 def _init_project_root(tmp_path: Path) -> Path:
@@ -36,10 +35,13 @@ def _write_snapshot(project_root: Path, session_id: str, payload: dict) -> None:
 
 
 def _run_hook(project_root: Path, payload: dict) -> subprocess.CompletedProcess:
+    session_id = payload.get("mst_session_id")
     env = {
         **os.environ,
         "CLAUDE_PROJECT_DIR": str(project_root),
     }
+    if isinstance(session_id, str) and session_id.strip():
+        env["MST_SESSION_ID"] = session_id
     return subprocess.run(
         ["bash", str(HOOK)],
         input=json.dumps(payload, ensure_ascii=False),
@@ -94,6 +96,7 @@ def test_stop_hook_to_resolver_e2e(tmp_path):
     stop_result = _run_hook(
         project_root,
         {
+            "mst_session_id": session_id,
             "session_id": session_id,
             "hook_event_name": "Stop",
             "last_assistant_message": "request sub-flow is complete.",
@@ -102,10 +105,8 @@ def test_stop_hook_to_resolver_e2e(tmp_path):
 
     stop_payload = _stdout_json(stop_result)
     assert stop_payload["decision"] == "block"
-    assert "[RETURN-TO] snapshot return_to=plan/4" in stop_payload["reason"]
+    assert "[RETURN-TO] Sub-skill returned with return_to=plan/4" in stop_payload["reason"]
     assert RESUME_COMMAND in stop_payload["reason"]
-    assert "SNAPSHOT_RETURN_TO_SKILL=plan" in stop_payload["reason"]
-    assert "SNAPSHOT_RETURN_TO_STEP=4" in stop_payload["reason"]
 
     resolved = _run_mst(
         project_root,

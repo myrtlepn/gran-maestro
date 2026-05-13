@@ -393,10 +393,17 @@ if local_head is not None and not head_within_ndjson(local_head):
 if mirror_head is not None and not head_within_ndjson(mirror_head):
     fail("self-heal failed: head ahead of ndjson last_hash")
 
+verify_state_path = history_path.with_name("history.verify")
+allow_self_heal = not verify_state_path.exists()
+
 if last_hash != zero_hash and (
     (local_head is not None and local_head != last_hash)
     or (mirror_head is not None and mirror_head != last_hash)
 ):
+    if not allow_self_heal:
+        if local_head != last_hash:
+            fail("history.head")
+        fail("home mirror head")
     prev_local = local_head or zero_hash
     prev_mirror = mirror_head or zero_hash
     targets = []

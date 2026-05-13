@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
 FLOW_LOGGER = REPO_ROOT / "scripts" / "_flow_logger.py"
 SNAPSHOT_PROBE = REPO_ROOT / "scripts" / "_snapshot_probe.py"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-AGI-036-20260513T120000000Z-snapguard"
 
 
 def _init_project_root(tmp_path: Path) -> Path:
@@ -32,13 +32,15 @@ def _write_snapshot(project_root: Path, session_id: str, payload: dict) -> Path:
 def _run_hook(project_root: Path, payload: dict) -> subprocess.CompletedProcess:
     if not HOOK.is_file():
         pytest.skip(f"hook not found: {HOOK}")
+    hook_payload = {"mst_session_id": SESSION_ID, **payload}
     return subprocess.run(
         ["bash", str(HOOK)],
-        input=json.dumps(payload, ensure_ascii=False),
+        input=json.dumps(hook_payload, ensure_ascii=False),
         cwd=project_root,
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "MST_SESSION_ID": SESSION_ID},
     )
 
 
@@ -122,7 +124,7 @@ def test_snapshot_absent_allows(tmp_path):
 
     payload = _stdout_json(result)
     assert payload["decision"] == "approve"
-    assert "no-mst-session" in payload["reason"]
+    assert "workflow_inactive" in payload["reason"]
     assert "snapshot_present=false" in payload["reason"]
 
 

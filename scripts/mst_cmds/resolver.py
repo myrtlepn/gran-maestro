@@ -56,7 +56,7 @@ def _normalize_queue_skill(skill: object) -> str:
     return f"mst:{value}"
 
 
-def _command_from_parts(skill: object, args: object = "") -> Optional[str]:
+def _command_from_shards(skill: object, args: object = "") -> Optional[str]:
     command = _normalize_skill_command(skill)
     if not command:
         return None
@@ -219,7 +219,7 @@ def resolve_result(args: argparse.Namespace) -> ResolveResult:
     queue_entry = queue_peek()
     if queue_entry is not None:
         return {
-            "command": _command_from_parts(queue_entry.get("skill"), queue_entry.get("args")),
+            "command": _command_from_shards(queue_entry.get("skill"), queue_entry.get("args")),
             "source": "queue",
         }
 
@@ -228,7 +228,7 @@ def resolve_result(args: argparse.Namespace) -> ResolveResult:
         if bool(getattr(args, "enqueue", False)) and not bool(getattr(args, "dry_run", False)):
             _enqueue_workflow_action(action)
         return {
-            "command": _command_from_parts(action.get("skill"), _workflow_args(action)),
+            "command": _command_from_shards(action.get("skill"), _workflow_args(action)),
             "source": "workflow_state",
         }
 
@@ -239,7 +239,7 @@ def resolve_result(args: argparse.Namespace) -> ResolveResult:
             if bool(getattr(args, "enqueue", False)) and not bool(getattr(args, "dry_run", False)):
                 _enqueue_workflow_action(action)
             return {
-                "command": _command_from_parts(action.get("skill"), _workflow_args(action)),
+                "command": _command_from_shards(action.get("skill"), _workflow_args(action)),
                 "source": "wakeup-hint:stop-recover",
             }
 

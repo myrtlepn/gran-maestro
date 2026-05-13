@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LEDGER_LIB = REPO_ROOT / "hooks" / "lib" / "ledger.bash"
+MST_SESSION_ID = "MST-AGI-036-20260513T120000000Z-ledgerlib"
 
 
 def _run_ledger(workspace: Path, payload: str, event: str = "SessionStart") -> subprocess.CompletedProcess:
@@ -37,7 +38,7 @@ def _read_ledger(workspace: Path) -> list[dict]:
 
 def test_emit_ledger_start_and_complete_write_schema(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    payload = json.dumps({"session_id": "sess-lib", "value": 1})
+    payload = json.dumps({"mst_session_id": MST_SESSION_ID, "session_id": "sess-lib", "value": 1})
 
     result = _run_ledger(workspace, payload)
 
@@ -54,12 +55,14 @@ def test_emit_ledger_start_and_complete_write_schema(tmp_path: Path) -> None:
             "phase",
             "exit_code",
             "payload_digest",
-            "session_id",
+            "mst_session_id",
+            "claude_session_id",
             "invocation_source",
             "pid",
         }
         assert record["hook_event"] == "SessionStart"
-        assert record["session_id"] == "sess-lib"
+        assert record["mst_session_id"] == MST_SESSION_ID
+        assert record["claude_session_id"] == "sess-lib"
         assert record["invocation_source"] == "settings_local"
         assert isinstance(record["pid"], int)
         assert len(record["payload_digest"]) == 12
@@ -67,7 +70,7 @@ def test_emit_ledger_start_and_complete_write_schema(tmp_path: Path) -> None:
 
 def test_payload_digest_is_stable_for_same_payload(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    payload = json.dumps({"session_id": "sess-digest", "value": "same"})
+    payload = json.dumps({"mst_session_id": MST_SESSION_ID, "session_id": "sess-digest", "value": "same"})
 
     result = _run_ledger(workspace, payload)
 
@@ -79,8 +82,8 @@ def test_payload_digest_is_stable_for_same_payload(tmp_path: Path) -> None:
 def test_payload_digest_changes_for_different_payloads(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
 
-    first = _run_ledger(workspace, json.dumps({"session_id": "sess-a", "value": "a"}), "PreToolUse")
-    second = _run_ledger(workspace, json.dumps({"session_id": "sess-b", "value": "b"}), "PreToolUse")
+    first = _run_ledger(workspace, json.dumps({"mst_session_id": MST_SESSION_ID, "session_id": "sess-a", "value": "a"}), "PreToolUse")
+    second = _run_ledger(workspace, json.dumps({"mst_session_id": MST_SESSION_ID, "session_id": "sess-b", "value": "b"}), "PreToolUse")
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr

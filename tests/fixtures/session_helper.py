@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
+import secrets
 from pathlib import Path
 
 
-def make_session_id() -> str:
-    """Return a fresh session id."""
-    return uuid.uuid4().hex
+def make_session_id(root: str = "AGI-036") -> str:
+    """Return a fresh structured MST session id."""
+    suffix = secrets.token_hex(4)
+    return f"MST-{root}-20260513T120000000Z-{suffix}"
 
 
 def init_project_root(tmp_path: Path) -> Path:

@@ -11,7 +11,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "mst-stop-hook.sh"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-AGI-036-20260513T120000000Z-schemaval"
 VALID_STOP_DECISIONS = {"allow", "approve", "block"}
 STOP_HOOK_SCHEMA_FIELDS = {
     "decision",
@@ -30,11 +30,10 @@ def _copy_hook_project(tmp_path: Path) -> Path:
     (project_root / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
     (project_root / ".gran-maestro" / "agile").mkdir(parents=True, exist_ok=True)
     (project_root / "hooks").mkdir(parents=True, exist_ok=True)
-    (project_root / "scripts").mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(HOOK, project_root / "hooks" / "mst-stop-hook.sh")
-    for script_name in ("_snapshot_probe.py", "_flow_logger.py", "_hook_patterns.py"):
-        shutil.copy2(REPO_ROOT / "scripts" / script_name, project_root / "scripts" / script_name)
+    shutil.copytree(REPO_ROOT / "hooks" / "lib", project_root / "hooks" / "lib")
+    (project_root / "scripts").symlink_to(REPO_ROOT / "scripts", target_is_directory=True)
     return project_root
 
 
@@ -59,7 +58,7 @@ def _run_hook(
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, **(env or {})},
+        env={**os.environ, "MST_SESSION_ID": SESSION_ID, **(env or {})},
     )
 
 
@@ -94,10 +93,10 @@ def _assert_stop_hook_schema(payload: dict) -> None:
 def test_no_mst_session_decision_is_approve_or_block(tmp_path):
     project_root = _copy_hook_project(tmp_path)
 
-    result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
+    result = _run_hook(project_root, {"mst_session_id": SESSION_ID, "session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
-    assert "no-mst-session" in payload["reason"]
+    assert "workflow_inactive" in payload["reason"]
     _assert_valid_stop_decision(payload)
 
 
@@ -115,7 +114,7 @@ def test_completion_path_decision_valid(tmp_path):
         },
     )
 
-    result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
+    result = _run_hook(project_root, {"mst_session_id": SESSION_ID, "session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
     assert "completion" in payload["reason"]
@@ -125,7 +124,7 @@ def test_completion_path_decision_valid(tmp_path):
 def test_stop_hook_output_schema_validation(tmp_path):
     project_root = _copy_hook_project(tmp_path)
 
-    result = _run_hook(project_root, {"session_id": SESSION_ID, "hook_event_name": "Stop"})
+    result = _run_hook(project_root, {"mst_session_id": SESSION_ID, "session_id": SESSION_ID, "hook_event_name": "Stop"})
 
     payload = _stdout_json(result)
     _assert_stop_hook_schema(payload)

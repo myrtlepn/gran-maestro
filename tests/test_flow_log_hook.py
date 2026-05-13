@@ -21,6 +21,7 @@ from scripts._flow_logger import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+MST_SESSION_ID = "MST-AGI-036-20260513T120000000Z-flowtest"
 HOOK_FIELDS = {
     "timestamp",
     "session_id",
@@ -125,9 +126,10 @@ def test_cmd_state_set_uses_rotation(tmp_path, monkeypatch):
     workspace = _workspace(tmp_path)
     monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
     env = dict(os.environ)
-    env["MST_SNAPSHOT_SESSION_ID"] = "test-s-1"
+    env["MST_SESSION_ID"] = MST_SESSION_ID
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
     env.pop("MST_STATE_PPID", None)
+    env.pop("MST_SNAPSHOT_SESSION_ID", None)
     env.pop("MST_FLOW_LOG_DIR", None)
 
     result = subprocess.run(
@@ -164,8 +166,7 @@ def test_cmd_state_set_uses_rotation(tmp_path, monkeypatch):
 def test_cmd_state_set_records_workflow_resource_id_on_enter_and_commit(tmp_path, monkeypatch):
     workspace = _workspace(tmp_path)
     monkeypatch.setenv("MST_FLOW_LOG_MONTH", "202604")
-    ppid = os.getpid()
-    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{MST_SESSION_ID}.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
         json.dumps(
@@ -180,9 +181,10 @@ def test_cmd_state_set_records_workflow_resource_id_on_enter_and_commit(tmp_path
         encoding="utf-8",
     )
     env = dict(os.environ)
-    env["MST_STATE_PPID"] = str(ppid)
-    env["MST_SNAPSHOT_SESSION_ID"] = "test-s-2"
+    env["MST_SESSION_ID"] = MST_SESSION_ID
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env.pop("MST_STATE_PPID", None)
+    env.pop("MST_SNAPSHOT_SESSION_ID", None)
     env.pop("MST_FLOW_LOG_DIR", None)
 
     for step in (1, 2):
@@ -217,18 +219,18 @@ def _run_state_set_with_workflow_payload(
     workspace: Path,
     payload: dict,
     *,
-    ppid: int,
     session_id: str,
     step: int = 1,
     total: int = 2,
 ) -> list[dict]:
-    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{ppid}.json"
+    state_path = workspace / ".gran-maestro" / "tmp" / f"mst-state-{session_id}.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     env = dict(os.environ)
-    env["MST_STATE_PPID"] = str(ppid)
-    env["MST_SNAPSHOT_SESSION_ID"] = session_id
+    env["MST_SESSION_ID"] = session_id
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env.pop("MST_STATE_PPID", None)
+    env.pop("MST_SNAPSHOT_SESSION_ID", None)
     env.pop("MST_FLOW_LOG_DIR", None)
 
     result = subprocess.run(
@@ -355,8 +357,7 @@ def test_cmd_state_set_resource_id_priority_and_normalization(tmp_path, monkeypa
     events = _run_state_set_with_workflow_payload(
         workspace,
         payload,
-        ppid=os.getpid(),
-        session_id="priority-session",
+        session_id=MST_SESSION_ID,
     )
 
     assert len(events) == 1
@@ -382,8 +383,7 @@ def test_cmd_state_set_omits_invalid_resource_id_tokens(tmp_path, monkeypatch):
                 "resource_id": "REQ-778!",
             },
         },
-        ppid=os.getpid(),
-        session_id="invalid-session",
+        session_id=MST_SESSION_ID,
     )
 
     assert len(events) == 1

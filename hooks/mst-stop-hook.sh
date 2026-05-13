@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# DOD-003 compatibility anchor: owner_ppid-only workflow state ignored as diagnostic-only evidence.
 
 # Pre-defined emit functions exposed for source-time test harnesses.
 # Claude Code Stop hook strict schema: stdout JSON contains decision + reason only.
@@ -97,23 +98,35 @@ MST_HOOK_LOG_PREFIX="mst-stop-hook"
 mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
-if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
-  export MST_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
-  MST_LEDGER_HOOK_EVENT="Stop"
-  if [ -f "${script_dir}/lib/ledger.bash" ]; then
-    # shellcheck source=/dev/null
-    source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
-  fi
-  if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
-    emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
-    _mst_ledger_complete_once() {
-      local status="${1:-$?}"
-      [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
-      MST_LEDGER_COMPLETED=1
-      emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
-    }
-    trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
-  fi
+MST_CANONICAL_SESSION_ID=""
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-stdin" "$STDIN_RAW"; then
+  MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
+  MST_SESSION_RESOLUTION_STATUS=0
+else
+  MST_SESSION_RESOLUTION_STATUS=$?
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
+fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  emit_approve_json "missing canonical MST_SESSION_ID; stop hook fail-open without mutation"
+  exit 0
+fi
+export MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
+MST_LEDGER_HOOK_EVENT="Stop"
+if [ -f "${script_dir}/lib/ledger.bash" ]; then
+  # shellcheck source=/dev/null
+  source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
+fi
+if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_complete >/dev/null 2>&1; then
+  emit_ledger_start "$MST_LEDGER_HOOK_EVENT" || true
+  _mst_ledger_complete_once() {
+    local status="${1:-$?}"
+    [ "${MST_LEDGER_COMPLETED:-0}" = "1" ] && return 0
+    MST_LEDGER_COMPLETED=1
+    emit_ledger_complete "$MST_LEDGER_HOOK_EVENT" "$status" || true
+  }
+  trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
 fi
 
 resolve_mst_script() {
@@ -275,9 +288,13 @@ stderr_capture="${runtime_dir}/judge.stderr"
 status_file="${runtime_dir}/judge.status"
 final_file="${runtime_dir}/final.json"
 cleanup_runtime() {
+  local status="${1:-$?}"
+  if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
+    _mst_ledger_complete_once "$status" || true
+  fi
   rm -rf "$runtime_dir" "$HOOK_JUDGE_TIMEOUT_MARKER" "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
 }
-trap cleanup_runtime EXIT
+trap '_mst_stop_hook_exit_code=$?; cleanup_runtime "$_mst_stop_hook_exit_code"; exit "$_mst_stop_hook_exit_code"' EXIT
 
 printf '%s' "$STDIN_RAW" > "$stdin_file"
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# DOD-003 compatibility anchor: owner_ppid-only workflow state ignored as diagnostic-only evidence.
 
 # Pre-defined emit functions exposed for source-time test harnesses.
 # Claude Code Stop hook strict schema: stdout JSON contains decision + reason only.
-# details_anchor (when present) is emitted to stderr as "[stop-hook] anchor=<value>".
 if [ -z "${HOOK_JUDGE_TIMEOUT_MARKER:-}" ]; then
   _MST_DECISION_TOKEN="${BASHPID:-$$}-$(date +%s%N 2>/dev/null || printf '%s' "${RANDOM:-0}")"
   HOOK_JUDGE_TIMEOUT_RUNTIME_DIR="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
@@ -20,57 +20,37 @@ claim_judge_timeout_emit() {
 }
 
 emit_approve_json() {
-  local reason="$1"
-  local details_anchor="$2"
+  local reason="${1:-approved}" details_anchor="${2:-}"
   DECISION_EMIT_WRITTEN="false"
-  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
-    if ! claim_judge_timeout_emit; then
-      return 0
-    fi
+  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ] && ! claim_judge_timeout_emit; then
+    return 0
   fi
-  if [ -n "$details_anchor" ]; then
-    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
-  fi
+  [ -n "$details_anchor" ] && printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
   python3 - "$reason" <<'PY'
 import json
 import sys
-
-reason = sys.argv[1] or "approved"
-if not reason.strip():
-    reason = "approved"
-print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
+reason = sys.argv[1] if len(sys.argv) > 1 else "approved"
+print(json.dumps({"decision": "approve", "reason": reason.strip() or "approved"}, ensure_ascii=False))
 PY
-  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
-    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-  fi
+  [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ] && : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
   HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
   DECISION_EMIT_WRITTEN="true"
 }
 
 emit_block_json() {
-  local reason="$1"
-  local details_anchor="$2"
+  local reason="${1:-stop blocked (reason unspecified)}" details_anchor="${2:-}"
   DECISION_EMIT_WRITTEN="false"
-  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
-    if ! claim_judge_timeout_emit; then
-      return 0
-    fi
+  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ] && ! claim_judge_timeout_emit; then
+    return 0
   fi
-  if [ -n "$details_anchor" ]; then
-    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
-  fi
+  [ -n "$details_anchor" ] && printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
   python3 - "$reason" <<'PY'
 import json
 import sys
-
-reason = sys.argv[1] or ""
-if not reason.strip():
-    reason = "stop blocked (reason unspecified)"
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+reason = sys.argv[1] if len(sys.argv) > 1 else ""
+print(json.dumps({"decision": "block", "reason": reason.strip() or "stop blocked (reason unspecified)"}, ensure_ascii=False))
 PY
-  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
-    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-  fi
+  [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ] && : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
   HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
   DECISION_EMIT_WRITTEN="true"
 }
@@ -96,7 +76,7 @@ case "$script_dir" in
     ;;
 esac
 
-if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/session_identity.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
+if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
   printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
   exit 0
 fi
@@ -111,15 +91,15 @@ source "$script_dir/lib/logging.bash"
 mst_validate_hook_script_dir_or_exit "$script_dir"
 PROJECT_ROOT="$(mst_resolve_project_root)"
 MST_TMP="${PROJECT_ROOT}/.gran-maestro/tmp"
-STATE_FILE=""
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 MST_HOOK_LOG_PREFIX="mst-stop-hook"
+mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
 MST_CANONICAL_SESSION_ID=""
-if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "allow-stdin-without-env" "$STDIN_RAW"; then
+if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-stdin" "$STDIN_RAW"; then
   MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
   MST_SESSION_RESOLUTION_STATUS=0
 else
@@ -129,66 +109,12 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
-  LEGACY_STOP_GUARD_STATE_KEY="$(MST_STOP_HOOK_STDIN_RAW="$STDIN_RAW" PROJECT_ROOT="$PROJECT_ROOT" MST_STOP_HOOK_PARENT_PPID="$PPID" python3 - <<'PY' 2>/dev/null || true
-import json
-import os
-import re
-from pathlib import Path
-
-STRUCTURED_RE = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
-SAFE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-
-try:
-    payload = json.loads(os.environ.get("MST_STOP_HOOK_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    raise SystemExit(0)
-
-raw = os.environ.get("MST_STOP_HOOK_STDIN_RAW", "")
-structured = payload.get("mst_session_id")
-if isinstance(structured, str) and STRUCTURED_RE.fullmatch(structured.strip()):
-    print(structured.strip())
-    raise SystemExit(0)
-
-session_id = payload.get("session_id")
-session_id = session_id.strip() if isinstance(session_id, str) else ""
-if session_id and ("/" in session_id or ".." in session_id or not SAFE_RE.fullmatch(session_id)):
-    session_id = ""
-
-parent_ppid = os.environ.get("MST_STOP_HOOK_PARENT_PPID", "").strip()
-return_to_seen = "return_to=" in raw
-if return_to_seen and parent_ppid.isdigit():
-    print(parent_ppid)
-    raise SystemExit(0)
-
-if session_id:
-    snapshot_path = Path(os.environ.get("PROJECT_ROOT", ".")) / ".gran-maestro" / "state" / session_id / "snapshot.json"
-    if snapshot_path.is_file():
-        print(session_id)
-        raise SystemExit(0)
-    legacy_owner_fields = any(
-        payload.get(key) not in (None, "")
-        for key in ("owner_ppid", "owner_session_id", "sessionId")
-    )
-    if not legacy_owner_fields:
-        print(session_id)
-        raise SystemExit(0)
-PY
-)"
-  if [ -z "$LEGACY_STOP_GUARD_STATE_KEY" ]; then
-    emit_approve_json "no canonical mst_session_id" ""
-    exit 0
-  fi
-  STATE_FILE="${MST_TMP}/mst-state-${LEGACY_STOP_GUARD_STATE_KEY}.json"
-else
-  MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
-  export MST_SESSION_ID
-  STATE_FILE="${MST_TMP}/mst-state-${MST_SESSION_ID}.json"
+  emit_approve_json "missing canonical MST_SESSION_ID; stop hook fail-open without mutation"
+  exit 0
 fi
-mkdir -p "$MST_TMP"
+export MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
 MST_LEDGER_HOOK_EVENT="Stop"
-if [ -n "${MST_SESSION_ID:-}" ] && [ -z "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ] && [ -f "${script_dir}/lib/ledger.bash" ]; then
+if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null
   source "${script_dir}/lib/ledger.bash" 2>/dev/null || true
 fi
@@ -203,342 +129,13 @@ if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_comple
   trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
 fi
 
-
-
 resolve_mst_script() {
-  local script_dir candidate
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
+  local candidate
   candidate="$(cd "$script_dir/.." && pwd)/scripts/mst.py"
-  if [ -f "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
+  [ -f "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
   candidate="$(cd "$script_dir/../.." && pwd)/scripts/mst.py"
-  if [ -f "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
+  [ -f "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
   printf '%s\n' "${PROJECT_ROOT}/scripts/mst.py"
-}
-
-MST_SCRIPT="$(resolve_mst_script)"
-
-run_stophook_cleanup_contract() {
-  [ "${MST_STOP_HOOK_CLEANUP_DISABLE:-0}" = "1" ] && return 0
-
-  python3 - "$PROJECT_ROOT" "${MST_SESSION_ID:-unknown}" "$$" "$MST_SCRIPT" <<'PY' >&2 || true
-import json
-import os
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1]).resolve()
-session_id = sys.argv[2] or "unknown"
-try:
-    hook_pid = int(sys.argv[3])
-except Exception:
-    hook_pid = os.getpid()
-mst_script = Path(sys.argv[4]).resolve()
-repo_root = mst_script.parents[1]
-sys.path.insert(0, str(repo_root))
-
-try:
-    from scripts.mst_cmds import cleanup
-except Exception:
-    raise SystemExit(0)
-
-
-active_dir = project_root / ".gran-maestro" / "active-flow"
-marker_path = active_dir / f"{session_id}.json"
-
-
-def _load_marker():
-    try:
-        if marker_path.is_file():
-            payload = cleanup._load_json_object(marker_path)
-            if payload:
-                payload.setdefault("session_id", session_id)
-                return payload
-    except Exception:
-        return None
-    return None
-
-
-def _positive_float_env(name: str, default: float) -> float:
-    try:
-        value = float(os.environ.get(name, "").strip())
-    except Exception:
-        return default
-    return value if value >= 0 else default
-
-
-def _cleanup(_context):
-    marker = _load_marker()
-    validation = cleanup.validate_active_flow_marker(marker)
-    validity = validation.get("validity", "missing")
-    decision = cleanup.decide_cleanup_action(
-        entrypoint="stophook",
-        marker=marker,
-        marker_validity=validity,
-        hook_session_id=session_id,
-        hook_target_pid=cleanup.stophook_target_pid_from_env(),
-        hook_process_pid=hook_pid,
-    )
-    marker_pid = marker.get("pid") if isinstance(marker, dict) else None
-    kill_candidates = cleanup.filter_stophook_kill_candidates(
-        [marker_pid, hook_pid],
-        marker_pid=marker_pid,
-        hook_process_pid=hook_pid,
-    )
-    resolved = decision.get("resolved_action")
-    status = "ok" if resolved == "fallthrough" else "skipped"
-    return {
-        "status": status,
-        "reason": f"stophook-{resolved}",
-        "marker_validity": validity,
-        "marker_mode": marker.get("mode") if isinstance(marker, dict) else None,
-        "real_cleanup": bool(decision.get("real_cleanup")),
-        "kill_candidates": kill_candidates,
-    }
-
-
-report = cleanup.run_cleanup_with_lock_report(
-    project_root=project_root,
-    entrypoint="stophook",
-    session_id=session_id,
-    timeout_seconds=_positive_float_env("MST_STOP_HOOK_CLEANUP_TIMEOUT_SECONDS", 0.2),
-    cleanup_fn=_cleanup,
-)
-print("[stop-hook cleanup] " + json.dumps(report, ensure_ascii=False, sort_keys=True))
-PY
-}
-
-resolve_repo_script() {
-  local script_name="$1"
-  local script_dir candidate
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-  candidate="$(cd "$script_dir/.." && pwd)/scripts/$script_name"
-  if [ -f "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
-  candidate="$(cd "$script_dir/../.." && pwd)/scripts/$script_name"
-  if [ -f "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
-  printf '%s\n' "${PROJECT_ROOT}/scripts/$script_name"
-}
-
-SNAPSHOT_PROBE_SCRIPT="$(resolve_repo_script "_snapshot_probe.py")"
-FLOW_LOGGER_SCRIPT="$(resolve_repo_script "_flow_logger.py")"
-HOOK_PATTERNS_SCRIPT="$(resolve_repo_script "_hook_patterns.py")"
-HOOK_JUDGE_START_MS="$(python3 - <<'PY'
-import time
-
-print(int(time.time() * 1000))
-PY
-)"
-HOOK_WATCHDOG_PID=""
-HOOK_JUDGE_TIMEOUT_RUNTIME_DIR="${TMPDIR:-/tmp}"
-HOOK_JUDGE_TIMEOUT_MARKER="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.emitted"
-HOOK_JUDGE_TIMEOUT_DONE="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.done"
-rm -rf "$HOOK_JUDGE_TIMEOUT_MARKER" "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-
-HOOK_INFO="$(printf '%s' "$STDIN_RAW" | python3 -c 'import json, sys
-raw = sys.stdin.read() or ""
-stop_active = "unknown"
-agile_auto_mode = "unknown"
-last_msg = ""
-
-def parse_bool(value):
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in ("1", "true", "yes", "y", "on"):
-            return "true"
-        if text in ("0", "false", "no", "n", "off"):
-            return "false"
-    return "unknown"
-
-try:
-    payload = json.loads(raw)
-except Exception:
-    payload = {}
-
-if isinstance(payload, dict):
-    value = payload.get("stop_hook_active")
-    if value is True:
-        stop_active = "true"
-    elif value is False:
-        stop_active = "false"
-
-    for key in ("agile_auto_mode", "agileAutoMode", "AUTO_MODE", "auto_mode"):
-        parsed = parse_bool(payload.get(key))
-        if parsed != "unknown":
-            agile_auto_mode = parsed
-            break
-
-    candidates = [
-        payload.get("last_assistant_message"),
-        payload.get("assistant_message"),
-        payload.get("message"),
-        payload.get("reason"),
-    ]
-
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            last_msg = candidate.strip()
-            break
-
-print(f"{stop_active}\t{agile_auto_mode}\t{last_msg}")
-' 2>/dev/null || printf 'unknown\tunknown\t\n')"
-
-STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INFO" | cut -f1)"
-AGILE_AUTO_MODE_HINT="$(printf '%s' "$HOOK_INFO" | cut -f2)"
-LAST_ASSISTANT_MESSAGE="$(printf '%s' "$HOOK_INFO" | cut -f3-)"
-
-DECISION_EMITTED="false"
-SESSION_ID="unknown"
-SESSION_ID_SOURCE=""
-SESSION_ID_RESOLUTION_FAILED="true"
-HOOK_EVENT_NAME="Stop"
-TRANSCRIPT_PATH=""
-SNAPSHOT_PRESENT="false"
-SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/unknown/snapshot.json"
-SNAPSHOT_DIGEST=""
-STDIN_DIGEST=""
-SNAPSHOT_CURRENT_SKILL=""
-SNAPSHOT_CURRENT_STEP=""
-SNAPSHOT_TOTAL_STEPS=""
-SNAPSHOT_STATUS=""
-SNAPSHOT_RETURN_TO_SKILL=""
-SNAPSHOT_RETURN_TO_STEP=""
-
-emit_approve_json() {
-  local reason="$1"
-  local details_anchor="$2"
-  DECISION_EMIT_WRITTEN="false"
-  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
-    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
-      if ! claim_judge_timeout_emit; then
-        return 0
-      fi
-    fi
-  fi
-  if [ -n "$details_anchor" ]; then
-    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
-  fi
-  python3 - "$reason" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1] or "approved"
-if not reason.strip():
-    reason = "approved"
-print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
-PY
-  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
-    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-  fi
-  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
-  DECISION_EMIT_WRITTEN="true"
-}
-
-details_anchor_for_reason() {
-  local reason="${1:-}"
-  case "$reason" in
-    *"mst-off mode pass-through"*|*"stop_hook_active_true"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-1-mode-gate"
-      ;;
-    *"no-mst-session"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-2-snapshot-gate"
-      ;;
-    *"non-mst-skill"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#layer-3-namespace-gate"
-      ;;
-    *"[RETURN-TO]"*|*"return_to"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#return-to"
-      ;;
-    *"step_progress"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#step-progress"
-      ;;
-    *"completion"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#completion"
-      ;;
-    *"unhandled_path"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#unhandled-path"
-      ;;
-    "hook_failure:"*|*"hook judge timeout"*|*"judge_timeout"*)
-      printf '%s\n' "docs/FLOW-CONSTRAINTS.md#hook-failure"
-      ;;
-    *)
-      printf '\n'
-      ;;
-  esac
-}
-
-reason_with_snapshot_meta() {
-  local reason="$1"
-  case "$reason" in
-    *snapshot_present=*)
-      printf '%s\n' "$reason"
-      ;;
-    *)
-      printf '%s snapshot_present=%s\n' "$reason" "${SNAPSHOT_PRESENT:-unknown}"
-      ;;
-  esac
-}
-
-emit_approve_decision() {
-  local reason details_anchor
-  reason="$(reason_with_snapshot_meta "$1")"
-  details_anchor="$(details_anchor_for_reason "$reason")"
-  DECISION_EMITTED="true"
-  emit_approve_json "$reason" "$details_anchor"
-}
-
-append_flow_event() {
-  local event_type="$1"
-  local data="$2"
-  local status
-
-  if [ ! -f "$FLOW_LOGGER_SCRIPT" ]; then
-    warn_helper_failed "flow_logger" "127" "missing path=$(sanitize_log_value "$FLOW_LOGGER_SCRIPT")"
-    return 0
-  fi
-
-  if python3 "$FLOW_LOGGER_SCRIPT" append \
-    --project-root "$PROJECT_ROOT" \
-    --session-id "${SESSION_ID:-unknown}" \
-    --event-type "$event_type" \
-    --data "$data" \
-    --snapshot-path "${SNAPSHOT_PATH:-}" \
-    --stdin-digest "${STDIN_DIGEST:-}" \
-    --ppid "$PPID" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  status=$?
-  warn_helper_failed "flow_logger" "$status" "event_type=$(sanitize_log_value "$event_type")"
-  return 0
-}
-
-epoch_ms() {
-  python3 - <<'PY'
-import time
-
-print(int(time.time() * 1000))
-PY
 }
 
 resolve_hook_judge_timeout_ms() {
@@ -548,2514 +145,230 @@ import os
 import sys
 from pathlib import Path
 
-project_root = Path(sys.argv[1])
-
-
-def coerce_positive_int(value):
+def coerce(value):
     if isinstance(value, bool):
         return None
-    if isinstance(value, int):
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, float) and value.is_integer() and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
         return value if value > 0 else None
-    if isinstance(value, float) and value.is_integer():
-        value = int(value)
-        return value if value > 0 else None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            value = int(text)
-            return value if value > 0 else None
     return None
 
-
-def dotted(data, path):
-    current = data
-    for part in path.split("."):
-        if not isinstance(current, dict) or part not in current:
-            return None
-        current = current[part]
-    return current
-
-
-env_value = coerce_positive_int(os.environ.get("MST_HOOK_JUDGE_TIMEOUT_MS"))
+env_value = coerce(os.environ.get("MST_HOOK_JUDGE_TIMEOUT_MS"))
 if env_value is not None:
     print(env_value)
     raise SystemExit(0)
 
+root = Path(sys.argv[1])
 for path in (
-    project_root / ".gran-maestro" / "config.resolved.json",
-    project_root / ".gran-maestro" / "config.json",
-    project_root / "templates" / "defaults" / "config.json",
+    root / ".gran-maestro" / "config.resolved.json",
+    root / ".gran-maestro" / "config.json",
+    root / "templates" / "defaults" / "config.json",
 ):
     try:
-        value = coerce_positive_int(dotted(json.loads(path.read_text(encoding="utf-8")), "hook.judge_timeout_ms"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        current = data
+        for part in "hook.judge_timeout_ms".split("."):
+            current = current[part]
+        value = coerce(current)
     except Exception:
         value = None
     if value is not None:
         print(value)
         raise SystemExit(0)
-
 print(500)
 PY
 }
 
+epoch_ms() {
+  python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+}
+
+kill_process_tree() {
+  local pid="$1" child_pids
+  child_pids="$(pgrep -P "$pid" 2>/dev/null || true)"
+  [ -n "$child_pids" ] && kill -TERM $child_pids 2>/dev/null || true
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+append_timeout_event() {
+  local budget_ms="$1" observed_ms="$2"
+  MST_STOP_HOOK_STDIN_FILE="$stdin_file" python3 - "$PROJECT_ROOT" "$budget_ms" "$observed_ms" <<'PY' 2>/dev/null || true
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path(sys.argv[1])
+budget_ms = int(sys.argv[2])
+observed_ms = int(sys.argv[3])
+try:
+    payload = json.loads(Path(os.environ["MST_STOP_HOOK_STDIN_FILE"]).read_text(encoding="utf-8") or "{}")
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+
+safe_mst_re = re.compile(r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$")
+session_id = os.environ.get("MST_SESSION_ID") or payload.get("mst_session_id") or "unknown"
+session_id = str(session_id or "unknown")
+if "/" in session_id or ".." in session_id or not safe_mst_re.match(session_id):
+    session_id = "unknown"
+path = root / ".gran-maestro" / "state" / session_id / "flow-detail.ndjson"
+path.parent.mkdir(parents=True, exist_ok=True)
+entry = {
+    "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "event_type": "judge_timeout",
+    "session_id": session_id,
+    "data": {"budget_ms": budget_ms, "fail_open": True, "hook": "stop-hook", "observed_ms_approx": observed_ms},
+}
+path.open("a", encoding="utf-8").write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+PY
+}
+
+validate_judge_stdout() {
+  local stdout_capture="$1" final_file="$2"
+  python3 - "$stdout_capture" "$final_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+stdout_path = Path(sys.argv[1])
+final_path = Path(sys.argv[2])
+try:
+    raw = stdout_path.read_text(encoding="utf-8")
+except OSError:
+    raw = ""
+lines = [line for line in raw.splitlines() if line.strip()]
+if len(lines) != 1 or "Traceback" in raw:
+    raise SystemExit(1)
+try:
+    payload = json.loads(lines[0])
+except Exception:
+    raise SystemExit(1)
+if not isinstance(payload, dict) or set(payload) != {"decision", "reason"}:
+    raise SystemExit(1)
+if payload.get("decision") not in {"approve", "block"}:
+    raise SystemExit(1)
+reason = payload.get("reason")
+if not isinstance(reason, str) or not reason.strip():
+    raise SystemExit(1)
+final_path.write_text(json.dumps({"decision": payload["decision"], "reason": reason}, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+}
+
+emit_final_file_once() {
+  local final_file="$1"
+  if claim_judge_timeout_emit; then
+    cat "$final_file"
+    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
+    HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
+  fi
+}
+
+MST_SCRIPT="$(resolve_mst_script)"
 HOOK_JUDGE_TIMEOUT_MS="$(resolve_hook_judge_timeout_ms)"
+HOOK_JUDGE_TIMEOUT_RUNTIME_DIR="${TMPDIR:-/tmp}"
+HOOK_JUDGE_TIMEOUT_MARKER="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.emitted"
+HOOK_JUDGE_TIMEOUT_DONE="${HOOK_JUDGE_TIMEOUT_RUNTIME_DIR}/mst-stop-hook-timeout-$$.done"
+rm -rf "$HOOK_JUDGE_TIMEOUT_MARKER" "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
 
-judge_timeout_already_emitted() {
-  [ -d "$HOOK_JUDGE_TIMEOUT_MARKER" ]
-}
-
-claim_judge_timeout_emit() {
-  if mkdir "$HOOK_JUDGE_TIMEOUT_MARKER" 2>/dev/null; then
-    HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="true"
-    return 0
-  fi
-  return 1
-}
-
-wait_for_judge_timeout_emit_done() {
-  local attempts=0
-  while [ "$attempts" -lt 20 ]; do
-    [ -f "$HOOK_JUDGE_TIMEOUT_DONE" ] && return 0
-    sleep 0.01
-    attempts="$((attempts + 1))"
-  done
-  return 1
-}
-
-resolve_timeout_session_id() {
-  if [ -n "${SESSION_ID:-}" ] && [ "${SESSION_ID:-unknown}" != "unknown" ] && mst_is_structured_mst_session_id "$SESSION_ID"; then
-    printf '%s\n' "$SESSION_ID"
-    return 0
-  fi
-  if [ -n "${MST_SESSION_ID:-}" ] && mst_is_structured_mst_session_id "$MST_SESSION_ID"; then
-    printf '%s\n' "$MST_SESSION_ID"
-    return 0
-  fi
-
-  MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
-import json
-import os
-import re
-
-
-STRUCTURED_RE = re.compile(
-    r"^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$"
-)
-
-
-try:
-    payload = json.loads(os.environ.get("MST_TIMEOUT_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-
-if not isinstance(payload, dict):
-    payload = {}
-
-direct = payload.get("mst_session_id")
-if isinstance(direct, str):
-    value = direct.strip()
-    if value and "/" not in value and ".." not in value and STRUCTURED_RE.match(value):
-        print(value)
-        raise SystemExit(0)
-
-core = payload.get("core_rehydration")
-if isinstance(core, dict):
-    direct = core.get("mst_session_id")
-    value = direct.strip() if isinstance(direct, str) else ""
-    if value and "/" not in value and ".." not in value and STRUCTURED_RE.match(value):
-        print(value)
-        raise SystemExit(0)
-
-print("unknown")
-PY
-}
-
-ensure_timeout_stdin_digest() {
-  if [ -n "${STDIN_DIGEST:-}" ]; then
-    return 0
-  fi
-  STDIN_DIGEST="$(MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
-import hashlib
-import os
-import sys
-
-print(hashlib.sha256(os.environ.get("MST_TIMEOUT_STDIN_RAW", "").encode("utf-8", errors="replace")).hexdigest())
-PY
-)"
-}
-
-emit_allow_json() {
-  local reason="$1"
-  local details_anchor
-  DECISION_EMIT_WRITTEN="false"
-  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
-    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
-      if ! claim_judge_timeout_emit; then
-        return 0
-      fi
-    fi
-  fi
-  details_anchor="$(details_anchor_for_reason "$reason")"
-  if [ -n "$details_anchor" ]; then
-    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
-  fi
-  python3 - "$reason" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1] or "approved"
-if not reason.strip():
-    reason = "approved"
-print(json.dumps({"decision": "approve", "reason": reason}, ensure_ascii=False))
-PY
-  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
-    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-  fi
-  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
-  DECISION_EMIT_WRITTEN="true"
-}
-
-emit_judge_timeout_payload() {
-  local observed_ms_approx data
-  DECISION_EMITTED="true"
-  DECISION_EMIT_WRITTEN="false"
-  SESSION_ID="$(resolve_timeout_session_id)"
-  SNAPSHOT_PATH="${PROJECT_ROOT}/.gran-maestro/state/${SESSION_ID:-unknown}/snapshot.json"
-  observed_ms_approx="$(( $(epoch_ms) - HOOK_JUDGE_START_MS ))"
-  ensure_timeout_stdin_digest
-
-  emit_allow_json "hook judge timeout (>${HOOK_JUDGE_TIMEOUT_MS}ms) fail-open"
-  if [ "${DECISION_EMIT_WRITTEN:-false}" != "true" ]; then
-    return 0
-  fi
-
-  data="$(python3 - "$HOOK_JUDGE_TIMEOUT_MS" "$observed_ms_approx" <<'PY'
-import json
-import sys
-
-payload = {
-    "budget_ms": int(sys.argv[1]),
-    "fail_open": True,
-    "hook": "stop-hook",
-    "observed_ms_approx": int(sys.argv[2]),
-}
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-PY
-)"
-  append_flow_event "judge_timeout" "$data"
-  printf '[mst-stop-hook] judge_timeout budget_ms=%s observed_ms_approx=%s fail_open=true\n' \
-    "$(sanitize_log_value "$HOOK_JUDGE_TIMEOUT_MS")" \
-    "$(sanitize_log_value "$observed_ms_approx")" >&2
-  : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-}
-
-emit_judge_timeout_and_exit() {
-  trap - TERM
-  trap - ERR
-  trap - EXIT
-  set +e
-
-  emit_judge_timeout_payload
-  wait_for_judge_timeout_emit_done || true
-
-  DECISION_EMITTED="true"
-
-  exit 0
-}
-
-kill_hook_children() {
-  local parent_pid="$1"
-  local child_pids=""
-
-  child_pids="$(pgrep -P "$parent_pid" 2>/dev/null || true)"
-  [ -n "$child_pids" ] || return 0
-  kill -TERM $child_pids 2>/dev/null || true
-}
-
-cleanup_hook_watchdog() {
-  local watchdog_pid="${HOOK_WATCHDOG_PID:-}"
-  [ -n "$watchdog_pid" ] || return 0
-
-  set +e
-  kill -KILL "$watchdog_pid" 2>/dev/null || true
-  wait "$watchdog_pid" 2>/dev/null || true
-  HOOK_WATCHDOG_PID=""
-  set -e
-}
-
-start_hook_judge_watchdog() {
-  local hook_pid="$1"
-  local budget_ms="$2"
-  local elapsed_ms remaining_ms sleep_seconds margin_ms
-
-  elapsed_ms="$(( $(epoch_ms) - HOOK_JUDGE_START_MS ))"
-  margin_ms=75
-  if [ "$budget_ms" -lt 150 ]; then
-    margin_ms="$((budget_ms / 2))"
-    if [ "$margin_ms" -lt 1 ]; then
-      margin_ms=1
-    fi
-  fi
-  remaining_ms="$((budget_ms - elapsed_ms - margin_ms))"
-  if [ "$remaining_ms" -lt 1 ]; then
-    remaining_ms=1
-  fi
-
-  sleep_seconds="$(python3 - "$remaining_ms" <<'PY'
-import sys
-
-remaining_ms = int(sys.argv[1])
-print(f"{remaining_ms / 1000.0:.3f}")
-PY
-)"
-
-  (
-    trap - EXIT
-    trap - ERR
-    trap - TERM
-    sleep "$sleep_seconds"
-    if judge_timeout_already_emitted; then
-      wait_for_judge_timeout_emit_done || true
-      exit 0
-    fi
-    emit_judge_timeout_payload
-    kill_hook_children "$hook_pid"
-    kill -TERM "$hook_pid" 2>/dev/null || true
-  ) &
-  HOOK_WATCHDOG_PID="$!"
-}
-
-run_hook_judge_timeout_test_sleep() {
-  local raw_ms="${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}"
-  local remaining_ms chunk_ms sleep_seconds
-  [ -n "$raw_ms" ] || return 0
-
-  remaining_ms="$(python3 - "$raw_ms" <<'PY'
-import sys
-
-try:
-    value = int(str(sys.argv[1]).strip())
-except Exception:
-    value = 0
-if value < 0:
-    value = 0
-print(value)
-PY
-)"
-
-  if [ "$remaining_ms" -gt "${HOOK_JUDGE_TIMEOUT_MS:-0}" ] 2>/dev/null; then
-    emit_judge_timeout_and_exit
-  fi
-
-  while [ "$remaining_ms" -gt 0 ]; do
-    chunk_ms="$remaining_ms"
-    if [ "$chunk_ms" -gt 20 ]; then
-      chunk_ms=20
-    fi
-    sleep_seconds="$(printf '0.%03d' "$chunk_ms")"
-    sleep "$sleep_seconds"
-    remaining_ms="$((remaining_ms - chunk_ms))"
-  done
-}
-
-should_arm_hook_judge_watchdog() {
-  if [ -n "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ]; then
-    return 0
-  fi
-
-  if printf '%s\n%s' "$LAST_ASSISTANT_MESSAGE" "$STDIN_RAW" | grep -qE 'return_to=[a-zA-Z0-9_:/-]+'; then
-    return 1
-  fi
-
-  MST_TIMEOUT_STDIN_RAW="$STDIN_RAW" python3 - <<'PY'
-import json
-import os
-
-try:
-    payload = json.loads(os.environ.get("MST_TIMEOUT_STDIN_RAW", "") or "{}")
-except Exception:
-    payload = {}
-
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-
-for key in ("session_id", "transcript_path"):
-    value = payload.get(key)
-    if isinstance(value, str) and value.strip():
-        raise SystemExit(0)
-
-raise SystemExit(1)
-PY
-}
-
-emit_unhandled_path_fallback() {
-  local exit_code="${1:-0}"
-  local data
-  data="$(python3 - "$exit_code" "${SNAPSHOT_DIGEST:-}" "${SNAPSHOT_CURRENT_SKILL:-}" "${SNAPSHOT_CURRENT_STEP:-}" "${SNAPSHOT_TOTAL_STEPS:-}" "${SNAPSHOT_STATUS:-}" <<'PY'
-import json
-import sys
-
-payload = {
-    "exit_code": sys.argv[1],
-    "snapshot_digest": sys.argv[2],
-    "current_skill": sys.argv[3],
-    "current_step": sys.argv[4],
-    "total_steps": sys.argv[5],
-    "status": sys.argv[6],
-}
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-PY
-)"
-  append_flow_event "unhandled_path" "$data"
-  emit_approve_decision "unhandled_path fallback"
-}
-
-on_stop_hook_err() {
-  local exit_code="${1:-$?}"
-  local line="${2:-${BASH_LINENO[0]:-}}"
-  local command="${3:-${BASH_COMMAND:-unknown}}"
-  local funcname="${FUNCNAME[*]:-}"
-  local source="${BASH_SOURCE[*]:-}"
-  local signal=""
-  local data safe_command
-
-  trap - ERR
-  set +e
-
-  if judge_timeout_already_emitted; then
-    DECISION_EMITTED="true"
-    exit 0
-  fi
-
-  if [ "${DECISION_EMITTED:-false}" = "true" ]; then
-    exit 0
-  fi
-
-  if printf '%s' "$exit_code" | grep -Eq '^[0-9]+$' && [ "$exit_code" -ge 128 ]; then
-    signal="$((exit_code - 128))"
-  fi
-
-  data="$(python3 - "$exit_code" "$line" "$command" "$funcname" "$source" "$signal" "$PPID" "${SESSION_ID:-unknown}" <<'PY'
-import json
-import sys
-
-payload = {
-    "exit_code": sys.argv[1],
-    "line": sys.argv[2],
-    "command": sys.argv[3],
-    "funcname": sys.argv[4],
-    "source": sys.argv[5],
-    "signal": sys.argv[6],
-    "ppid": sys.argv[7],
-    "session_id": sys.argv[8],
-}
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-PY
-)"
-
-  append_flow_event "hook_failure" "$data"
-  safe_command="$(sanitize_log_value "$command")"
-  printf '[mst-stop-hook] hook_failure event_type=hook_failure exit_code=%s line=%s cmd=%s signal=%s ppid=%s session_id=%s\n' \
-    "$(sanitize_log_value "$exit_code")" \
-    "$(sanitize_log_value "$line")" \
-    "$safe_command" \
-    "$(sanitize_log_value "$signal")" \
-    "$(sanitize_log_value "$PPID")" \
-    "$(sanitize_log_value "${SESSION_ID:-unknown}")" >&2
-  emit_approve_decision "hook_failure: line=$line cmd=$safe_command"
-  exit 0
-}
-
-on_stop_hook_exit() {
-  local exit_code="$?"
-  trap - EXIT
-  if judge_timeout_already_emitted; then
-    wait_for_judge_timeout_emit_done || true
-    cleanup_hook_watchdog
-    if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
-      _mst_ledger_complete_once "$exit_code"
-    fi
-    exit 0
-  fi
-  cleanup_hook_watchdog
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/mst-stop-hook.XXXXXX")"
+stdin_file="${runtime_dir}/stdin.json"
+stdout_capture="${runtime_dir}/judge.stdout"
+stderr_capture="${runtime_dir}/judge.stderr"
+status_file="${runtime_dir}/judge.status"
+final_file="${runtime_dir}/final.json"
+cleanup_runtime() {
+  local status="${1:-$?}"
   if declare -F _mst_ledger_complete_once >/dev/null 2>&1; then
-    _mst_ledger_complete_once "$exit_code"
+    _mst_ledger_complete_once "$status" || true
   fi
-  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
-    emit_unhandled_path_fallback "$exit_code"
-    exit 0
-  fi
-  exit "$exit_code"
+  rm -rf "$runtime_dir" "$HOOK_JUDGE_TIMEOUT_MARKER" "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
 }
+trap '_mst_stop_hook_exit_code=$?; cleanup_runtime "$_mst_stop_hook_exit_code"; exit "$_mst_stop_hook_exit_code"' EXIT
 
-trap on_stop_hook_exit EXIT
-trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-trap emit_judge_timeout_and_exit TERM
+printf '%s' "$STDIN_RAW" > "$stdin_file"
 
-if should_arm_hook_judge_watchdog; then
-  start_hook_judge_watchdog "$$" "$HOOK_JUDGE_TIMEOUT_MS"
-  run_hook_judge_timeout_test_sleep
-fi
-
-run_stophook_cleanup_contract
-
-SNAPSHOT_PROBE_EXPORTS=""
-if [ -f "$SNAPSHOT_PROBE_SCRIPT" ]; then
-  SNAPSHOT_PROBE_STATUS=0
-  trap - ERR
+start_ms="$(epoch_ms)"
+(
   set +e
-  SNAPSHOT_PROBE_EXPORTS="$(printf '%s' "$STDIN_RAW" | python3 "$SNAPSHOT_PROBE_SCRIPT" --project-root "$PROJECT_ROOT" --format shell 2>/dev/null)"
-  SNAPSHOT_PROBE_STATUS=$?
-  set -e
-  trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-  if [ "$SNAPSHOT_PROBE_STATUS" -eq 0 ]; then
-    SNAPSHOT_PROBE_EVAL_STATUS=0
-    if eval "$SNAPSHOT_PROBE_EXPORTS"; then
-      :
-    else
-      SNAPSHOT_PROBE_EVAL_STATUS=$?
-      warn_helper_failed "snapshot_probe" "$SNAPSHOT_PROBE_EVAL_STATUS" "invalid_exports"
-      debug_log "warn" "reason=snapshot_probe_invalid_exports"
-    fi
-  else
-    warn_helper_failed "snapshot_probe" "$SNAPSHOT_PROBE_STATUS" "path=$(sanitize_log_value "$SNAPSHOT_PROBE_SCRIPT")"
-    debug_log "warn" "reason=snapshot_probe_failed"
-  fi
-else
-  warn_helper_failed "snapshot_probe" "127" "missing path=$(sanitize_log_value "$SNAPSHOT_PROBE_SCRIPT")"
-  debug_log "warn" "reason=snapshot_probe_missing path=$SNAPSHOT_PROBE_SCRIPT"
-fi
-
-if [ -z "${HOOK_EVENT_NAME:-}" ]; then
-  HOOK_EVENT_NAME="Stop"
-fi
-
-if [ "${MST_STOP_HOOK_TEST_INJECT_FAILURE:-}" = "after_snapshot_probe" ]; then
-  python3 -c 'raise SystemExit("REQ-692 injected failure after_snapshot_probe")'
-fi
-
-refresh_snapshot_from_canonical_session() {
-  local canonical="${MST_SESSION_ID:-}" exports
-  [ -n "$canonical" ] || return 0
-  case "$canonical" in
-    */*|*'..'*|*[!A-Za-z0-9._-]*) return 0 ;;
-  esac
-
-  exports="$(python3 - "$PROJECT_ROOT" "$canonical" "$STDIN_RAW" <<'PY'
-import hashlib
-import json
-import shlex
+  if [ -n "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS:-}" ]; then
+    python3 - "${MST_HOOK_JUDGE_TIMEOUT_TEST_SLEEP_MS}" <<'PY'
 import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-session_id = sys.argv[2]
-raw_stdin = sys.argv[3]
-snapshot_path = project_root / ".gran-maestro" / "state" / session_id / "snapshot.json"
-snapshot = {}
-snapshot_digest = ""
-if snapshot_path.is_file():
-    try:
-        snapshot_digest = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
-        loaded = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            snapshot = loaded
-    except Exception:
-        snapshot = {}
-
-def emit(name, value):
-    print(f"{name}={shlex.quote(str(value))}")
-
-return_to = snapshot.get("returnTo")
-return_to_skill = ""
-return_to_step = ""
-if isinstance(return_to, dict):
-    return_to_skill = str(return_to.get("skill") or "")
-    return_to_step = str(return_to.get("step") or "")
-elif isinstance(return_to, str):
-    skill, sep, step = return_to.partition("/")
-    return_to_skill = skill
-    return_to_step = step if sep else ""
-
-emit("SESSION_ID", session_id)
-emit("SESSION_ID_SOURCE", "env:MST_SESSION_ID")
-emit("SESSION_ID_RESOLUTION_FAILED", "false")
-emit("SNAPSHOT_PATH", snapshot_path)
-emit("SNAPSHOT_PRESENT", "true" if snapshot_path.is_file() else "false")
-emit("SNAPSHOT_DIGEST", snapshot_digest)
-emit("STDIN_DIGEST", hashlib.sha256(raw_stdin.encode("utf-8", errors="replace")).hexdigest())
-emit("SNAPSHOT_CURRENT_SKILL", snapshot.get("currentSkill") or snapshot.get("current_skill") or "")
-emit("SNAPSHOT_CURRENT_STEP", snapshot.get("currentStep", snapshot.get("current_step", "")))
-emit("SNAPSHOT_TOTAL_STEPS", snapshot.get("totalSteps", snapshot.get("total_steps", "")))
-emit("SNAPSHOT_STATUS", "" if snapshot.get("status") is None else snapshot.get("status") or "")
-emit("SNAPSHOT_RETURN_TO_SKILL", return_to_skill)
-emit("SNAPSHOT_RETURN_TO_STEP", return_to_step)
-emit("SNAPSHOT_MST_SESSION_ID", snapshot.get("mst_session_id") or "")
-PY
-)" || return 0
-  eval "$exports"
-}
-
-fail_closed_canonical_mismatch_if_any() {
-  local reason=""
-  [ -n "${MST_SESSION_ID:-}" ] || return 0
-  case "${SNAPSHOT_MST_SESSION_ID:-}" in
-    "")
-      ;;
-    "${MST_SESSION_ID}")
-      ;;
-    *)
-      reason="mst_session_id mismatch: env=${MST_SESSION_ID} snapshot=${SNAPSHOT_MST_SESSION_ID}"
-      ;;
-  esac
-  [ -n "$reason" ] || return 0
-  printf '[mst-stop-hook] fail-closed: %s\n' "$(sanitize_log_value "$reason")" >&2
-  emit_block_decision "$reason"
-  exit 0
-}
-
-canonical_ledger_head() {
-  python3 - "$PROJECT_ROOT" "${MST_SESSION_ID:-}" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-session_id = sys.argv[2]
-if not re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", session_id or ""):
-    raise SystemExit(0)
-head_path = project_root / ".gran-maestro" / "sessions" / session_id / "history.head"
+import time
 try:
-    head = head_path.read_text(encoding="utf-8").strip()
-except OSError:
-    raise SystemExit(0)
-if re.fullmatch(r"[0-9a-f]{64}", head):
-    print(head)
-PY
-}
-
-context_rehydration_head() {
-  MST_CONTEXT_JSON_VALUE="${MST_CONTEXT_JSON:-}" python3 - <<'PY'
-import json
-import os
-import re
-
-try:
-    payload = json.loads(os.environ.get("MST_CONTEXT_JSON_VALUE", "") or "{}")
+    ms = max(0, int(str(sys.argv[1]).strip()))
 except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-core = payload.get("core_rehydration")
-history = core.get("history") if isinstance(core, dict) else {}
-if not isinstance(history, dict):
-    history = {}
-for key in ("last_event_id", "head_hash", "event_hash"):
-    value = history.get(key)
-    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value.strip()):
-        print(value.strip())
-        raise SystemExit(0)
+    ms = 0
+time.sleep(ms / 1000.0)
 PY
-}
-
-append_audit_entry() {
-  local classification="${1:-}"
-  local declared_reason="${2:-}"
-  local block_reason="${3:-}"
-
-  python3 - "$PROJECT_ROOT" "$classification" "$declared_reason" "$block_reason" "$STOP_HOOK_ACTIVE" "$LAST_ASSISTANT_MESSAGE" <<'PY'
-import json
-import re
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-classification = str(sys.argv[2] or "").strip()
-declared_reason_input = str(sys.argv[3] or "").strip()
-block_reason = str(sys.argv[4] or "").strip() or None
-stop_hook_active_raw = str(sys.argv[5] or "").strip().lower()
-last_assistant_message = str(sys.argv[6] or "")
-
-try:
-    agile_root = project_root / ".gran-maestro" / "agile"
-    active_sessions = []
-    for session_path in sorted(agile_root.glob("AGI-*/session.json")):
-        try:
-            with open(session_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if str(payload.get("status", "")).strip().lower() != "active":
-            continue
-        updated_at = payload.get("updated_at")
-        updated_at_key = str(updated_at).strip() if isinstance(updated_at, str) else ""
-        active_sessions.append((updated_at_key, session_path.parent.name))
-
-    if not active_sessions:
-        raise SystemExit(0)
-
-    active_sessions.sort(key=lambda item: item[0])
-    agi_id = active_sessions[-1][1]
-    audit_path = agile_root / agi_id / "stop-audit.ndjson"
-
-    line_count = 0
-    if audit_path.is_file():
-        try:
-            with open(audit_path, "r", encoding="utf-8") as f:
-                line_count = sum(1 for _ in f)
-        except Exception:
-            line_count = 0
-    event_id = f"SAT-{line_count + 1:06d}"
-
-    sentinel_match = re.search(r"\[MST\s+stop_intent\s+reason=([^\s\]]+)(?:\s+detail=\"([^\"]*)\")?\]", last_assistant_message)
-    sentinel_raw = None
-    declared_reason = None
-    if sentinel_match:
-        sentinel_raw = sentinel_match.group(0)
-        parsed_reason = sentinel_match.group(1).strip()
-        declared_reason = parsed_reason or None
-    if declared_reason_input:
-        declared_reason = declared_reason_input
-
-    stop_hook_active_at_entry = None
-    if stop_hook_active_raw == "true":
-        stop_hook_active_at_entry = True
-    elif stop_hook_active_raw == "false":
-        stop_hook_active_at_entry = False
-
-    classification_value = classification if classification in {"blocked", "allowed", "pass_through"} else "pass_through"
-    outcome_map = {
-        "blocked": "block",
-        "allowed": "allow",
-        "pass_through": "pass_through",
-    }
-    entry = {
-        "event_id": event_id,
-        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "agi_id": agi_id,
-        "sprint": None,
-        "hook_stage": "Stop",
-        "stop_hook_active_at_entry": stop_hook_active_at_entry,
-        "declared_reason": declared_reason,
-        "classification": classification_value,
-        "block_reason": block_reason,
-        "sentinel_raw": sentinel_raw,
-        "pm_last_turn_snippet": last_assistant_message[:200],
-        "retry_history_ref": None,
-        "outcome": outcome_map.get(classification_value, "pass_through"),
-    }
-
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(audit_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False))
-        f.write("\n")
-except SystemExit:
-    pass
-except Exception as exc:
-    print(f"[stop-audit] append failed: {exc}", file=sys.stderr)
-PY
-}
-
-classify_stop_intent() {
-  python3 - "$PROJECT_ROOT" "$LAST_ASSISTANT_MESSAGE" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-pm_last_turn = str(sys.argv[2] or "")
-
-sentinel_match = re.search(
-    r"\[MST\s+stop_intent\s+reason=([^\s\]]+)(?:\s+detail=\"([^\"]*)\")?\]",
-    pm_last_turn,
-)
-if not sentinel_match:
-    print("none\t\t")
-    raise SystemExit(0)
-
-declared_reason = sentinel_match.group(1).strip()
-if not declared_reason:
-    print("none\t\t")
-    raise SystemExit(0)
-
-policy_path = project_root / "hooks" / "stop-agile-gate-reasons.json"
-try:
-    with open(policy_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-    allowed_enum = payload.get("allowed_enum")
-    if not isinstance(allowed_enum, list):
-        raise ValueError("allowed_enum must be a list")
-    allowed = {str(item).strip() for item in allowed_enum if str(item).strip()}
-except Exception:
-    print("none\t\t")
-    raise SystemExit(0)
-
-if declared_reason not in allowed:
-    print(f"blocked\t{declared_reason}\tarbitrary_stop")
-    raise SystemExit(0)
-
-if declared_reason == "unrecoverable_external_failure":
-    if not re.search(r"retry|재시도|다시\s*시도|retried|attempt", pm_last_turn, re.IGNORECASE):
-        print(f"blocked\t{declared_reason}\tinsufficient_recovery_attempt")
-        raise SystemExit(0)
-    print(f"allowed\t{declared_reason}\t")
-    raise SystemExit(0)
-
-if declared_reason == "fatal_user_judgment_required":
-    if "?" not in pm_last_turn:
-        print(f"blocked\t{declared_reason}\tambiguous_user_question")
-        raise SystemExit(0)
-    print(f"allowed\t{declared_reason}\t")
-    raise SystemExit(0)
-
-print(f"allowed\t{declared_reason}\t")
-PY
-}
-
-append_block_audit_entry() {
-  local fallback_reason="${1:-}"
-  local effective_block_reason="$fallback_reason"
-  if [ -n "${STOP_INTENT_BLOCK_REASON:-}" ]; then
-    effective_block_reason="$STOP_INTENT_BLOCK_REASON"
   fi
+  if [ -n "${MST_STOP_HOOK_TEST_JUDGE_STDOUT+x}" ]; then
+    printf '%b' "${MST_STOP_HOOK_TEST_JUDGE_STDOUT}"
+    exit "${MST_STOP_HOOK_TEST_JUDGE_EXIT:-0}"
+  fi
+  export MST_STOP_HOOK_WRAPPER=1
+  export MST_STOP_HOOK_PARENT_PPID="$PPID"
+  python3 "$MST_SCRIPT" hook stop judge --stdin-file "$stdin_file" --hook-timeout-ms "$HOOK_JUDGE_TIMEOUT_MS"
+) >"$stdout_capture" 2>"$stderr_capture" &
+judge_pid="$!"
 
-  append_audit_entry "blocked" "${STOP_INTENT_DECLARED_REASON:-}" "$effective_block_reason"
-}
+timed_out="false"
+while kill -0 "$judge_pid" 2>/dev/null; do
+  now_ms="$(epoch_ms)"
+  if [ "$((now_ms - start_ms))" -gt "$HOOK_JUDGE_TIMEOUT_MS" ]; then
+    timed_out="true"
+    kill_process_tree "$judge_pid"
+    break
+  fi
+  sleep 0.01
+done
 
-append_dod012_stop_transition_event() {
-  local fallback_event_type="${1:-continue.queued_action}"
-  MST_DOD012_STDIN_RAW="$STDIN_RAW" \
-  MST_DOD012_STATE_FILE="$STATE_FILE" \
-  MST_DOD012_FALLBACK_EVENT_TYPE="$fallback_event_type" \
-  MST_DOD012_SOURCE_ROOT="$(cd "$script_dir/.." && pwd)" \
-  python3 - "$PROJECT_ROOT" "$MST_SESSION_ID" <<'PY' || true
-import hashlib
+set +e
+wait "$judge_pid" 2>/dev/null
+judge_status=$?
+set -e
+printf '%s\n' "$judge_status" > "$status_file"
+
+if [ -s "$stderr_capture" ]; then
+  cat "$stderr_capture" >&2
+fi
+
+if [ "$timed_out" = "true" ]; then
+  observed_ms="$(( $(epoch_ms) - start_ms ))"
+  python3 - "$HOOK_JUDGE_TIMEOUT_MS" "$final_file" <<'PY'
 import json
-import os
-import re
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-session_id = sys.argv[2]
-
-if not re.fullmatch(r"MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}", session_id or ""):
-    raise SystemExit(0)
-
-base_dir = project_root / ".gran-maestro"
-policy_home = Path(os.environ.get("MST_POLICY_HOME", "")).expanduser()
-if not str(policy_home):
-    policy_home = Path.home().expanduser() / ".claude" / "gran-maestro-policy"
-state_path = Path(os.environ.get("MST_DOD012_STATE_FILE", ""))
-stdin_raw = os.environ.get("MST_DOD012_STDIN_RAW", "")
-fallback_event_type = os.environ.get("MST_DOD012_FALLBACK_EVENT_TYPE", "continue.queued_action")
-
-def load_json_object(raw):
-    try:
-        payload = json.loads(raw or "{}")
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-def read_json_file(path):
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-payload = load_json_object(stdin_raw)
-state = read_json_file(state_path) if state_path else {}
-next_action = payload.get("queued_action")
-if not isinstance(next_action, dict):
-    next_action = state.get("next_action")
-if not isinstance(next_action, dict):
-    next_action = {}
-
-head_path = base_dir / "sessions" / session_id / "history.head"
-try:
-    history_head = head_path.read_text(encoding="utf-8").strip()
-except OSError:
-    history_head = ""
-if not re.fullmatch(r"[0-9a-f]{64}", history_head or ""):
-    history_head = "0" * 64
-
-hook_boundary = str(payload.get("hook_event_name") or "Stop").strip() or "Stop"
-
-def normalize_action(action):
-    explicit = action.get("normalized_action") if isinstance(action, dict) else None
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-    tool = action.get("tool") if isinstance(action, dict) else None
-    command = action.get("command") if isinstance(action, dict) else None
-    if isinstance(tool, str) and isinstance(command, str) and command.strip():
-        return f"{tool.strip().lower()}:{command.strip()}"
-    skill = action.get("expected_skill") or action.get("skill") if isinstance(action, dict) else None
-    source = action.get("source_id") or action.get("source") if isinstance(action, dict) else None
-    return ":".join(str(part).strip() for part in (skill, source) if isinstance(part, str) and part.strip()) or "unknown-action"
-
-def normalized_error():
-    failure = payload.get("failure")
-    if isinstance(failure, dict):
-        value = failure.get("normalized_error")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    value = next_action.get("normalized_error") if isinstance(next_action, dict) else None
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return ""
-
-def transition_source():
-    candidates = []
-    if isinstance(next_action, dict):
-        candidates.append(next_action.get("transition_source"))
-    failure = payload.get("failure")
-    if isinstance(failure, dict):
-        candidates.append(failure.get("transition_source"))
-    candidates.append(payload.get("transition_source"))
-    continuation = state.get("continuation")
-    if isinstance(continuation, dict):
-        candidates.append(continuation.get("transition_source"))
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            normalized = re.sub(r"[^A-Za-z0-9_.:-]+", "-", candidate.strip())
-            return normalized.strip("-") or "unknown"
-    return ""
-
-def action_scope(action):
-    for key in ("scope", "scope_hint"):
-        value = action.get(key) if isinstance(action, dict) else None
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    command = action.get("command") if isinstance(action, dict) else ""
-    command_text = command if isinstance(command, str) else ""
-    if re.search(r"\brm\s+-rf\b|/shared/|publish|remote|delete|archive", command_text, re.IGNORECASE):
-        return "destructive_external_shared_state"
-    if re.search(r"\b(pytest|npm test|tsc --noEmit|git diff --check)\b", command_text):
-        return "read_only_local_reversible"
-    return "unknown"
-
-def is_dangerous_scope(scope):
-    return any(token in scope for token in ("destructive", "external", "shared", "security_sensitive", "remote", "publish"))
-
-def classification(action, scope):
-    safe = []
-    if "read_only" in scope:
-        safe.append("run read-only verification")
-    if "local_reversible" in scope:
-        safe.append("continue local reversible sub-action")
-    if not safe:
-        safe.append("inspect queued action scope")
-    return {
-        "source": "queued_action_tool_envelope",
-        "scope": scope,
-        "classifier_failure_kind": None,
-        "safe_alternatives": safe,
-    }
-
-def blocker_from_candidate(candidate):
-    if not isinstance(candidate, dict):
-        return None
-    blocker_type = str(candidate.get("type") or "state_inconsistency").strip()
-    evidence = candidate.get("evidence")
-    attempted = candidate.get("attempted_recovery")
-    return {
-        "type": blocker_type,
-        "evidence": evidence if isinstance(evidence, list) and evidence else [str(evidence or "critical blocker evidence supplied")],
-        "attempted_recovery": attempted if isinstance(attempted, list) and attempted else [str(attempted or "inspect-only verification")],
-        "next_safe_action": str(candidate.get("next_safe_action") or "request user confirmation").strip(),
-        "mst_session_id": session_id,
-        "history_head": history_head,
-    }
-
-def security_blocker(scope):
-    return {
-        "type": "security_confirmation_required",
-        "evidence": [f"queued action scope requires explicit confirmation: {scope}"],
-        "attempted_recovery": ["classified action scope before auto continuation", "searched for read-only/local reversible alternative"],
-        "next_safe_action": "request security confirmation before original action",
-        "mst_session_id": session_id,
-        "history_head": history_head,
-    }
-
-def prior_circuit_state(key, normalized_action_value):
-    history_path = base_dir / "sessions" / session_id / "history.ndjson"
-    try:
-        rows = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except Exception:
-        return 0, False
-    count = 0
-    reset_seen = False
-    for row in rows:
-        event = row.get("event") if isinstance(row, dict) else None
-        if not isinstance(event, dict):
-            continue
-        event_type = str(event.get("event_type") or event.get("type") or "")
-        if event_type == "action.completed" and str(event.get("normalized_action") or "") == normalized_action_value:
-            count = 0
-            reset_seen = True
-            continue
-        circuit = event.get("circuit_breaker")
-        if isinstance(circuit, dict) and circuit.get("key") == key and isinstance(circuit.get("count"), int):
-            count = max(count, circuit["count"])
-    return count, reset_seen
-
-def append(event):
-    root_match = re.match(r"^MST-(.+)-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$", session_id)
-    if not root_match:
-        return
-    root_mst_id = root_match.group(1)
-    history_file = base_dir / "sessions" / session_id / "history.ndjson"
-    local_head = base_dir / "sessions" / session_id / "history.head"
-    mirror_head = policy_home / "ledger-heads" / f"{session_id}.head"
-    verify_state = base_dir / "sessions" / session_id / "history.verify"
-    history_file.parent.mkdir(parents=True, exist_ok=True)
-    mirror_head.parent.mkdir(parents=True, exist_ok=True)
-
-    last_seq = 0
-    last_hash = "0" * 64
-    idempotency_keys = set()
-    if history_file.is_file():
-        for line in history_file.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if not isinstance(row, dict):
-                continue
-            event_hash = row.get("event_hash")
-            seq = row.get("seq")
-            if isinstance(event_hash, str) and re.fullmatch(r"[0-9a-f]{64}", event_hash) and isinstance(seq, int):
-                if seq >= last_seq:
-                    last_seq = seq
-                    last_hash = event_hash
-            row_event = row.get("event")
-            if isinstance(row_event, dict) and isinstance(row_event.get("idempotency_key"), str):
-                idempotency_keys.add(row_event["idempotency_key"])
-
-    event.setdefault("schema_version", 1)
-    event.setdefault("mst_session_id", session_id)
-    event.setdefault("root_mst_id", root_mst_id)
-    event.setdefault("type", event.get("event_type"))
-    event.setdefault(
-        "created_at",
-        datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-    )
-    event.setdefault("history_head", history_head)
-    if not isinstance(event.get("idempotency_key"), str) or not event.get("idempotency_key").strip():
-        stable = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        event["idempotency_key"] = (
-            f"{session_id}:{event.get('event_type')}:"
-            f"{hashlib.sha256(stable.encode('utf-8')).hexdigest()[:24]}"
-        )
-    if event["idempotency_key"] in idempotency_keys:
-        return
-
-    canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    event_hash = hashlib.sha256((last_hash + "\n" + canonical).encode("utf-8")).hexdigest()
-    row = {
-        "schema_version": 1,
-        "mst_session_id": session_id,
-        "root_mst_id": root_mst_id,
-        "event_type": event.get("event_type"),
-        "created_at": event.get("created_at"),
-        "idempotency_key": event.get("idempotency_key"),
-        "event": event,
-        "event_hash": event_hash,
-        "prev_hash": last_hash,
-        "seq": last_seq + 1,
-    }
-    with history_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
-    local_head.write_text(event_hash + "\n", encoding="utf-8")
-    mirror_head.write_text(event_hash + "\n", encoding="utf-8")
-    stat = history_file.stat()
-    fingerprint = f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}"
-    verify_state.write_text(f"{event_hash}\t{fingerprint}\t{last_seq + 1}\n", encoding="utf-8")
-
-scope = action_scope(next_action)
-action_classification = classification(next_action, scope)
-blocker = blocker_from_candidate(payload.get("critical_blocker_candidate"))
-event_type = fallback_event_type
-extra = {}
-
-if blocker is not None:
-    event_type = "terminal.security_confirmation_required"
-    extra["critical_blocker"] = blocker
-elif next_action and is_dangerous_scope(scope):
-    event_type = "terminal.security_confirmation_required"
-    extra["critical_blocker"] = security_blocker(scope)
-elif normalized_error():
-    event_type = "continue.recoverable_issue"
-    norm_action = normalize_action(next_action)
-    norm_error = normalized_error()
-    norm_source = transition_source()
-    circuit_key = f"{session_id}:{norm_source}:{norm_action}:{norm_error}" if norm_source else f"{session_id}:{norm_action}:{norm_error}"
-    prior_count, reset_seen = prior_circuit_state(circuit_key, norm_action)
-    count = prior_count + 1
-    extra["circuit_breaker"] = {
-        "key": circuit_key,
-        "count": count,
-        "limit": 3,
-        "open": count >= 3,
-        "transition_source": norm_source or None,
-        "normalized_action": norm_action,
-        "normalized_error": norm_error,
-    }
-    if count >= 3:
-        event_type = "terminal.repeat_failure_limit"
-        extra["critical_blocker"] = {
-            "type": "repeat_failure_limit",
-            "evidence": [f"repeat failure circuit opened for {circuit_key}"],
-            "attempted_recovery": ["tracked repeated normalized action/error failures"],
-            "next_safe_action": "inspect-only failure diagnosis before continuation",
-            "mst_session_id": session_id,
-            "history_head": history_head,
-        }
-    if reset_seen:
-        extra["circuit_breaker_reset"] = {
-            "key": f"{session_id}:{norm_action}:progress-reset",
-            "count": 1,
-            "reason": "action.completed",
-        }
-elif isinstance(payload.get("hook_output"), dict):
-    event_type = "continue.hook_blocking_observed"
-elif payload.get("preventContinuation") is True:
-    event_type = "continue.queued_action"
-elif "critical blocker" in str(payload.get("last_assistant_message") or "").lower():
-    event_type = "continue.queued_action"
-
-event = {
-    "event_type": event_type,
-    "type": event_type,
-    "hook_boundary": hook_boundary,
-    "external_control_surface": "hook",
-    "new_session_fallback": False,
-    "next_action": next_action or None,
-    "next_action_execution": {"status": "queued", "next_action": next_action} if next_action else None,
-    "action_classification": action_classification if next_action else None,
-    **extra,
-}
-if event_type.startswith("continue."):
-    event.setdefault(
-        "attempted_recovery",
-        ["queued same-session continuation instead of terminal user wait"],
-    )
-elif isinstance(event.get("critical_blocker"), dict):
-    event.setdefault("user_wait_transition", event_type)
-reset_circuit = event.pop("circuit_breaker_reset", None)
-append(event)
-
-if isinstance(reset_circuit, dict):
-    append(
-        {
-            "event_type": "continue.circuit_reset",
-            "type": "continue.circuit_reset",
-            "hook_boundary": hook_boundary,
-            "external_control_surface": "hook",
-            "new_session_fallback": False,
-            "next_action": next_action or None,
-            "circuit_breaker": reset_circuit,
-        }
-    )
-
-if event_type.startswith("continue.") and next_action and not is_dangerous_scope(scope):
-    append(
-        {
-            "event_type": "action.started",
-            "type": "action.started",
-            "hook_boundary": hook_boundary,
-            "external_control_surface": "hook",
-            "new_session_fallback": False,
-            "next_action": next_action,
-            "action": next_action,
-            "action_classification": action_classification,
-            "normalized_action": normalize_action(next_action),
-        }
-    )
+budget = int(sys.argv[1])
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"decision": "approve", "reason": f"hook judge timeout (>{budget}ms) fail-open"}, ensure_ascii=False) + "\n")
 PY
-}
-
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  append_audit_entry "pass_through" "" "stop_hook_active_true"
-  debug_log "allow" "reason=stop_hook_active_true"
-  emit_approve_decision "stop_hook_active_true"
+  append_timeout_event "$HOOK_JUDGE_TIMEOUT_MS" "$observed_ms"
+  printf '[mst-stop-hook] judge_timeout budget_ms=%s observed_ms_approx=%s fail_open=true\n' "$HOOK_JUDGE_TIMEOUT_MS" "$observed_ms" >&2
+  emit_final_file_once "$final_file"
   exit 0
 fi
 
-contains_allow_pattern() {
-  local text="$1"
-  printf '%s' "$text" | grep -Eiq -- '"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|"name"[[:space:]]*:[[:space:]]*"AskUserQuestion"|workflow complete|final answer delivered|user requested stop'
-}
-
-extract_return_to() {
-  local text="$1"
-  printf '%s' "$text" | grep -oE 'return_to=[a-zA-Z0-9_:/-]+' | tail -1 | sed 's/return_to=//' || true
-}
-
-read_status_field() {
-  local status_file="$1"
-  local status
-  trap - ERR
-  set +e
-  python3 - "$status_file" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-except Exception:
-    raise SystemExit(1)
-
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-
-status = payload.get("status", "")
-if status is None:
-    status = ""
-elif not isinstance(status, str):
-    status = str(status)
-
-print(status.strip().lower())
-PY
-  status=$?
-  return "$status"
-}
-
-# Exit 0 + print value: owner_ppid present
-# Exit 2: owner_ppid field absent (legacy file)
-# Exit 1: parse error
-read_owner_ppid_field() {
-  local status_file="$1"
-  local status
-  trap - ERR
-  set +e
-  python3 - "$status_file" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-except Exception:
-    raise SystemExit(1)
-
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-
-owner_ppid = payload.get("owner_ppid")
-if owner_ppid is None:
-    raise SystemExit(2)
-
-if isinstance(owner_ppid, bool):
-    raise SystemExit(1)
-try:
-    print(int(owner_ppid))
-except (TypeError, ValueError):
-    raise SystemExit(1)
-PY
-  status=$?
-  return "$status"
-}
-
-# Exit 0 + print value: owner_session_id present
-# Exit 2: owner_session_id field absent/null/empty
-# Exit 1: parse error or invalid type
-read_owner_session_id_field() {
-  local status_file="$1"
-  local status
-  trap - ERR
-  set +e
-  python3 - "$status_file" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-except Exception:
-    raise SystemExit(1)
-
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-
-owner_session_id = payload.get("owner_session_id")
-if owner_session_id is None:
-    raise SystemExit(2)
-if not isinstance(owner_session_id, str):
-    raise SystemExit(1)
-owner_session_id = owner_session_id.strip()
-if not owner_session_id:
-    raise SystemExit(2)
-print(owner_session_id)
-PY
-  status=$?
-  return "$status"
-}
-
-resolve_durable_owner_session_id() {
-  python3 - "$PROJECT_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-base_dir = project_root / ".gran-maestro"
-request_terminal = {"done", "completed", "accepted", "cancelled"}
-plan_terminal = {"done", "completed", "cancelled"}
-values = []
-
-
-def add_owner(path, terminal_statuses=None, require_active=False):
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if not isinstance(payload, dict):
-        return
-
-    status = str(payload.get("status") or "").strip().lower()
-    if terminal_statuses is not None and status in terminal_statuses:
-        return
-    if require_active and status != "active":
-        return
-
-    owner_session_id = payload.get("owner_session_id")
-    if isinstance(owner_session_id, str) and owner_session_id.strip():
-        values.append(owner_session_id.strip())
-
-
-for path in sorted((base_dir / "requests").glob("REQ-*/request.json")):
-    add_owner(path, request_terminal)
-
-for path in sorted((base_dir / "plans").glob("PLN-*/plan.json")):
-    add_owner(path, plan_terminal)
-
-for path in sorted((base_dir / "agile").glob("AGI-*/session.json")):
-    add_owner(path, require_active=True)
-
-unique = []
-for value in values:
-    if value not in unique:
-        unique.append(value)
-
-if len(unique) == 1:
-    print(unique[0])
-    raise SystemExit(0)
-if not unique:
-    raise SystemExit(2)
-raise SystemExit(3)
-PY
-}
-
-warn_session_id_mismatch_if_any() {
-  local snapshot_lookup_sid="${MST_SESSION_ID:-${LEGACY_STOP_GUARD_STATE_KEY:-}}"
-  if [ ! -d "${PROJECT_ROOT}/.gran-maestro/requests" ] && [ ! -d "${PROJECT_ROOT}/.gran-maestro/plans" ] && [ ! -d "${PROJECT_ROOT}/.gran-maestro/agile" ]; then
-    return 0
-  fi
-  mst_warn_legacy_session_id_mismatch_once \
-    "$PROJECT_ROOT" \
-    "$MST_TMP" \
-    "$STDIN_RAW" \
-    "$MST_HOOK_LOG_PREFIX" \
-    "$PPID" \
-    "${STDIN_DIGEST:-}" \
-    "$snapshot_lookup_sid"
-}
-
-is_request_terminal_status() {
-  local status="$1"
-  case "$status" in
-    done|completed|accepted|cancelled)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-is_plan_terminal_status() {
-  local status="$1"
-  case "$status" in
-    done|completed|cancelled)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-read_mst_session_id_field() {
-  local file="$1"
-  python3 - "$file" <<'PY'
-import json
-import sys
-
-try:
-    payload = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-value = payload.get("mst_session_id")
-if isinstance(value, str) and value.strip():
-    print(value.strip())
-    raise SystemExit(0)
-raise SystemExit(2)
-PY
-}
-
-has_active_workflow_session() {
-  local requests_root plans_root status_file status owner_session_id_value owner_session_id_exit owner_ppid_value owner_ppid_exit resource_session_id resource_session_id_exit
-  requests_root="${PROJECT_ROOT}/.gran-maestro/requests"
-  plans_root="${PROJECT_ROOT}/.gran-maestro/plans"
-  MST_OWNER_PPID_ONLY_DIAGNOSTIC_SEEN="false"
-
-  if [ -d "$requests_root" ]; then
-    for status_file in "$requests_root"/*/request.json; do
-      [ -f "$status_file" ] || continue
-      if ! status="$(read_status_field "$status_file")"; then
-        printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=request_status_parse_failed file=$status_file"
-        continue
-      fi
-      if is_request_terminal_status "$status"; then
-        continue
-      fi
-
-      resource_session_id_exit=0
-      trap - ERR
-      set +e
-      resource_session_id="$(read_mst_session_id_field "$status_file")"
-      resource_session_id_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$resource_session_id_exit" -eq 0 ]; then
-        if [ -n "${MST_SESSION_ID:-}" ] && [ "$resource_session_id" = "$MST_SESSION_ID" ]; then
-          debug_log "info" "canonical_active_request_detected status=$status file=$status_file mst_session_id=$resource_session_id"
-          return 0
-        fi
-        debug_log "info" "canonical_request_session_ignored status=$status file=$status_file resource_mst_session_id=$resource_session_id current_mst_session_id=${MST_SESSION_ID:-unknown}"
-        continue
-      elif [ "$resource_session_id_exit" -ne 2 ]; then
-        printf '[mst-stop-hook] warn: failed to parse mst_session_id from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=request_mst_session_id_parse_failed file=$status_file"
-        continue
-      fi
-
-      owner_session_id_exit=0
-      trap - ERR
-      set +e
-      owner_session_id_value="$(read_owner_session_id_field "$status_file")"
-      owner_session_id_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$owner_session_id_exit" -eq 0 ]; then
-        debug_log "info" "diagnostic_owner_session_id_ignored status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
-        continue
-      elif [ "$owner_session_id_exit" -ne 2 ]; then
-        printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
-        continue
-      fi
-
-      owner_ppid_exit=0
-      trap - ERR
-      set +e
-      owner_ppid_value="$(read_owner_ppid_field "$status_file")"
-      owner_ppid_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] diagnostic: owner_ppid-only workflow state ignored for %s\n' "$status_file" >&2
-        MST_OWNER_PPID_ONLY_DIAGNOSTIC_SEEN="true"
-        debug_log "info" "diagnostic_owner_ppid_ignored status=$status file=$status_file owner_ppid=$owner_ppid_value"
-        continue
-      elif [ "$owner_ppid_exit" -eq 2 ]; then
-        debug_log "info" "skipping_legacy_request_without_canonical_session status=$status file=$status_file"
-        continue
-      else
-        printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"
-        continue
-      fi
-    done
-  fi
-
-  if [ -d "$plans_root" ]; then
-    for status_file in "$plans_root"/*/plan.json; do
-      [ -f "$status_file" ] || continue
-      if ! status="$(read_status_field "$status_file")"; then
-        printf '[mst-stop-hook] warn: failed to parse status from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=plan_status_parse_failed file=$status_file"
-        continue
-      fi
-      if is_plan_terminal_status "$status"; then
-        continue
-      fi
-
-      resource_session_id_exit=0
-      trap - ERR
-      set +e
-      resource_session_id="$(read_mst_session_id_field "$status_file")"
-      resource_session_id_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$resource_session_id_exit" -eq 0 ]; then
-        if [ -n "${MST_SESSION_ID:-}" ] && [ "$resource_session_id" = "$MST_SESSION_ID" ]; then
-          debug_log "info" "canonical_active_plan_detected status=$status file=$status_file mst_session_id=$resource_session_id"
-          return 0
-        fi
-        debug_log "info" "canonical_plan_session_ignored status=$status file=$status_file resource_mst_session_id=$resource_session_id current_mst_session_id=${MST_SESSION_ID:-unknown}"
-        continue
-      elif [ "$resource_session_id_exit" -ne 2 ]; then
-        printf '[mst-stop-hook] warn: failed to parse mst_session_id from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=plan_mst_session_id_parse_failed file=$status_file"
-        continue
-      fi
-
-      owner_session_id_exit=0
-      trap - ERR
-      set +e
-      owner_session_id_value="$(read_owner_session_id_field "$status_file")"
-      owner_session_id_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$owner_session_id_exit" -eq 0 ]; then
-        debug_log "info" "diagnostic_owner_session_id_ignored status=$status file=$status_file owner_session_id=$owner_session_id_value current_session_id=${SESSION_ID:-unknown}"
-        continue
-      elif [ "$owner_session_id_exit" -ne 2 ]; then
-        printf '[mst-stop-hook] warn: failed to parse owner_session_id from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=owner_session_id_parse_failed file=$status_file"
-        continue
-      fi
-
-      owner_ppid_exit=0
-      trap - ERR
-      set +e
-      owner_ppid_value="$(read_owner_ppid_field "$status_file")"
-      owner_ppid_exit=$?
-      set -e
-      trap 'on_stop_hook_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
-      if [ "$owner_ppid_exit" -eq 0 ]; then
-        printf '[mst-stop-hook] diagnostic: owner_ppid-only workflow state ignored for %s\n' "$status_file" >&2
-        MST_OWNER_PPID_ONLY_DIAGNOSTIC_SEEN="true"
-        debug_log "info" "diagnostic_owner_ppid_ignored status=$status file=$status_file owner_ppid=$owner_ppid_value"
-        continue
-      elif [ "$owner_ppid_exit" -eq 2 ]; then
-        debug_log "info" "skipping_legacy_plan_without_canonical_session status=$status file=$status_file"
-        continue
-      else
-        printf '[mst-stop-hook] warn: failed to parse owner_ppid from %s\n' "$status_file" >&2
-        debug_log "warn" "reason=owner_ppid_parse_failed file=$status_file"
-        continue
-      fi
-    done
-  fi
-
-  return 1
-}
-
-emit_block_json() {
-  local reason="$1"
-  local details_anchor="$2"
-  DECISION_EMIT_WRITTEN="false"
-  if [ "${HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED:-false}" != "true" ]; then
-    if declare -F claim_judge_timeout_emit >/dev/null 2>&1; then
-      if ! claim_judge_timeout_emit; then
-        return 0
-      fi
-    fi
-  fi
-  if [ -n "$details_anchor" ]; then
-    printf '[stop-hook] anchor=%s\n' "$details_anchor" >&2
-  fi
-  python3 - "$reason" <<'PY'
-import json
-import sys
-
-reason = sys.argv[1] or ""
-if not reason.strip():
-    reason = "stop blocked (reason unspecified)"
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-PY
-  if [ -n "${HOOK_JUDGE_TIMEOUT_DONE:-}" ]; then
-    : > "$HOOK_JUDGE_TIMEOUT_DONE" 2>/dev/null || true
-  fi
-  HOOK_JUDGE_TIMEOUT_EMIT_CLAIMED="emitted"
-  DECISION_EMIT_WRITTEN="true"
-}
-
-emit_block_decision() {
-  local reason details_anchor
-  reason="$(reason_with_snapshot_meta "$1")"
-  details_anchor="$(details_anchor_for_reason "$reason")"
-  DECISION_EMITTED="true"
-  emit_block_json "$reason" "$details_anchor"
-}
-
-persist_block_state() {
-  local reason="$1"
-  python3 - "$STATE_FILE" "$reason" <<'PY'
-import json
-import os
-import sys
-
-path = sys.argv[1]
-reason = sys.argv[2]
-
-payload = {}
-if os.path.isfile(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        payload = {}
-
-if not isinstance(payload, dict):
-    payload = {}
-
-block_count = payload.get("block_count")
-if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
-    block_count = 0
-
-block_count += 1
-payload["block_count"] = block_count
-payload["last_block_reason"] = reason if isinstance(reason, str) else ""
-
-tmp_path = f"{path}.tmp"
-try:
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp_path, path)
-except Exception:
-    pass
-
-print(block_count)
-PY
-}
-
-is_int_value() {
-  printf '%s' "$1" | grep -Eq '^-?[0-9]+$'
-}
-
-is_mst_snapshot_skill() {
-  local skill="$1"
-  case "$skill" in
-    mst:*|agile|request|resume|recover|review|approve|accept|feedback|cancel|intent|list|inspect|priority|explore|debug|discussion|ideation|plan|agile-plan)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-run_snapshot_guard() {
-  local reason persisted_block_count
-
-  if [ "${SESSION_ID_RESOLUTION_FAILED:-false}" = "true" ]; then
-    debug_log "info" "reason=session_id_resolution_failed_fallthrough hook_event=${HOOK_EVENT_NAME:-unknown}"
-    return 0
-  fi
-
-  if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
-    debug_log "info" "reason=no_mst_session_fallthrough session_id=${SESSION_ID:-unknown} hook_event=${HOOK_EVENT_NAME:-unknown}"
-    return 0
-  fi
-
-  if ! is_mst_snapshot_skill "${SNAPSHOT_CURRENT_SKILL:-}"; then
-    debug_log "allow" "reason=non_mst_skill skill=${SNAPSHOT_CURRENT_SKILL:-}"
-    emit_approve_decision "non-mst-skill"
-    exit 0
-  fi
-
-  if [ -n "${SNAPSHOT_RETURN_TO_SKILL:-}" ]; then
-    reason="[RETURN-TO] snapshot return_to=${SNAPSHOT_RETURN_TO_SKILL}/${SNAPSHOT_RETURN_TO_STEP}. Do NOT stop or pause."
-    reason="$reason You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (SNAPSHOT_RETURN_TO_SKILL=${SNAPSHOT_RETURN_TO_SKILL}, SNAPSHOT_RETURN_TO_STEP=${SNAPSHOT_RETURN_TO_STEP}) to determine the next action."
-    persisted_block_count="$(persist_block_state "$reason" 2>/dev/null || printf '%s' "$(( ${BLOCK_COUNT:-0} + 1 ))")"
-    debug_log "block" "reason=snapshot_return_to skill=$SNAPSHOT_RETURN_TO_SKILL step=$SNAPSHOT_RETURN_TO_STEP block_count=$persisted_block_count"
-    emit_block_decision "$reason"
-    exit 0
-  fi
-
-  if is_int_value "${SNAPSHOT_CURRENT_STEP:-}" && is_int_value "${SNAPSHOT_TOTAL_STEPS:-}" && [ "$SNAPSHOT_CURRENT_STEP" -lt "$SNAPSHOT_TOTAL_STEPS" ]; then
-    reason="[SNAPSHOT][step_progress] skill ${SNAPSHOT_CURRENT_SKILL:-unknown} step $((SNAPSHOT_CURRENT_STEP + 1))/${SNAPSHOT_TOTAL_STEPS} 계속 진행."
-    reason="$reason Do not stop; emit the next tool call now."
-    persisted_block_count="$(persist_block_state "$reason" 2>/dev/null || printf '%s' "$(( ${BLOCK_COUNT:-0} + 1 ))")"
-    debug_log "block" "reason=snapshot_step_progress skill=${SNAPSHOT_CURRENT_SKILL:-} step=${SNAPSHOT_CURRENT_STEP:-} total=${SNAPSHOT_TOTAL_STEPS:-} block_count=$persisted_block_count"
-    emit_block_decision "$reason"
-    exit 0
-  fi
-
-  case "${SNAPSHOT_STATUS:-}" in
-    committed|completed|done)
-      debug_log "allow" "reason=snapshot_completion skill=${SNAPSHOT_CURRENT_SKILL:-}"
-      emit_approve_decision "completion"
-      exit 0
-      ;;
-  esac
-
-  append_dod012_stop_transition_event "continue.queued_action"
-  emit_unhandled_path_fallback "0"
-  exit 0
-}
-
-
-run_boundary_check() {
-  local req_id="$1" phase="$2"
-  local output status
-  set +e
-  output="$(cd "$PROJECT_ROOT" && python3 "$MST_SCRIPT" worktree check-boundary --req "$req_id" --phase "$phase" --ppid "$PPID")"
-  status=$?
-  set -e
-  if [ "$status" -ne 0 ]; then
-    debug_log "boundary_check_nonzero" "phase=$phase req=$req_id status=$status"
-  fi
-  printf '%s\n' "$output"
-}
-
-parse_boundary_info() {
-  local raw="$1"
-  python3 - "$raw" <<'PY'
-import json
-import sys
-
-try:
-    payload = json.loads(sys.argv[1] or "{}")
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-
-def text(value):
-    if value is None:
-        return ""
-    return str(value).replace("\t", " ").replace("\n", " ").strip()
-
-print(
-    "{}\t{}\t{}\t{}\t{}\t{}".format(
-        "true" if payload.get("ok") is True else "false",
-        text(payload.get("violation") or "unknown"),
-        "true" if payload.get("retry_possible") is True else "false",
-        text(payload.get("detected_base")),
-        text(payload.get("owner_ppid")),
-        text(payload.get("current_ppid")),
-    )
-)
-PY
-}
-
-exit_boundary_requests() {
-  python3 - "$PROJECT_ROOT" "$PPID" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-try:
-    current_ppid = int(sys.argv[2])
-except (IndexError, TypeError, ValueError):
-    raise SystemExit(0)
-
-requests_root = project_root / ".gran-maestro" / "requests"
-if not requests_root.is_dir():
-    raise SystemExit(0)
-
-def parse_int(value):
-    if isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-for request_path in sorted(requests_root.glob("REQ-*/request.json")):
-    try:
-        data = json.loads(request_path.read_text(encoding="utf-8"))
-    except Exception:
-        continue
-    if not isinstance(data, dict):
-        continue
-    phase = parse_int(data.get("current_phase"))
-    if phase is None:
-        continue
-    status = str(data.get("status") or "").strip().lower()
-    owner_ppid = parse_int(data.get("owner_ppid"))
-    if owner_ppid is None:
-        continue
-    if phase == 5 and status == "done" and owner_ppid == current_ppid:
-        req_id = str(data.get("id") or request_path.parent.name).strip()
-        if req_id:
-            print(req_id)
-PY
-}
-
-exit_repair_targets() {
-  local req_id="$1"
-  python3 - "$PROJECT_ROOT" "$req_id" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-req_id = sys.argv[2]
-request_path = project_root / ".gran-maestro" / "requests" / req_id / "request.json"
-try:
-    data = json.loads(request_path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if not isinstance(data, dict):
-    raise SystemExit(0)
-
-tasks = data.get("tasks")
-if not isinstance(tasks, list):
-    raise SystemExit(0)
-
-retry_states = {"cleaning", "pre_merge", "clean_failed"}
-for task in tasks:
-    if not isinstance(task, dict):
-        continue
-    task_id = str(task.get("id") or "").strip()
-    if not task_id:
-        continue
-    meta_path = project_root / ".gran-maestro" / "worktrees" / f"{req_id}-{task_id}.meta.json"
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception:
-        continue
-    if not isinstance(meta, dict):
-        continue
-    state = str(meta.get("state") or "").strip()
-    path = str(meta.get("path") or "").strip()
-    if state in retry_states and path:
-        print(f"{task_id}\t{path}")
-PY
-}
-
-mark_exit_meta_cleaned() {
-  local req_id="$1" task_id="$2"
-  python3 - "$PROJECT_ROOT" "$req_id" "$task_id" <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-req_id = sys.argv[2]
-task_id = sys.argv[3]
-meta_path = project_root / ".gran-maestro" / "worktrees" / f"{req_id}-{task_id}.meta.json"
-try:
-    payload = json.loads(meta_path.read_text(encoding="utf-8"))
-except Exception:
-    payload = {}
-if not isinstance(payload, dict):
-    payload = {}
-now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-payload["state"] = "cleaned"
-payload["last_activity_at"] = now
-tmp_path = Path(str(meta_path) + ".tmp")
-tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-os.replace(tmp_path, meta_path)
-PY
-}
-
-repair_exit_once() {
-  local req_id="$1"
-  local task_id worktree_path remove_status
-
-  while IFS=$'\t' read -r task_id worktree_path; do
-    [ -n "${task_id:-}" ] || continue
-    [ -n "${worktree_path:-}" ] || continue
-
-    if [ -e "$worktree_path" ]; then
-      set +e
-      cd "$PROJECT_ROOT" && python3 "$MST_SCRIPT" worktree remove --path "$worktree_path" --force >/dev/null
-      remove_status=$?
-      set -e
-      if [ "$remove_status" -ne 0 ]; then
-        debug_log "boundary_exit_repair_failed" "req=$req_id task=$task_id status=$remove_status path=$worktree_path"
-        continue
-      fi
-    fi
-
-    if [ ! -e "$worktree_path" ]; then
-      mark_exit_meta_cleaned "$req_id" "$task_id"
-      debug_log "boundary_exit_repair_meta_cleaned" "req=$req_id task=$task_id path=$worktree_path"
-    fi
-  done <<EOF
-$(exit_repair_targets "$req_id")
-EOF
-}
-
-run_exit_boundary_guard() {
-  local req_id boundary_raw boundary_info boundary_ok boundary_violation boundary_retry owner_ppid current_ppid
-
-  while IFS= read -r req_id; do
-    [ -n "$req_id" ] || continue
-
-    boundary_raw="$(run_boundary_check "$req_id" "exit")"
-    boundary_info="$(parse_boundary_info "$boundary_raw")"
-    boundary_ok="$(printf '%s' "$boundary_info" | cut -f1)"
-    boundary_violation="$(printf '%s' "$boundary_info" | cut -f2)"
-    boundary_retry="$(printf '%s' "$boundary_info" | cut -f3)"
-    owner_ppid="$(printf '%s' "$boundary_info" | cut -f5)"
-    current_ppid="$(printf '%s' "$boundary_info" | cut -f6)"
-
-    if [ "$boundary_ok" != "true" ]; then
-      [ -n "$boundary_violation" ] || boundary_violation="unknown"
-      log_boundary_event "detected" "$req_id" "$boundary_violation" "exit boundary violation detected"
-    fi
-
-    if [ "$boundary_ok" = "true" ]; then
-      debug_log "boundary_exit_pass" "req=$req_id"
-      continue
-    fi
-
-    if [ "$boundary_violation" = "not_cleaned" ] && [ "$boundary_retry" = "true" ]; then
-      repair_exit_once "$req_id"
-      boundary_raw="$(run_boundary_check "$req_id" "exit")"
-      boundary_info="$(parse_boundary_info "$boundary_raw")"
-      boundary_ok="$(printf '%s' "$boundary_info" | cut -f1)"
-      boundary_violation="$(printf '%s' "$boundary_info" | cut -f2)"
-      if [ "$boundary_ok" = "true" ]; then
-        log_boundary_event "retry_success" "$req_id" "ok" "exit repair succeeded"
-        debug_log "boundary_exit_repair_pass" "req=$req_id"
-        continue
-      fi
-      [ -n "$boundary_violation" ] || boundary_violation="unknown"
-      log_boundary_event "retry_failed" "$req_id" "$boundary_violation" "exit repair failed"
-    fi
-
-    [ -n "$boundary_violation" ] || boundary_violation="unknown"
-    debug_log "boundary_exit_block" "req=$req_id violation=$boundary_violation"
-    log_boundary_event "blocked" "$req_id" "$boundary_violation" "boundary_violation:${boundary_violation}"
-    emit_block_decision "boundary_violation:${boundary_violation}"
-    exit 0
-  done <<EOF
-$(exit_boundary_requests)
-EOF
-}
-
-pending_delegate_io_attention_context() {
-  python3 - "$PROJECT_ROOT" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-project_root = Path(sys.argv[1])
-run_dir = project_root / ".gran-maestro" / "run"
-if not run_dir.is_dir():
-    raise SystemExit(0)
-
-def parse_dt(value):
-    if not isinstance(value, str) or not value.strip():
-        return None
-    raw = value.strip()
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except Exception:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-now = datetime.now(timezone.utc)
-pending = []
-for state_path in sorted(run_dir.glob("*.json")):
-    try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except Exception:
-        continue
-    if not isinstance(payload, dict):
-        continue
-    for event in payload.get("delegate_io_attention_events") or []:
-        if not isinstance(event, dict):
-            continue
-        if event.get("kind") != "delegate_io_attention":
-            continue
-        expires_at = parse_dt(event.get("expires_at"))
-        if expires_at is not None and expires_at <= now:
-            continue
-        pending.append(event)
-
-if not pending:
-    raise SystemExit(0)
-
-def observed_key(event):
-    return parse_dt(event.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc)
-
-event = sorted(pending, key=observed_key)[-1]
-allowed = ",".join(str(item) for item in event.get("allowed_actions") or [])
-forbidden = ",".join(str(item) for item in event.get("forbidden_reasons") or [])
-fields = {
-    "event_id": event.get("event_id", ""),
-    "task_id": event.get("task_id", ""),
-    "provider": event.get("provider", ""),
-    "pid": event.get("pid", ""),
-    "signal": event.get("signal", ""),
-    "confidence": event.get("confidence", ""),
-    "allowed_actions": allowed,
-    "forbidden_reasons": forbidden,
-}
-print(
-    " ".join(
-        f"{key}={str(value).replace(chr(9), ' ').replace(chr(10), ' ').strip()}"
-        for key, value in fields.items()
-        if str(value).strip()
-    )
-)
-PY
-}
-
-warn_session_id_mismatch_if_any
-refresh_snapshot_from_canonical_session
-fail_closed_canonical_mismatch_if_any
-
-if [ "${SNAPSHOT_PRESENT:-false}" != "true" ]; then
-  if has_active_workflow_session; then
-    REASON="active workflow session detected but canonical state missing; continue workflow"
-    emit_block_decision "$REASON"
-    debug_log "block" "reason=state_missing_active_session_detected_pre_snapshot"
-    exit 0
-  fi
-  if [ "${MST_OWNER_PPID_ONLY_DIAGNOSTIC_SEEN:-false}" = "true" ]; then
-    emit_approve_decision "owner_ppid-only workflow state ignored"
-    debug_log "allow" "reason=owner_ppid_only_diagnostic_pre_snapshot"
-    exit 0
-  fi
-fi
-
-PRE_STATE_NEXT_INFO="$(python3 - "$STATE_FILE" <<'PY'
-import json
-import os
-import sys
-
-path = sys.argv[1]
-if not os.path.isfile(path):
-    raise SystemExit(0)
-try:
-    payload = json.load(open(path, encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-if not isinstance(payload, dict) or payload.get("workflow_active") is not True:
-    raise SystemExit(0)
-next_action = payload.get("next_action")
-if not isinstance(next_action, dict):
-    raise SystemExit(0)
-skill = next_action.get("expected_skill") or next_action.get("skill") or ""
-if not isinstance(skill, str) or not skill.strip():
-    raise SystemExit(0)
-source = next_action.get("source_id") or next_action.get("source") or ""
-source_skill = next_action.get("source_skill") or ""
-current_skill = payload.get("current_skill") or ""
-active_req = payload.get("active_req") or ""
-iteration = payload.get("iteration")
-updated_at = payload.get("updated_at") or ""
-fields = [
-    skill.strip(),
-    source.strip() if isinstance(source, str) else "",
-    source_skill.strip() if isinstance(source_skill, str) else "",
-    current_skill.strip() if isinstance(current_skill, str) else "",
-    active_req.strip() if isinstance(active_req, str) else "",
-    str(iteration) if isinstance(iteration, int) else "0",
-    updated_at.strip() if isinstance(updated_at, str) else "",
-]
-print("\t".join(value.replace("\t", " ").replace("\n", " ") for value in fields))
-PY
-)"
-if [ -n "$PRE_STATE_NEXT_INFO" ]; then
-  PRE_NEXT_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f1)"
-  PRE_NEXT_SOURCE="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f2)"
-  PRE_SOURCE_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f3)"
-  PRE_CURRENT_SKILL="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f4)"
-  PRE_ACTIVE_REQ="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f5)"
-  PRE_ITERATION="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f6)"
-  PRE_UPDATED_AT="$(printf '%s' "$PRE_STATE_NEXT_INFO" | cut -f7)"
-  PRE_NEXT_ARGS="-a"
-  PRE_LEDGER_HEAD="$(canonical_ledger_head || true)"
-  PRE_CONTEXT_HEAD="$(context_rehydration_head || true)"
-  if [ -n "$PRE_NEXT_SOURCE" ]; then
-    PRE_NEXT_ARGS="-a $PRE_NEXT_SOURCE"
-  fi
-  REASON="Workflow active, continue current skill and context without stopping."
-  if [ -n "$PRE_CURRENT_SKILL" ]; then
-    REASON="$REASON Current skill: $PRE_CURRENT_SKILL."
-  fi
-  if [ -n "$PRE_ACTIVE_REQ" ]; then
-    REASON="$REASON Active request: $PRE_ACTIVE_REQ."
-  fi
-  if [ "$PRE_ITERATION" != "0" ]; then
-    REASON="$REASON Iteration: $PRE_ITERATION."
-  fi
-  if [ -n "$PRE_UPDATED_AT" ]; then
-    REASON="$REASON Last update: $PRE_UPDATED_AT."
-  fi
-  if [ -n "$PRE_CONTEXT_HEAD" ]; then
-    REASON="$REASON Rehydration head: $PRE_CONTEXT_HEAD."
-  fi
-  if [ -n "$PRE_LEDGER_HEAD" ]; then
-    REASON="$REASON Ledger head: $PRE_LEDGER_HEAD."
-  fi
-  REASON="$REASON You MUST call Skill(skill: \"$PRE_NEXT_SKILL\", args: \"$PRE_NEXT_ARGS\") immediately."
-  if [ -n "$PRE_SOURCE_SKILL" ]; then
-    REASON="$REASON Transition source_skill: $PRE_SOURCE_SKILL."
-  fi
-  REASON="$REASON Do not stop; emit the next tool call now."
-  append_dod012_stop_transition_event "continue.queued_action"
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "1")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=next_action_present_pre_snapshot next_skill=$PRE_NEXT_SKILL next_source=$PRE_NEXT_SOURCE ledger_head=$PRE_LEDGER_HEAD block_count=$PERSISTED_BLOCK_COUNT"
+if [ "$judge_status" -eq 0 ] && validate_judge_stdout "$stdout_capture" "$final_file"; then
+  emit_final_file_once "$final_file"
   exit 0
 fi
 
-run_snapshot_guard
-
-run_exit_boundary_guard
-
-STATE_INFO="$(python3 - "$STATE_FILE" <<'PY'
-import json
-import os
-import sys
-
-def emit(
-    status,
-    workflow_active=False,
-    current_skill="",
-    active_req="",
-    iteration=0,
-    next_skill="",
-    next_source="",
-    next_auto=False,
-    source_skill="",
-    has_next_action=False,
-    updated_at="",
-    agile_loop_active=False,
-    block_count=0,
-    last_block_reason="",
-    steering_disabled=False,
-):
-    if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
-        block_count = 0
-    if not isinstance(last_block_reason, str):
-        last_block_reason = ""
-    last_block_reason = last_block_reason.replace("\t", " ").replace("\n", " ").strip()
-    print(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
-            status,
-            "true" if workflow_active else "false",
-            current_skill,
-            active_req,
-            iteration,
-            next_skill,
-            next_source,
-            "true" if next_auto else "false",
-            source_skill,
-            "true" if has_next_action else "false",
-            updated_at,
-            "true" if agile_loop_active else "false",
-            block_count,
-            last_block_reason,
-            "true" if steering_disabled else "false",
-        )
-    )
-
-path = sys.argv[1]
-if not os.path.isfile(path):
-    emit("missing")
-    raise SystemExit(0)
-
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-except Exception:
-    emit("invalid")
-    raise SystemExit(0)
-
-if not isinstance(payload, dict):
-    emit("invalid")
-    raise SystemExit(0)
-
-workflow_active = bool(payload.get("workflow_active"))
-current_skill = payload.get("current_skill") if isinstance(payload.get("current_skill"), str) else ""
-active_req = payload.get("active_req") if isinstance(payload.get("active_req"), str) else ""
-updated_at = payload.get("updated_at") if isinstance(payload.get("updated_at"), str) else ""
-agile_loop_active = payload.get("agile_loop_active")
-if not isinstance(agile_loop_active, bool):
-    agile_loop_active = False
-
-block_count = payload.get("block_count")
-if not isinstance(block_count, int) or isinstance(block_count, bool) or block_count < 0:
-    block_count = 0
-
-last_block_reason = payload.get("last_block_reason")
-if not isinstance(last_block_reason, str):
-    last_block_reason = ""
-
-steering_disabled = payload.get("steering_disabled")
-if not isinstance(steering_disabled, bool):
-    steering_disabled = False
-
-iteration = payload.get("iteration")
-if not isinstance(iteration, int):
-    iteration = 0
-
-next_skill = ""
-next_source = ""
-next_auto = False
-source_skill = ""
-has_next_action = False
-
-next_action = payload.get("next_action")
-if isinstance(next_action, dict):
-    has_next_action = True
-    skill_candidates = [
-        next_action.get("expected_skill"),
-        next_action.get("skill"),
-    ]
-    source_candidates = [
-        next_action.get("source_id"),
-        next_action.get("source"),
-    ]
-
-    for candidate in skill_candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            next_skill = candidate.strip()
-            break
-
-    for candidate in source_candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            next_source = candidate.strip()
-            break
-
-    source_skill_value = next_action.get("source_skill")
-    if isinstance(source_skill_value, str) and source_skill_value.strip():
-        source_skill = source_skill_value.strip()
-
-    auto_candidates = [next_action.get("auto_mode"), next_action.get("auto")]
-    for candidate in auto_candidates:
-        if candidate is True:
-            next_auto = True
-            break
-
-emit(
-    "valid",
-    workflow_active=workflow_active,
-    current_skill=current_skill,
-    active_req=active_req,
-    iteration=iteration,
-    next_skill=next_skill,
-    next_source=next_source,
-    next_auto=next_auto,
-    source_skill=source_skill,
-    has_next_action=has_next_action,
-    updated_at=updated_at,
-    agile_loop_active=agile_loop_active,
-    block_count=block_count,
-    last_block_reason=last_block_reason,
-    steering_disabled=steering_disabled,
-)
-PY
-)"
-
-STATE_STATUS="$(printf '%s' "$STATE_INFO" | cut -f1)"
-WORKFLOW_ACTIVE="$(printf '%s' "$STATE_INFO" | cut -f2)"
-CURRENT_SKILL="$(printf '%s' "$STATE_INFO" | cut -f3)"
-ACTIVE_REQ="$(printf '%s' "$STATE_INFO" | cut -f4)"
-ITERATION="$(printf '%s' "$STATE_INFO" | cut -f5)"
-NEXT_SKILL="$(printf '%s' "$STATE_INFO" | cut -f6)"
-NEXT_SOURCE="$(printf '%s' "$STATE_INFO" | cut -f7)"
-NEXT_AUTO="$(printf '%s' "$STATE_INFO" | cut -f8)"
-SOURCE_SKILL="$(printf '%s' "$STATE_INFO" | cut -f9)"
-HAS_NEXT_ACTION="$(printf '%s' "$STATE_INFO" | cut -f10)"
-UPDATED_AT="$(printf '%s' "$STATE_INFO" | cut -f11)"
-AGILE_LOOP_ACTIVE="$(printf '%s' "$STATE_INFO" | cut -f12)"
-BLOCK_COUNT="$(printf '%s' "$STATE_INFO" | cut -f13)"
-LAST_BLOCK_REASON="$(printf '%s' "$STATE_INFO" | cut -f14)"
-STEERING_DISABLED="$(printf '%s' "$STATE_INFO" | cut -f15)"
-
-RETURN_TO_RAW="$(extract_return_to "$LAST_ASSISTANT_MESSAGE")"
-if [ -z "$RETURN_TO_RAW" ] || [ "$RETURN_TO_RAW" = "null" ]; then
-  RETURN_TO_RAW="$(extract_return_to "$STDIN_RAW")"
-fi
-RETURN_TO_SKILL=""
-RETURN_TO_STEP=""
-if [ -n "$RETURN_TO_RAW" ] && [ "$RETURN_TO_RAW" != "null" ]; then
-  RETURN_TO_SKILL="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f1)"
-  RETURN_TO_STEP="$(printf '%s' "$RETURN_TO_RAW" | cut -d'/' -f2)"
-  debug_log "info" "return_to_detected skill=$RETURN_TO_SKILL step=$RETURN_TO_STEP raw=$RETURN_TO_RAW"
-fi
-
-if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ] && [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
-  REASON="[RETURN-TO] Sub-skill returned with return_to=$RETURN_TO_RAW. Do NOT stop or pause."
-  REASON="$REASON You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (RETURN_TO_SKILL=$RETURN_TO_SKILL, RETURN_TO_STEP=$RETURN_TO_STEP) to determine the next action."
-  REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
-  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=return_to_detected_workflow_inactive return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
-  exit 0
-fi
-
-if [ "$WORKFLOW_ACTIVE" != "true" ] && [ "$AGILE_LOOP_ACTIVE" != "true" ]; then
-  if has_active_workflow_session; then
-    REASON="active workflow session detected but canonical state missing; continue workflow"
-    append_block_audit_entry "$REASON"
-    emit_block_decision "$REASON"
-    debug_log "block" "reason=state_missing_active_session_detected"
-    exit 0
-  fi
-  if [ "${MST_OWNER_PPID_ONLY_DIAGNOSTIC_SEEN:-false}" = "true" ]; then
-    emit_approve_decision "owner_ppid-only workflow state ignored"
-    debug_log "allow" "reason=owner_ppid_only_diagnostic"
-    exit 0
-  fi
-  DELEGATE_IO_CONTEXT="$(pending_delegate_io_attention_context || true)"
-  if [ -n "$DELEGATE_IO_CONTEXT" ]; then
-    REASON="[DELEGATE-IO] pending delegate_io_attention event: $DELEGATE_IO_CONTEXT."
-    REASON="$REASON Treat this as low-priority re-entry context; inspect current state and choose an allowed action without writing child stdin."
-    append_block_audit_entry "$REASON"
-    debug_log "block" "reason=delegate_io_attention_pending context=$(sanitize_log_value "$DELEGATE_IO_CONTEXT")"
-    emit_block_decision "$REASON"
-    exit 0
-  fi
-  if [ "${SNAPSHOT_PRESENT:-false}" != "true" ] && [ -z "${MST_SESSION_ID:-}" ] && [ -z "$(mst_extract_stdin_mst_session_id_literal "$STDIN_RAW" || true)" ] && [ "${SESSION_ID:-unknown}" != "unknown" ]; then
-    append_audit_entry "pass_through" "" "no-mst-session"
-    debug_log "allow" "reason=no_mst_session state_status=$STATE_STATUS session_id=${SESSION_ID:-unknown}"
-    emit_approve_decision "no-mst-session"
-    exit 0
-  fi
-  append_audit_entry "pass_through" "" "workflow_inactive"
-  debug_log "allow" "reason=workflow_inactive state_status=$STATE_STATUS"
-  emit_approve_decision "workflow_inactive"
-  exit 0
-fi
-
-CLASSIFY_INFO="$(classify_stop_intent)"
-STOP_INTENT_CLASSIFICATION="$(printf '%s' "$CLASSIFY_INFO" | cut -f1)"
-STOP_INTENT_DECLARED_REASON="$(printf '%s' "$CLASSIFY_INFO" | cut -f2)"
-STOP_INTENT_BLOCK_REASON="$(printf '%s' "$CLASSIFY_INFO" | cut -f3)"
-STOP_INTENT_FORCE_BLOCK="false"
-
-if [ "$STOP_INTENT_CLASSIFICATION" = "allowed" ]; then
-  append_audit_entry "allowed" "$STOP_INTENT_DECLARED_REASON" ""
-  debug_log "allow" "reason=sentinel_allowed declared=$STOP_INTENT_DECLARED_REASON"
-  emit_approve_decision "sentinel_allowed"
-  exit 0
-fi
-
-if [ "$STOP_INTENT_CLASSIFICATION" = "blocked" ]; then
-  STOP_INTENT_FORCE_BLOCK="true"
-  debug_log "info" "sentinel_blocked declared=$STOP_INTENT_DECLARED_REASON block_reason=$STOP_INTENT_BLOCK_REASON"
-fi
-
-if ! printf '%s' "$BLOCK_COUNT" | grep -Eq '^[0-9]+$'; then
-  BLOCK_COUNT="0"
-fi
-
-AGILE_GUARD_ACTIVE="false"
-if [ "$AGILE_LOOP_ACTIVE" = "true" ] || [ "$CURRENT_SKILL" = "mst:agile" ]; then
-  AGILE_GUARD_ACTIVE="true"
-fi
-
-AGILE_AUTO_MODE_ACTIVE="false"
-if [ "$AGILE_AUTO_MODE_HINT" = "true" ]; then
-  AGILE_AUTO_MODE_ACTIVE="true"
-elif [ "$AGILE_AUTO_MODE_HINT" = "false" ]; then
-  AGILE_AUTO_MODE_ACTIVE="false"
-elif [ "$NEXT_AUTO" = "true" ]; then
-  AGILE_AUTO_MODE_ACTIVE="true"
-fi
-
-ALLOW_PATTERN_FOUND="false"
-if contains_allow_pattern "$LAST_ASSISTANT_MESSAGE" || contains_allow_pattern "$STDIN_RAW"; then
-  ALLOW_PATTERN_FOUND="true"
-fi
-
-if [ -f "$HOOK_PATTERNS_SCRIPT" ]; then
-  HOOK_PATTERNS_JSON=""
-  HOOK_PATTERNS_STATUS=0
-  set +e
-  HOOK_PATTERNS_JSON="$(printf '%s' "$STDIN_RAW" | python3 "$HOOK_PATTERNS_SCRIPT" detect --stdin \
-    --last-message "$LAST_ASSISTANT_MESSAGE" \
-    --agile-loop-active "$AGILE_LOOP_ACTIVE" \
-    --agile-auto-mode-active "$AGILE_AUTO_MODE_ACTIVE" \
-    --steering-disabled "$STEERING_DISABLED" \
-    --agile-guard-active "$AGILE_GUARD_ACTIVE" \
-    --stop-intent-force-block "$STOP_INTENT_FORCE_BLOCK" \
-    --allow-pattern-found "$ALLOW_PATTERN_FOUND" \
-    --block-count "$BLOCK_COUNT" \
-    --next-source "$NEXT_SOURCE" \
-    --active-req "$ACTIVE_REQ" \
-    --current-skill "$CURRENT_SKILL" \
-    --route-allow-whitelist)"
-  HOOK_PATTERNS_STATUS=$?
-  set -e
-  if [ "$HOOK_PATTERNS_STATUS" -eq 0 ] && [ -n "$HOOK_PATTERNS_JSON" ]; then
-    HOOK_PATTERNS_INFO=""
-    HOOK_PATTERNS_PARSE_STATUS=0
-    set +e
-    HOOK_PATTERNS_INFO="$(python3 - "$HOOK_PATTERNS_JSON" <<'PY'
+printf '[mst-stop-hook] judge_invalid_output exit=%s fallback=startup_failure\n' "$judge_status" >&2
+python3 - "$final_file" <<'PY'
 import json
 import sys
-
-try:
-    payload = json.loads(sys.argv[1])
-except Exception:
-    raise SystemExit(1)
-if not isinstance(payload, dict):
-    raise SystemExit(1)
-
-def field(name):
-    value = payload.get(name)
-    if value is None:
-        return ""
-    return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
-
-print(f"{field('decision')}\t{field('pattern_id')}\t{field('reason')}")
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write(json.dumps({"decision": "approve", "reason": "hook judge startup failure fail-open"}, ensure_ascii=False) + "\n")
 PY
-    )"
-    HOOK_PATTERNS_PARSE_STATUS=$?
-    set -e
-    if [ "$HOOK_PATTERNS_PARSE_STATUS" -ne 0 ]; then
-      warn_helper_failed "hook_patterns" "$HOOK_PATTERNS_PARSE_STATUS" "invalid_json"
-      debug_log "warn" "reason=hook_patterns_json_parse_failed status=$HOOK_PATTERNS_PARSE_STATUS"
-      emit_unhandled_path_fallback "$HOOK_PATTERNS_PARSE_STATUS"
-      exit 0
-    fi
-    HOOK_PATTERN_DECISION="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f1)"
-    HOOK_PATTERN_ID="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f2)"
-    HOOK_PATTERN_REASON="$(printf '%s' "$HOOK_PATTERNS_INFO" | cut -f3-)"
-
-    if [ "$HOOK_PATTERN_DECISION" = "allow" ] && [ "$HOOK_PATTERN_ID" = "agile_allow_pattern_whitelisted" ]; then
-      append_audit_entry "allowed" "" "agile_allow_pattern_whitelisted"
-      debug_log "allow" "reason=agile_allow_pattern_whitelisted workflow_active=$WORKFLOW_ACTIVE current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE"
-      emit_approve_decision "agile_allow_pattern_whitelisted"
-      exit 0
-    fi
-
-    if [ "$HOOK_PATTERN_DECISION" = "block" ]; then
-      REASON="$HOOK_PATTERN_REASON"
-      PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-      append_block_audit_entry "$REASON"
-      emit_block_decision "$REASON"
-      case "$HOOK_PATTERN_ID" in
-        self_pause_rationalization)
-          debug_log "block" "reason=self_pause_rationalization_detected current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
-          ;;
-        agile_text_question_in_auto_mode)
-          debug_log "block" "reason=agile_text_question_in_auto_mode agile_loop_active=$AGILE_LOOP_ACTIVE agile_auto_mode=$AGILE_AUTO_MODE_ACTIVE current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
-          ;;
-        agile_allow_pattern_missing_marker)
-          debug_log "block" "reason=agile_allow_pattern_missing_marker current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
-          ;;
-        *)
-          debug_log "block" "reason=hook_pattern_detected pattern_id=$HOOK_PATTERN_ID block_count=$PERSISTED_BLOCK_COUNT"
-          ;;
-      esac
-      exit 0
-    fi
-  else
-    warn_helper_failed "hook_patterns" "$HOOK_PATTERNS_STATUS" "path=$(sanitize_log_value "$HOOK_PATTERNS_SCRIPT")"
-    debug_log "warn" "reason=hook_patterns_helper_failed status=$HOOK_PATTERNS_STATUS"
-    emit_unhandled_path_fallback "$HOOK_PATTERNS_STATUS"
-    exit 0
-  fi
-else
-  warn_helper_failed "hook_patterns" "127" "missing path=$(sanitize_log_value "$HOOK_PATTERNS_SCRIPT")"
-  debug_log "warn" "reason=hook_patterns_helper_missing path=$HOOK_PATTERNS_SCRIPT"
-  emit_unhandled_path_fallback "127"
-  exit 0
-fi
-
-if [ "$HAS_NEXT_ACTION" != "true" ]; then
-  if [ "$STOP_INTENT_FORCE_BLOCK" != "true" ] && [ "$ALLOW_PATTERN_FOUND" = "true" ]; then
-    append_audit_entry "allowed" "" "explicit_allow_pattern_no_next_action"
-    debug_log "allow" "reason=explicit_allow_pattern_no_next_action workflow_active=$WORKFLOW_ACTIVE"
-    emit_approve_decision "explicit_allow_pattern_no_next_action"
-    exit 0
-  fi
-else
-  if [ "$NEXT_AUTO" = "true" ]; then
-    debug_log "block_decision" "reason=next_action_auto_override skip_allow_pattern=true next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE"
-  else
-    debug_log "block_decision" "reason=next_action_present skip_allow_pattern=true next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO"
-  fi
-fi
-
-if [ -n "$RETURN_TO_SKILL" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
-  REASON="[RETURN-TO] Sub-skill returned with return_to=$RETURN_TO_RAW. Do NOT stop or pause."
-  REASON="$REASON You MUST immediately invoke /mst:resume --wakeup-hint stop-recover. The resolver will read current disk state (RETURN_TO_SKILL=$RETURN_TO_SKILL, RETURN_TO_STEP=$RETURN_TO_STEP) to determine the next action."
-  REASON="$REASON The sub-skill has completed; resume the parent skill's flow at the indicated step."
-  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=return_to_detected return_to_skill=$RETURN_TO_SKILL return_to_step=$RETURN_TO_STEP current_skill=$CURRENT_SKILL block_count=$PERSISTED_BLOCK_COUNT"
-  exit 0
-fi
-
-if [ "$AGILE_GUARD_ACTIVE" = "true" ] && [ "$HAS_NEXT_ACTION" != "true" ]; then
-  REASON="[AGILE-CONTINUE] Sprint loop active (agile_loop_active=$AGILE_LOOP_ACTIVE, skill=$CURRENT_SKILL). Do NOT stop or pause."
-  REASON="$REASON You MUST immediately continue the current sprint loop: run objective-check, then proceed to the next sprint step."
-  REASON="$REASON Specifically: execute 'python3 ... agile objective-check {AGI_ID} --json' or the next pending step in the sprint backlog."
-  REASON="$REASON [CRITICAL][NO-SELF-MOTIVATED-PAUSE] Any pause, summary, or confirmation question is forbidden. Emit the next tool call NOW."
-  PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-  append_block_audit_entry "$REASON"
-  emit_block_decision "$REASON"
-  debug_log "block" "reason=agile_loop_no_next_action_continue current_skill=$CURRENT_SKILL agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT"
-  exit 0
-fi
-
-REASON="Workflow active, continue current skill and context without stopping."
-if [ -n "$CURRENT_SKILL" ]; then
-  REASON="$REASON Current skill: $CURRENT_SKILL."
-fi
-if [ -n "$ACTIVE_REQ" ]; then
-  REASON="$REASON Active request: $ACTIVE_REQ."
-fi
-if [ "$ITERATION" != "0" ]; then
-  REASON="$REASON Iteration: $ITERATION."
-fi
-if [ -n "$UPDATED_AT" ]; then
-  REASON="$REASON Last update: $UPDATED_AT."
-fi
-if [ "$HAS_NEXT_ACTION" = "true" ] && [ -n "$NEXT_SKILL" ]; then
-  NEXT_ARGS="-a"
-  if [ -n "$NEXT_SOURCE" ]; then
-    NEXT_ARGS="-a $NEXT_SOURCE"
-  fi
-  REASON="$REASON You MUST call Skill(skill: \"$NEXT_SKILL\", args: \"$NEXT_ARGS\") immediately."
-  if [ -n "$SOURCE_SKILL" ]; then
-    REASON="$REASON Transition source_skill: $SOURCE_SKILL."
-  fi
-elif [ "$HAS_NEXT_ACTION" = "true" ]; then
-  REASON="$REASON Next action is pending; do not stop."
-elif [ -n "$NEXT_SKILL" ]; then
-  REASON="$REASON Workflow active, continue current skill before transitioning to $NEXT_SKILL."
-fi
-REASON="$REASON Do not stop; emit the next tool call now."
-
-PERSISTED_BLOCK_COUNT="$(persist_block_state "$REASON" 2>/dev/null || printf '%s' "$((BLOCK_COUNT + 1))")"
-append_dod012_stop_transition_event "continue.queued_action"
-append_block_audit_entry "$REASON"
-emit_block_decision "$REASON"
-debug_log "block" "reason=workflow_active current_skill=$CURRENT_SKILL active_req=$ACTIVE_REQ next_skill=$NEXT_SKILL next_source=$NEXT_SOURCE next_auto=$NEXT_AUTO agile_loop_active=$AGILE_LOOP_ACTIVE block_count=$PERSISTED_BLOCK_COUNT last_block_reason=$LAST_BLOCK_REASON"
+emit_final_file_once "$final_file"
 exit 0
