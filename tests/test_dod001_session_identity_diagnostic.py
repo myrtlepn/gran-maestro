@@ -136,14 +136,30 @@ def test_missing_invalid_and_legacy_only_inputs_remain_no_mutation_diagnostics()
     assert invalid["canonical_mst_session_id"] is None
 
     legacy_only = execution_flow.resolve_canonical_mst_session_identity(
-        {"session_id": LEGACY_UUID},
-        {"MST_STATE_PPID": "424242"},
+        {
+            "session_id": LEGACY_UUID,
+            "sessionId": "legacy-alias",
+            "owner_ppid": 424242,
+            "owner_pid": 434343,
+            "owner_session_id": "owner-alias",
+            "transcript_path": f"/tmp/{TRANSCRIPT_UUID}.jsonl",
+        },
+        {"MST_STATE_PPID": "424242", "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-alias"},
         invocation_class="diagnostic_invocation",
     )
     assert legacy_only["valid"] is False
     assert legacy_only["reason"] == "legacy_identity_not_canonical_source"
     assert legacy_only["action"] == "emit_diagnostic_no_mutation"
-    assert legacy_only["legacy_diagnostics"]["MST_STATE_PPID"] == "424242"
+    assert legacy_only["legacy_diagnostics"] == {
+        "MST_STATE_PPID": "424242",
+        "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-alias",
+        "session_id": LEGACY_UUID,
+        "sessionId": "legacy-alias",
+        "owner_ppid": 424242,
+        "owner_pid": 434343,
+        "owner_session_id": "owner-alias",
+        "hook_transcript_stem": TRANSCRIPT_UUID,
+    }
 
     missing = execution_flow.resolve_canonical_mst_session_identity({}, {}, invocation_class="diagnostic_invocation")
     assert missing["valid"] is False

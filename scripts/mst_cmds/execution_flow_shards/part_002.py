@@ -851,8 +851,24 @@ def resolve_canonical_mst_session_identity(
     snapshot_body_value = snapshot_body_value.strip() if isinstance(snapshot_body_value, str) else ""
     snapshot_path_value = _snapshot_path_session_id(snapshot_path)
     legacy_diagnostics: dict[str, Any] = {}
-    for key in ("MST_STATE_PPID", "session_id", "hook_transcript_uuid", "transcript_uuid"):
-        value = env.get(key) if key.startswith("MST_") else payload.get(key)
+    legacy_env_keys = ("MST_STATE_PPID", "MST_SNAPSHOT_SESSION_ID")
+    legacy_payload_keys = ("session_id", "sessionId", "owner_ppid", "owner_pid", "owner_session_id")
+    for key in legacy_env_keys:
+        value = env.get(key)
+        if isinstance(value, str) and value.strip():
+            legacy_diagnostics[key] = value.strip()
+    for key in legacy_payload_keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            legacy_diagnostics[key] = value.strip()
+        elif isinstance(value, int) and not isinstance(value, bool):
+            legacy_diagnostics[key] = value
+    transcript_path = payload.get("transcript_path")
+    if isinstance(transcript_path, str) and transcript_path.strip():
+        transcript_stem = Path(transcript_path).name
+        legacy_diagnostics["hook_transcript_stem"] = transcript_stem[:-6] if transcript_stem.endswith(".jsonl") else Path(transcript_stem).stem
+    for key in ("hook_transcript_uuid", "transcript_uuid"):
+        value = payload.get(key) or env.get(key)
         if isinstance(value, str) and value.strip():
             legacy_diagnostics[key] = value.strip()
     source_precedence = _common.canonical_session_source_precedence()
