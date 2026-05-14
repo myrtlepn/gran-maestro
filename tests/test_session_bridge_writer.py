@@ -11,6 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK_SCRIPT = REPO_ROOT / "hooks" / "mst-session-init.sh"
 VALID_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+VALID_MST_SESSION_ID = "MST-AGI-030-20260503T130813382Z-k7f3q9x2"
 
 
 def _workspace_tmp_path(workspace: Path) -> Path:
@@ -152,7 +153,7 @@ def test_session_init_exports_session_id_to_child_sync(tmp_path):
     result = subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
         cwd=project_root,
-        input=json.dumps({"session_id": VALID_SESSION_ID}),
+        input=json.dumps({"mst_session_id": VALID_MST_SESSION_ID, "session_id": VALID_SESSION_ID}),
         capture_output=True,
         text=True,
         check=False,
@@ -161,6 +162,7 @@ def test_session_init_exports_session_id_to_child_sync(tmp_path):
             "HOME": str(claude_home),
             "MST_CLAUDE_HOME": str(claude_home),
             "PLUGIN_ROOT": str(project_root),
+            "MST_SESSION_ID": VALID_MST_SESSION_ID,
         },
     )
 
@@ -170,4 +172,4 @@ def test_session_init_exports_session_id_to_child_sync(tmp_path):
         if env_file.exists():
             break
         time.sleep(0.02)
-    assert env_file.read_text(encoding="utf-8") == VALID_SESSION_ID
+    assert env_file.read_text(encoding="utf-8") == VALID_MST_SESSION_ID

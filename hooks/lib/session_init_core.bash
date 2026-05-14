@@ -24,7 +24,11 @@ else
 fi
 
 stdin_session_id() {
-  printf '%s\n' "${MST_SESSION_ID:-}"
+  if [ -n "${MST_SESSION_ID:-}" ]; then
+    printf '%s\n' "$MST_SESSION_ID"
+    return 0
+  fi
+  printf '%s\n' "${MST_LEGACY_SESSION_ID:-}"
 }
 
 utc_timestamp() {

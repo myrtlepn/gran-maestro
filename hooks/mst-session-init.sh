@@ -53,7 +53,18 @@ SESSION_BRIDGE_FILE="${MST_TMP}/claude-session-${PPID}.id"
 DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 MST_HOOK_LOG_PREFIX="mst-session-init"
 
+# Legacy Claude UUID `session_id` is owner-bridge diagnostic metadata, not canonical MST identity.
+# shellcheck source=/dev/null
+source "${script_dir}/lib/session_init_runtime.bash"
+
 STDIN_RAW="$(cat || true)"
+MST_LEGACY_SESSION_ID="$(mst_extract_stdin_json_string_literal "$STDIN_RAW" "session_id" || true)"
+MST_LEGACY_OWNER_SESSION_ID="$(mst_extract_stdin_json_string_literal "$STDIN_RAW" "owner_session_id" || true)"
+MST_LEGACY_OWNER_PPID="$(mst_extract_stdin_json_string_literal "$STDIN_RAW" "owner_ppid" || true)"
+MST_LEGACY_OWNER_METADATA_PRESENT=0
+case "$STDIN_RAW" in
+  *'"owner_session_id"'*|*'"owner_ppid"'*) MST_LEGACY_OWNER_METADATA_PRESENT=1 ;;
+esac
 MST_CANONICAL_SESSION_ID=""
 if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-stdin" "$STDIN_RAW"; then
   MST_CANONICAL_SESSION_ID="$MST_RESOLVED_CANONICAL_SESSION_ID"
@@ -65,6 +76,16 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
+  mkdir -p "$MST_TMP"
+  if ! write_session_bridge; then
+    echo "[mst-session-init] warning: failed to write legacy session bridge file." >&2
+  fi
+  if [ -n "${MST_LEGACY_SESSION_ID:-}" ] && [ "$MST_LEGACY_OWNER_METADATA_PRESENT" = "0" ] && [ -z "${MST_LEGACY_OWNER_SESSION_ID:-}" ] && [ -z "${MST_LEGACY_OWNER_PPID:-}" ]; then
+    STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
+    if ! write_initial_state; then
+      echo "[mst-session-init] warning: failed to initialize legacy state file." >&2
+    fi
+  fi
   exit 0
 fi
 MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
@@ -87,10 +108,6 @@ if declare -F emit_ledger_start >/dev/null 2>&1 && declare -F emit_ledger_comple
   }
   trap '_mst_ledger_exit_code=$?; _mst_ledger_complete_once "$_mst_ledger_exit_code"; exit "$_mst_ledger_exit_code"' EXIT
 fi
-
-# DOD-006 compatibility anchor: sync_plugin_cache() is defined in hooks/lib/session_init_maintenance.bash and sourced here.
-# shellcheck source=/dev/null
-source "${script_dir}/lib/session_init_runtime.bash"
 
 sync_plugin_cache() {
   session_init_sync_plugin_cache "$@"

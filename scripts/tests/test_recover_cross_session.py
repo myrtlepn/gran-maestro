@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ AGI_ID = "AGI-725"
 DOD_ID = "DOD-XXX"
 SID_A = "MST-AGI-725-20260503T130813382Z-k7f3q9x2"
 SID_B = "MST-AGI-725-20260503T130813382Z-z9y8x7w6"
+ZERO_HASH = "0" * 64
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -24,6 +26,48 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _event_hash(prev_hash: str, event: dict) -> str:
+    canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256((prev_hash + "\n" + canonical).encode("utf-8")).hexdigest()
+
+
+def _fingerprint(path: Path) -> str:
+    stat = path.stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}"
+
+
+def _seed_session_contract(root: Path, session_id: str = SID_B) -> None:
+    session_dir = root / ".gran-maestro" / "sessions" / session_id
+    write_json(
+        session_dir / "session.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": session_id,
+            "root_mst_id": AGI_ID,
+        },
+    )
+    history_file = session_dir / "history.ndjson"
+    event = {
+        "schema_version": 1,
+        "mst_session_id": session_id,
+        "root_mst_id": AGI_ID,
+        "event_type": "skill.step",
+        "type": "skill.step",
+        "skill": "mst:agile",
+        "created_at": "2026-05-03T13:08:13.382Z",
+        "timestamp": "2026-05-03T13:08:13.382Z",
+        "idempotency_key": f"{session_id}:skill.step:recover-cross-session-seed",
+    }
+    head = _event_hash(ZERO_HASH, event)
+    row = {"seq": 1, "prev_hash": ZERO_HASH, "event_hash": head, "event": event, "mst_session_id": session_id}
+    history_file.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    (session_dir / "history.head").write_text(head + "\n", encoding="utf-8")
+    (session_dir / "history.verify").write_text(f"{head}\t{_fingerprint(history_file)}\t1\n", encoding="utf-8")
+    mirror = root / ".policy" / "ledger-heads" / f"{session_id}.head"
+    mirror.parent.mkdir(parents=True, exist_ok=True)
+    mirror.write_text(head + "\n", encoding="utf-8")
+
+
 def write_agile_fixture(
     root: Path,
     *,
@@ -33,6 +77,8 @@ def write_agile_fixture(
     agi_dir = root / ".gran-maestro" / "agile" / AGI_ID
     payload = {
         "id": AGI_ID,
+        "schema_version": 1,
+        "root_mst_id": AGI_ID,
         "status": "executing",
         "current_sprint": 2,
         "owner_ppid": 12345,
@@ -54,6 +100,7 @@ def write_agile_fixture(
         f"# Test objective\n\n<!-- dod: {DOD_ID} status: pending priority: must -->\n",
         encoding="utf-8",
     )
+    _seed_session_contract(root, SID_B)
     return agi_dir
 
 
@@ -72,6 +119,7 @@ def run_mst(root: Path, *args: str, session_id: str | None = SID_B) -> subproces
     else:
         env["MST_SESSION_ID"] = session_id
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env["MST_POLICY_HOME"] = str(root / ".policy")
     return subprocess.run(
         ["python3", str(MST), *args],
         cwd=root,
@@ -94,7 +142,7 @@ def test_durable_fallback_reconstructs_skillstack(tmp_path: Path, monkeypatch) -
     result = recover(tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "cross-session recover" in result.stdout
+    assert "owner_session_id ignored" in result.stderr
     assert "read-only" not in result.stdout
     snapshot = read_json(snapshot_path(tmp_path))
     assert snapshot["skillStack"]
@@ -205,7 +253,7 @@ def test_recover_requires_canonical_mst_session_id(tmp_path: Path, monkeypatch) 
     result = recover(tmp_path, session_id=None)
 
     assert result.returncode != 0
-    assert "missing MST_SESSION_ID" in result.stderr
+    assert "missing_canonical_mst_session_id" in result.stderr
     assert not (tmp_path / ".gran-maestro" / "state").exists()
 
 

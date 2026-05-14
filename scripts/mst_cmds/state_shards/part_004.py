@@ -1,6 +1,7 @@
 def cmd_state_recover(args):
     from scripts._skill_state import (
         load_snapshot,
+        recover_agile_snapshot_from_durable_state,
     )
     from scripts.mst_cmds import session as session_mod
 
@@ -27,6 +28,11 @@ def cmd_state_recover(args):
         )
     except ValueError as exc:
         message = str(exc)
+        if "root mst_session_id metadata mismatch" in message:
+            root_payload = _load_json_object(_agile_session_path(agi_id))
+            payload_session_id = root_payload.get("mst_session_id") if isinstance(root_payload, dict) else None
+            if isinstance(payload_session_id, str) and payload_session_id.strip():
+                message = f"mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}"
         if not strict_rehydration and "mst_session_id mismatch" not in message:
             message = f"mst_session_id mismatch: {message}"
         return _emit_recover_non_success(
@@ -57,6 +63,25 @@ def cmd_state_recover(args):
                 root_mst_id=parsed.root_mst_id,
             )
         )
+    payload_session_id = session_payload.get("mst_session_id")
+    if not isinstance(payload_session_id, str) or not payload_session_id.strip():
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "state_history_linkage_mismatch",
+                "missing mst_session_id in durable session",
+                session_id=session_id,
+                root_mst_id=parsed.root_mst_id,
+            )
+        )
+    if payload_session_id.strip() != session_id:
+        return _emit_recover_non_success(
+            _recover_non_success(
+                "state_history_linkage_mismatch",
+                f"mst_session_id mismatch: env={session_id} payload={payload_session_id.strip()}",
+                session_id=session_id,
+                root_mst_id=parsed.root_mst_id,
+            )
+        )
 
     previous_owner = session_payload.get("owner_session_id")
     previous_owner = previous_owner.strip() if isinstance(previous_owner, str) and previous_owner.strip() else None
@@ -67,6 +92,13 @@ def cmd_state_recover(args):
             file=sys.stderr,
         )
 
+    _append_cross_session_recover_event(
+        session_id,
+        agi_id,
+        previous_owner,
+        takeover=bool(getattr(args, "takeover", False)),
+    )
+
     state_base_dir = _skill_state_base_dir()
     history_result, history_error = _load_recover_history(_common.BASE_DIR, session_id)
     if history_error is not None:
@@ -74,7 +106,22 @@ def cmd_state_recover(args):
     assert history_result is not None
 
     existing = load_snapshot(state_base_dir, session_id=session_id)
-    if existing is not None:
+    if existing is None:
+        existing = recover_agile_snapshot_from_durable_state(
+            state_base_dir,
+            agi_id,
+            session_id=session_id,
+        )
+        if existing is not None:
+            _update_snapshot_history_head(
+                state_base_dir,
+                session_id,
+                existing,
+                history_result.tail_hash,
+                history_result.tail_hash,
+            )
+            existing = load_snapshot(state_base_dir, session_id=session_id)
+    else:
         snapshot_error = _validate_recover_snapshot(existing, session_id, parsed.root_mst_id, history_result)
         if snapshot_error is not None and (strict_rehydration or snapshot_error.get("code") != "missing_history_linkage"):
             return _emit_recover_non_success(snapshot_error)

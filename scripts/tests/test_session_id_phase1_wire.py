@@ -17,6 +17,7 @@ from scripts.mst_cmds.state import (
 
 UUID_V4 = "123e4567-e89b-42d3-a456-426614174000"
 UUID_V1 = "aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee"
+STRUCTURED_OWNER_SESSION_ID = "MST-REQ-864-20260515T000000000Z-a1b2c3d4"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MST = REPO_ROOT / "scripts" / "mst.py"
 
@@ -224,3 +225,54 @@ def test_mst_plan_branch_injects_owner_metadata(tmp_path: Path, monkeypatch) -> 
     assert payload["owner_session_id"] == UUID_V4
     assert "owner_ppid" in payload
     assert payload["owner_ppid"] == ppid
+
+
+def test_mst_request_repairs_stale_owner_metadata_with_canonical_env(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path
+    base_dir = repo_root / ".gran-maestro"
+    request_path = base_dir / "requests" / "REQ-864" / "request.json"
+    ppid = 7474
+
+    monkeypatch.setenv("MST_STATE_PPID", str(ppid))
+    monkeypatch.setenv("MST_SESSION_ID", STRUCTURED_OWNER_SESSION_ID)
+    monkeypatch.delenv("MST_SNAPSHOT_SESSION_ID", raising=False)
+
+    _write_json(
+        request_path,
+        {
+            "id": "REQ-864",
+            "title": "repair check",
+            "owner_ppid": ppid,
+            "owner_session_id": None,
+            "owner_resolution": {
+                "reason": "bridge_missing",
+                "action": "retry",
+            },
+        },
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MST),
+            "state",
+            "set-workflow",
+            "--active",
+            "true",
+            "--skill",
+            "mst:dispatch",
+            "--req",
+            "REQ-864",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = _read_json(request_path)
+    assert payload["owner_session_id"] == STRUCTURED_OWNER_SESSION_ID
+    assert payload["owner_resolution"]["reason"] == "repaired_from_canonical_identity"
+    assert payload["owner_resolution"]["action"] == "converged_owner_session_id"

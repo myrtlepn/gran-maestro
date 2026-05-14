@@ -122,8 +122,159 @@ def _resolve_owner_session_id(ppid: int) -> Optional[str]:
     if session_id.variant != uuid.RFC_4122 or session_id.version != 4 or canonical != raw_value:
         return None
     return canonical
-def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optional[str]) -> None:
-    """Write owner metadata into json_path only when fields are absent (idempotent)."""
+def _owner_resolution_source(present: bool, value: object = None, valid: bool = False, error: str | None = None) -> dict:
+    source = {"present": present, "valid": valid, "value": value}
+    if error:
+        source["error"] = error
+    return source
+def _valid_canonical_owner_session_id(raw_value: str) -> tuple[Optional[str], Optional[str]]:
+    try:
+        from scripts.mst_cmds.session import validate_mst_session_id
+
+        return validate_mst_session_id(raw_value).mst_session_id, None
+    except ValueError as exc:
+        return None, str(exc)
+def _valid_bridge_owner_session_id(raw_value: str) -> tuple[Optional[str], Optional[str]]:
+    if not raw_value:
+        return None, "empty_bridge_uuid"
+    try:
+        session_id = uuid.UUID(raw_value)
+    except ValueError:
+        return None, "invalid_bridge_uuid"
+    canonical = str(session_id)
+    if session_id.variant != uuid.RFC_4122 or session_id.version != 4 or canonical != raw_value:
+        return None, "invalid_bridge_uuid"
+    return canonical, None
+def _owner_invocation_class() -> str:
+    if os.environ.get("MST_SESSION_ID") is not None:
+        return "workflow_with_canonical_env"
+    if os.environ.get("MST_HOOK_STDIN_RAW", "").strip():
+        return "workflow_with_hook_stdin"
+    if os.environ.get("MST_STATE_PPID", "").strip():
+        return "workflow_with_owner_ppid"
+    return "external_invocation"
+def _owner_bridge_path(ppid: int) -> Optional[Path]:
+    if not _common.BASE_DIR:
+        return None
+    return _common.BASE_DIR / "tmp" / f"claude-session-{ppid}.id"
+def _other_owner_bridge_paths(ppid: int) -> list[str]:
+    if not _common.BASE_DIR:
+        return []
+    tmp_dir = _common.BASE_DIR / "tmp"
+    if not tmp_dir.is_dir():
+        return []
+    current_name = f"claude-session-{ppid}.id"
+    return sorted(path.name for path in tmp_dir.glob("claude-session-*.id") if path.name != current_name)
+def _resolve_owner_session_context(ppid: int) -> tuple[Optional[str], dict]:
+    observed_sources: dict[str, dict] = {}
+    invocation_class = _owner_invocation_class()
+
+    raw_env = os.environ.get("MST_SESSION_ID")
+    env_present = raw_env is not None
+    env_value = raw_env.strip() if raw_env is not None else None
+    if env_present:
+        if env_value:
+            canonical, canonical_error = _valid_canonical_owner_session_id(env_value)
+        else:
+            canonical, canonical_error = None, "empty_canonical_mst_session_id"
+        observed_sources["env:MST_SESSION_ID"] = _owner_resolution_source(
+            True,
+            env_value,
+            bool(canonical),
+            canonical_error,
+        )
+    else:
+        canonical = None
+        canonical_error = None
+        observed_sources["env:MST_SESSION_ID"] = _owner_resolution_source(False)
+
+    bridge_path = _owner_bridge_path(ppid)
+    bridge_raw = None
+    bridge_owner = None
+    bridge_error = None
+    if bridge_path is None:
+        bridge_error = "bridge_base_dir_missing"
+        observed_sources["bridge:claude_session"] = _owner_resolution_source(False, error=bridge_error)
+    else:
+        try:
+            bridge_raw = bridge_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            other_paths = _other_owner_bridge_paths(ppid)
+            bridge_error = "owner_ppid_changed" if other_paths else "bridge_missing"
+            observed_sources["bridge:claude_session"] = _owner_resolution_source(False, error=bridge_error)
+            if other_paths:
+                observed_sources["bridge:other_owner_ppids"] = {
+                    "present": True,
+                    "valid": False,
+                    "value": other_paths,
+                }
+        except Exception as exc:
+            bridge_error = "bridge_read_failure"
+            observed_sources["bridge:claude_session"] = _owner_resolution_source(
+                True,
+                None,
+                False,
+                f"{bridge_error}:{exc.__class__.__name__}",
+            )
+        else:
+            bridge_owner, bridge_error = _valid_bridge_owner_session_id(bridge_raw)
+            observed_sources["bridge:claude_session"] = _owner_resolution_source(
+                True,
+                bridge_raw,
+                bool(bridge_owner),
+                bridge_error,
+            )
+
+    if env_present and not canonical:
+        return None, {
+            "reason": "invalid_canonical_identity",
+            "action": "emit_diagnostic_no_mutation",
+            "invocation_class": invocation_class,
+            "observed_sources": observed_sources,
+            "owner_session_id": None,
+        }
+    if canonical:
+        return canonical, {
+            "reason": "canonical_identity_converged",
+            "action": "converged_owner_session_id",
+            "invocation_class": invocation_class,
+            "observed_sources": observed_sources,
+            "owner_session_id": canonical,
+        }
+    if bridge_owner:
+        return bridge_owner, {
+            "reason": "bridge_owner_resolved",
+            "action": "use_verified_owner_bridge",
+            "invocation_class": invocation_class,
+            "observed_sources": observed_sources,
+            "owner_session_id": bridge_owner,
+        }
+
+    reason = bridge_error or "bridge_missing"
+    return None, {
+        "reason": reason,
+        "action": "record_owner_resolution_diagnostic",
+        "invocation_class": invocation_class,
+        "observed_sources": observed_sources,
+        "owner_session_id": None,
+    }
+def _owner_resolution_for_write(owner_resolution: Optional[dict], session_id: Optional[str]) -> dict:
+    if isinstance(owner_resolution, dict):
+        return dict(owner_resolution)
+    return {
+        "reason": "owner_metadata_provided",
+        "action": "record_owner_metadata",
+        "invocation_class": "direct_owner_metadata_write",
+        "observed_sources": {},
+        "owner_session_id": session_id,
+    }
+def _inject_owner_metadata_to_json(
+    json_path: Path,
+    ppid: int,
+    session_id: Optional[str],
+    owner_resolution: Optional[dict] = None,
+) -> None:
+    """Write owner metadata while preserving non-null existing owner fields."""
     data = _common.load_json(json_path)
     if not isinstance(data, dict):
         return
@@ -131,8 +282,18 @@ def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optio
     if "owner_ppid" not in data:
         data["owner_ppid"] = ppid
         should_write = True
-    if "owner_session_id" not in data:
+    existing_owner = data.get("owner_session_id")
+    if "owner_session_id" not in data or (existing_owner is None and session_id is not None):
         data["owner_session_id"] = session_id
+        should_write = True
+        if existing_owner is None and session_id is not None and isinstance(data.get("owner_resolution"), dict):
+            repaired_resolution = _owner_resolution_for_write(owner_resolution, session_id)
+            repaired_resolution["reason"] = "repaired_from_canonical_identity"
+            repaired_resolution["action"] = "converged_owner_session_id"
+            data["owner_resolution"] = repaired_resolution
+            should_write = True
+    if "owner_resolution" not in data and owner_resolution is not None:
+        data["owner_resolution"] = _owner_resolution_for_write(owner_resolution, session_id)
         should_write = True
     if not should_write:
         return
@@ -143,7 +304,7 @@ def _inject_owner_metadata_to_json(json_path: Path, ppid: int, session_id: Optio
     os.replace(tmp_path, json_path)
 def _inject_owner_metadata_if_missing(args) -> bool:
     ppid = _resolve_owner_ppid()
-    session_id = canonical_session_id_from_env() or _resolve_owner_session_id(ppid)
+    session_id, owner_resolution = _resolve_owner_session_context(ppid)
     injected = False
 
     req_id = (getattr(args, "req", "") or "").strip()
@@ -152,7 +313,7 @@ def _inject_owner_metadata_if_missing(args) -> bool:
         if req_json.exists():
             try:
                 before = _common.load_json(req_json)
-                _inject_owner_metadata_to_json(req_json, ppid, session_id)
+                _inject_owner_metadata_to_json(req_json, ppid, session_id, owner_resolution)
                 after = _common.load_json(req_json)
                 injected = injected or before != after
             except Exception as exc:
@@ -165,7 +326,7 @@ def _inject_owner_metadata_if_missing(args) -> bool:
         if plan_json.exists():
             try:
                 before = _common.load_json(plan_json)
-                _inject_owner_metadata_to_json(plan_json, ppid, session_id)
+                _inject_owner_metadata_to_json(plan_json, ppid, session_id, owner_resolution)
                 after = _common.load_json(plan_json)
                 injected = injected or before != after
             except Exception as exc:
@@ -481,14 +642,16 @@ def migrate(args: argparse.Namespace) -> int:
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     now = _workflow_state_timestamp()
-    owner_metadata_injected = _inject_owner_metadata_if_missing(args)
+    owner_metadata_injected = _inject_owner_metadata_if_missing(args) if bool(args.active) else False
 
     try:
         try:
             session_id = _common.require_mst_session_id_for_mutation("workflow state write")
         except ValueError as exc:
             if _common.is_missing_canonical_session_error(exc):
-                if owner_metadata_injected:
+                if not bool(args.active):
+                    session_id = None
+                elif owner_metadata_injected:
                     print(json.dumps({
                         "status": "partial",
                         "code": "owner_metadata_injected_without_workflow_state",
@@ -496,8 +659,29 @@ def cmd_state_set_workflow(args):
                         "workflow_state_written": False,
                     }, ensure_ascii=False))
                     return 0
-                session_id = None
+                elif _common.legacy_session_diagnostics():
+                    return _common.emit_session_identity_non_success(
+                        "workflow state write",
+                        error=exc,
+                        invocation_class="state_set_workflow",
+                    )
+                else:
+                    session_id = None
             else:
+                if _common.is_session_identity_non_success_error(exc):
+                    if owner_metadata_injected:
+                        print(json.dumps({
+                            "status": "partial",
+                            "code": "owner_metadata_injected_without_workflow_state",
+                            "mutation_performed": True,
+                            "workflow_state_written": False,
+                        }, ensure_ascii=False))
+                        return 0
+                    return _common.emit_session_identity_non_success(
+                        "workflow state write",
+                        error=exc,
+                        invocation_class="state_set_workflow",
+                    )
                 raise
 
         if session_id:

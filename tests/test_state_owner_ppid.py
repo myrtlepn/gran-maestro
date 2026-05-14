@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 SAMPLE_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+STRUCTURED_SESSION_ID = "MST-REQ-864-20260515T000000000Z-a1b2c3d4"
 
 
 def _run_set_workflow(workspace: Path, ppid: int, *extra_args: str) -> subprocess.CompletedProcess:
@@ -159,6 +160,10 @@ def test_owner_session_id_null_when_bridge_missing(tmp_path):
     assert data["owner_ppid"] == fake_ppid
     assert "owner_session_id" in data
     assert data["owner_session_id"] is None
+    assert data["owner_resolution"]["reason"] == "bridge_missing"
+    assert data["owner_resolution"]["action"]
+    assert data["owner_resolution"]["invocation_class"]
+    assert data["owner_resolution"]["observed_sources"]
 
 
 def test_owner_session_id_null_when_bridge_read_fails(tmp_path):
@@ -183,6 +188,63 @@ def test_owner_session_id_null_when_bridge_read_fails(tmp_path):
     assert data["owner_ppid"] == fake_ppid
     assert "owner_session_id" in data
     assert data["owner_session_id"] is None
+    assert data["owner_resolution"]["reason"] == "bridge_read_failure"
+    assert data["owner_resolution"]["action"]
+    assert data["owner_resolution"]["invocation_class"]
+    assert data["owner_resolution"]["observed_sources"]
+
+
+def test_owner_resolution_diagnostic_when_bridge_uuid_invalid(tmp_path):
+    req_id = "REQ-005A"
+    workspace, req_json = _setup_workspace(
+        tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
+    )
+    fake_ppid = 76544
+    _write_session_bridge(workspace, fake_ppid, "not-a-uuid")
+
+    result = _run_set_workflow(
+        workspace,
+        fake_ppid,
+        "--active", "true",
+        "--skill", "mst:request",
+        "--req", req_id,
+    )
+    assert result.returncode == 0, result.stderr
+
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_ppid"] == fake_ppid
+    assert data["owner_session_id"] is None
+    assert data["owner_resolution"]["reason"] == "invalid_bridge_uuid"
+    assert data["owner_resolution"]["action"]
+    assert data["owner_resolution"]["invocation_class"]
+    assert data["owner_resolution"]["observed_sources"]
+
+
+def test_owner_resolution_diagnostic_when_owner_ppid_changes(tmp_path):
+    req_id = "REQ-005B"
+    workspace, req_json = _setup_workspace(
+        tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
+    )
+    stale_ppid = 76545
+    current_ppid = 76546
+    _write_session_bridge(workspace, stale_ppid)
+
+    result = _run_set_workflow(
+        workspace,
+        current_ppid,
+        "--active", "true",
+        "--skill", "mst:request",
+        "--req", req_id,
+    )
+    assert result.returncode == 0, result.stderr
+
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_ppid"] == current_ppid
+    assert data["owner_session_id"] is None
+    assert data["owner_resolution"]["reason"] == "owner_ppid_changed"
+    assert data["owner_resolution"]["action"]
+    assert data["owner_resolution"]["invocation_class"]
+    assert data["owner_resolution"]["observed_sources"]
 
 
 def test_read_owner_ppid_rejects_bool(tmp_path):
@@ -227,7 +289,7 @@ def test_read_owner_ppid_rejects_bool(tmp_path):
 def test_owner_session_id_prefers_mst_session_id_over_legacy_bridge(tmp_path):
     """DOD-010: mixed env must record MST_SESSION_ID, not MST_STATE_PPID bridge identity."""
     req_id = "REQ-006"
-    canonical_session_id = "223e4567-e89b-42d3-a456-426614174000"
+    canonical_session_id = STRUCTURED_SESSION_ID
     legacy_bridge_session_id = "323e4567-e89b-42d3-a456-426614174000"
     workspace, req_json = _setup_workspace(
         tmp_path, req_id, {"id": req_id, "status": "phase1_analysis"}
@@ -265,3 +327,49 @@ def test_owner_session_id_prefers_mst_session_id_over_legacy_bridge(tmp_path):
     data = json.loads(req_json.read_text(encoding="utf-8"))
     assert data["owner_session_id"] == canonical_session_id
     assert data["owner_session_id"] != legacy_bridge_session_id
+
+
+def test_owner_session_id_repairs_stale_null_with_canonical_env(tmp_path):
+    req_id = "REQ-007"
+    workspace, req_json = _setup_workspace(
+        tmp_path,
+        req_id,
+        {
+            "id": req_id,
+            "status": "phase1_analysis",
+            "owner_session_id": None,
+            "owner_resolution": {"reason": "bridge_missing", "action": "retry"},
+        },
+    )
+    fake_ppid = 87655
+    env = {
+        **os.environ,
+        "MST_SESSION_ID": STRUCTURED_SESSION_ID,
+        "MST_STATE_PPID": str(fake_ppid),
+    }
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MST_SCRIPT),
+            "state",
+            "set-workflow",
+            "--active",
+            "true",
+            "--skill",
+            "mst:request",
+            "--req",
+            req_id,
+        ],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    data = json.loads(req_json.read_text(encoding="utf-8"))
+    assert data["owner_session_id"] == STRUCTURED_SESSION_ID
+    assert data["owner_resolution"]["reason"] == "repaired_from_canonical_identity"
+    assert data["owner_resolution"]["action"] == "converged_owner_session_id"

@@ -167,6 +167,30 @@ def test_missing_invalid_and_legacy_only_inputs_remain_no_mutation_diagnostics()
     assert missing["action"] == "emit_diagnostic_no_mutation"
 
 
+def test_invalid_canonical_env_keeps_owner_session_id_diagnostic_only() -> None:
+    diagnostic = execution_flow.resolve_canonical_mst_session_identity(
+        {
+            "owner_session_id": "owner-alias",
+            "owner_ppid": 424242,
+            "session_id": LEGACY_UUID,
+        },
+        {
+            "MST_SESSION_ID": "invalid-canonical-id",
+            "MST_STATE_PPID": "424242",
+        },
+        invocation_class="diagnostic_invocation",
+    )
+
+    assert diagnostic["valid"] is False
+    assert diagnostic["reason"] == "invalid_canonical_identity"
+    assert diagnostic["action"] == "emit_diagnostic_no_mutation"
+    assert diagnostic["selected_source"] is None
+    assert diagnostic["canonical_mst_session_id"] is None
+    assert diagnostic["legacy_diagnostics"]["owner_session_id"] == "owner-alias"
+    assert diagnostic["legacy_diagnostics"]["owner_ppid"] == 424242
+    assert diagnostic["legacy_diagnostics"]["session_id"] == LEGACY_UUID
+
+
 def test_external_invocation_legacy_only_payload_stays_read_only() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -237,4 +261,3 @@ def test_normal_entry_generation_and_skill_snapshot_converge_on_canonical_id() -
         payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
         assert payload["mst_session_id"] == created["mst_session_id"]
         assert payload["root_mst_id"] == "AGI-030"
-
