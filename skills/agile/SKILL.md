@@ -117,9 +117,9 @@ args 전체 토큰에서 아래 플래그를 감지한다:
 | `--steering-every N` | 스티어링 체크포인트 간격 (기본값: 3) |
 
 - `-a` 또는 `--auto`가 args 어디에든 포함되면 `AUTO_MODE=true`, 없으면 `AUTO_MODE=false`.
-- `AUTO_MODE=false`인 경우 config fallback: `mst.py config get auto_mode.agile` → 없으면 `templates/defaults/config.json` 확인 → `auto_mode.agile == true`면 `AUTO_MODE=true`.
+- `AUTO_MODE=false`인 경우 section preload: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.agile agile.steering_every --json)` 결과를 `agile_bootstrap_config`로 보관한다. 없으면 `templates/defaults/config.json` 확인 → `auto_mode.agile == true`면 `AUTO_MODE=true`.
 - 우선순위: CLI 플래그(`-a`/`--auto`)가 config보다 우선한다.
-- `--steering-every` 미지정 시: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.steering_every)` 값을 사용한다. config에도 없으면 기본값 `3`.
+- `--steering-every` 미지정 시: 같은 `agile_bootstrap_config`의 `agile.steering_every` 값을 사용한다. preload가 없거나 config에도 없으면 기본값 `3`.
 - `STEERING_DISABLED`는 `STEERING_EVERY == 0`이면 `true`, 아니면 `false`로 계산한다.
 
 #### 0.2 분기: --resume 있는 경우

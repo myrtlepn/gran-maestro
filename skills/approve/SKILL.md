@@ -757,9 +757,12 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
 ##### 5.7-0. 진입 게이트 (source_plan Guard + 하위호환)
 
 1. `Read({PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json)`로 `source_plan`을 확인한다.
-2. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification)`를 실행하고, stdout을 JSON으로 파싱한다. 파싱 실패 또는 빈 값이면 `{}`로 취급한다.
+2. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification review.auto_review workflow.auto_accept_result --json)`를 실행하고, stdout JSON 배열을 `phase3_config_items`로 보관한다. 같은 preload에서 `intent_verification`, `review.auto_review`, `workflow.auto_accept_result`를 함께 추출한다. 파싱 실패, 빈 값, 누락 항목은 graceful fallback 처리한다.
+   - `intent_cfg`: `phase3_config_items`에서 `key == "intent_verification"`인 항목의 `value`. 파싱 실패 또는 빈 값이면 `{}`로 취급한다.
    - `intent_enabled`: `intent_cfg.enabled`가 boolean이면 그 값을 사용하고, 아니면 `true`.
    - `max_iterations`: `intent_cfg.max_iterations`가 양의 정수이면 그 값을 사용하고, 아니면 `5`.
+   - `review.auto_review`, `workflow.auto_accept_result`도 같은 preload에서 함께 확보해 Step 6 Phase 3 리뷰 루프에서 재사용한다.
+   - REQ-866 경계: 이번 태스크에서는 새 read-only summary CLI(`request phase2-status`, `workflow gate-summary`)를 추가하지 않고, 기존 `advance-phase2-if-ready --check/--json` 분리와 config preload만 유지한다.
 3. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --check --json)`를 실행하고, stdout JSON의 `ready` 값을 확인한다.
    - `ready != true`이면 아직 모든 Phase 2 태스크가 완료 상태가 아니므로 Step 6으로 이동해 전환 명령이 `incomplete_tasks`를 보고하게 한다.
 4. `source_plan`이 없으면 `[Step 5.7 skip] source_plan 없음 (--plan 없는 REQ) → Step 6 진행`을 출력하고 Step 6으로 이동한다.
@@ -920,12 +923,14 @@ else:
 
 모든 Phase 2 태스크가 완료 상태에 도달하고 `current_phase`가 3으로 전환된 후:
 
-1. `review.auto_review` 설정 확인 (`Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get review.auto_review)`):
+1. `review.auto_review` / `workflow.auto_accept_result` 설정 확인:
+   - 가능하면 Step 5.7-0의 `phase3_config_items` preload를 재사용한다.
+   - Step 5.7을 건너뛴 경로라 preload가 없으면 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get intent_verification review.auto_review workflow.auto_accept_result --json)`를 1회 실행해 `phase3_config_items`를 복구한다.
    - `AUTO_MODE`는 단건 프로토콜 진입 시 단일 초기화된 값을 그대로 사용한다 (이중 판단 금지).
    - `false` (기본): 아래 태스크 상태 검증 후 최종 수락 실행 (mst:review 미호출):
      1. `request.json.tasks` 전체 확인: 모든 Phase 2 태스크가 완료 상태(`committed`, `completed`, `done`, `accepted`)인지 검증
         - 미완료 태스크 존재 시: "태스크 {TASK_ID}가 아직 Phase 2 완료 상태가 아닙니다" 경고 후 대기
-     2. 검증 통과 시 `workflow.auto_accept_result` 설정에 따라 즉시 실행:
+     2. 검증 통과 시 같은 `phase3_config_items` preload의 `workflow.auto_accept_result` 설정에 따라 즉시 실행:
         - **`true` (기본)**: `Skill(skill: "mst:accept", args: "{REQ_ID}")` 호출 → accept 완료 후 DAG 연쇄 실행 판단
         - **`false`**: Phase 3 리뷰 PASS로 간주하고 멈추고, 사용자에게 `/mst:accept {REQ_ID}` 수동 호출 안내
    - `true` 또는 `AUTO_MODE=true`이면 mst:review 호출 진행

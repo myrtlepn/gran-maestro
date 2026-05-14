@@ -158,8 +158,8 @@ Step 0.5 처리 완료 후, 사용자 입력 텍스트 전체에서 `/\[?CAP-\d{
 
 1. args 전체 토큰에서 `-a` 또는 `--auto` 존재 여부 검사. 하나라도 있으면 `AUTO_MODE=true`, 없으면 `AUTO_MODE=false`.
 2. `AUTO_MODE=false`인 경우 state guarded fallback 시도: `read_workflow_state_auto_mode("mst:plan")` 호출. 반환값이 bool이면 채택, `None`이면 Step 3(config fallback)으로 진행.
-3. config 읽기: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.plan)` 우선, 키가 없으면 `Read(templates/defaults/config.json)` fallback. `auto_mode.plan == true`면 `AUTO_MODE=true`.
-4. `config.auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장 (미설정 시 기본값 `0.7`). CLI 플래그가 config보다 우선.
+3. config preload: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.plan auto_mode.confidence_threshold --json)` 결과를 `plan_auto_mode_config`로 보관한다. 키가 없으면 `Read(templates/defaults/config.json)` fallback.
+4. `plan_auto_mode_config`의 `auto_mode.plan == true`면 `AUTO_MODE=true`. `auto_mode.confidence_threshold`를 읽어 `CONFIDENCE_THRESHOLD`에 저장하고, 미설정 시 기본값 `0.7`을 사용한다. CLI 플래그가 config보다 우선.
 
 ### Step 0.8: Args intent 판별 (MANDATORY)
 
@@ -402,11 +402,13 @@ WHILE (미클리어 항목 존재):
 
 ### Step 2.4: 테스트 전략 의도 수집 (선택적 Q&A)
 
+> Shared preload: Step 2.4와 Step 2.45는 시작 전에 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets --json)`를 1회 실행해 `plan_qa_presets_config`로 보관하고, `plan_qa_presets.test_strategy`/`plan_qa_presets.loop_exit`를 모두 여기서 읽는다. preload 실패 시에만 `templates/defaults/config.json` fallback을 사용한다.
+
 > ⚠️ **AUTO_MODE 가드 (CRITICAL — 최우선 평가)**: `AUTO_MODE=true`이면 AUTO_MODE=false 블록 전체를 건너뛰고 즉시 AUTO_MODE=true 블록을 실행한다.
 
 **AUTO_MODE=true** (최우선 분기): PM이 요청 맥락에서 테스트 방법론 적용 여부와 목표 커버리지를 자율 판단. `plan_qa_presets.test_strategy` 값이 `"ask"` 이외이면 해당 preset을 기본값으로 채택. 판단 근거와 결정을 auto-decisions.md에 기록. plan.md `## 테스트 전략` 섹션에 반영. **AskUserQuestion 호출 절대 금지.**
 
-**AUTO_MODE=false**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.test_strategy)` 값 먼저 확인 (없으면 `templates/defaults/config.json` fallback).
+**AUTO_MODE=false**: `plan_qa_presets_config`의 `plan_qa_presets.test_strategy` 값을 먼저 확인한다 (없으면 `templates/defaults/config.json` fallback).
 - `"ask"` 이외의 preset이면 AskUserQuestion 생략하고 자동 적용: `"apply-80"` → 적용/80%, `"apply-90"` → 적용/90%, `"apply-no-coverage"` → 적용/미설정, `"skip"` → 적용 안 함
 - `"ask"`이면 AskUserQuestion 1회 수행. 핵심 선택지 4개: `"A. 적용 80%"`, `"B. 적용 90%"`, `"C. 적용 미설정"`, `"D. 적용 안 함"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
 
@@ -416,7 +418,7 @@ WHILE (미클리어 항목 존재):
 
 **AUTO_MODE=true** (최우선 분기): PM이 기본 프리셋 `"기존 검증 통과(기본값)"`을 자율 선택. `plan_qa_presets.loop_exit`가 `"ask"` 이외면 해당 preset 채택. 판단 근거와 결정을 auto-decisions.md에 기록. plan.md `## Loop 종료 조건` 섹션에 반영.
 
-**AUTO_MODE=false**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.loop_exit)` 값 확인 (없으면 fallback).
+**AUTO_MODE=false**: `plan_qa_presets_config`의 `plan_qa_presets.loop_exit` 값을 확인한다 (없으면 fallback).
 - `"ask"` 이외이면 자동 적용: `"default_pass"` → 기존 종료 조건(AC 통과 + max_iterations), `"convergence"` → 연속 무변경 수렴, `"fixed_n"` → 고정 N회 반복
 - `"ask"`이면 AskUserQuestion 수행. 핵심 선택지 3개: `"A. 기존 검증 통과"`, `"B. 무변경 수렴"`, `"C. 고정 횟수 반복"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
 - `"C. 고정 횟수 반복"` 선택 시 후속 AskUserQuestion으로 N값(자연수) 수집.

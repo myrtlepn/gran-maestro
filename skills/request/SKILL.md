@@ -129,7 +129,7 @@ DOD-009 session identity glossary: `mst_session_id` is the canonical state machi
 
 > ⚠️ 이 단계는 건너뛸 수 없음: spec.md Assigned Agent 결정 전 반드시 실행. 이 단계 없이 spec.md 작성 금지.
 
-Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) → `workflow.default_agent` 추출 → DEFAULT_AGENT 변수 보관.
+Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent auto_mode.request --json`) → 결과를 `request_bootstrap_config`로 보관하고 `workflow.default_agent`를 추출해 DEFAULT_AGENT 변수에 저장한다. 같은 preload의 `auto_mode.request` 값은 아래 auto_mode 판단에서 재사용한다.
 파일이 없으면 `templates/defaults/config.json`에서 `workflow.default_agent`와 `agent_assignments`를 Read하여 DEFAULT_AGENT 및 도메인 추론 기준으로 사용한다.
 
 모든 spec.md의 Assigned Agent 필드는 반드시 `[config: {DEFAULT_AGENT}] → ...` 형식으로 DEFAULT_AGENT를 명시해야 한다. DEFAULT_AGENT 미확인 상태의 Assigned Agent 결정은 에러로 처리한다. `agent_assignments` 읽기 시 `_`로 시작하는 키는 에이전트명으로 간주하지 않는다. `config.resolved.json` 없으면 `templates/defaults/config.json`의 `agent_assignments`를 fallback으로 Read한다.
@@ -141,7 +141,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
    - `{PLUGIN_ROOT}/scripts` 경유로 `read_workflow_state_auto_mode("mst:request", expected_source_id)` 호출
    - `expected_source_id`: `--plan PLN-NNN`이 있으면 `PLN-NNN`, `--resume REQ-NNN`이 있으면 `REQ-NNN`, 둘 다 없으면 `None`
    - 반환값이 bool이면 `AUTO_APPROVE`에 채택; `None`이면 Step 2(config)로 진행
-2. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get auto_mode.request)`로 값을 확인한다. `true`면 `AUTO_APPROVE=true`.
+2. Step 0.5의 `request_bootstrap_config`에서 `auto_mode.request` 값을 확인한다. preload가 없으면 같은 batched 명령을 1회 재실행해 복구한다. `true`면 `AUTO_APPROVE=true`.
 3. 최종 우선순위: `args > state(guarded) > config > default(false)`.
 
 ### Step 1: 요청 생성/재개
@@ -232,8 +232,9 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
         - 0.0~0.3: 변경 범위 명확, 단일 모듈 한정, 기존 패턴 단순 적용 가능
         - 0.4~0.6: 일부 모듈 의존성 변경 예상되나 영향 범위 파악 가능
         - 0.7~1.0: 다수 모듈 연쇄 영향, 아키텍처 방향 불명확, 설계 리스크 존재
-      - `arch_gate_threshold` 읽기: `config get workflow.arch_gate_threshold` → fallback `templates/defaults/config.json` → fallback `0.7`
-      - `workflow.high_pass_guard` 읽기: `config get workflow.high_pass_guard` → fallback `templates/defaults/config.json` → fallback: `enabled=true`, `confidence_supporting_only=true`, `require_external_execution_evidence=true`, `require_independent_judgement=true`, `block_self_report_only_pass=true`, `plan_bypass_requires_explicit_rationale=true`
+      - workflow gate preload: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.arch_gate_threshold workflow.high_pass_guard --json)` 결과를 `workflow_gate_config`로 보관한다.
+      - `arch_gate_threshold` 읽기: `workflow_gate_config`의 `workflow.arch_gate_threshold` 사용 → fallback `templates/defaults/config.json` → fallback `0.7`
+      - `workflow.high_pass_guard` 읽기: 같은 `workflow_gate_config`의 `workflow.high_pass_guard` 사용 → fallback `templates/defaults/config.json` → fallback: `enabled=true`, `confidence_supporting_only=true`, `require_external_execution_evidence=true`, `require_independent_judgement=true`, `block_self_report_only_pass=true`, `plan_bypass_requires_explicit_rationale=true`
       - 하드 게이트 규칙 (`enabled=true` 기준):
         - reason token 키: `self_report_only_block`, `external_evidence_missing`, `independent_judgement_required`, `"risk_signal_review_required"`.
         - `confidence`는 보조 신호이며, risk signal(A/B/C) 중 하나라도 감지되면 confidence 값만으로 gate를 닫을 수 없다.
@@ -451,7 +452,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
         → Stitch 완료 후 spec.md 작성 계속
       - 그 외(새 화면 추가/약한 신호): approve Phase 2.5에서 제안, 이 단계 skip
       - `ui_related` 플래그: 명시적 디자인 요청 또는 새 화면/약한 UI 신호 → `true`; 그 외 → `false`
-   h-0.5. **Assigned Agent 기본값 보관**: spec.md 작성 직전, `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)`로 기본값 설정. `templates/spec.md`의 Decision Tree는 이 기본값의 override 조건으로만 동작. config 미참조 시 `claude-dev` 자동 선택은 금지. `config.resolved.json` 없으면 `templates/defaults/config.json`의 `agent_assignments`와 `workflow.default_agent`를 fallback으로 함께 Read한다.
+   h-0.5. **Assigned Agent 기본값 보관**: spec.md 작성 직전, 가능하면 Step 0.5의 `request_bootstrap_config`에서 `workflow.default_agent`를 재사용한다. preload가 없으면 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent auto_mode.request --json)`를 1회 재실행해 복구한다. `templates/spec.md`의 Decision Tree는 이 기본값의 override 조건으로만 동작. config 미참조 시 `claude-dev` 자동 선택은 금지. `config.resolved.json` 없으면 `templates/defaults/config.json`의 `agent_assignments`와 `workflow.default_agent`를 fallback으로 함께 Read한다.
    h-0.6. **Intent Context Load (MANDATORY)**:
       - `{PROJECT_ROOT}/.gran-maestro/request-context.md`를 반드시 Read한다. 파일이 없으면 아래 초기 템플릿으로 생성 후 즉시 Read한다 (비차단):
         ```markdown

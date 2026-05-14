@@ -54,6 +54,21 @@ def test_approve_phase2_gate_uses_advance_phase2_stdout_json_contract():
     assert 'all_committed = every(... ["committed", "done"])' not in content
 
 
+def test_approve_phase2_and_phase3_use_batched_config_preload_without_req866_cli():
+    skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
+    content = skill_doc.read_text(encoding="utf-8")
+
+    assert (
+        "config get intent_verification review.auto_review workflow.auto_accept_result --json"
+        in content
+    )
+    assert "phase3_config_items" in content
+    assert "REQ-866" in content
+    assert "read-only summary" in content
+    assert "request phase2-status" in content
+    assert "workflow gate-summary" in content
+
+
 def test_approve_phase2_dispatch_metadata_contract_matches_request_writer():
     skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
     content = skill_doc.read_text(encoding="utf-8")

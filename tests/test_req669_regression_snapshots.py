@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import re
 from pathlib import Path
 
@@ -98,3 +99,77 @@ def test_worktree_base_branch_config_read_write_snapshot(monkeypatch, capsys) ->
     assert 'd.setdefault("worktree", {})["base_branch"] = "{BASE_BRANCH_VALUE}"' in on_content
     assert 'v = d.get(\'worktree\', {}).get(\'base_branch\', \'\')' in on_content
     assert "os.replace(tmp, path)" in on_content
+
+
+def test_config_get_backward_compatibility_contract(monkeypatch, capsys) -> None:
+    resolved = {
+        "workflow": {
+            "default_agent": "codex-dev",
+            "high_pass_guard": {"enabled": True},
+        },
+        "auto_mode": {"plan": False},
+    }
+
+    monkeypatch.setattr(config_cmds, "_load_config_for_get", lambda: copy.deepcopy(resolved))
+
+    assert config_cmds.cmd_config_get(
+        argparse.Namespace(
+            key_path=["workflow.default_agent"],
+            default_value=None,
+            json=False,
+        )
+    ) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "codex-dev\n"
+    assert captured.err == ""
+
+    assert config_cmds.cmd_config_get(
+        argparse.Namespace(
+            key_path=["workflow.default_agent"],
+            default_value=None,
+            json=True,
+        )
+    ) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "key": "workflow.default_agent",
+        "value": "codex-dev",
+    }
+    assert captured.err == ""
+
+    assert config_cmds.cmd_config_get(
+        argparse.Namespace(
+            key_path=["workflow.default_agent", "auto_mode.plan"],
+            default_value=None,
+            json=True,
+        )
+    ) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == [
+        {"key": "workflow.default_agent", "value": "codex-dev"},
+        {"key": "auto_mode.plan", "value": False},
+    ]
+    assert captured.err == ""
+
+    assert config_cmds.cmd_config_get(
+        argparse.Namespace(
+            key_path=["workflow.default_agent", "auto_mode.plan"],
+            default_value="fallback",
+            json=True,
+        )
+    ) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: --default is only supported for a single key" in captured.err
+
+
+def test_skill_docs_prefer_batched_config_preload_patterns() -> None:
+    request_content = _skill_text("request")
+    plan_content = _skill_text("plan")
+    agile_content = _skill_text("agile")
+
+    assert "config get workflow.default_agent auto_mode.request --json" in request_content
+    assert "config get workflow.arch_gate_threshold workflow.high_pass_guard --json" in request_content
+    assert "config get auto_mode.plan auto_mode.confidence_threshold --json" in plan_content
+    assert "config get plan_qa_presets --json" in plan_content
+    assert "config get auto_mode.agile agile.steering_every --json" in agile_content
