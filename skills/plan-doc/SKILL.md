@@ -346,11 +346,13 @@ argument-hint: "{문서 주제 또는 작성하려는 문서 설명}"
 - 구성 규칙
   - 핵심 선택지: 최대 3개
   - 보조 선택지: 정확히 1개 (아래 중 택1)
-    - `다각도 의견 모으기 (ideation)`
-    - `팀 토론으로 합의 찾기 (discussion)`
-    - `코드베이스 탐색 + 웹검색 (explore)`
-  - Other는 자동 추가 (수동 추가 금지)
-- 선택지 `description`에는 추천 근거를 반드시 작성
+    - `C. ideation 보강`
+    - `C. discussion 보강`
+    - `C. explore 보강`
+  - Other는 UI가 자동 추가하므로 수동 추가 금지
+- content-decision label은 `A. {의미 요약}` 또는 `1. {의미 요약}` 형식으로 작성하고 bare `A`/`1`은 금지
+- single-select option.preview에는 `## 장점`, `## 단점`, `## PM 추천 의견`을 포함하고, visual-comparison preview에는 텍스트 와이어프레임을 포함
+- multiSelect option.description에는 `[장점]`, `[단점]`, `[적합]`을 포함
 - Step 6 저장 액션 질문은 보조 선택지 규칙 예외
 
 ## 기존 plan 대비 생략/간소화

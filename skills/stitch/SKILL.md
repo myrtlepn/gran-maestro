@@ -405,18 +405,18 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
      2. `AskUserQuestion`으로 화면 목록 선택 요청:
 
      **옵션 구성** (PM이 컨텍스트 기반으로 동적 결정):
-     - 옵션 1: `"{주요 화면 1개}"` — label: 화면명, description: "단일 화면만 생성"
-     - 옵션 2: `"{주요 화면}, {연관 화면 1}"` — label: "화면명1, 화면명2", description: "2개 화면 생성"
-     - 옵션 3: `"{주요 화면}, {연관 화면 1}, {연관 화면 2}"` — label: "화면명1, 화면명2, 화면명3", description: "3개 화면 생성"
-     - Other (자유 입력): 직접 쉼표 구분 입력 가능 (예: `"로그인, 대시보드, 설정"`)
+     - 옵션 1: label `"A. {주요 화면}"`, description: `"[장점] 가장 빠르게 핵심 화면을 확인합니다. [단점] 연결 흐름 검증은 제한됩니다. [적합] 단일 화면의 레이아웃·톤만 결정할 때 적합합니다."`
+     - 옵션 2: label `"B. {주요 화면}+{연관 화면}"`, description: `"[장점] 핵심 전후 흐름을 함께 확인합니다. [단점] 생성 시간이 늘어납니다. [적합] 인증·온보딩처럼 인접 화면 맥락이 중요한 경우에 적합합니다."`
+     - 옵션 3: label `"C. {주요 화면}+{연관 화면 2개}"`, description: `"[장점] 작은 사용자 여정을 한 번에 비교합니다. [단점] 화면별 완성도 조정 비용이 커집니다. [적합] 플로우 전체 정보 배치를 검토할 때 적합합니다."`
+     - Other는 UI가 자동 추가하므로 explicit option으로 넣지 않는다. 자유 입력에는 쉼표 구분 화면 목록을 받는다.
 
      **예시** (요청이 "로그인 화면 디자인"인 경우):
-     - 옵션 1 label: `"로그인"`, description: `"로그인 화면 1개만 생성"`
-     - 옵션 2 label: `"로그인, 회원가입"`, description: `"인증 관련 2개 화면 생성"`
-     - 옵션 3 label: `"로그인, 회원가입, 비밀번호 찾기"`, description: `"인증 플로우 3개 화면 생성"`
+     - 옵션 1 label: `"A. 로그인"`, description: `"[장점] 로그인 화면 1개에 집중합니다. [단점] 가입·복구 흐름은 보지 못합니다. [적합] 첫 화면의 구조와 분위기만 빠르게 확인할 때 적합합니다."`
+     - 옵션 2 label: `"B. 로그인+회원가입"`, description: `"[장점] 인증 진입과 가입 전환을 함께 봅니다. [단점] 단일 화면보다 생성·검토 시간이 늘어납니다. [적합] 인증 관련 2개 화면의 일관성이 중요할 때 적합합니다."`
+     - 옵션 3 label: `"C. 인증 플로우"`, description: `"[장점] 로그인·회원가입·비밀번호 찾기를 한 번에 비교합니다. [단점] 범위가 넓어 세부 조정이 분산됩니다. [적합] 인증 플로우 3개 화면의 흐름을 검토할 때 적합합니다."`
 
      **컨텍스트가 모호한 경우 범용 폴백 옵션 사용**:
-     - 옵션 1: `"메인 화면"`, 옵션 2: `"메인 화면, 서브 화면"`, 옵션 3: `"메인 화면, 서브 화면, 설정 화면"`
+     - 옵션 1: `"A. 메인 화면"`, 옵션 2: `"B. 메인+서브"`, 옵션 3: `"C. 메인+서브+설정"`
 
      **선택값 처리**:
      - 옵션 선택: 쉼표 구분 파싱 → `screen_list` 배열 생성 (기존과 동일)
@@ -573,14 +573,16 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
    ```
 
 7. **Q1: 어떤 스타일을 탐색할까요?** (`AskUserQuestion`, `multiSelect: true`):
-   - 선택지: A({스타일명1}) / B({스타일명2}) / C({스타일명3}) / 다시 생성 (다른 스타일로)
-   - 스타일은 최대 3개 도출되므로 A/B/C + "다시 생성" = 최대 4개 선택지 (AskUserQuestion 4개 제한 준수)
+   - 선택지 label: `"A. {스타일명1}"` / `"B. {스타일명2}"` / `"C. {스타일명3}"` / `"D. 스타일 재생성"`
+   - 각 option.description에는 `[장점]`, `[단점]`, `[적합]`을 포함해 스타일 차별점과 추천 상황을 설명한다.
+   - 스타일은 최대 3개 도출되므로 A/B/C + `"D. 스타일 재생성"` = 최대 4개 선택지 (AskUserQuestion 4개 제한 준수)
    - **복수 선택 가능** — 선택한 스타일 모두에 대해 variants를 생성함
-   - "다시 생성" 단독 선택 시: Step 1로 돌아가 새 스타일 세트 도출 (accumulated_screens 유지)
+   - `"D. 스타일 재생성"` 단독 선택 시: Step 1로 돌아가 새 스타일 세트 도출 (accumulated_screens 유지)
    - 스타일 1개 이상 선택 시: Step 8로 진행
 
 8. **Q2: 선택한 시안들에 variants를 몇 개씩 만들까요?** (`AskUserQuestion`):
-   - 선택지: 0개 / 1개 / 2개 / 3개 (선택된 모든 스타일에 동일 적용)
+   - 선택지 label: `"A. variants 없음"` / `"B. 1개씩 생성"` / `"C. 2개씩 생성"` / `"D. 3개씩 생성"` (선택된 모든 스타일에 동일 적용)
+   - 각 option.preview에는 `## 장점`, `## 단점`, `## PM 추천 의견`을 포함한다.
    - **빠른 완료 조건**: Q1에서 정확히 1개 선택 + Q2에서 0개
      → Step 11(메타데이터 갱신) 직행, 그 1개가 최종 선택 (Q_final 스킵)
    - 그 외: Step 9로 진행
@@ -609,15 +611,16 @@ python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type des
       ...
       ```
     - 선택지:
-      - "더 탐색하기" → Step 7(Q1)으로 돌아가기 (accumulated_screens 유지)
-      - "이대로 완료" → Step 10.5(Q_final)로 진행
+      - `"A. 더 탐색하기"` → Step 7(Q1)으로 돌아가기 (accumulated_screens 유지)
+      - `"B. 이대로 완료"` → Step 10.5(Q_final)로 진행
+    - 각 option.preview에는 `## 장점`, `## 단점`, `## PM 추천 의견`을 포함한다.
 
 10.5. **Q_final: 최종 시안을 선택해주세요** (`AskUserQuestion`, `multiSelect: false`):
     - accumulated_screens 전체 시안을 스타일 단위로 선택지 제시 (스타일명 — 해당 스타일의 모든 화면이 포함됨)
     - **variant 포함 스타일의 최종 기록 화면 규칙**:
       - variant가 없는 스타일: 기존대로 스타일명을 단일 선택지로 표시
       - variant가 있는 스타일: 스타일 선택 후 별도 `AskUserQuestion`을 통해 원본 또는 각 variant 중 하나를 선택하도록 안내
-        - 예: "A. 원본" / "B. variant 1" / "C. variant 2"
+        - 예: `"A. 원본 유지"` / `"B. variant 1 적용"` / `"C. variant 2 적용"`
         - variant 수는 Q2 선택지(최대 3개)와 연동 → 원본 1 + variant 최대 3 = 최대 4개 (AskUserQuestion 4개 제한 준수)
       - 최종 선택된 단일 화면의 `stitch_screen_id`를 Step 11에서 기록한다
       - **`screen_title` 기록 규칙**: variant 선택 시 `screen_title`은 `"{원본 화면명} (variant {N})"` 형식으로 기록 (예: "로그인 화면 (variant 1)"); 원본 선택 시 원본 화면명 그대로 기록
@@ -900,7 +903,8 @@ variants 생성 시:
    ```
 
 4. **2개 대안 제시 + 선택** (`AskUserQuestion`):
-   - 선택지: A(variant 1) / B(variant 2)
+   - 선택지 label: `"A. variant 1 적용"` / `"B. variant 2 적용"`
+   - 각 option.preview에는 대안 화면의 텍스트 와이어프레임과 `## 장점`, `## 단점`, `## PM 추천 의견`을 포함한다.
    - 사용자가 선택한 variant를 `{SELECTED_VARIANT_STITCH_SCREEN_ID}`로 확정
 
 5. **선택 결과 저장**:
@@ -927,7 +931,8 @@ Edit/Alt로 결과가 생성된 직후 아래 루프를 실행한다.
    - `current_screen_id = {직전 결과 screen-NNN}`
 
 2. **반복 질문** (`AskUserQuestion`):
-   - 선택지: `추가 수정(Edit)` / `대안 보기(Alt)` / `확정(Accept)`
+   - 선택지 label: `"A. 추가 수정"` / `"B. 대안 보기"` / `"C. 확정"`
+   - 각 option.description 또는 preview에는 장점·단점·추천 상황을 포함한다.
 
 3. **분기 처리**:
    - `추가 수정(Edit)`:
@@ -949,7 +954,7 @@ Edit/Alt로 결과가 생성된 직후 아래 루프를 실행한다.
 
 5. **하드캡 (20회)**:
    - `refine_count >= 20` 상태에서 사용자가 Edit/Alt를 다시 선택하면 강제 확인 질문을 띄운다.
-   - 강제 확인 선택지: `확정(Accept)` / `중단(Abort)`
+   - 강제 확인 선택지 label: `"A. 확정"` / `"B. 중단"`
    - 이 단계에서는 추가 Edit/Alt 실행을 허용하지 않는다.
 
 ## Redesign 프로토콜
@@ -969,10 +974,11 @@ Edit/Alt로 결과가 생성된 직후 아래 루프를 실행한다.
 
 2. **사용자 확인** (`AskUserQuestion`):
    - **Q1: variants 수를 선택해주세요** (기본 3):
-     - 선택지: 1개 / 2개 / 3개 / 4개 / 5개
+     - 선택지 label: `"A. 1개 생성"` / `"B. 2개 생성"` / `"C. 3개 생성"` / `"D. 4개 생성"`. 5개 이상은 UI 자동 Other 입력으로 받는다.
+     - 각 option.preview에는 생성 수에 따른 `## 장점`, `## 단점`, `## PM 추천 의견`을 포함한다.
    - **Q2: 변경할 aspects를 선택해주세요** (`multiSelect: true`, 기본 전체):
-     - 선택지: LAYOUT / COLOR_SCHEME / IMAGES / TEXT_FONT / TEXT_CONTENT / 전체 (기본)
-     - "전체" 선택 시: 모든 aspects 적용
+     - 선택지 label: `"A. 레이아웃"` / `"B. 색상"` / `"C. 이미지"` / `"D. 텍스트"`. 전체 적용은 UI 자동 Other 입력 또는 별도 single-select 확인으로 처리한다.
+     - 각 option.description에는 `[장점]`, `[단점]`, `[적합]`을 포함한다.
 
 3. **variants 생성**:
    ```

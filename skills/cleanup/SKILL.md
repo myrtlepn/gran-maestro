@@ -118,7 +118,7 @@ tar -czf {PROJECT_ROOT}/.gran-maestro/plans/archived/plans-{ID_from}-{ID_to}-{YY
 
 1. 남은 REQ-* 중 `old_request_threshold_hours` 이상 경과한 요청 필터링
 2. 대상 없으면 스킵
-3. `AskUserQuestion` 멀티 토글 (최대 4개, 오래된 순; label: `{REQ-ID}: {title 앞 20자}`, description: 상태/생성 시각)
+3. `AskUserQuestion` 멀티 토글 (최대 4개, 오래된 순; label: `A. {REQ-ID} {title 앞 16자}`, description: `[장점] 선택한 오래된 요청을 정리합니다. [단점] 복원은 archive restore 절차가 필요합니다. [적합] 상태: {status} | 생성: {created_at}`)
 4. 4개 초과 시 가장 오래된 4개만 표시 후 재실행 안내
 5. 선택된 요청 개별 tar.gz 압축 후 원본 삭제 → `[Cleanup] {N}개 아카이브됨 (사용자 선택)`
 6. 미선택 시: `오래된 요청 정리를 건너뛰었습니다.`

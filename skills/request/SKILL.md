@@ -244,7 +244,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent`) �
         - Gate Open: A/B/C 중 1개 이상 충족 AND (`pm_arch_confidence >= arch_gate_threshold` 또는 `high_pass_guard.enabled=true` 또는 self-report only + 증거 부족)
         - Gate Close: A/B/C 모두 미충족 AND self-report only 아님 AND 외부 실행 증거+분리된 판정 단계 모두 확인 AND (`pm_arch_confidence < arch_gate_threshold` 또는 명시적 비위험 근거 기록)
       - `--plan` bypass: `plan_bypass_requires_explicit_rationale=true`이면 plan 기반 명시적 우회 근거(외부 실행 증거 + 분리된 판정 단계 출처) 필수. 없으면 bypass 거부 → Gate Open. 허용 시에도 `req-arch-decision.md`에 `gate: skip`, `reason: "plan 참조 + explicit rationale"` 저장.
-      - AUTO_APPROVE=false + Gate Open: `AskUserQuestion`으로 방향 선택 요청 (① "제안 방향으로 진행" ② "방향을 바꿔서 직접 입력" ③ PM 판단 시 ideation/discussion/explore 보조 선택지)
+      - AUTO_APPROVE=false + Gate Open: `AskUserQuestion`으로 방향 선택 요청. label은 `"A. 제안 방향 진행"`, `"B. 방향 재지정"`, `"C. 보조 검토"`처럼 의미를 포함하고, 각 option은 description 또는 preview에 장점·단점·추천 상황을 담는다.
       - AUTO_APPROVE=true + Gate Open: PM 자율 결정. 방향 미확정/발산 필요 → ideation; 리스크·합의 복잡 → discussion; 동시 충족 → discussion 우선; 두 조건 미충족 → ideation 기본
       - Gate Open이든 Close든, 판단 결과를 `REQ-NNN/discussion/req-arch-decision.md`에 저장:
         ```yaml

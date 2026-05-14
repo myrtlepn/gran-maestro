@@ -178,7 +178,7 @@ Step 0.5 처리 완료 후, 사용자 입력 텍스트 전체에서 `/\[?CAP-\d{
    2. 수행 결과를 바탕으로 **파생 가능한 계획 후보 1~3개**를 선제시한다.
       - 형식: `[계획 후보] 1) {후보1 주제} 2) {후보2 주제} 3) {후보3 주제}`
       - 후보가 도출되지 않으면 "계획 가능한 후속 작업이 도출되지 않았습니다"만 출력하고 종료한다.
-   3. `AUTO_MODE=false`: `AskUserQuestion`으로 후보 중 선택받거나 Other로 직접 주제 입력받아 Step 1로 진입한다. "계획 없이 종료" 선택지를 포함한다.
+   3. `AUTO_MODE=false`: `AskUserQuestion`으로 후보 중 선택받거나 UI 자동 Other로 직접 주제 입력받아 Step 1로 진입한다. 명시 선택지에는 `"A. 후보 주제"`, `"B. 계획 없이 종료"`처럼 의미 있는 label을 사용한다.
    4. `AUTO_MODE=true`: PM이 최유력 후보 1건을 자율 선택하여 Step 1로 진입한다. 선택 근거를 Step 1에서 초기화되는 `auto-decisions.md`에 함께 기록한다. 후보 도출 불가 시 종료한다.
 5. `workflow.high_pass_guard`를 읽어 `HIGH_PASS_GUARD`에 저장 (미설정 시 기본값: `enabled=true`, `confidence_supporting_only=true`, `require_external_execution_evidence=true`, `require_independent_judgement=true`, `block_self_report_only_pass=true`, `plan_bypass_requires_explicit_rationale=true`).
 6. 우선순위: `args > state(guarded) > config > default(false)`.
@@ -408,7 +408,7 @@ WHILE (미클리어 항목 존재):
 
 **AUTO_MODE=false**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.test_strategy)` 값 먼저 확인 (없으면 `templates/defaults/config.json` fallback).
 - `"ask"` 이외의 preset이면 AskUserQuestion 생략하고 자동 적용: `"apply-80"` → 적용/80%, `"apply-90"` → 적용/90%, `"apply-no-coverage"` → 적용/미설정, `"skip"` → 적용 안 함
-- `"ask"`이면 AskUserQuestion 1회 수행. 핵심 선택지 4개: `"적용 (80% 커버리지)"`, `"적용 (90% 커버리지)"`, `"적용 (커버리지 미설정)"`, `"적용 안 함"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
+- `"ask"`이면 AskUserQuestion 1회 수행. 핵심 선택지 4개: `"A. 적용 80%"`, `"B. 적용 90%"`, `"C. 적용 미설정"`, `"D. 적용 안 함"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
 
 ### Step 2.45: Loop 종료 조건 수집 (선택적 Q&A)
 
@@ -418,9 +418,9 @@ WHILE (미클리어 항목 존재):
 
 **AUTO_MODE=false**: `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get plan_qa_presets.loop_exit)` 값 확인 (없으면 fallback).
 - `"ask"` 이외이면 자동 적용: `"default_pass"` → 기존 종료 조건(AC 통과 + max_iterations), `"convergence"` → 연속 무변경 수렴, `"fixed_n"` → 고정 N회 반복
-- `"ask"`이면 AskUserQuestion 수행. 핵심 선택지 3개: `"기존 검증 통과(기본값)"`, `"연속 무변경 수렴"`, `"고정 N회 반복"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
-- `"고정 N회 반복"` 선택 시 후속 AskUserQuestion으로 N값(자연수) 수집.
-- `"연속 무변경 수렴"` 또는 `"고정 N회 반복"` 또는 Other 선택 시 복수 조건 AND 조합 여부 확인. `"추가 조건 설정"` 선택 시 동일 선택지 반복, `"이대로 진행"` 시 종료.
+- `"ask"`이면 AskUserQuestion 수행. 핵심 선택지 3개: `"A. 기존 검증 통과"`, `"B. 무변경 수렴"`, `"C. 고정 횟수 반복"`. ⚠️ 이 질문은 보조 선택지 규칙 적용 제외.
+- `"C. 고정 횟수 반복"` 선택 시 후속 AskUserQuestion으로 N값(자연수) 수집.
+- `"B. 무변경 수렴"` 또는 `"C. 고정 횟수 반복"` 또는 UI 자동 Other 입력 시 복수 조건 AND 조합 여부 확인. `"A. 조건 추가"` 선택 시 동일 선택지 반복, `"B. 이대로 진행"` 시 종료.
 
 ### Step 2.6: 의존성 확인 (MANDATORY)
 
@@ -451,20 +451,20 @@ WHILE (미클리어 항목 존재):
 > `AUTO_MODE=false`에서 콘텐츠 결정 관련 모든 `AskUserQuestion` 호출 시:
 > - **핵심 선택지**: 최대 3개 (실제 답변 옵션)
 > - **보조 선택지**: 반드시 1개 — ideation · discussion · explore 중 현재 맥락에 가장 적합한 것을 택 1
-> - **Other**: 자동 추가 (사용자 자유 텍스트 입력용, 수동 포함 금지)
+> - **Other**: UI가 자동 추가하므로 사용자 자유 입력용 `Other`, `기타`, `직접 입력`, `자유 입력`, `사용자 지정`, `Custom` explicit option을 수동으로 넣지 않는다.
 > - Step 4 저장 액션 AskUserQuestion은 보조 선택지 규칙 제외.
 >
 > **[전역 규칙] 선택지 표기 형식 (MANDATORY)**
-> - 사용자가 입력하기 쉬운 **알파벳 또는 숫자만** 사용한다.
-> - 허용 예시: `A`, `B`, `C`, `1`, `2`, `3`, `A1`, `B2`
-> - 금지 예시: `α`, `β`, `γ`, `i`, `ii`, `iii`, `I`, `II`, `III`
-> - 후보/분기/안건을 본문에 나열할 때도 동일 규칙을 적용한다.
+> - content-decision explicit option label은 bare `A`, `B`, `C`, `D`, `1`, `2`, `3`, `4`가 아니라 `A. {의미 요약}`~`D. {의미 요약}` 또는 `1. {의미 요약}`~`4. {의미 요약}` 형식으로 쓴다.
+> - 사용자가 왼쪽 label만 보고도 선택지 의미를 구분할 수 있어야 한다. 예: `A. 최소 변경`, `B. 전면 정렬`, `1. 우선순위 유지`.
+> - 금지 예시: `A`, `B`, `1`, `α`, `β`, `γ`, `i`, `ii`, `iii`, `I`, `II`, `III`, 이모지·기호만으로 된 prefix.
+> - 후보/분기/안건을 본문에 나열할 때도 visible structural prefix는 `A.`, `B.`, `C.`, `D.`, `1.`, `2.`, `3.`, `4.`만 사용한다.
 
 > **[전역 규칙] 선택지 장단점·추천 필수 — 모든 다중 선택지 AskUserQuestion 공통**
-> 선택지가 2개 이상인 모든 `AskUserQuestion`에서 각 선택지에 **장점·단점·추천하는 상황**을 `description` 또는 `markdown` 필드에 **반드시 포함**한다.
+> 선택지가 2개 이상인 모든 `AskUserQuestion`에서 각 선택지에 **장점·단점·추천하는 상황**을 `description` 또는 `preview` 필드에 **반드시 포함**한다.
 > - 내용 없이 라벨만 있는 빈 선택지는 **절대 금지**한다.
-> - 적용 제외: 순수한 예/아니오 확인 질문, 정보 수집형 자유 텍스트 질문.
-> - 구체적인 표현 형식은 아래 "선택지 장단점 표현: 2가지 유형"을 따른다.
+> - 적용 제외: 순수한 예/아니오 확인 질문, 계속/종료 확인, 정보 수집형 자유 텍스트 질문.
+> - 구체적인 표현 형식은 아래 "선택지 장단점 표현: 3가지 유형"을 따른다.
 
 ### Step 3: 반복 정제
 
@@ -493,9 +493,9 @@ WHILE (미클리어 항목 존재):
 
 #### 시각적 미리보기 활용 (UI/레이아웃 선택 시)
 
-UI 레이아웃/컴포넌트 구조/화면 흐름/정보 밀도 비교가 필요한 단일 선택(`multiSelect: false`) 시 각 옵션에 ASCII 도식 첨부:
-- **`description`**: 짧은 텍스트 설명 (하단 표시)
-- **`markdown`**: ASCII 도식 (우측 미리보기 패널)
+UI 레이아웃/컴포넌트 구조/화면 흐름/정보 밀도 비교가 필요한 단일 선택(`multiSelect: false`) 시 각 옵션에 텍스트 와이어프레임을 첨부한다.
+- **`description`**: 짧은 텍스트 설명. preview가 표시되지 않아도 의미를 잃지 않도록 핵심 차이를 담는다.
+- **`preview`**: 우측 미리보기 패널에 표시되는 ASCII 도식. 화면명이나 컴포넌트명을 포함해 구조 차이를 바로 볼 수 있게 한다.
 
 ```
 ┌─────────────┐   ← 박스로 영역 구분
@@ -505,43 +505,67 @@ UI 레이아웃/컴포넌트 구조/화면 흐름/정보 밀도 비교가 필요
 ─────────────────  ← 구분선
 ```
 
-> ⚠️ `multiSelect: true` 질문에서는 미리보기 패널이 비활성화되므로 단일 선택 질문 여러 개로 분리하거나 텍스트 설명으로 대체한다.
+> ⚠️ `multiSelect: true` 질문에서는 preview 패널이 비활성화되므로 시각 비교가 필요한 결정은 단일 선택 질문 여러 개로 분리한다. 분리할 수 없는 multiSelect는 `description`에 `[장점]`, `[단점]`, `[적합]`을 모두 포함한다.
 
-#### 선택지 장단점 표현: 2가지 유형
+#### 선택지 장단점 표현: 3가지 유형
 
-선택지가 2개 이상인 모든 `AskUserQuestion`에서 아래 **2가지 유형 중 하나**를 반드시 적용한다. 적용 제외: 순수한 예/아니오 확인, 정보 수집형 자유 텍스트 질문.
+선택지가 2개 이상인 모든 `AskUserQuestion`에서 아래 **3가지 유형 중 하나**를 반드시 적용한다. 적용 제외: 순수한 예/아니오 확인, 계속/종료 확인, 정보 수집형 자유 텍스트 질문.
 
-**유형 1: description 3줄형 + ASCII 도식 (UI/레이아웃 선택 시)**
+**유형 1: non-visual single-select content-decision**
+
+`multiSelect: false`이고 UI 구조 비교가 아닌 결정 질문은 각 option label과 preview를 아래처럼 구성한다.
 
 ```
-description: |
-  [장점] 콤마 구분 키워드 나열
-  [단점] 콤마 구분 키워드 나열
-  [적합] 콤마 구분 키워드 나열 (선택적)
-markdown: |
-  ┌─────────────┐
-  │  컴포넌트    │
-  └─────────────┘
+label: "A. 타입 안전성 우선"
+description: "초기 설정 비용은 있지만 장기 유지보수 안정성을 높이는 선택"
+preview: |
+  ## 장점
+  - 타입 추론과 IDE 지원이 강해 후속 구현 실수를 줄입니다.
+  - 변경 영향이 컴파일 단계에서 빨리 드러납니다.
+
+  ## 단점
+  - 초기 설정과 타입 정의 시간이 더 필요합니다.
+  - 간단한 문서 변경에는 과한 절차가 될 수 있습니다.
+
+  ## PM 추천 의견
+  여러 스킬과 에이전트 지침이 함께 바뀌는 경우처럼 회귀 위험이 있는 변경에 추천합니다.
+```
+
+**유형 2: visual-comparison single-select**
+
+UI/레이아웃/컴포넌트 배치/정보 배치/화면 흐름을 비교하는 질문은 각 option preview에 텍스트 와이어프레임을 포함한다.
+
+```
+label: "B. 좌측 탐색 유지"
+description: "정보 구조가 안정적이지만 모바일 전환 시 공간이 줄어드는 배치"
+preview: |
+  ## 화면 구조
+  ┌────────────── 대시보드 ──────────────┐
+  │ Nav │ Header                         │
+  │     │ ┌──── 카드 ────┐ ┌──── 카드 ─┐ │
+  │     │ └──────────────┘ └───────────┘ │
+  └──────────────────────────────────────┘
+
+  ## 장점
+  - 주요 메뉴가 항상 보여 탐색 비용이 낮습니다.
+
+  ## 단점
+  - 좁은 화면에서는 콘텐츠 폭이 줄어듭니다.
+
+  ## PM 추천 의견
+  관리자 화면처럼 반복 탐색이 많은 경우에 추천합니다.
+```
+
+**유형 3: multiSelect content-decision**
+
+`multiSelect: true`에서는 preview가 표시되지 않으므로 각 option.description에 `[장점]`, `[단점]`, `[적합]` 태그와 충분한 설명을 넣는다.
+
+```
+label: "C. 회귀 테스트 포함"
+description: "[장점] 기존 흐름 파손을 빠르게 확인합니다. [단점] 실행 시간이 늘어납니다. [적합] 사용자 영향이 큰 공통 규칙 변경에 적합합니다."
 ```
 
 이모티콘 사용 금지 — 반드시 `[장점]`, `[단점]`, `[적합]` 대괄호 텍스트 태그를 사용한다.
-
-**유형 2: 간결한 description + markdown 상세 설명 (그 외 트레이드오프 선택 시)**
-
-`description`에는 한 줄 요약만, `markdown`에 장점·단점·PM 추천 의견을 **문장 단위로 충분히 설명**한다.
-
-```
-description: "타입 안전성과 IDE 지원이 우수하나 초기 설정 비용이 있는 접근"
-markdown: |
-  ## 장점
-  - **타입 안전성**: ...
-  ## 단점
-  - **초기 설정 비용**: ...
-  ## PM 추천 의견
-  현재 프로젝트 맥락을 고려한 PM 판단.
-```
-
-`markdown` 상세 설명은 유형 2 적용 시 반드시 작성한다 (생략 금지). PM은 각 장단점 항목을 1~2문장으로 구체적 근거와 현재 프로젝트 맥락을 포함하여 서술한다.
 
 ### Step 3.3: INVEST Gate
 
@@ -769,7 +793,7 @@ plan 주제, 요청 텍스트, 결정사항 섹션을 대상으로 아래 두 �
 - **감지됨 + `AUTO_MODE=false`**:
   - Step 4 저장 액션 AskUserQuestion 전에 아래 질문을 **반드시 1회** 실행한다:
     - 질문: `review 단계에서 브라우저 UI 테스트도 같이 진행할까요?`
-    - 선택지: **"브라우저 UI 테스트 진행"** → `## 브라우저 테스트` 섹션 추가 (`enabled: true`) → **즉시 Step 4.1으로 진행** / **"이번에는 생략"** → `enabled: false`
+    - 선택지: **"A. 브라우저 UI 테스트 진행"** → `## 브라우저 테스트` 섹션 추가 (`enabled: true`) → **즉시 Step 4.1으로 진행** / **"B. 이번에는 생략"** → `enabled: false`
   - 저장 액션 AskUserQuestion 선택지에 4번째 옵션 "스티치로 디자인 시안 보기" 추가
 - **감지됨 + `AUTO_MODE=true`**: AskUserQuestion 없이 PM이 `브라우저 UI 테스트 진행(enabled: true)`을 기본값으로 자율 결정하고 `auto-decisions.md`에 기록. **즉시 Step 4.1의 AUTO_MODE=true 분기를 실행**. PM이 `mst:stitch`를 자동 호출해 시안을 초안에 반영.
 - **미감지** → Stitch 단계 없이 진행
@@ -794,7 +818,7 @@ plan 주제, 요청 텍스트, 결정사항 섹션을 대상으로 아래 두 �
 기존 기능 회귀:
   1. {흐름 설명}
 ```
-AskUserQuestion 선택지: **"위 흐름으로 확정"** / **"흐름 수정 필요"** (수정 후 반복) / **"코드베이스 탐색 + 웹검색 (explore)"** / Other(추가 흐름 자유 입력). 추가 흐름 입력 시 목록에 추가하고 "더 추가할 흐름이 있나요?" 후속 질문 반복.
+AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수정 필요"** (수정 후 반복) / **"C. 코드베이스 탐색"**. 추가 흐름은 UI 자동 Other 입력으로 받고, 입력 시 목록에 추가한 뒤 "더 추가할 흐름이 있나요?" 후속 질문을 반복한다.
 
 **`AUTO_MODE=true`**: PM이 자율 추론한 테스트 흐름을 AskUserQuestion 없이 바로 확정. auto-decisions.md에 기록: `| 테스트 흐름 수집 | {N}개 흐름 (신규 {X}개 + 회귀 {Y}개) | {confidence:.2f} | PM 자율 판단 | 자율 |`
 
@@ -854,7 +878,7 @@ AskUserQuestion 선택지: **"위 흐름으로 확정"** / **"흐름 수정 필�
      - **"수정 후 진행"**: 수정 내용 입력 후 Step 4 반복
      - **"저장만 하기"**: plan.md만 저장, mst:request는 수동 실행
        → 저장 완료 후 출력: `{PLN-NNN}으로 저장됨. 다음 명령으로 구현 사양(spec.md)을 작성할 수 있습니다.\n  - 일반: /mst:request --plan {PLN-NNN}\n  - 자율 모드: /mst:request --plan {PLN-NNN} -a` (**절대 /mst:approve를 안내하지 않음**)
-       → 즉시 이어서 `AskUserQuestion`: **"지금 /mst:request 실행할까요?"** (선택지: **"실행"** / **"자율 모드 실행"** / **"종료"**)
+       → 즉시 이어서 `AskUserQuestion`: **"지금 /mst:request 실행할까요?"** (선택지: **"A. 바로 실행"** / **"B. 자율 모드 실행"** / **"C. 여기서 종료"**)
      - **"스티치로 디자인 시안 보기"** *(UI 키워드 감지 시에만 표시)*
    - `AUTO_MODE=true`: `AskUserQuestion` 없이 **"저장하고 /mst:request 실행"** 경로를 기본값으로 즉시 진행 (규모·복잡도와 무관하게 이 경로만 허용)
 4. 저장 선택 시 `plans/PLN-NNN/plan.md` 작성; `debug_context` 활성 시 `plan.json`에 `"linked_debug"` 추가

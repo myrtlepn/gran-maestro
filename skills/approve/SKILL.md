@@ -146,16 +146,16 @@ DOD-009 session identity glossary: `mst_session_id` is the canonical state machi
 ##### 2~4개인 경우 (multiSelect UI)
 
 `AskUserQuestion`의 `multiSelect` 옵션 사용:
-- `label: "REQ-NNN — {title}  [←REQ-MMM →REQ-PPP]"` (배지 있을 때)
-- `description: "Phase 1 완료, 태스크 N개 | 선행: REQ-MMM | 후행: REQ-PPP"` (의존성 있을 때)
+- `label: "A. REQ-NNN {title 앞 18자}  [←REQ-MMM →REQ-PPP]"` (배지 있을 때)
+- `description: "[장점] 선택한 요청을 배치 실행에 포함합니다. [단점] 의존성이 있는 경우 선행 실패의 영향을 받습니다. [적합] Phase 1 완료, 태스크 N개 | 선행: REQ-MMM | 후행: REQ-PPP"` (의존성 있을 때)
 - **기본값: 전체 선택**. 선택 후 확인 → 배치 실행. 0개 선택 시 "선택된 요청이 없습니다" 후 종료.
 
 ##### 5개 이상인 경우 (전체선택 / 직접 입력 UI)
 
 1. **목록 텍스트 출력**: `REQ-NNN — {title}  [배지]  [태스크 M개]` 형식
-2. **1차 AskUserQuestion**: "전체선택" 또는 "직접 입력"
-3. **"전체선택"**: 전체 대기 REQ 배치 실행.
-4. **"직접 입력"**: 2차 AskUserQuestion에서 REQ ID 자유 입력 → "콤마 구분 및 범위 지정" 파싱 로직으로 처리 → 배치 실행. 빈 입력/0건 → "선택된 요청이 없습니다" 후 종료.
+2. **1차 AskUserQuestion**: `"A. 전체 선택"` 또는 `"B. ID 직접 입력"`
+3. **`"A. 전체 선택"`**: 전체 대기 REQ 배치 실행.
+4. **`"B. ID 직접 입력"`**: 2차 AskUserQuestion에서 REQ ID 자유 입력 → "콤마 구분 및 범위 지정" 파싱 로직으로 처리 → 배치 실행. 빈 입력/0건 → "선택된 요청이 없습니다" 후 종료.
 
 ---
 

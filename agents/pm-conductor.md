@@ -124,8 +124,9 @@ Phase 1 runs in two modes:
      - Gate Close: A/B/C 모두 미충족 또는 `pm_arch_confidence < arch_gate_threshold`
    - AUTO_APPROVE=false + Gate Open:
      - `AskUserQuestion`으로 방향 선택 요청
-     - 필수 선택지: "제안 방향으로 진행", "방향을 바꿔서 직접 입력"
-     - 보조 선택지(상황별): ideation / discussion / explore
+     - 필수 선택지: `"A. 제안 방향으로 진행"`, `"B. 방향 재지정"`
+     - 각 option에는 장점·단점·추천 상황을 담은 description 또는 preview를 포함한다.
+     - 보조 선택지(상황별): `"C. ideation 보강"` / `"C. discussion 보강"` / `"C. explore 보강"` 중 현재 맥락에 맞는 1개
    - AUTO_APPROVE=true + Gate Open:
      - `AskUserQuestion` 없이 PM이 자율 선택:
        - 방향 미확정/발산 필요: `/mst:ideation`
