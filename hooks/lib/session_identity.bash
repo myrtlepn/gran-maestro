@@ -6,6 +6,7 @@ fi
 MST_SESSION_IDENTITY_BASH_SOURCED=1
 
 MST_RESOLVED_CANONICAL_SESSION_ID=""
+MST_SESSION_IDENTITY_DIAGNOSTIC_JSON=""
 
 mst_is_structured_mst_session_id() {
   local value="${1:-}"
@@ -15,62 +16,138 @@ mst_is_structured_mst_session_id() {
   [[ "$value" =~ ^MST-[A-Z][A-Z0-9]*-[0-9]+-[0-9]{8}T[0-9]{9}Z-[a-z0-9]{8,}$ ]]
 }
 
-mst_extract_stdin_mst_session_id_literal() {
-  local raw="$1" rest value
+mst_json_escape_literal() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+mst_json_string_or_null() {
+  local value="${1:-}"
+  if [ -z "$value" ]; then
+    printf 'null'
+  else
+    printf '"%s"' "$(mst_json_escape_literal "$value")"
+  fi
+}
+
+mst_extract_stdin_json_string_literal() {
+  local raw="$1" key="$2" rest value
   case "$raw" in
-    *\"mst_session_id\"*)
-      rest="${raw#*\"mst_session_id\"}"
+    *\"$key\"*)
+      rest="${raw#*\"$key\"}"
       rest="${rest#*:}"
       rest="${rest#*\"}"
       value="${rest%%\"*}"
       value="${value//$'\n'/}"
       value="${value//$'\r'/}"
       value="${value//$'\t'/}"
-      case "$value" in
-        ""|*[!A-Za-z0-9_-]*) return 0 ;;
-      esac
-      if mst_is_structured_mst_session_id "$value"; then
-        printf '%s\n' "$value"
-      fi
+      printf '%s\n' "$value"
       ;;
   esac
 }
 
+mst_extract_stdin_mst_session_id_literal() {
+  local raw="$1" value
+  value="$(mst_extract_stdin_json_string_literal "$raw" "mst_session_id" || true)"
+  case "$value" in
+    ""|*[!A-Za-z0-9_-]*) return 0 ;;
+  esac
+  if mst_is_structured_mst_session_id "$value"; then
+    printf '%s\n' "$value"
+  fi
+}
+
+mst_set_session_identity_diagnostic_json() {
+  local valid="$1" reason="$2" action="$3" canonical_id="$4" selected_source="$5" invocation_class="$6"
+  local env_present="$7" env_valid="$8" env_value="$9"
+  local stdin_present="${10}" stdin_valid="${11}" stdin_value="${12}"
+  local valid_json="false" env_present_json="false" env_valid_json="false" stdin_present_json="false" stdin_valid_json="false"
+
+  [ "$valid" = "true" ] && valid_json="true"
+  [ "$env_present" = "true" ] && env_present_json="true"
+  [ "$env_valid" = "true" ] && env_valid_json="true"
+  [ "$stdin_present" = "true" ] && stdin_present_json="true"
+  [ "$stdin_valid" = "true" ] && stdin_valid_json="true"
+
+  MST_SESSION_IDENTITY_DIAGNOSTIC_JSON="$(printf '{"valid":%s,"reason":"%s","action":"%s","canonical_mst_session_id":%s,"selected_source":%s,"source_precedence":["env:MST_SESSION_ID","structured:mst_session_id"],"observed_sources":{"env:MST_SESSION_ID":{"present":%s,"valid":%s,"value":%s},"structured:mst_session_id":{"present":%s,"valid":%s,"value":%s}},"invocation_class":"%s"}' \
+    "$valid_json" \
+    "$(mst_json_escape_literal "$reason")" \
+    "$(mst_json_escape_literal "$action")" \
+    "$(mst_json_string_or_null "$canonical_id")" \
+    "$(mst_json_string_or_null "$selected_source")" \
+    "$env_present_json" \
+    "$env_valid_json" \
+    "$(mst_json_string_or_null "$env_value")" \
+    "$stdin_present_json" \
+    "$stdin_valid_json" \
+    "$(mst_json_string_or_null "$stdin_value")" \
+    "$(mst_json_escape_literal "$invocation_class")")"
+}
+
 mst_resolve_canonical_mst_session_id() {
   local hook_name="$1" stdin_policy="$2" stdin_raw="$3"
-  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id=""
+  local env_raw="${MST_SESSION_ID:-}" env_id="" stdin_id="" stdin_raw_id="" legacy_session_id=""
+  local env_present="false" env_valid="false" stdin_present="false" stdin_valid="false"
 
   MST_RESOLVED_CANONICAL_SESSION_ID=""
+  MST_SESSION_IDENTITY_DIAGNOSTIC_JSON=""
+  [ -n "$env_raw" ] && env_present="true"
   if [ -n "$env_raw" ] && mst_is_structured_mst_session_id "$env_raw"; then
     env_id="$env_raw"
+    env_valid="true"
   fi
+  stdin_raw_id="$(mst_extract_stdin_json_string_literal "$stdin_raw" "mst_session_id" || true)"
+  [ -n "$stdin_raw_id" ] && stdin_present="true"
   stdin_id="$(mst_extract_stdin_mst_session_id_literal "$stdin_raw" || true)"
+  [ -n "$stdin_id" ] && stdin_valid="true"
+  legacy_session_id="$(mst_extract_stdin_json_string_literal "$stdin_raw" "session_id" || true)"
 
   if [ -n "$env_id" ] && [ -n "$stdin_id" ] && [ "$env_id" != "$stdin_id" ]; then
+    mst_set_session_identity_diagnostic_json "false" "canonical_identity_conflict" "block_canonical_identity_conflict" "" "" "hook_boundary_env_stdin_conflict" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
     printf '[%s] error: mst_session_id mismatch: env:MST_SESSION_ID=%s stdin:mst_session_id=%s\n' "$hook_name" "$env_id" "$stdin_id" >&2
     return 1
   fi
   if [ -n "$env_raw" ] && [ -z "$env_id" ]; then
+    mst_set_session_identity_diagnostic_json "false" "invalid_canonical_identity" "emit_diagnostic_no_mutation" "" "" "hook_boundary_invalid_env" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
     printf '[%s] diagnostic: ignoring invalid MST_SESSION_ID; no canonical parent mst_session_id.\n' "$hook_name" >&2
     return 2
   fi
   if [ -n "$env_id" ]; then
     MST_RESOLVED_CANONICAL_SESSION_ID="$env_id"
+    if [ -n "$stdin_id" ]; then
+      mst_set_session_identity_diagnostic_json "true" "canonical_identity_resolved" "use_canonical_mst_session_id" "$env_id" "env:MST_SESSION_ID" "hook_boundary_env_stdin_same" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
+    else
+      mst_set_session_identity_diagnostic_json "true" "canonical_identity_resolved" "use_canonical_mst_session_id" "$env_id" "env:MST_SESSION_ID" "hook_boundary_env_only" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
+    fi
     return 0
   fi
   if [ -n "$stdin_id" ]; then
     case "$stdin_policy" in
       allow-stdin-without-env)
         MST_RESOLVED_CANONICAL_SESSION_ID="$stdin_id"
+        mst_set_session_identity_diagnostic_json "true" "canonical_identity_resolved" "use_canonical_mst_session_id" "$stdin_id" "structured:mst_session_id" "hook_boundary_stdin_only" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
         return 0
         ;;
       require-env-for-stdin)
+        mst_set_session_identity_diagnostic_json "false" "missing_inherited_env_for_structured_stdin" "emit_diagnostic_no_mutation" "" "" "hook_boundary_stdin_without_env" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
         printf '[%s] diagnostic: structured hook stdin mst_session_id ignored without inherited MST_SESSION_ID.\n' "$hook_name" >&2
         return 2
         ;;
     esac
   fi
 
+  if [ -n "$legacy_session_id" ]; then
+    mst_set_session_identity_diagnostic_json "false" "legacy_identity_not_canonical_source" "emit_diagnostic_no_mutation" "" "" "hook_boundary_legacy_only" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
+    printf '[%s] diagnostic: legacy session_id ignored without canonical MST_SESSION_ID/mst_session_id; no hook identity mutation.\n' "$hook_name" >&2
+    return 2
+  fi
+
+  mst_set_session_identity_diagnostic_json "false" "missing_canonical_identity" "emit_diagnostic_no_mutation" "" "" "hook_boundary_missing" "$env_present" "$env_valid" "$env_raw" "$stdin_present" "$stdin_valid" "$stdin_raw_id"
   printf '[%s] diagnostic: missing canonical parent MST_SESSION_ID/mst_session_id; no hook identity mutation.\n' "$hook_name" >&2
   return 2
 }

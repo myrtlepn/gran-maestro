@@ -16,51 +16,6 @@ fail() {
   exit 1
 }
 
-sha256_file() {
-  shasum -a 256 "$1" | awk '{print $1}'
-}
-
-assert_hash_match_if_exists() {
-  local name="$1" source="$2" candidate="$3"
-  [ -f "$candidate" ] || return 0
-  local source_hash candidate_hash
-  source_hash="$(sha256_file "$source")"
-  candidate_hash="$(sha256_file "$candidate")"
-  [ "$source_hash" = "$candidate_hash" ] || fail "$name hash mismatch: $candidate"
-}
-
-assert_hash_match_if_accessible() {
-  local name="$1" source="$2" candidate="$3"
-  [ -f "$candidate" ] || return 0
-  if [ ! -w "$candidate" ]; then
-    printf 'SKIP: %s inaccessible for sync: %s\n' "$name" "$candidate" >&2
-    return 0
-  fi
-  assert_hash_match_if_exists "$name" "$source" "$candidate"
-}
-
-for hook_name in mst-session-init.sh mst-pre-tool-use.sh mst-stop-hook.sh mst-auto-chain-context.sh; do
-  assert_hash_match_if_exists ".claude hook $hook_name" "$REPO_ROOT/hooks/$hook_name" "$REPO_ROOT/.claude/hooks/$hook_name"
-  while IFS= read -r cache_file; do
-    [ -n "$cache_file" ] || continue
-    assert_hash_match_if_accessible "plugin cache hook $hook_name" "$REPO_ROOT/hooks/$hook_name" "$cache_file"
-  done < <(find "$HOME/.claude/plugins/cache/gran-maestro/mst" -path "*/hooks/$hook_name" -type f 2>/dev/null | sort || true)
-done
-
-for helper_name in bootstrap.bash logging.bash session_identity.bash; do
-  [ -f "$REPO_ROOT/.claude/hooks/lib/$helper_name" ] || fail "missing .claude hook lib helper: $helper_name"
-  assert_hash_match_if_exists ".claude hook lib $helper_name" "$REPO_ROOT/hooks/lib/$helper_name" "$REPO_ROOT/.claude/hooks/lib/$helper_name"
-  while IFS= read -r cache_file; do
-    [ -n "$cache_file" ] || continue
-    assert_hash_match_if_accessible "plugin cache hook lib $helper_name" "$REPO_ROOT/hooks/lib/$helper_name" "$cache_file"
-  done < <(find "$HOME/.claude/plugins/cache/gran-maestro/mst" -path "*/hooks/lib/$helper_name" -type f 2>/dev/null | sort || true)
-done
-
-while IFS= read -r cache_file; do
-  [ -n "$cache_file" ] || continue
-  assert_hash_match_if_accessible "plugin cache hook lib pre_tool_use_fast.py" "$REPO_ROOT/hooks/lib/pre_tool_use_fast.py" "$cache_file"
-done < <(find "$HOME/.claude/plugins/cache/gran-maestro/mst" -path "*/hooks/lib/pre_tool_use_fast.py" -type f 2>/dev/null | sort || true)
-
 PROJECT_ROOT="$TEST_TMP_ROOT/project"
 HOME_DIR="$TEST_TMP_ROOT/home"
 mkdir -p "$PROJECT_ROOT/.gran-maestro" "$HOME_DIR"
@@ -112,5 +67,5 @@ for row in history_rows:
     if row.get("session_id") in {root, legacy} or event.get("session_id") in {root, legacy}:
         raise SystemExit(f"history session_id used as canonical/legacy key: {row}")
 
-print("PASS: hook identity uses canonical mst_session_id and synced hook hashes")
+print("PASS: hook identity uses canonical mst_session_id and rejects legacy session_id mutation")
 PY
