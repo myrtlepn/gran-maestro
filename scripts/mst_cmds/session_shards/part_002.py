@@ -18,11 +18,11 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
             code="legacy_identity_not_canonical_source",
         )
 
-    if payload.get("schema_version") != 1:
+    if "schema_version" in payload and payload.get("schema_version") != 1:
         _common.raise_validation_failure(
             target="dispatch_envelope",
             field="schema_version",
-            reason="dispatch context schema_version is required and must be 1",
+            reason="dispatch context schema_version must be 1 when provided",
         )
     if not isinstance(payload.get("mst_session_id"), str) or not payload.get("mst_session_id", "").strip():
         _common.raise_validation_failure(
@@ -227,11 +227,31 @@ def cmd_session_resolve(args):
         )
     except ValueError as exc:
         if args.json and _common.is_session_identity_non_success_error(exc):
-            return _common.emit_session_identity_non_success("session resolve", error=exc)
+            return _common.emit_session_identity_non_success(
+                "session resolve",
+                error=exc,
+                invocation_class="external_invocation",
+            )
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     session_id = identity["mst_session_id"]
     if args.json:
+        from scripts.mst_cmds import execution_flow
+
+        diagnostic = execution_flow.resolve_canonical_mst_session_identity(
+            {"mst_session_id": session_id} if identity.get("source") == "payload:mst_session_id" else {},
+            {"MST_SESSION_ID": session_id} if identity.get("source") == "env:MST_SESSION_ID" else {},
+            invocation_class="external_invocation",
+        )
+        if identity.get("source") == "generated:root_mst_id":
+            diagnostic = execution_flow.resolve_canonical_mst_session_identity(
+                {},
+                {},
+                invocation_class="normal_entry",
+                allow_generate=True,
+                root_mst_id=args.root_mst_id,
+                started_at=started_at,
+            )
         print(
             json.dumps(
                 {
@@ -239,6 +259,12 @@ def cmd_session_resolve(args):
                     "session_id": session_id,
                     "source": identity.get("source"),
                     "legacy_diagnostics": identity.get("legacy_diagnostics", {}),
+                    "valid": diagnostic.get("valid", True),
+                    "reason": diagnostic.get("reason", "canonical_identity_resolved"),
+                    "action": diagnostic.get("action", "accept_canonical_identity"),
+                    "source_precedence": diagnostic.get("source_precedence", _common.canonical_session_source_precedence()),
+                    "observed_sources": diagnostic.get("observed_sources", {}),
+                    "invocation_class": diagnostic.get("invocation_class", "external_invocation"),
                 },
                 ensure_ascii=False,
             )

@@ -761,63 +761,247 @@ def validate_source_ledger_projection_source(
     projection_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return validate_source_ledger_for_projection(ledger, projection_source)
+def _identity_observed_source(value: object, *, validate: bool = True) -> dict[str, Any]:
+    text = value.strip() if isinstance(value, str) else ""
+    observed = {
+        "present": bool(text),
+        "value": text or None,
+        "valid": False,
+    }
+    if not text:
+        return observed
+    if not validate:
+        observed["valid"] = True
+        return observed
+    try:
+        observed["canonical_value"] = session_cmds.validate_mst_session_id(text).mst_session_id
+        observed["valid"] = True
+    except Exception as exc:
+        observed["error"] = str(exc)
+    return observed
+def _snapshot_path_session_id(snapshot_path: str | None) -> str:
+    text = str(snapshot_path or "").strip()
+    if not text:
+        return ""
+    parts = Path(text).parts
+    try:
+        state_index = parts.index("state")
+    except ValueError:
+        return ""
+    if state_index + 2 >= len(parts):
+        return ""
+    if parts[state_index + 2] != "snapshot.json":
+        return ""
+    return parts[state_index + 1]
+def _canonical_identity_result(
+    *,
+    status: str,
+    valid: bool,
+    reason: str,
+    action: str,
+    invocation_class: str,
+    source_precedence: list[str],
+    observed_sources: dict[str, dict[str, Any]],
+    selected_source: str | None = None,
+    selected_mst_session_id: str | None = None,
+    legacy_diagnostics: dict[str, Any] | None = None,
+    diagnostics: list[dict[str, Any]] | None = None,
+    **details: Any,
+) -> dict[str, Any]:
+    payload = {
+        "status": status,
+        "accepted": valid,
+        "fail_closed": not valid,
+        "valid": valid,
+        "reason": reason,
+        "action": action,
+        "source_precedence": source_precedence,
+        "observed_sources": observed_sources,
+        "invocation_class": invocation_class,
+        "canonical_mst_session_id": selected_mst_session_id,
+        "mst_session_id": selected_mst_session_id,
+        "selected_source": selected_source,
+        "legacy_diagnostics": legacy_diagnostics or {},
+        "diagnostics": diagnostics or [],
+    }
+    payload.update({key: value for key, value in details.items() if value is not None})
+    return payload
 def resolve_canonical_mst_session_identity(
     payload: dict[str, Any] | None = None,
     env: dict[str, str] | None = None,
+    *,
+    session_metadata: dict[str, Any] | None = None,
+    snapshot_payload: dict[str, Any] | None = None,
+    snapshot_path: str | None = None,
+    invocation_class: str = "diagnostic_invocation",
+    allow_generate: bool = False,
+    root_mst_id: str | None = None,
+    started_at: datetime | None = None,
 ) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     env = env if env is not None else os.environ
+    session_metadata = session_metadata if isinstance(session_metadata, dict) else {}
+    snapshot_payload = snapshot_payload if isinstance(snapshot_payload, dict) else {}
     env_value = str(env.get("MST_SESSION_ID") or "").strip()
     payload_value = payload.get("mst_session_id")
     payload_value = payload_value.strip() if isinstance(payload_value, str) else ""
+    session_value = session_metadata.get("mst_session_id")
+    session_value = session_value.strip() if isinstance(session_value, str) else ""
+    snapshot_body_value = snapshot_payload.get("mst_session_id")
+    snapshot_body_value = snapshot_body_value.strip() if isinstance(snapshot_body_value, str) else ""
+    snapshot_path_value = _snapshot_path_session_id(snapshot_path)
     legacy_diagnostics: dict[str, Any] = {}
     for key in ("MST_STATE_PPID", "session_id", "hook_transcript_uuid", "transcript_uuid"):
         value = env.get(key) if key.startswith("MST_") else payload.get(key)
         if isinstance(value, str) and value.strip():
             legacy_diagnostics[key] = value.strip()
+    source_precedence = _common.canonical_session_source_precedence()
+    observed_sources = {
+        "env:MST_SESSION_ID": _identity_observed_source(env_value),
+        "structured:mst_session_id": _identity_observed_source(payload_value),
+        "session_metadata:mst_session_id": _identity_observed_source(session_value),
+        "snapshot_path:mst_session_id": _identity_observed_source(snapshot_path_value),
+        "snapshot_body:mst_session_id": _identity_observed_source(snapshot_body_value),
+    }
+    valid_candidates = [
+        (source_name, observed_sources[source_name]["canonical_value"])
+        for source_name in source_precedence
+        if observed_sources[source_name].get("valid") and observed_sources[source_name].get("canonical_value")
+    ]
+    invalid_sources = [source_name for source_name, observed in observed_sources.items() if observed.get("present") and not observed.get("valid")]
 
-    if env_value and payload_value and env_value != payload_value:
-        return _failure(
-            "canonical_mst_session_id_mismatch",
+    if valid_candidates:
+        selected_source, selected_session_id = valid_candidates[0]
+        conflicting_sources = [
+            source_name
+            for source_name, candidate_session_id in valid_candidates[1:]
+            if candidate_session_id != selected_session_id
+        ]
+        if conflicting_sources:
+            return _canonical_identity_result(
+                status="error",
+                valid=False,
+                reason="canonical_identity_conflict",
+                action="repair_canonical_identity_conflict",
+                invocation_class=invocation_class,
+                source_precedence=source_precedence,
+                observed_sources=observed_sources,
+                selected_source=selected_source,
+                selected_mst_session_id=selected_session_id,
+                legacy_diagnostics=legacy_diagnostics or _common.legacy_session_diagnostics(),
+                diagnostics=[
+                    _diagnostic(
+                        "canonical_mst_session_id_mismatch",
+                        field="mst_session_id",
+                        reason="canonical MST session identity sources disagree",
+                        expected=selected_session_id,
+                        conflicting_sources=conflicting_sources,
+                    )
+                ],
+                code="canonical_mst_session_id_mismatch",
+            )
+        parsed = session_cmds.validate_mst_session_id(selected_session_id)
+        return _canonical_identity_result(
+            status="ok",
+            valid=True,
+            reason="canonical_identity_resolved",
+            action="accept_canonical_identity",
+            invocation_class=invocation_class,
+            source_precedence=source_precedence,
+            observed_sources=observed_sources,
+            selected_source=selected_source,
+            selected_mst_session_id=parsed.mst_session_id,
+            legacy_diagnostics=legacy_diagnostics,
+            diagnostics=[],
+            root_mst_id=parsed.root_mst_id,
+            identity_source=selected_source,
+            ignored_legacy_identity_sources=sorted(legacy_diagnostics),
+        )
+
+    if invalid_sources:
+        return _canonical_identity_result(
+            status="error",
+            valid=False,
+            reason="invalid_canonical_identity",
+            action="emit_diagnostic_no_mutation",
+            invocation_class=invocation_class,
+            source_precedence=source_precedence,
+            observed_sources=observed_sources,
+            legacy_diagnostics=legacy_diagnostics or _common.legacy_session_diagnostics(),
             diagnostics=[
                 _diagnostic(
-                    "canonical_mst_session_id_mismatch",
+                    "invalid_mst_session_id",
                     field="mst_session_id",
-                    reason="MST_SESSION_ID and payload mst_session_id must match",
-                    expected=env_value,
-                    actual=payload_value,
+                    reason="observed canonical identity source is invalid",
+                    invalid_sources=invalid_sources,
                 )
             ],
-            canonical_mst_session_id=None,
-            legacy_diagnostics=legacy_diagnostics,
+            code="invalid_mst_session_id",
         )
 
-    candidate = env_value or payload_value
-    if not candidate:
-        return _common.session_identity_non_success_payload("execution-flow replay") | {
-            "fail_closed": True,
-            "accepted": False,
-            "legacy_diagnostics": legacy_diagnostics or _common.legacy_session_diagnostics(),
+    if allow_generate and invocation_class == "normal_entry" and root_mst_id:
+        generated = session_cmds.generate_mst_session_id(root_mst_id, started_at=started_at)
+        parsed = session_cmds.validate_mst_session_id(generated)
+        observed_sources["generated:root_mst_id"] = {
+            "present": True,
+            "value": parsed.mst_session_id,
+            "valid": True,
+            "canonical_value": parsed.mst_session_id,
         }
-
-    try:
-        parsed = session_cmds.validate_mst_session_id(candidate)
-    except Exception as exc:
-        return _failure(
-            "invalid_mst_session_id",
-            diagnostics=[
-                _diagnostic("invalid_mst_session_id", field="mst_session_id", reason=str(exc), actual=candidate)
-            ],
-            canonical_mst_session_id=None,
+        return _canonical_identity_result(
+            status="ok",
+            valid=True,
+            reason="generated_canonical_identity",
+            action="generate_canonical_mst_session_id",
+            invocation_class=invocation_class,
+            source_precedence=source_precedence + ["generated:root_mst_id"],
+            observed_sources=observed_sources,
+            selected_source="generated:root_mst_id",
+            selected_mst_session_id=parsed.mst_session_id,
             legacy_diagnostics=legacy_diagnostics,
+            diagnostics=[],
+            root_mst_id=parsed.root_mst_id,
+            identity_source="generated:root_mst_id",
+            ignored_legacy_identity_sources=sorted(legacy_diagnostics),
         )
-    return _ok(
-        canonical_mst_session_id=parsed.mst_session_id,
-        mst_session_id=parsed.mst_session_id,
-        root_mst_id=parsed.root_mst_id,
-        identity_source="MST_SESSION_ID" if env_value else "mst_session_id",
-        ignored_legacy_identity_sources=sorted(legacy_diagnostics),
-        legacy_diagnostics=legacy_diagnostics,
+
+    if legacy_diagnostics:
+        return _canonical_identity_result(
+            status="error",
+            valid=False,
+            reason="legacy_identity_not_canonical_source",
+            action="emit_diagnostic_no_mutation",
+            invocation_class=invocation_class,
+            source_precedence=source_precedence,
+            observed_sources=observed_sources,
+            legacy_diagnostics=legacy_diagnostics or _common.legacy_session_diagnostics(),
+            diagnostics=[
+                _diagnostic(
+                    "legacy_identity_not_canonical_source",
+                    field="mst_session_id",
+                    reason="legacy identity inputs are diagnostic-only and cannot become canonical",
+                )
+            ],
+            code="legacy_identity_not_canonical_source",
+        )
+
+    return _canonical_identity_result(
+        status="error",
+        valid=False,
+        reason="missing_canonical_identity",
+        action="emit_diagnostic_no_mutation" if invocation_class != "normal_entry" else "block_missing_canonical_identity",
+        invocation_class=invocation_class,
+        source_precedence=source_precedence,
+        observed_sources=observed_sources,
+        legacy_diagnostics=legacy_diagnostics or _common.legacy_session_diagnostics(),
+        diagnostics=[
+            _diagnostic(
+                "missing_canonical_mst_session_id",
+                field="mst_session_id",
+                reason="canonical MST session identity is missing",
+            )
+        ],
+        code="missing_canonical_mst_session_id",
     )
 def resolve_canonical_mst_session_id(
     payload: dict[str, Any] | None = None,

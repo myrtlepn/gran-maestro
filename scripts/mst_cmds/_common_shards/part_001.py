@@ -127,6 +127,15 @@ def structured_mst_session_id_from_env() -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+CANONICAL_SESSION_SOURCE_PRECEDENCE = [
+    "env:MST_SESSION_ID",
+    "structured:mst_session_id",
+    "session_metadata:mst_session_id",
+    "snapshot_path:mst_session_id",
+    "snapshot_body:mst_session_id",
+]
+def canonical_session_source_precedence() -> list[str]:
+    return list(CANONICAL_SESSION_SOURCE_PRECEDENCE)
 def canonical_mst_session_id_from_env_or_context() -> str | None:
     if len(sys.argv) > 1 and sys.argv[1] == "dispatch" and os.environ.get("MST_INVOCATION_HISTORY_ACTIVE") != "1":
         return None
@@ -222,15 +231,56 @@ def session_identity_non_success_payload(
     *,
     code: str | None = None,
     error: object | None = None,
+    invocation_class: str = "external_invocation",
 ) -> dict:
     diagnostics = legacy_session_diagnostics()
     resolved_code = code or session_identity_non_success_code(error, diagnostics) or "missing_canonical_mst_session_id"
+    observed_sources = {
+        "env:MST_SESSION_ID": {
+            "present": bool(canonical_session_id_from_env()),
+            "value": canonical_session_id_from_env(),
+        },
+        "structured:mst_session_id": {
+            "present": bool(structured_mst_session_id_from_env()),
+            "value": structured_mst_session_id_from_env(),
+        },
+        "session_metadata:mst_session_id": {
+            "present": False,
+            "value": None,
+        },
+        "snapshot_path:mst_session_id": {
+            "present": False,
+            "value": None,
+        },
+        "snapshot_body:mst_session_id": {
+            "present": False,
+            "value": None,
+        },
+    }
+    reason_map = {
+        "mst_session_id_mismatch": "canonical_identity_conflict",
+        "invalid_canonical_mst_session_id": "invalid_canonical_identity",
+        "legacy_identity_not_canonical_source": "legacy_identity_not_canonical_source",
+        "missing_canonical_mst_session_id": "missing_canonical_identity",
+    }
+    action_map = {
+        "mst_session_id_mismatch": "repair_canonical_identity_conflict",
+        "invalid_canonical_mst_session_id": "emit_diagnostic_no_mutation",
+        "legacy_identity_not_canonical_source": "emit_diagnostic_no_mutation",
+        "missing_canonical_mst_session_id": "emit_diagnostic_no_mutation",
+    }
     return {
         "status": "error",
         "code": resolved_code,
         "message": message or str(error or "") or f"{subject} requires canonical MST_SESSION_ID or structured mst_session_id",
         "created_new_session": False,
         "canonical_mst_session_id": None,
+        "valid": False,
+        "reason": reason_map.get(resolved_code, resolved_code),
+        "action": action_map.get(resolved_code, "emit_diagnostic_no_mutation"),
+        "source_precedence": canonical_session_source_precedence(),
+        "observed_sources": observed_sources,
+        "invocation_class": invocation_class,
         "legacy_diagnostics": diagnostics,
         "mutation_performed": False,
     }
@@ -326,8 +376,15 @@ def emit_session_identity_non_success(
     *,
     code: str | None = None,
     error: object | None = None,
+    invocation_class: str = "external_invocation",
 ) -> int:
-    payload = session_identity_non_success_payload(subject, message, code=code, error=error)
+    payload = session_identity_non_success_payload(
+        subject,
+        message,
+        code=code,
+        error=error,
+        invocation_class=invocation_class,
+    )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 1
 def is_session_identity_non_success_error(error: object) -> bool:

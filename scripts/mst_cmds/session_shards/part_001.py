@@ -725,13 +725,13 @@ def write_session_history_event(base_dir: Path, mst_session_id: str, payload: di
         event_type = "event"
     event["event_type"] = event_type
     event.setdefault("type", event_type)
-    if event_type.startswith("mst.invocation_"):
-        event.setdefault("schema_version", 1)
-        event.setdefault("mst_session_id", parsed.mst_session_id)
-        event.setdefault("root_mst_id", parsed.root_mst_id)
-        event.setdefault("created_at", event.get("timestamp") or _utc_now_history())
-        event.setdefault("idempotency_key", _history_idempotency_key(parsed.mst_session_id, event))
-        event.setdefault("event_id", _history_event_id(parsed.mst_session_id, event))
+    event.setdefault("schema_version", 1)
+    event.setdefault("mst_session_id", parsed.mst_session_id)
+    event.setdefault("root_mst_id", parsed.root_mst_id)
+    event.setdefault("artifact_id", parsed.mst_session_id)
+    event.setdefault("created_at", event.get("timestamp") or _utc_now_history())
+    event.setdefault("idempotency_key", _history_idempotency_key(parsed.mst_session_id, event))
+    event.setdefault("event_id", _history_event_id(parsed.mst_session_id, event))
     _validate_history_event_contract(parsed, event)
     event.setdefault("timestamp", event["created_at"])
 

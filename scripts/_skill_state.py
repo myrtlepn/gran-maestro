@@ -34,6 +34,27 @@ def _safe_session_id(value: str) -> str:
         else:
             cleaned.append("_")
     return "".join(cleaned) or "default"
+def _canonical_snapshot_identity(session_id: str) -> Dict[str, Any]:
+    identity: Dict[str, Any] = {"sessionId": session_id}
+    try:
+        from scripts.mst_cmds.session import validate_mst_session_id
+
+        parsed = validate_mst_session_id(session_id)
+    except Exception:
+        return identity
+    identity.update(
+        {
+            "schema_version": 1,
+            "mst_session_id": parsed.mst_session_id,
+            "root_mst_id": parsed.root_mst_id,
+        }
+    )
+    return identity
+def _ensure_canonical_snapshot_payload(payload: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    updated = dict(payload)
+    updated.update(_canonical_snapshot_identity(session_id))
+    updated["sessionId"] = session_id
+    return updated
 
 
 def snapshot_path(base_dir: Path, session_id: str = "default") -> Path:
@@ -117,7 +138,7 @@ def _base_snapshot(session_id: str) -> Dict[str, Any]:
 
     owner_ppid = _resolve_owner_ppid()
     return {
-        "sessionId": session_id,
+        **_canonical_snapshot_identity(session_id),
         "owner_ppid": owner_ppid,
         "owner_session_id": _resolve_owner_session_id(owner_ppid),
         "currentSkill": "",
@@ -178,7 +199,7 @@ def _write_session_snapshot(
     ended_at = timestamp_now()
     stack = _normalize_stack(snapshot.get("skillStack"))
     payload = dict(snapshot)
-    payload["sessionId"] = session_id
+    payload = _ensure_canonical_snapshot_payload(payload, session_id)
     payload["skillStack"] = stack
     payload["sessionEndedAt"] = ended_at
     payload["sessionEndReason"] = reason
@@ -198,8 +219,7 @@ def apply_event(
     return_to: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Apply enter/commit/fail event and return new snapshot."""
-    data = dict(snapshot or _base_snapshot(session_id))
-    data["sessionId"] = session_id
+    data = _ensure_canonical_snapshot_payload(dict(snapshot or _base_snapshot(session_id)), session_id)
     stack = _normalize_stack(data.get("skillStack"))
     event_time = timestamp_now()
 
@@ -426,7 +446,7 @@ def recover_agile_snapshot_from_durable_state(
     now = timestamp_now()
     owner_ppid = session_payload.get("owner_ppid")
     snapshot = {
-        "sessionId": session_id,
+        **_canonical_snapshot_identity(session_id),
         "owner_ppid": owner_ppid if isinstance(owner_ppid, int) and not isinstance(owner_ppid, bool) else None,
         "owner_session_id": session_payload.get("owner_session_id"),
         "agi_id": safe_agi_id,
@@ -462,7 +482,7 @@ def mark_paused(base_dir: Path, session_id: str = "default") -> Optional[Dict[st
 
     event_time = timestamp_now()
     updated = dict(snapshot)
-    updated["sessionId"] = session_id
+    updated = _ensure_canonical_snapshot_payload(updated, session_id)
     updated["paused"] = True
     updated["paused_at"] = event_time
     updated.pop("resumed_at", None)
@@ -479,7 +499,7 @@ def resume_paused(base_dir: Path, session_id: str = "default") -> Optional[Dict[
 
     event_time = timestamp_now()
     updated = dict(snapshot)
-    updated["sessionId"] = session_id
+    updated = _ensure_canonical_snapshot_payload(updated, session_id)
     updated["paused"] = False
     updated["resumed_at"] = event_time
     updated["updatedAt"] = event_time
