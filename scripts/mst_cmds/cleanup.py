@@ -435,6 +435,347 @@ def filter_stophook_kill_candidates(
     return result
 
 
+CANONICAL_CLEANUP_STAGE_ORDER = [
+    "freeze",
+    "inspect_child_worktrees",
+    "child_merge_or_block",
+    "child_remove",
+    "inspect_session",
+    "final_merge_or_block",
+    "session_remove",
+    "branch_or_archive",
+]
+
+CLEANUP_WORKTREE_REMOVAL_STAGES = ["child_remove", "session_remove"]
+
+BLOCKING_CLEANUP_CHILD_STATES = {
+    "active",
+    "dirty",
+    "conflicted",
+    "orphaned",
+    "late_arriving_child",
+    "unclassified",
+}
+
+
+def _cleanup_stage_index() -> dict[str, int]:
+    return {stage: index for index, stage in enumerate(CANONICAL_CLEANUP_STAGE_ORDER)}
+
+
+def _is_successful_cleanup_event(event: dict, *, stage: str, child_id: Optional[str] = None) -> bool:
+    if not isinstance(event, dict):
+        return False
+    if event.get("stage") != stage or event.get("status") != "succeeded":
+        return False
+    if child_id is None:
+        return True
+    return event.get("child_id") == child_id
+
+
+def _child_remove_succeeded(child: dict, durable_events: list[dict]) -> bool:
+    if child.get("remove_path_succeeded") is True:
+        return True
+    child_id = child.get("child_id")
+    return any(
+        _is_successful_cleanup_event(event, stage="child_remove", child_id=child_id)
+        for event in durable_events
+    )
+
+
+def _classify_cleanup_child_state(child: dict, *, freeze_snapshot_child_ids: set[str]) -> dict:
+    classified = dict(child) if isinstance(child, dict) else {}
+    child_id = str(classified.get("child_id") or "")
+    raw_state = classified.get("state")
+    state = raw_state.strip() if isinstance(raw_state, str) else ""
+    in_freeze_snapshot = classified.get("in_freeze_snapshot")
+
+    if child_id and (child_id not in freeze_snapshot_child_ids or in_freeze_snapshot is False):
+        state = "late_arriving_child"
+    elif not state:
+        state = "unclassified"
+
+    classified["child_id"] = child_id
+    classified["state"] = state
+    return classified
+
+
+def _resolved_final_merge_policy(final_merge_policy) -> bool:
+    return isinstance(final_merge_policy, str) and bool(final_merge_policy.strip())
+
+
+def classify_cleanup_worktree_ownership(*, worktree: dict, session_id: str) -> dict:
+    worktree = dict(worktree or {})
+    mst_session_id = worktree.get("mst_session_id")
+    registered_parent_session_id = worktree.get("registered_parent_session_id")
+    ownership_proof = {
+        "same_session_lineage": mst_session_id == session_id,
+        "owned_path": bool(worktree.get("owned_path")),
+        "registered_relation": registered_parent_session_id == session_id,
+    }
+
+    if worktree.get("legacy_owner_session_id"):
+        classification = "legacy"
+        cleanup_allowed = False
+    elif isinstance(mst_session_id, str) and mst_session_id and mst_session_id != session_id:
+        classification = "external"
+        cleanup_allowed = False
+    elif ownership_proof["same_session_lineage"] and (
+        ownership_proof["owned_path"] or ownership_proof["registered_relation"]
+    ):
+        classification = "owned"
+        cleanup_allowed = True
+    elif ownership_proof["same_session_lineage"]:
+        classification = "ownership_ambiguous"
+        cleanup_allowed = False
+    else:
+        classification = "unclassified"
+        cleanup_allowed = False
+
+    return {
+        "worktree_id": worktree.get("worktree_id"),
+        "classification": classification,
+        "cleanup_allowed": cleanup_allowed,
+        "fallback_used": False,
+        "diagnostic": None if cleanup_allowed else "blocked_recovery",
+        "ownership_proof": ownership_proof,
+    }
+
+
+def resolve_cleanup_ordering_state(
+    *,
+    requested_stage: str,
+    completed_stages: Optional[list[str]] = None,
+    children: Optional[list[dict]] = None,
+    durable_events: Optional[list[dict]] = None,
+    final_merge_policy=None,
+    freeze_snapshot_child_ids: Optional[list[str]] = None,
+) -> dict:
+    stage_index = _cleanup_stage_index()
+    completed = [stage for stage in (completed_stages or []) if stage in stage_index]
+    durable_events = [event for event in (durable_events or []) if isinstance(event, dict)]
+    freeze_child_ids = {str(child_id) for child_id in (freeze_snapshot_child_ids or []) if str(child_id)}
+    classified_children = [
+        _classify_cleanup_child_state(child or {}, freeze_snapshot_child_ids=freeze_child_ids)
+        for child in (children or [])
+    ]
+
+    stage_status = {stage: "pending" for stage in CANONICAL_CLEANUP_STAGE_ORDER}
+    satisfied_stages = set(completed)
+    for stage in completed:
+        stage_status[stage] = "completed"
+
+    already_satisfied: list[str] = []
+    if classified_children and "child_remove" not in satisfied_stages:
+        if all(_child_remove_succeeded(child, durable_events) for child in classified_children):
+            satisfied_stages.add("child_remove")
+            stage_status["child_remove"] = "already_satisfied"
+            already_satisfied.append("child_remove")
+    if "session_remove" not in satisfied_stages and any(
+        _is_successful_cleanup_event(event, stage="session_remove") for event in durable_events
+    ):
+        satisfied_stages.add("session_remove")
+        stage_status["session_remove"] = "already_satisfied"
+        already_satisfied.append("session_remove")
+
+    diagnostics: list[dict] = []
+    blockers: list[dict] = []
+    session_remove_allowed = False
+
+    if requested_stage not in stage_index:
+        diagnostics.append(
+            {
+                "code": "invalid_requested_stage",
+                "requested_stage": requested_stage,
+            }
+        )
+        return {
+            "requested_stage": requested_stage,
+            "allowed_transition": False,
+            "next_stage": CANONICAL_CLEANUP_STAGE_ORDER[0],
+            "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+            "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+            "diagnostics": diagnostics,
+            "blockers": blockers,
+            "classified_children": classified_children,
+            "session_remove_allowed": session_remove_allowed,
+            "already_satisfied": already_satisfied,
+            "stage_status": stage_status,
+        }
+
+    prerequisites = CANONICAL_CLEANUP_STAGE_ORDER[: stage_index[requested_stage]]
+    for prerequisite in prerequisites:
+        if prerequisite in satisfied_stages:
+            continue
+        if (
+            requested_stage == "session_remove"
+            and prerequisite == "final_merge_or_block"
+            and not _resolved_final_merge_policy(final_merge_policy)
+        ):
+            diagnostics.append(
+                {
+                    "code": "final_merge_policy_unresolved",
+                    "requested_stage": requested_stage,
+                }
+            )
+            return {
+                "requested_stage": requested_stage,
+                "allowed_transition": False,
+                "next_stage": "final_merge_or_block",
+                "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+                "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+                "diagnostics": diagnostics,
+                "blockers": blockers,
+                "classified_children": classified_children,
+                "session_remove_allowed": session_remove_allowed,
+                "already_satisfied": already_satisfied,
+                "stage_status": stage_status,
+            }
+        diagnostics.append(
+            {
+                "code": "missing_prerequisite",
+                "requested_stage": requested_stage,
+                "missing_stage": prerequisite,
+            }
+        )
+        return {
+            "requested_stage": requested_stage,
+            "allowed_transition": False,
+            "next_stage": prerequisite,
+            "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+            "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+            "diagnostics": diagnostics,
+            "blockers": blockers,
+            "classified_children": classified_children,
+            "session_remove_allowed": session_remove_allowed,
+            "already_satisfied": already_satisfied,
+            "stage_status": stage_status,
+        }
+
+    if requested_stage == "session_remove":
+        barrier_children = [
+            child for child in classified_children if child.get("state") in BLOCKING_CLEANUP_CHILD_STATES
+        ]
+        if barrier_children:
+            for child in barrier_children:
+                blockers.append(
+                    {
+                        "child_id": child.get("child_id"),
+                        "state": child.get("state"),
+                        "reason": "child_collection_barrier",
+                    }
+                )
+                diagnostics.append(
+                    {
+                        "code": "child_collection_barrier",
+                        "child_id": child.get("child_id"),
+                        "state": child.get("state"),
+                    }
+                )
+            return {
+                "requested_stage": requested_stage,
+                "allowed_transition": False,
+                "next_stage": "inspect_child_worktrees",
+                "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+                "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+                "diagnostics": diagnostics,
+                "blockers": blockers,
+                "classified_children": classified_children,
+                "session_remove_allowed": False,
+                "already_satisfied": already_satisfied,
+                "stage_status": stage_status,
+            }
+
+        unresolved_child_outcomes = [
+            child for child in classified_children if child.get("merge_outcome") in (None, "", "pending")
+        ]
+        if unresolved_child_outcomes:
+            diagnostics.extend(
+                {
+                    "code": "child_outcome_unresolved",
+                    "child_id": child.get("child_id"),
+                    "requested_stage": requested_stage,
+                }
+                for child in unresolved_child_outcomes
+            )
+            return {
+                "requested_stage": requested_stage,
+                "allowed_transition": False,
+                "next_stage": "child_merge_or_block",
+                "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+                "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+                "diagnostics": diagnostics,
+                "blockers": blockers,
+                "classified_children": classified_children,
+                "session_remove_allowed": False,
+                "already_satisfied": already_satisfied,
+                "stage_status": stage_status,
+            }
+
+        if not _resolved_final_merge_policy(final_merge_policy):
+            diagnostics.append(
+                {
+                    "code": "final_merge_policy_unresolved",
+                    "requested_stage": requested_stage,
+                }
+            )
+            return {
+                "requested_stage": requested_stage,
+                "allowed_transition": False,
+                "next_stage": "final_merge_or_block",
+                "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+                "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+                "diagnostics": diagnostics,
+                "blockers": blockers,
+                "classified_children": classified_children,
+                "session_remove_allowed": False,
+                "already_satisfied": already_satisfied,
+                "stage_status": stage_status,
+            }
+
+        session_remove_allowed = True
+
+    if requested_stage == "branch_or_archive":
+        missing_remove_evidence = [
+            child for child in classified_children if not _child_remove_succeeded(child, durable_events)
+        ]
+        if missing_remove_evidence:
+            diagnostics.extend(
+                {
+                    "code": "child_remove_evidence_missing",
+                    "child_id": child.get("child_id"),
+                    "route": "retry_or_reconcile",
+                }
+                for child in missing_remove_evidence
+            )
+            return {
+                "requested_stage": requested_stage,
+                "allowed_transition": False,
+                "next_stage": "child_remove",
+                "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+                "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+                "diagnostics": diagnostics,
+                "blockers": blockers,
+                "classified_children": classified_children,
+                "session_remove_allowed": session_remove_allowed,
+                "already_satisfied": already_satisfied,
+                "stage_status": stage_status,
+            }
+
+    return {
+        "requested_stage": requested_stage,
+        "allowed_transition": True,
+        "next_stage": requested_stage,
+        "stage_order": CANONICAL_CLEANUP_STAGE_ORDER,
+        "worktree_removal_stages": CLEANUP_WORKTREE_REMOVAL_STAGES,
+        "diagnostics": diagnostics,
+        "blockers": blockers,
+        "classified_children": classified_children,
+        "session_remove_allowed": session_remove_allowed,
+        "already_satisfied": already_satisfied,
+        "stage_status": stage_status,
+    }
+
+
 def scan_active_flow_markers(active_dir: Path) -> list[dict]:
     active_dir = Path(active_dir)
     if not active_dir.is_dir():

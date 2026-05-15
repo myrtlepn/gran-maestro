@@ -49,6 +49,14 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락합니다. request child a
 - DOD-005는 DOD-013 full truth table과 DOD-014 multi-child ordering/idempotency를 범위 밖으로 유지한다.
 - DOD-013과 DOD-014는 terminal success 확장과 multi-child ordering을 다루며, 이 단계에서는 final original merge authorization을 확장하지 않는다.
 
+## DOD-006 Child-First / Session-Last Cleanup Contract
+
+- child-first/session-last cleanup lifecycle vocabulary는 `freeze` → `child inspection` (`inspect_child_worktrees`) → `child merge/block` (`child_merge_or_block`) → `child removal` (`child_remove`) → `session inspection` (`inspect_session`) → `final merge/cancel policy` (`final_merge_or_block`) → `session removal` (`session_remove`) → `branch/archive` (`branch_or_archive`) 순서로 고정한다.
+- `request child accept`는 child/session merge와 child cleanup evidence까지만 담당한다. session final cleanup/removal, `session inspection`, `final merge/cancel policy`, `session removal`, `branch/archive`, original base cleanup authority는 주장하지 않는다.
+- child freeze snapshot에 없는 late-arriving child, dirty child, conflicted child, orphaned child는 child inspection 단계에서 barrier로 분류하고 session-last cleanup으로 넘어가지 않는다.
+- session-level accept 또는 `terminal_success`만 session inspection 이후 final merge/cancel policy를 결정할 수 있다. session removal과 branch/archive는 final policy가 `merged` 또는 `cancelled`로 확정된 뒤에만 진행한다.
+- worktree removal은 child removal과 session removal에서만 수행한다. branch/archive는 항상 worktree removal 이후의 마지막 정리 단계다.
+
 ## Anti-Rationalization Checklist
 
 - 합리화 패턴: "테스트가 통과했으니 리뷰/상태 확인 없이 바로 머지해도 된다." | 확인 증거: 실행 로그에 리뷰 PASS 확인 결과와 대상 REQ-ID를 먼저 출력한다.
