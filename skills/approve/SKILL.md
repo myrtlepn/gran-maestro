@@ -227,12 +227,14 @@ REQ 리스트가 1건이거나 명시적 단건 인자 호출 시 이 프로토�
 
 preflight 검사가 통과된 경우에만 아래 base 감지/protected 검사를 실행하고, 이 검사가 통과된 경우에만 Step 3(worktree 생성 및 구현 착수)로 진행.
 
-**HEAD base 자동 감지 + protected block (차단 검사, preflight 통과 이후 실행)**:
-- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py worktree resolve-base --req {REQ-ID})`를 실행한다.
-  - 성공 시 stdout의 브랜치명을 `DETECTED_BASE`로 사용한다.
-  - 성공 시 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json`의 `detected_base` 필드가 같은 값으로 저장되어야 한다.
-- `resolve-base`는 현재 `git HEAD` 브랜치를 base로 감지하고, `worktree.protected_branches` 패턴(`release/*` glob 포함)과 매칭되면 non-zero로 종료한다. 실패 시 stderr 안내("다른 브랜치로 이동" 포함)를 전달하고 approve를 차단한다.
-- 이 단계에서는 REQ 브랜치나 태스크 worktree를 생성하지 않는다. `worktree.base_branch`는 하위 호환 설정으로만 남기며 approve의 신규 base 결정에는 사용하지 않는다.
+**Session parent base resolve + protected original guard (차단 검사, preflight 통과 이후 실행)**:
+- `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py worktree resolve-base --req {REQ-ID} --json)`를 실행한다.
+  - `MST_SESSION_ID`와 active/reused session metadata가 있는 정상 경로에서 stdout JSON의 `base`를 `SESSION_BASE_BRANCH`로 사용한다.
+  - 성공 시 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/request.json`의 `detected_base` 필드는 `session_branch`와 같은 값으로 저장되어야 한다.
+  - 성공 JSON에는 `parent_mst_session_id`, `parent_session_branch`, `parent_session_worktree_path`, `original_base_branch`, `original_base_sha`가 포함되어야 한다.
+- missing/invalid legacy-only identity, blocked session worktree, metadata mismatch는 original checkout/current HEAD fallback 없이 structured non-success diagnostic으로 approve를 차단한다.
+- original base branch는 `original_base_branch`/`original_base_sha` reference로만 보존하며, final original merge trigger/scope는 DOD-005/DOD-013 범위로 남긴다.
+- 이 단계에서는 REQ 브랜치나 태스크 worktree를 생성하지 않는다. `worktree.base_branch`는 하위 호환 설정으로만 남기며 approve의 신규 child base 결정에는 사용하지 않는다.
 
 3. 승인 실행:
    - **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 2 phase2_execution`; 실패 시 fallback으로 `request.json`의 `current_phase`=2, `status`=`phase2_execution` 직접 업데이트
@@ -498,15 +500,15 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 **REQ 브랜치 생성 (태스크 수와 무관한 공통 선행 단계)**:
 
 ```bash
-DETECTED_BASE="{Step 2.7에서 저장한 request.json.detected_base}"
-REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$DETECTED_BASE" --role integration --agi "${AGI_ID:-}")
+SESSION_BASE_BRANCH="{Step 2.7에서 저장한 request.json.detected_base}"
+REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$SESSION_BASE_BRANCH" --role integration --agi "${AGI_ID:-}")
 INTEGRATION_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role integration --agi "${AGI_ID:-}")
-python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$INTEGRATION_WORKTREE" --branch "$REQ_BRANCH" --base "$DETECTED_BASE"
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$INTEGRATION_WORKTREE" --branch "$REQ_BRANCH" --base "$SESSION_BASE_BRANCH"
 ```
 
-REQ 브랜치명은 AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/REQ-NNN`, 없으면 legacy fallback으로 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 감지된 base의 `/`만 `-`로 치환한다.
-REQ 브랜치 checkout과 태스크 통합은 원본 `PROJECT_ROOT`가 아니라 `INTEGRATION_WORKTREE`에서만 수행한다.
-accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash-merge한다(T04).
+REQ 브랜치명은 AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/REQ-NNN`, 없으면 legacy fallback으로 `gran-maestro/{base_slug}/REQ-NNN` 형식이다. `base_slug`는 session branch base의 `/`만 `-`로 치환한다.
+REQ 브랜치 checkout과 태스크 통합은 원본 `PROJECT_ROOT` 또는 original checkout이 아니라 `INTEGRATION_WORKTREE`에서만 수행한다.
+accept 단계는 후속 수락 정책에서 `request.json.detected_base`와 original base reference를 구분해야 하며, final original branch merge trigger/scope는 DOD-005/DOD-013 범위로 남긴다.
 단일 태스크 REQ에서도 반드시 integration worktree를 생성해야 accept의 3단계 플로우가 정상 작동한다.
 
 **태스크가 1개인 경우**: 기존 순차 실행과 동일 처리.
@@ -526,7 +528,7 @@ accept 단계는 `request.json.detected_base`를 사용해 실제 base로 squash
 독립 태스크들의 git worktree를 미리 생성합니다. 태스크 worktree는 integration worktree에서 준비된 REQ 브랜치를 기준으로 생성:
 
 ```bash
-TASK_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE" --agi "${AGI_ID:-}")
+TASK_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --task T01 --base "$SESSION_BASE_BRANCH" --agi "${AGI_ID:-}")
 python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path {worktree_path} --branch "$TASK_BRANCH" --base "$REQ_BRANCH"
 ```
 

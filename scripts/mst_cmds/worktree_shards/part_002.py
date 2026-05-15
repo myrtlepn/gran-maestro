@@ -408,6 +408,23 @@ def cmd_worktree_classify_collision(args):
         print(classification)
     return 0 if classification in {"no_collision", "reusable_existing_worktree"} else 2
 def cmd_worktree_resolve_base(args):
+    as_json = bool(getattr(args, "json", False))
+    req_id = getattr(args, "req", None)
+    if as_json:
+        parent_session, session_error = _resolve_parent_session_context()
+        if session_error is not None:
+            _print_session_child_non_success(session_error, True)
+            return 2
+        detected_base = parent_session["session_branch"]
+        if req_id:
+            try:
+                _persist_detected_base(req_id, detected_base, parent_session=parent_session)
+            except RuntimeError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+        _print_resolve_base_payload(detected_base, req_id, True, parent_session=parent_session)
+        return 0
+
     try:
         detected_base = current_head_branch()
     except RuntimeError as exc:
@@ -425,7 +442,6 @@ def cmd_worktree_resolve_base(args):
         )
         return 2
 
-    req_id = getattr(args, "req", None)
     if req_id:
         try:
             _persist_detected_base(req_id, detected_base)
@@ -433,7 +449,7 @@ def cmd_worktree_resolve_base(args):
             print(f"Error: {exc}", file=sys.stderr)
             return 1
 
-    _print_resolve_base_payload(detected_base, req_id, getattr(args, "json", False))
+    _print_resolve_base_payload(detected_base, req_id, False)
     return 0
 def cmd_worktree_is_protected(args):
     branch = getattr(args, "branch", None)

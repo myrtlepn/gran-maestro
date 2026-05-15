@@ -506,6 +506,8 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - `context_manifest_files`를 bullet 목록으로 삽입
         - `objective_context.objective_md_path`가 있으면 dedupe 추가; 없으면 skip (graceful)
         - `--plan` 없는 경우에도 동일 규칙 적용 (Step 1c 탐색 + 요청 분석 기반)
+        - `MST_SESSION_ID`와 active session worktree metadata가 있는 정상 경로에서는 session worktree를 effective project root로 관찰한 파일 경로를 우선 사용한다.
+        - original checkout에서 호출된 경우에는 session worktree 재진입 또는 structured diagnostic 경계로 분류하고, legacy owner/session field를 effective root source로 사용하지 않는다.
         - 최종 §0 목록은 최소 1개 이상 파일 경로를 포함해야 한다
       - **`## 3.2 Intent Trace` 작성 규칙 (MANDATORY)**: `intent_context_active=true`일 때만 §3.2 채움. 각 AC마다 최소 1개 의도 근거 연결. 근거를 찾지 못하면 `[INTENT-GAP]` 표기. docs 근거 사용 시 `intent_snapshot`에 `doc_path`, `last_modified`, `spec_generated_at` 기록. `intent_context_active=false`면 §3.2 전체 skip.
       - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**: `objective_context` 존재 + `project_dod_items[]` 1개 이상일 때만 생성. 표 형식: `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`. 매핑 가능한 AC 없으면 `[UNMAPPED]`/`Gap`. `objective_context` 없거나 비어있으면 §3.4 전체 skip (graceful fallback).
