@@ -343,8 +343,41 @@ def cmd_session_list(args):
             topic = (sj.get("topic") or sj.get("title") or "")[:50]
             print(f"{sess.name:<15} {subdir:<12} {topic}")
     return 0
+def cmd_session_ensure_worktree(args):
+    project_root = Path(args.project_root).expanduser().resolve(strict=False) if getattr(args, "project_root", None) else Path(_common.BASE_DIR).parent
+    mst_session_id = args.mst_session_id or os.environ.get("MST_SESSION_ID", "").strip()
+    if not mst_session_id:
+        print("Error: missing MST_SESSION_ID for session ensure-worktree.", file=sys.stderr)
+        return 1
+    try:
+        payload = ensure_session_worktree_contract(project_root, mst_session_id)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(payload.get("session_worktree_path") or "")
+    return 0
 def cmd_session_inspect(args):
-    sess_id = args.session_id.upper()
+    raw_session_id = str(args.session_id).strip()
+    if raw_session_id.startswith("MST-"):
+        try:
+            parsed = validate_mst_session_id(raw_session_id)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        sess_path = session_metadata_path(_common.BASE_DIR, parsed.mst_session_id)
+        if not sess_path.exists():
+            print(f"Error: {parsed.mst_session_id} not found.", file=sys.stderr)
+            return 1
+        sj = load_json(sess_path)
+        if sj:
+            print(json.dumps(sj, ensure_ascii=False, indent=2))
+        return 0
+
+    sess_id = raw_session_id.upper()
     prefix = sess_id[:3]
     type_map = {"IDN": "ideation", "DSC": "discussion", "DBG": "debug"}
     subdir = type_map.get(prefix, "ideation")
@@ -422,6 +455,11 @@ def register(subparsers):
 
     sess_list = sess_sub.add_parser("list")
     sess_list.add_argument("--type", choices=["ideation", "discussion", "debug"])
+
+    sess_ensure_worktree = sess_sub.add_parser("ensure-worktree")
+    sess_ensure_worktree.add_argument("--mst-session-id", dest="mst_session_id")
+    sess_ensure_worktree.add_argument("--project-root")
+    sess_ensure_worktree.add_argument("--json", action="store_true")
 
     sess_inspect = sess_sub.add_parser("inspect")
     sess_inspect.add_argument("session_id")

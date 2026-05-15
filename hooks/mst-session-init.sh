@@ -72,9 +72,6 @@ if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-
 else
   MST_SESSION_RESOLUTION_STATUS=$?
 fi
-if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
-  exit 1
-fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
   mkdir -p "$MST_TMP"
   if ! write_session_bridge; then
@@ -133,6 +130,9 @@ if ! init_history_sentinel; then
 fi
 if ! append_session_lifecycle_events; then
   echo "[mst-session-init] warning: failed to append session lifecycle history events." >&2
+fi
+if ! ensure_session_worktree_contract; then
+  echo "[mst-session-init] warning: failed to ensure session worktree contract." >&2
 fi
 
 # === Auto-gardening trigger (PLN-475 / REQ-633-T03) ===

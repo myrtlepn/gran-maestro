@@ -241,6 +241,7 @@ DISPATCH = {
     ("gardening", "restore"): gardening.cmd_gardening_restore,
     ("cleanup", None): cleanup.cmd_cleanup,
     ("session", "list"): session.cmd_session_list,
+    ("session", "ensure-worktree"): session.cmd_session_ensure_worktree,
     ("session", "inspect"): session.cmd_session_inspect,
     ("session", "complete"): session.cmd_session_complete,
     ("session", "flow"): session.cmd_session_flow,
