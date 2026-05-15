@@ -457,6 +457,32 @@ BLOCKING_CLEANUP_CHILD_STATES = {
     "unclassified",
 }
 
+RECOVERY_PRIMARY_ACTIONS = {
+    "resume_session",
+    "cleanup_child",
+    "manual_conflict_resolution",
+    "blocked_destructive",
+    "diagnostic_only",
+}
+
+RECOVERY_CHILD_BLOCKER_STATES = {
+    "dirty": ("cleanup_child", "child_dirty"),
+    "conflicted": ("manual_conflict_resolution", "child_conflicted"),
+    "orphaned": ("blocked_destructive", "orphan_child"),
+    "late_arriving_child": ("blocked_destructive", "late_arriving_child"),
+}
+
+RECOVERY_PROTECTED_COLLISION_OWNERSHIPS = {
+    "same_name_ambiguous": {"delete": False, "overwrite": False, "merge": False},
+    "same_name_external": {"delete": False, "overwrite": False, "merge": False},
+}
+
+RECOVERY_OWNED_COLLISION_ALLOWANCES = {
+    "same_name_owned": {"delete": True, "overwrite": True, "merge": True},
+}
+
+_MST_SESSION_ID_PATTERN = re.compile(r"^MST-[A-Za-z0-9-]+$")
+
 
 def _cleanup_stage_index() -> dict[str, int]:
     return {stage: index for index, stage in enumerate(CANONICAL_CLEANUP_STAGE_ORDER)}
@@ -501,6 +527,354 @@ def _classify_cleanup_child_state(child: dict, *, freeze_snapshot_child_ids: set
 
 def _resolved_final_merge_policy(final_merge_policy) -> bool:
     return isinstance(final_merge_policy, str) and bool(final_merge_policy.strip())
+
+
+def _is_non_empty_text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_valid_mst_session_id(value) -> bool:
+    return _is_non_empty_text(value) and bool(_MST_SESSION_ID_PATTERN.match(value.strip()))
+
+
+def _recovery_branch_collision_allows(ownership) -> dict[str, bool]:
+    if ownership in RECOVERY_OWNED_COLLISION_ALLOWANCES:
+        return dict(RECOVERY_OWNED_COLLISION_ALLOWANCES[ownership])
+    if ownership in RECOVERY_PROTECTED_COLLISION_OWNERSHIPS:
+        return dict(RECOVERY_PROTECTED_COLLISION_OWNERSHIPS[ownership])
+    return {"delete": False, "overwrite": False, "merge": False}
+
+
+def _annotate_recovery_branch_collisions(branch_collisions: list[dict]) -> list[dict]:
+    annotated: list[dict] = []
+    for collision in branch_collisions:
+        item = dict(collision) if isinstance(collision, dict) else {}
+        item["recovery_allows"] = _recovery_branch_collision_allows(item.get("ownership"))
+        annotated.append(item)
+    return annotated
+
+
+def _normalize_recovery_child(child: dict) -> dict:
+    normalized = dict(child) if isinstance(child, dict) else {}
+    normalized["child_id"] = str(normalized.get("child_id") or "")
+    for key in ("state", "merge_status", "ownership"):
+        value = normalized.get(key)
+        normalized[key] = value.strip() if isinstance(value, str) else value
+    if not normalized.get("state"):
+        normalized["state"] = "unclassified"
+    return normalized
+
+
+def _recovery_affected_resources(
+    *,
+    mst_session_id,
+    session_worktree: dict,
+    children: list[dict],
+    merge_state: dict,
+    cleanup_stage_evidence: dict,
+) -> list[dict]:
+    resources = [{"kind": "mst_session_id", "value": mst_session_id}]
+    resources.append(
+        {
+            "kind": "session_worktree",
+            "path": session_worktree.get("path"),
+            "metadata_mst_session_id": session_worktree.get("metadata_mst_session_id"),
+        }
+    )
+    for child in children:
+        resources.append(
+            {
+                "kind": "child_worktree",
+                "child_id": child.get("child_id"),
+                "metadata_mst_session_id": child.get("metadata_mst_session_id"),
+                "state": child.get("state"),
+            }
+        )
+    resources.append(
+        {
+            "kind": "merge_state",
+            "session_branch": merge_state.get("session_branch"),
+            "final_policy_state": merge_state.get("final_policy_state"),
+        }
+    )
+    resources.append(
+        {
+            "kind": "cleanup_stage_evidence",
+            "evidence_state": cleanup_stage_evidence.get("evidence_state"),
+            "next_idempotent_stage": cleanup_stage_evidence.get("next_idempotent_stage"),
+        }
+    )
+    return resources
+
+
+def _build_recovery_payload(
+    *,
+    mst_session_id,
+    session_worktree: dict,
+    children: list[dict],
+    merge_state: dict,
+    cleanup_stage_evidence: dict,
+    caller_context: dict,
+    legacy_diagnostics: dict,
+    primary_action: str,
+    reason: str,
+    diagnostics: Optional[list[dict]] = None,
+) -> dict:
+    payload = {
+        "mst_session_id": mst_session_id,
+        "session_worktree": session_worktree,
+        "children": children,
+        "merge_state": merge_state,
+        "cleanup_stage_evidence": cleanup_stage_evidence,
+        "caller_context": caller_context,
+        "legacy_diagnostics": legacy_diagnostics,
+        "primary_action": primary_action,
+        "reason": reason,
+        "affected_resources": _recovery_affected_resources(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+        ),
+        "completed_destructive_stages": list(cleanup_stage_evidence.get("completed_destructive_stages") or []),
+        "next_idempotent_stage": cleanup_stage_evidence.get("next_idempotent_stage"),
+    }
+    if diagnostics:
+        payload["diagnostics"] = diagnostics
+    return payload
+
+
+def _recovery_canonical_identity_decision(
+    *,
+    mst_session_id,
+    session_worktree: dict,
+    children: list[dict],
+) -> Optional[str]:
+    canonical_values = [mst_session_id, session_worktree.get("metadata_mst_session_id")]
+    canonical_values.extend(child.get("metadata_mst_session_id") for child in children)
+
+    if any(not _is_non_empty_text(value) for value in canonical_values):
+        return "missing_canonical_identity"
+    if any(not _is_valid_mst_session_id(value) for value in canonical_values):
+        return "invalid_canonical_identity"
+
+    canonical_root = str(mst_session_id).strip()
+    if any(str(value).strip() != canonical_root for value in canonical_values[1:]):
+        return "canonical_identity_mismatch"
+    return None
+
+
+def _recovery_session_mismatch_decision(*, session_worktree: dict, merge_state: dict) -> Optional[str]:
+    if session_worktree.get("ownership") not in (None, "", "owned"):
+        return "session_ownership_mismatch"
+    if session_worktree.get("state") not in (None, "", "active"):
+        return "session_worktree_inactive"
+    if session_worktree.get("scan_fresh") is False:
+        return "stale_session_scan"
+    session_branch = session_worktree.get("session_branch")
+    merge_branch = merge_state.get("session_branch")
+    if _is_non_empty_text(session_branch) and _is_non_empty_text(merge_branch) and session_branch != merge_branch:
+        return "session_branch_mismatch"
+    return None
+
+
+def _recovery_child_decision(*, children: list[dict], cleanup_stage_evidence: dict) -> Optional[tuple[str, str]]:
+    child_scan_fresh = cleanup_stage_evidence.get("child_scan_fresh")
+    for child in children:
+        if child.get("ownership") == "ownership_ambiguous":
+            return ("blocked_destructive", "child_ownership_ambiguous")
+        if child.get("scan_fresh") is False or child_scan_fresh is False:
+            return ("blocked_destructive", "stale_child_scan")
+        state = child.get("state")
+        if state in RECOVERY_CHILD_BLOCKER_STATES:
+            return RECOVERY_CHILD_BLOCKER_STATES[state]
+    return None
+
+
+def _recovery_merge_decision(*, merge_state: dict) -> Optional[tuple[str, str]]:
+    original_base_ref = merge_state.get("original_base_ref")
+    current_base_ref = merge_state.get("current_base_ref")
+    final_policy_state = merge_state.get("final_policy_state")
+    merge_uncertainty = bool(merge_state.get("merge_uncertainty"))
+    child_merge_statuses = [str(status) for status in (merge_state.get("child_merge_statuses") or [])]
+    branch_collisions = merge_state.get("branch_collisions") or []
+
+    if _is_non_empty_text(original_base_ref) and _is_non_empty_text(current_base_ref) and original_base_ref != current_base_ref:
+        return ("manual_conflict_resolution", "base_branch_drift")
+    if any(status == "conflicted" for status in child_merge_statuses):
+        return ("manual_conflict_resolution", "child_merge_conflict")
+    if any(
+        collision.get("ownership") in RECOVERY_PROTECTED_COLLISION_OWNERSHIPS
+        for collision in branch_collisions
+        if isinstance(collision, dict)
+    ):
+        return ("blocked_destructive", "branch_collision_review_required")
+    if final_policy_state == "manual_conflict_resolution_required":
+        return ("manual_conflict_resolution", "merge_conflict_review_required")
+    if final_policy_state in {"collision_review_required", "uncertain", "final_merge_retry_requested"} or merge_uncertainty:
+        return ("blocked_destructive", "merge_state_uncertain")
+    return None
+
+
+def resolve_recovery_judgement_state(
+    *,
+    mst_session_id=None,
+    session_worktree: Optional[dict] = None,
+    children: Optional[list[dict]] = None,
+    merge_state: Optional[dict] = None,
+    cleanup_stage_evidence: Optional[dict] = None,
+    caller_context: Optional[dict] = None,
+    legacy_diagnostics: Optional[dict] = None,
+) -> dict:
+    session_worktree = dict(session_worktree or {})
+    children = [_normalize_recovery_child(child) for child in (children or [])]
+    merge_state = dict(merge_state or {})
+    merge_state["branch_collisions"] = _annotate_recovery_branch_collisions(merge_state.get("branch_collisions") or [])
+    cleanup_stage_evidence = dict(cleanup_stage_evidence or {})
+    caller_context = dict(caller_context or {})
+    legacy_diagnostics = dict(legacy_diagnostics or {})
+
+    identity_reason = _recovery_canonical_identity_decision(
+        mst_session_id=mst_session_id,
+        session_worktree=session_worktree,
+        children=children,
+    )
+    if identity_reason is not None:
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="blocked_destructive",
+            reason=identity_reason,
+            diagnostics=[{"code": identity_reason}],
+        )
+
+    session_reason = _recovery_session_mismatch_decision(
+        session_worktree=session_worktree,
+        merge_state=merge_state,
+    )
+    if session_reason is not None:
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="blocked_destructive",
+            reason=session_reason,
+            diagnostics=[{"code": session_reason}],
+        )
+
+    if caller_context.get("read_only") is True and caller_context.get("request_scope") == "diagnostic":
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="diagnostic_only",
+            reason="read_only_probe",
+            diagnostics=[{"code": "read_only_probe"}],
+        )
+
+    child_decision = _recovery_child_decision(
+        children=children,
+        cleanup_stage_evidence=cleanup_stage_evidence,
+    )
+    if child_decision is not None:
+        primary_action, reason = child_decision
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action=primary_action,
+            reason=reason,
+            diagnostics=[{"code": reason}],
+        )
+
+    if cleanup_stage_evidence.get("evidence_state") == "unknown":
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="blocked_destructive",
+            reason="cleanup_evidence_unknown",
+            diagnostics=[{"code": "cleanup_evidence_unknown"}],
+        )
+
+    if caller_context.get("request_scope") == "child_accept":
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="diagnostic_only",
+            reason="request_child_accept_scope",
+            diagnostics=[{"code": "request_child_accept_scope"}],
+        )
+
+    merge_decision = _recovery_merge_decision(merge_state=merge_state)
+    if merge_decision is not None:
+        primary_action, reason = merge_decision
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action=primary_action,
+            reason=reason,
+            diagnostics=[{"code": reason}],
+        )
+
+    if cleanup_stage_evidence.get("next_idempotent_stage"):
+        return _build_recovery_payload(
+            mst_session_id=mst_session_id,
+            session_worktree=session_worktree,
+            children=children,
+            merge_state=merge_state,
+            cleanup_stage_evidence=cleanup_stage_evidence,
+            caller_context=caller_context,
+            legacy_diagnostics=legacy_diagnostics,
+            primary_action="resume_session",
+            reason="resume_from_cleanup_stage",
+            diagnostics=[{"code": "resume_from_cleanup_stage"}],
+        )
+
+    return _build_recovery_payload(
+        mst_session_id=mst_session_id,
+        session_worktree=session_worktree,
+        children=children,
+        merge_state=merge_state,
+        cleanup_stage_evidence=cleanup_stage_evidence,
+        caller_context=caller_context,
+        legacy_diagnostics=legacy_diagnostics,
+        primary_action="resume_session",
+        reason="resume_ready",
+        diagnostics=[{"code": "resume_ready"}],
+    )
 
 
 def classify_cleanup_worktree_ownership(*, worktree: dict, session_id: str) -> dict:
