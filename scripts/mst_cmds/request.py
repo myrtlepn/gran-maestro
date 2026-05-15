@@ -57,6 +57,22 @@ def _advance_phase2_result(req_id: str, request_path: Path | None, request_data:
     }
 
 
+def phase2_status(req_id: str) -> dict:
+    normalized_req_id = str(req_id).strip().upper()
+    request_path = _common.requests_dir() / normalized_req_id / "request.json"
+    request_data = _common.load_json(request_path)
+    if not isinstance(request_data, dict):
+        return {
+            "req_id": normalized_req_id,
+            "ready": False,
+            "advanced": False,
+            "reason": "unknown_request",
+            "incomplete_tasks": [],
+            "request_path": str(request_path),
+        }
+    return _advance_phase2_result(normalized_req_id, request_path, request_data)
+
+
 def advance_phase2_if_ready(req_id: str, *, check: bool = False) -> dict:
     normalized_req_id = str(req_id).strip().upper()
     request_path = _common.requests_dir() / normalized_req_id / "request.json"
@@ -291,6 +307,12 @@ def cmd_request_set_phase(args):
     return 0
 
 
+def cmd_request_phase2_status(args):
+    result = phase2_status(args.req_id)
+    _print_advance_phase2_result(result, args.json)
+    return 0
+
+
 def cmd_request_advance_phase2_if_ready(args):
     if not args.check:
         from scripts.mst_cmds.state import _check_read_only
@@ -395,6 +417,10 @@ def register(subparsers):
     req_set_phase.add_argument("req_id")
     req_set_phase.add_argument("phase", type=int)
     req_set_phase.add_argument("status")
+
+    req_phase2_status = req_sub.add_parser("phase2-status")
+    req_phase2_status.add_argument("req_id")
+    req_phase2_status.add_argument("--json", action="store_true")
 
     req_advance_phase2 = req_sub.add_parser("advance-phase2-if-ready")
     req_advance_phase2.add_argument("req_id")

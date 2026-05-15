@@ -40,11 +40,11 @@ def test_review_guard_metadata_contract_reaches_approve_and_accept():
     assert "approve의 auto-accept guard 차단은 AUTO_MODE와 별개" in accept_doc
 
 
-def test_approve_phase2_gate_uses_advance_phase2_stdout_json_contract():
+def test_approve_phase2_gate_uses_read_only_status_and_advance_stdout_json_contract():
     skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
     content = skill_doc.read_text(encoding="utf-8")
 
-    assert "request advance-phase2-if-ready {REQ_ID} --check --json" in content
+    assert "request phase2-status {REQ_ID} --json" in content
     assert "request advance-phase2-if-ready {REQ_ID} --json" in content
     assert "Bash" in content
     assert "stdout JSON" in content
@@ -54,7 +54,7 @@ def test_approve_phase2_gate_uses_advance_phase2_stdout_json_contract():
     assert 'all_committed = every(... ["committed", "done"])' not in content
 
 
-def test_approve_phase2_and_phase3_use_batched_config_preload_without_req866_cli():
+def test_approve_phase2_and_phase3_use_batched_config_preload_with_phase2_status():
     skill_doc = ROOT / "skills" / "approve" / "SKILL.md"
     content = skill_doc.read_text(encoding="utf-8")
 
@@ -64,7 +64,7 @@ def test_approve_phase2_and_phase3_use_batched_config_preload_without_req866_cli
     )
     assert "phase3_config_items" in content
     assert "REQ-866" in content
-    assert "read-only summary" in content
+    assert "readiness read-only 확인은 `request phase2-status`" in content
     assert "request phase2-status" in content
     assert "workflow gate-summary" in content
 

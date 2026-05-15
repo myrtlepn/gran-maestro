@@ -128,6 +128,7 @@ DISPATCH = {
     ("request", "cancel"): request.cmd_request_cancel,
     ("request", "takeover"): request.cmd_request_takeover,
     ("request", "set-phase"): request.cmd_request_set_phase,
+    ("request", "phase2-status"): request.cmd_request_phase2_status,
     ("request", "advance-phase2-if-ready"): request.cmd_request_advance_phase2_if_ready,
     ("request", "record-phase2-dispatch-attempt"): request.cmd_request_record_phase2_dispatch_attempt,
     ("request", "review"): request.cmd_request_review,

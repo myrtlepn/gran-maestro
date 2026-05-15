@@ -49,7 +49,7 @@ def _request_hash(path: Path) -> str:
 
 def _run_mst(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(Path(mst.__file__).resolve()), *args],
+        [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts" / "mst.py"), *args],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -154,6 +154,171 @@ def test_phase2_ready_accepts_completed_evidence_task(tmp_path, monkeypatch):
     assert data["current_phase"] == 3
     assert data["status"] == "phase3_review"
     assert data["review_summary"]["status"] == "pending_phase3_review"
+
+
+def test_phase2_status_ready_json_is_read_only(tmp_path):
+    base_dir = tmp_path / ".gran-maestro"
+    req_id = "REQ-866"
+    _seed_request(
+        base_dir,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[
+            {"id": "T01", "status": "committed"},
+            {"id": "T02", "status": "completed"},
+            {"id": "T03", "status": "done"},
+            {"id": "T04", "status": "accepted"},
+        ],
+    )
+    request_path = base_dir / "requests" / req_id / "request.json"
+    before_hash = _request_hash(request_path)
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {
+        "req_id": req_id,
+        "ready": True,
+        "advanced": False,
+        "reason": None,
+        "incomplete_tasks": [],
+        "request_path": str(request_path),
+    }
+    assert result.stderr == ""
+    assert _request_hash(request_path) == before_hash
+
+
+def test_phase2_status_does_not_reconcile_dispatch_actions(tmp_path):
+    base_dir = tmp_path / ".gran-maestro"
+    req_id = "REQ-866"
+    _seed_request(
+        base_dir,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[{"id": "T01", "status": "committed"}],
+        extra={
+            "background_task_ids": [
+                {
+                    "task_num": "01",
+                    "task_id": "bg-task-001",
+                    "attempt_id": "attempt-001",
+                    "dispatched_at": "2026-05-15T00:00:00Z",
+                    "agent": "codex-dev",
+                    "worktree_path": str(tmp_path / "REQ-866-T01"),
+                    "log_path": str(tmp_path / "REQ-866-T01" / "running.log"),
+                    "expected_task_status_before": "pending",
+                    "status": "running",
+                }
+            ],
+        },
+    )
+    request_path = base_dir / "requests" / req_id / "request.json"
+    queue_path = base_dir / "pending.ndjson"
+    before_hash = _request_hash(request_path)
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {
+        "req_id": req_id,
+        "ready": True,
+        "advanced": False,
+        "reason": None,
+        "incomplete_tasks": [],
+        "request_path": str(request_path),
+    }
+    assert result.stderr == ""
+    assert _request_hash(request_path) == before_hash
+    assert not queue_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("req_id", "phase", "status", "tasks", "expected_reason", "expected_incomplete"),
+    [
+        (
+            "REQ-867",
+            2,
+            "phase2_execution",
+            [{"id": "T01", "status": "executing"}, {"id": "T02"}],
+            "incomplete_tasks",
+            [{"id": "T01", "status": "executing"}, {"id": "T02", "status": None}],
+        ),
+        ("REQ-868", 2, "phase2_execution", [], "missing_tasks", []),
+        ("REQ-869", 3, "phase3_review", [{"id": "T01", "status": "committed"}], "not_phase2_execution", []),
+    ],
+)
+def test_phase2_status_not_ready_reasons_are_read_only(
+    tmp_path,
+    req_id,
+    phase,
+    status,
+    tasks,
+    expected_reason,
+    expected_incomplete,
+):
+    base_dir = tmp_path / ".gran-maestro"
+    _seed_request(base_dir, req_id, phase=phase, status=status, tasks=tasks)
+    request_path = base_dir / "requests" / req_id / "request.json"
+    before_hash = _request_hash(request_path)
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["req_id"] == req_id
+    assert payload["ready"] is False
+    assert payload["advanced"] is False
+    assert payload["reason"] == expected_reason
+    assert payload["incomplete_tasks"] == expected_incomplete
+    assert payload["request_path"] == str(request_path)
+    assert _request_hash(request_path) == before_hash
+
+
+def test_phase2_status_unknown_request_returns_read_only_json(tmp_path):
+    (tmp_path / ".gran-maestro").mkdir()
+    req_id = "REQ-UNKNOWN"
+    request_path = tmp_path / ".gran-maestro" / "requests" / req_id / "request.json"
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {
+        "req_id": req_id,
+        "ready": False,
+        "advanced": False,
+        "reason": "unknown_request",
+        "incomplete_tasks": [],
+        "request_path": str(request_path),
+    }
+    assert not request_path.exists()
+
+
+def test_phase2_status_session_mismatch_does_not_invoke_transition_guard(tmp_path, monkeypatch):
+    base_dir = tmp_path / ".gran-maestro"
+    req_id = "REQ-870"
+    _seed_mst_session_env(monkeypatch, req_id)
+    _seed_request(
+        base_dir,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[{"id": "T01", "status": "committed"}],
+        extra={"mst_session_id": "MST-REQ-870-20260101T000000000Z-mismatch"},
+    )
+    request_path = base_dir / "requests" / req_id / "request.json"
+    before_hash = _request_hash(request_path)
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["ready"] is True
+    assert payload["advanced"] is False
+    assert payload["reason"] is None
+    assert result.stderr == ""
+    assert _request_hash(request_path) == before_hash
 
 
 def test_phase2_ready_json_guard_returns_structured_guard_block_without_mutation(tmp_path, monkeypatch):

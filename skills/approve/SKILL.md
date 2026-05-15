@@ -762,8 +762,8 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
    - `intent_enabled`: `intent_cfg.enabled`가 boolean이면 그 값을 사용하고, 아니면 `true`.
    - `max_iterations`: `intent_cfg.max_iterations`가 양의 정수이면 그 값을 사용하고, 아니면 `5`.
    - `review.auto_review`, `workflow.auto_accept_result`도 같은 preload에서 함께 확보해 Step 6 Phase 3 리뷰 루프에서 재사용한다.
-   - REQ-866 경계: 이번 태스크에서는 새 read-only summary CLI(`request phase2-status`, `workflow gate-summary`)를 추가하지 않고, 기존 `advance-phase2-if-ready --check/--json` 분리와 config preload만 유지한다.
-3. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --check --json)`를 실행하고, stdout JSON의 `ready` 값을 확인한다.
+   - REQ-866 경계: readiness read-only 확인은 `request phase2-status`로 수행하고, 전환 실행은 기존 `advance-phase2-if-ready --json` 경로에만 남긴다. 상태 전이를 수행하는 `workflow gate-summary`류 bundle 명령은 사용하지 않는다.
+3. `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request phase2-status {REQ_ID} --json)`를 실행하고, stdout JSON의 `ready` 값을 확인한다.
    - `ready != true`이면 아직 모든 Phase 2 태스크가 완료 상태가 아니므로 Step 6으로 이동해 전환 명령이 `incomplete_tasks`를 보고하게 한다.
 4. `source_plan`이 없으면 `[Step 5.7 skip] source_plan 없음 (--plan 없는 REQ) → Step 6 진행`을 출력하고 Step 6으로 이동한다.
 5. `intent_enabled == false`이면 `[Step 5.7 skip] intent_verification.enabled=false → Step 6 진행`을 출력하고 Step 6으로 이동한다.
@@ -909,7 +909,7 @@ else:
 모든 Phase 2 태스크가 완료 상태(`committed`, `completed`, `done`, `accepted`)에 도달하면:
 
 1. **Read-only readiness 확인**:
-   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request advance-phase2-if-ready {REQ_ID} --check --json)`를 실행한다.
+   - `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py request phase2-status {REQ_ID} --json)`를 실행한다.
    - Bash stdout JSON을 파싱해 `ready == true`이고 `advanced == false`인지 확인한다.
    - `ready == false`이면 stdout JSON의 `reason`과 `incomplete_tasks`를 근거로 아직 Phase 3에 진입하지 않고 대기/수정 분기로 이동한다.
 2. **전환 실행**:
