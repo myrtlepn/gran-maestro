@@ -108,6 +108,10 @@ def _head_sha(repo_root: Path) -> str:
     return _assert_git_ok(_run_git(repo_root, "rev-parse", "HEAD"))
 
 
+def _is_detached_head(repo_root: Path) -> bool:
+    return _run_git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD").returncode != 0
+
+
 def _session_branch(session_id: str = MST_SESSION_ID) -> str:
     return f"gran-maestro/session/{session_id}"
 
@@ -226,8 +230,8 @@ def test_worktree_list_and_safe_branch_trace_canonical_session_id(tmp_path: Path
 def test_detached_head_is_classified_without_creating_or_retargeting_session_worktree(tmp_path: Path) -> None:
     repo_root = _init_repo(tmp_path)
     before_sha = _head_sha(repo_root)
-    before_worktrees = _worktree_list(repo_root)
     _assert_git_ok(_run_git(repo_root, "checkout", "--detach"))
+    before_worktrees = _worktree_list(repo_root)
 
     result = _run_session_start(repo_root, env={"MST_SESSION_ID": MST_SESSION_ID})
 
@@ -241,7 +245,9 @@ def test_detached_head_is_classified_without_creating_or_retargeting_session_wor
     assert payload[SESSION_WORKTREE_OUTCOME_KEY] == "blocked_detached_head"
     assert payload.get("base_branch") in (None, "")
     assert payload["base_sha"] == before_sha
+    assert payload["diagnostic"] == {"worktree_creation": "skipped_detached_head"}
     assert _head_sha(repo_root) == before_sha
+    assert _is_detached_head(repo_root)
     assert _worktree_list(repo_root) == before_worktrees
     assert not _session_worktree_path(repo_root).exists()
 
@@ -319,6 +325,28 @@ def test_legacy_identity_no_mutation_does_not_create_session_worktree_or_session
     )
 
     assert result.returncode == 0, result.stderr
+    assert _head_branch(repo_root) == before_branch
+    assert _head_sha(repo_root) == before_sha
+    assert _worktree_list(repo_root) == before_worktrees
+    assert not (repo_root / ".gran-maestro" / "sessions").exists()
+    assert not (repo_root / ".gran-maestro" / "worktrees" / "sessions").exists()
+
+
+def test_env_stdin_conflict_no_mutation_does_not_create_session_worktree_or_session_metadata(tmp_path: Path) -> None:
+    repo_root = _init_repo(tmp_path)
+    before_branch = _head_branch(repo_root)
+    before_sha = _head_sha(repo_root)
+    before_worktrees = _worktree_list(repo_root)
+    conflicting_session_id = "MST-AGI-038-20260515T010203004Z-def67890"
+
+    result = _run_session_start(
+        repo_root,
+        payload=_hook_payload(mst_session_id=conflicting_session_id),
+        env={"MST_SESSION_ID": MST_SESSION_ID},
+    )
+
+    assert result.returncode == 0
+    assert "mst_session_id mismatch" in result.stderr
     assert _head_branch(repo_root) == before_branch
     assert _head_sha(repo_root) == before_sha
     assert _worktree_list(repo_root) == before_worktrees

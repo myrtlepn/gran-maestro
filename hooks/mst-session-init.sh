@@ -72,9 +72,6 @@ if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-
 else
   MST_SESSION_RESOLUTION_STATUS=$?
 fi
-if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
-  exit 1
-fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
   mkdir -p "$MST_TMP"
   if ! write_session_bridge; then
