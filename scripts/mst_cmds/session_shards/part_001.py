@@ -401,6 +401,400 @@ def create_root_session_artifacts(
         "session_metadata_path": session_path,
         **metadata,
     }
+SESSION_WORKTREE_OUTCOME_KEY = "session_worktree_outcome"
+SESSION_WORKTREE_ACTIVE_STATES = {"active", "reused"}
+def _session_worktree_created_at_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+def session_worktree_branch_name(mst_session_id: str) -> str:
+    parsed = validate_mst_session_id(mst_session_id)
+    return f"gran-maestro/session/{parsed.mst_session_id}"
+def session_worktree_path(project_root: Path, mst_session_id: str) -> Path:
+    parsed = validate_mst_session_id(mst_session_id)
+    return _common.worktrees_dir(Path(project_root)) / "sessions" / parsed.mst_session_id
+def _git_stdout(project_root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed")
+    return result.stdout.strip()
+def _try_git_stdout(project_root: Path, *args: str) -> str | None:
+    try:
+        return _git_stdout(project_root, *args)
+    except RuntimeError:
+        return None
+def _git_worktree_entries(project_root: Path) -> list[dict[str, str]]:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git worktree list failed")
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        key, _, value = raw_line.partition(" ")
+        current[key] = value
+    if current:
+        entries.append(current)
+    return entries
+def _git_branch_exists(project_root: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+def _git_branch_candidates_for_head(project_root: Path) -> list[str]:
+    result = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "--points-at", "HEAD", "refs/heads"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+def _restore_detached_head_symbolic_ref(project_root: Path) -> str | None:
+    candidates = _git_branch_candidates_for_head(project_root)
+    if len(candidates) != 1:
+        return None
+    branch = candidates[0]
+    result = subprocess.run(
+        ["git", "symbolic-ref", "HEAD", f"refs/heads/{branch}"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return branch
+def _load_session_metadata_payload(path: Path) -> dict | None:
+    payload = load_json_object(path)
+    return dict(payload) if isinstance(payload, dict) else None
+def _string_or_none(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+def _session_worktree_base_snapshot(project_root: Path) -> dict[str, str | None]:
+    base_sha = _git_stdout(project_root, "rev-parse", "HEAD")
+    base_branch = _try_git_stdout(project_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if base_branch:
+        return {
+            "base_branch": base_branch,
+            "base_sha": base_sha,
+            "base_ref_type": "branch",
+        }
+    return {
+        "base_branch": None,
+        "base_sha": base_sha,
+        "base_ref_type": "detached_head",
+    }
+def _session_worktree_reason_action(outcome: str) -> tuple[str, str]:
+    mapping = {
+        "created": ("session_worktree_created", "use_session_worktree"),
+        "reused_existing": ("session_worktree_reused", "use_session_worktree"),
+        "resume_preserved": ("session_worktree_resumed", "use_session_worktree"),
+        "blocked_detached_head": ("detached_head", "attach_original_checkout_to_branch_before_session_worktree"),
+        "blocked_branch_collision": ("session_worktree_branch_collision", "resolve_session_worktree_branch_collision"),
+        "blocked_path_collision": ("session_worktree_path_collision", "resolve_session_worktree_path_collision"),
+        "blocked_missing_worktree": ("session_worktree_missing", "repair_or_remove_stale_session_metadata"),
+        "blocked_metadata_mismatch": ("session_metadata_mismatch", "repair_or_remove_conflicting_session_metadata"),
+        "blocked_worktree_conflict": ("session_worktree_conflict", "repair_or_remove_conflicting_session_worktree"),
+        "blocked_git_worktree_add_failed": ("git_worktree_add_failed", "inspect_git_worktree_error"),
+    }
+    return mapping.get(outcome, (outcome, "inspect_session_worktree_contract"))
+def _session_worktree_payload(
+    parsed: StructuredMstSessionId,
+    *,
+    project_root: Path,
+    session_branch: str,
+    worktree_path: Path,
+    base_branch: str | None,
+    base_sha: str,
+    base_ref_type: str,
+    created_at: str,
+    state: str,
+    outcome: str,
+    existing_payload: dict | None = None,
+    diagnostic: dict | None = None,
+) -> dict:
+    payload = dict(existing_payload or {})
+    payload.update(mst_session_metadata(parsed))
+    payload["schema_version"] = 1
+    payload["mst_session_id"] = parsed.mst_session_id
+    payload["root_mst_id"] = parsed.root_mst_id
+    payload["session_worktree_path"] = str(worktree_path)
+    payload["session_branch"] = session_branch
+    payload["base_branch"] = base_branch
+    payload["base_sha"] = base_sha
+    payload["base_ref_type"] = base_ref_type
+    payload["created_at"] = created_at
+    payload["state"] = state
+    payload["outcome"] = outcome
+    payload[SESSION_WORKTREE_OUTCOME_KEY] = outcome
+    reason, action = _session_worktree_reason_action(outcome)
+    payload["reason"] = reason
+    payload["action"] = action
+    if diagnostic:
+        payload["diagnostic"] = diagnostic
+    else:
+        payload.pop("diagnostic", None)
+    return payload
+def _session_metadata_matches_contract(
+    payload: dict,
+    *,
+    mst_session_id: str,
+    session_branch: str,
+    worktree_path: Path,
+) -> bool:
+    return (
+        _string_or_none(payload.get("mst_session_id")) == mst_session_id
+        and _string_or_none(payload.get("session_branch")) == session_branch
+        and _string_or_none(payload.get("session_worktree_path")) == str(worktree_path)
+    )
+def _write_session_worktree_payload(session_path: Path, payload: dict) -> dict:
+    _atomic_write_json(session_path, payload)
+    return payload
+def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) -> dict:
+    project_root = Path(project_root).resolve(strict=False)
+    parsed = validate_mst_session_id(mst_session_id)
+    base_dir = _common.base_dir_from_project(project_root)
+    session_path = session_metadata_path(base_dir, parsed.mst_session_id)
+    existing_payload = _load_session_metadata_payload(session_path)
+    session_branch = session_worktree_branch_name(parsed.mst_session_id)
+    session_branch_ref = f"refs/heads/{session_branch}"
+    worktree_path = session_worktree_path(project_root, parsed.mst_session_id).resolve(strict=False)
+    created_at_now = _session_worktree_created_at_now()
+    created_at = _string_or_none((existing_payload or {}).get("created_at")) or created_at_now
+    snapshot = _session_worktree_base_snapshot(project_root)
+    base_branch = _string_or_none(snapshot["base_branch"])
+    base_sha = str(snapshot["base_sha"] or "")
+    base_ref_type = str(snapshot["base_ref_type"] or "detached_head")
+    entries = _git_worktree_entries(project_root)
+    path_entry = next((entry for entry in entries if entry.get("worktree") == str(worktree_path)), None)
+    branch_entry = next((entry for entry in entries if entry.get("branch") == session_branch_ref), None)
+
+    if existing_payload and _session_metadata_matches_contract(
+        existing_payload,
+        mst_session_id=parsed.mst_session_id,
+        session_branch=session_branch,
+        worktree_path=worktree_path,
+    ):
+        existing_base_branch = _string_or_none(existing_payload.get("base_branch"))
+        existing_base_sha = _string_or_none(existing_payload.get("base_sha"))
+        existing_base_ref_type = _string_or_none(existing_payload.get("base_ref_type")) or ("branch" if existing_base_branch else "detached_head")
+        if path_entry and branch_entry and path_entry.get("branch") == session_branch_ref and branch_entry.get("worktree") == str(worktree_path):
+            return _write_session_worktree_payload(
+                session_path,
+                _session_worktree_payload(
+                    parsed,
+                    project_root=project_root,
+                    session_branch=session_branch,
+                    worktree_path=worktree_path,
+                    base_branch=existing_base_branch,
+                    base_sha=existing_base_sha or base_sha,
+                    base_ref_type=existing_base_ref_type,
+                    created_at=created_at,
+                    state="active",
+                    outcome="resume_preserved",
+                    existing_payload=existing_payload,
+                ),
+            )
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=existing_base_branch,
+                base_sha=existing_base_sha or base_sha,
+                base_ref_type=existing_base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_missing_worktree",
+                existing_payload=existing_payload,
+                diagnostic={
+                    "expected_branch": session_branch,
+                    "expected_path": str(worktree_path),
+                },
+            ),
+        )
+
+    if existing_payload:
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=_string_or_none(existing_payload.get("base_branch")) or base_branch,
+                base_sha=_string_or_none(existing_payload.get("base_sha")) or base_sha,
+                base_ref_type=_string_or_none(existing_payload.get("base_ref_type")) or base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_metadata_mismatch",
+                existing_payload=existing_payload,
+                diagnostic={
+                    "expected_branch": session_branch,
+                    "expected_path": str(worktree_path),
+                    "existing_branch": existing_payload.get("session_branch"),
+                    "existing_path": existing_payload.get("session_worktree_path"),
+                },
+            ),
+        )
+
+    if path_entry and branch_entry and path_entry.get("branch") == session_branch_ref and branch_entry.get("worktree") == str(worktree_path):
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="active",
+                outcome="reused_existing",
+            ),
+        )
+
+    if base_ref_type != "branch":
+        restored_branch = _restore_detached_head_symbolic_ref(project_root)
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=None,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_detached_head",
+                diagnostic={"restored_head_branch": restored_branch},
+            ),
+        )
+
+    if path_entry or branch_entry:
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_worktree_conflict",
+                diagnostic={
+                    "existing_path_entry": path_entry,
+                    "existing_branch_entry": branch_entry,
+                },
+            ),
+        )
+
+    if worktree_path.exists():
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_path_collision",
+                diagnostic={"existing_path": str(worktree_path)},
+            ),
+        )
+
+    if _git_branch_exists(project_root, session_branch):
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_branch_collision",
+                diagnostic={"existing_branch": session_branch},
+            ),
+        )
+
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["git", "worktree", "add", "-b", session_branch, str(worktree_path), base_sha],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return _write_session_worktree_payload(
+            session_path,
+            _session_worktree_payload(
+                parsed,
+                project_root=project_root,
+                session_branch=session_branch,
+                worktree_path=worktree_path,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                base_ref_type=base_ref_type,
+                created_at=created_at,
+                state="blocked",
+                outcome="blocked_git_worktree_add_failed",
+                diagnostic={
+                    "stderr": result.stderr.strip(),
+                    "stdout": result.stdout.strip(),
+                },
+            ),
+        )
+
+    return _write_session_worktree_payload(
+        session_path,
+        _session_worktree_payload(
+            parsed,
+            project_root=project_root,
+            session_branch=session_branch,
+            worktree_path=worktree_path,
+            base_branch=base_branch,
+            base_sha=base_sha,
+            base_ref_type=base_ref_type,
+            created_at=created_at,
+            state="active",
+            outcome="created",
+        ),
+    )
 ZERO_HISTORY_HASH = "0" * 64
 def _utc_now_history() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
