@@ -625,6 +625,492 @@ def _load_worktree_meta_json_for_migration(meta_path: Path) -> tuple[dict | None
     if not isinstance(data, dict):
         return None, "invalid-json"
     return data, None
+MIGRATION_LEGACY_DIAGNOSTIC_FIELDS = (
+    "owner_session_id",
+    "owner_pid",
+    "owner_ppid",
+    "session_id",
+    "sessionId",
+    "MST_STATE_PPID",
+    "MST_SNAPSHOT_SESSION_ID",
+    "hook_session_id",
+    "transcript_uuid",
+)
+def _migration_diagnostics(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    diagnostics: dict[str, object] = {}
+    for key in MIGRATION_LEGACY_DIAGNOSTIC_FIELDS:
+        value = payload.get(key)
+        if _coerce_nonempty_str(value) is not None or isinstance(value, (int, float)) and not isinstance(value, bool):
+            diagnostics[key] = value
+    return diagnostics
+def _migration_context_value(payload: dict | None, *keys: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = _coerce_nonempty_str(payload.get(key))
+        if value:
+            return value
+    return None
+def _migration_base_evidence_candidates(metadata: dict, request: dict | None) -> list[dict[str, object]]:
+    sources: list[tuple[str, dict, str, str]] = [("metadata", metadata, "base_branch", "base_sha")]
+    sources.append(("metadata", metadata, "original_base_branch", "original_base_sha"))
+    if isinstance(request, dict):
+        sources.extend(
+            [
+                ("request", request, "base_branch", "base_sha"),
+                ("request", request, "original_base_branch", "original_base_sha"),
+                ("request", request, "detected_base", "base_sha"),
+                ("request", request, "detected_base", "original_base_sha"),
+            ]
+        )
+    candidates: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for source, payload, branch_key, sha_key in sources:
+        branch = _migration_context_value(payload, branch_key)
+        sha = _migration_context_value(payload, sha_key)
+        if not branch and not sha:
+            continue
+        signature = (source, branch_key, branch or "", sha or "")
+        if signature in seen:
+            continue
+        seen.add(signature)
+        candidates.append(
+            {
+                "source": source,
+                "branch_field": branch_key,
+                "sha_field": sha_key,
+                "base_branch": branch,
+                "base_sha": sha,
+            }
+        )
+    return candidates
+def _migration_base_evidence_state(
+    metadata: dict,
+    current_session: dict,
+    request: dict | None,
+) -> tuple[str, dict | None, list[dict[str, object]]]:
+    session_base_branch = _migration_context_value(current_session, "base_branch", "original_base_branch")
+    session_base_sha = _migration_context_value(current_session, "base_sha", "original_base_sha")
+    candidates = _migration_base_evidence_candidates(metadata, request)
+    if not session_base_branch or not session_base_sha or not candidates:
+        return "insufficient_base_evidence", None, candidates
+    complete_candidates = [candidate for candidate in candidates if candidate.get("base_branch") and candidate.get("base_sha")]
+    for candidate in complete_candidates:
+        if candidate["base_branch"] == session_base_branch and candidate["base_sha"] == session_base_sha:
+            return "base_match", candidate, candidates
+    if complete_candidates:
+        return "base_mismatch", complete_candidates[0], candidates
+    return "insufficient_base_evidence", None, candidates
+def _migration_canonical_patch(current_session: dict) -> dict[str, object]:
+    patch: dict[str, object] = {
+        "parent_mst_session_id": _migration_context_value(current_session, "mst_session_id", "MST_SESSION_ID"),
+        "parent_session_branch": _migration_context_value(current_session, "session_branch"),
+        "original_base_branch": _migration_context_value(current_session, "base_branch", "original_base_branch"),
+        "original_base_sha": _migration_context_value(current_session, "base_sha", "original_base_sha"),
+    }
+    session_worktree_path = _migration_context_value(current_session, "session_worktree_path", "path")
+    if session_worktree_path:
+        patch["parent_session_worktree_path"] = session_worktree_path
+    return {key: value for key, value in patch.items() if value is not None}
+def _migration_result(
+    classification: str,
+    *,
+    migration_allowed: bool,
+    migration_required: bool,
+    reason: str,
+    canonical_patch: dict | None = None,
+    legacy_diagnostics: dict | None = None,
+    canonical_parent_evidence: dict | None = None,
+    base_evidence: dict | None = None,
+    base_evidence_candidates: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "classification": classification,
+        "migration_allowed": migration_allowed,
+        "migration_required": migration_required,
+        "canonical_patch": canonical_patch or {},
+        "legacy_diagnostics": legacy_diagnostics or {"metadata": {}, "request": {}},
+        "reason": reason,
+        "destructive_action_allowed": False,
+    }
+    if canonical_parent_evidence is not None:
+        payload["canonical_parent_evidence"] = canonical_parent_evidence
+    if base_evidence is not None:
+        payload["base_evidence"] = base_evidence
+    if base_evidence_candidates is not None:
+        payload["base_evidence_candidates"] = base_evidence_candidates
+    return payload
+def resolve_migration_compatibility_state(metadata, current_session, request=None) -> dict[str, object]:
+    metadata_payload = metadata if isinstance(metadata, dict) else {}
+    request_payload = request if isinstance(request, dict) else None
+    legacy_diagnostics = {
+        "metadata": _migration_diagnostics(metadata_payload),
+        "request": _migration_diagnostics(request_payload),
+    }
+    if not isinstance(metadata, dict):
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=False,
+            reason="invalid_metadata",
+            legacy_diagnostics=legacy_diagnostics,
+        )
+    if not isinstance(current_session, dict):
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=True,
+            reason="missing_current_session",
+            legacy_diagnostics=legacy_diagnostics,
+        )
+
+    current_mst_session_id = _migration_context_value(current_session, "mst_session_id", "MST_SESSION_ID")
+    current_session_branch = _migration_context_value(current_session, "session_branch")
+    if not current_mst_session_id:
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=True,
+            reason="missing_current_session_identity",
+            legacy_diagnostics=legacy_diagnostics,
+        )
+    if not current_session_branch:
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=True,
+            reason="missing_session_branch",
+            legacy_diagnostics=legacy_diagnostics,
+        )
+
+    parent_mst_session_id = _migration_context_value(metadata, "parent_mst_session_id")
+    parent_session_branch = _migration_context_value(metadata, "parent_session_branch")
+    if parent_mst_session_id:
+        if parent_mst_session_id != current_mst_session_id:
+            return _migration_result(
+                "blocked_migration",
+                migration_allowed=False,
+                migration_required=True,
+                reason="parent_session_mismatch",
+                legacy_diagnostics=legacy_diagnostics,
+                canonical_parent_evidence={
+                    "parent_mst_session_id": parent_mst_session_id,
+                    "parent_session_branch": parent_session_branch,
+                },
+            )
+        if parent_session_branch and parent_session_branch != current_session_branch:
+            return _migration_result(
+                "blocked_migration",
+                migration_allowed=False,
+                migration_required=True,
+                reason="parent_session_branch_mismatch",
+                legacy_diagnostics=legacy_diagnostics,
+                canonical_parent_evidence={
+                    "parent_mst_session_id": parent_mst_session_id,
+                    "parent_session_branch": parent_session_branch,
+                },
+            )
+        return _migration_result(
+            "canonical_child",
+            migration_allowed=False,
+            migration_required=False,
+            reason="already_canonical",
+            legacy_diagnostics=legacy_diagnostics,
+            canonical_parent_evidence={
+                "parent_mst_session_id": parent_mst_session_id,
+                "parent_session_branch": parent_session_branch,
+                "parent_session_worktree_path": _migration_context_value(metadata, "parent_session_worktree_path"),
+            },
+        )
+
+    if parent_session_branch and parent_session_branch != current_session_branch:
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=True,
+            reason="parent_session_branch_mismatch",
+            legacy_diagnostics=legacy_diagnostics,
+            canonical_parent_evidence={"parent_session_branch": parent_session_branch},
+        )
+
+    base_state, base_evidence, base_candidates = _migration_base_evidence_state(metadata, current_session, request_payload)
+    if base_state == "base_match":
+        return _migration_result(
+            "reparent_to_session",
+            migration_allowed=True,
+            migration_required=True,
+            reason="base_match",
+            canonical_patch=_migration_canonical_patch(current_session),
+            legacy_diagnostics=legacy_diagnostics,
+            base_evidence=base_evidence,
+            base_evidence_candidates=base_candidates,
+        )
+    if base_state == "base_mismatch":
+        return _migration_result(
+            "blocked_migration",
+            migration_allowed=False,
+            migration_required=True,
+            reason="base_mismatch",
+            legacy_diagnostics=legacy_diagnostics,
+            base_evidence=base_evidence,
+            base_evidence_candidates=base_candidates,
+        )
+    return _migration_result(
+        "legacy_or_external",
+        migration_allowed=False,
+        migration_required=True,
+        reason="insufficient_base_evidence",
+        legacy_diagnostics=legacy_diagnostics,
+        base_evidence_candidates=base_candidates,
+    )
+def _root_handoff_path(value) -> str | None:
+    raw = _coerce_nonempty_str(value)
+    if not raw:
+        return None
+    return str(Path(raw).expanduser().resolve(strict=False))
+def _root_handoff_diagnostics(payload: dict | None) -> dict:
+    return _migration_diagnostics(payload)
+def _root_handoff_canonical_session(current_session: dict | None) -> dict[str, object]:
+    if not isinstance(current_session, dict):
+        return {}
+    payload: dict[str, object] = {}
+    for key in (
+        "mst_session_id",
+        "session_branch",
+        "session_worktree_path",
+        "base_branch",
+        "base_sha",
+        "parent_project_root",
+        "canonical_runtime_root",
+    ):
+        value = current_session.get(key)
+        if _coerce_nonempty_str(value) is not None or isinstance(value, (int, float)) and not isinstance(value, bool):
+            payload[key] = value
+    return payload
+def _root_handoff_child_evidence(child_metadata: dict | None) -> dict[str, object]:
+    if not isinstance(child_metadata, dict):
+        return {}
+    payload: dict[str, object] = {}
+    for key in (
+        "taskId",
+        "path",
+        "branch",
+        "base_branch",
+        "base_sha",
+        "parent_mst_session_id",
+        "parent_session_branch",
+        "parent_session_worktree_path",
+        "canonical_runtime_root",
+    ):
+        value = child_metadata.get(key)
+        if _coerce_nonempty_str(value) is not None or isinstance(value, (int, float)) and not isinstance(value, bool):
+            payload[key] = value
+    return payload
+def _root_handoff_result(
+    classification: str,
+    *,
+    action: str,
+    allowed: bool,
+    reason: str,
+    effective_project_root: str | None,
+    target_project_root: str | None,
+    canonical_session: dict | None = None,
+    child_evidence: dict | None = None,
+    legacy_diagnostics: dict | None = None,
+    boundary: str | None = None,
+    write_intent: bool | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "classification": classification,
+        "action": action,
+        "allowed": allowed,
+        "effective_project_root": effective_project_root,
+        "target_project_root": target_project_root,
+        "canonical_session": canonical_session or {},
+        "child_evidence": child_evidence or {},
+        "legacy_diagnostics": legacy_diagnostics or {"session": {}, "child": {}},
+        "reason": reason,
+        "destructive_action_allowed": False,
+    }
+    if boundary is not None:
+        payload["boundary"] = boundary
+    if write_intent is not None:
+        payload["write_intent"] = write_intent
+    return payload
+def resolve_effective_root_handoff_state(
+    current_root,
+    current_session,
+    *,
+    child_metadata=None,
+    original_project_root=None,
+    boundary="skill",
+    write_intent=True,
+) -> dict[str, object]:
+    current_root_path = _root_handoff_path(current_root)
+    original_root_path = _root_handoff_path(original_project_root)
+    session_payload = current_session if isinstance(current_session, dict) else None
+    child_payload = child_metadata if isinstance(child_metadata, dict) else None
+    session_worktree_path = _root_handoff_path(session_payload.get("session_worktree_path") if session_payload else None)
+    current_mst_session_id = _migration_context_value(session_payload, "mst_session_id", "MST_SESSION_ID")
+    session_branch = _migration_context_value(session_payload, "session_branch")
+    child_path = _root_handoff_path(child_payload.get("path") if child_payload else None)
+    legacy_diagnostics = {
+        "session": _root_handoff_diagnostics(session_payload),
+        "child": _root_handoff_diagnostics(child_payload),
+    }
+    canonical_session = _root_handoff_canonical_session(session_payload)
+    child_evidence = _root_handoff_child_evidence(child_payload)
+    boundary_value = str(boundary or "skill")
+    write_value = bool(write_intent)
+
+    if not current_root_path:
+        return _root_handoff_result(
+            "unknown_root",
+            action="root_diagnostic_required",
+            allowed=False,
+            reason="missing_current_root",
+            effective_project_root=None,
+            target_project_root=session_worktree_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+    if not current_mst_session_id:
+        return _root_handoff_result(
+            "unknown_root",
+            action="session_identity_required",
+            allowed=False,
+            reason="missing_current_session_identity",
+            effective_project_root=current_root_path,
+            target_project_root=session_worktree_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+    if not session_worktree_path:
+        return _root_handoff_result(
+            "unknown_root",
+            action="session_metadata_required",
+            allowed=False,
+            reason="missing_session_worktree_path",
+            effective_project_root=current_root_path,
+            target_project_root=None,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+
+    if current_root_path == session_worktree_path:
+        return _root_handoff_result(
+            "session_root",
+            action="session_root_allowed",
+            allowed=True,
+            reason="already_in_session_root",
+            effective_project_root=session_worktree_path,
+            target_project_root=session_worktree_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+
+    if child_path and current_root_path == child_path:
+        child_parent_session_id = _migration_context_value(child_payload, "parent_mst_session_id")
+        child_parent_branch = _migration_context_value(child_payload, "parent_session_branch")
+        if child_parent_session_id != current_mst_session_id:
+            return _root_handoff_result(
+                "child_root",
+                action="child_parent_session_mismatch",
+                allowed=False,
+                reason="child_parent_session_mismatch",
+                effective_project_root=current_root_path,
+                target_project_root=session_worktree_path,
+                canonical_session=canonical_session,
+                child_evidence=child_evidence,
+                legacy_diagnostics=legacy_diagnostics,
+                boundary=boundary_value,
+                write_intent=write_value,
+            )
+        if child_parent_branch and session_branch and child_parent_branch != session_branch:
+            return _root_handoff_result(
+                "child_root",
+                action="child_parent_session_branch_mismatch",
+                allowed=False,
+                reason="child_parent_session_branch_mismatch",
+                effective_project_root=current_root_path,
+                target_project_root=session_worktree_path,
+                canonical_session=canonical_session,
+                child_evidence=child_evidence,
+                legacy_diagnostics=legacy_diagnostics,
+                boundary=boundary_value,
+                write_intent=write_value,
+            )
+        return _root_handoff_result(
+            "child_root",
+            action="child_root_allowed",
+            allowed=True,
+            reason="child_root_with_parent_session_evidence",
+            effective_project_root=current_root_path,
+            target_project_root=current_root_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+
+    if original_root_path and current_root_path == original_root_path:
+        return _root_handoff_result(
+            "original_checkout",
+            action="session_reentry_required" if write_value else "session_reentry_recommended",
+            allowed=False,
+            reason="parent_checkout_not_effective_root",
+            effective_project_root=current_root_path,
+            target_project_root=session_worktree_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+
+    if current_root_path == _root_handoff_path(_migration_context_value(session_payload, "parent_project_root")):
+        return _root_handoff_result(
+            "original_checkout",
+            action="session_reentry_required" if write_value else "session_reentry_recommended",
+            allowed=False,
+            reason="parent_checkout_not_effective_root",
+            effective_project_root=current_root_path,
+            target_project_root=session_worktree_path,
+            canonical_session=canonical_session,
+            child_evidence=child_evidence,
+            legacy_diagnostics=legacy_diagnostics,
+            boundary=boundary_value,
+            write_intent=write_value,
+        )
+
+    return _root_handoff_result(
+        "unknown_root",
+        action="root_diagnostic_required",
+        allowed=False,
+        reason="root_not_registered_to_session",
+        effective_project_root=current_root_path,
+        target_project_root=session_worktree_path,
+        canonical_session=canonical_session,
+        child_evidence=child_evidence,
+        legacy_diagnostics=legacy_diagnostics,
+        boundary=boundary_value,
+        write_intent=write_value,
+    )
 def _has_worktree_lineage(meta_data: dict) -> bool:
     return bool(_coerce_nonempty_str(meta_data.get("session_id")) or _coerce_nonempty_str(meta_data.get("owner_session_id")))
 def _lineage_unknown_archive_target_for_mtime(project_root: Path, meta_path: Path, original_mtime: float) -> Path:
@@ -819,6 +1305,245 @@ def _is_session_owned_child_target(worktree_path: Path, branch: str, base: str, 
     if base != session_branch and not branch.startswith(f"gran-maestro/{base_slug(session_branch)}/"):
         return False
     return True
+
+def child_merge_idempotency_key(
+    *,
+    mst_session_id: str,
+    req_id: str,
+    task_id: str,
+    child_id: str,
+    child_branch: str,
+    target_branch: str,
+) -> str:
+    payload = {
+        "mst_session_id": str(mst_session_id or "").strip(),
+        "req_id": str(req_id or "").strip(),
+        "task_id": str(task_id or "").strip(),
+        "child_id": str(child_id or "").strip(),
+        "child_branch": str(child_branch or "").strip(),
+        "target_branch": str(target_branch or "").strip(),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "child-merge:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+def _child_merge_value(payload: dict, *keys: str) -> str | None:
+    for key in keys:
+        value = _coerce_nonempty_str(payload.get(key))
+        if value:
+            return value
+    return None
+
+def _child_merge_int(payload: dict, key: str, default: int) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+def _child_merge_sort_key(child: dict) -> tuple[object, ...]:
+    return (
+        _child_merge_int(child, "priority", 100),
+        _child_merge_value(child, "ready_at", "completed_at", "finished_at") or "",
+        _child_merge_value(child, "req_id", "request_id") or "",
+        _child_merge_value(child, "task_id", "taskId") or "",
+        _child_merge_value(child, "child_id", "worktree_id", "id") or "",
+        _child_merge_value(child, "child_branch", "branch") or "",
+    )
+
+def _completed_child_merge_keys(durable_events: list[dict]) -> set[str]:
+    completed: set[str] = set()
+    for event in durable_events:
+        if not isinstance(event, dict):
+            continue
+        stage = _coerce_nonempty_str(event.get("stage"))
+        status = _coerce_nonempty_str(event.get("status"))
+        key = _coerce_nonempty_str(event.get("idempotency_key"))
+        if stage == "child_merge_or_block" and status in {"succeeded", "completed", "already_satisfied"} and key:
+            completed.add(key)
+    return completed
+
+def _child_merge_base_entry(
+    *,
+    child: dict,
+    mst_session_id: str,
+    session_branch: str,
+    queue_position: int,
+) -> dict[str, object]:
+    req_id = _child_merge_value(child, "req_id", "request_id") or ""
+    task_id = _child_merge_value(child, "task_id", "taskId") or ""
+    child_id = _child_merge_value(child, "child_id", "worktree_id", "id") or ""
+    child_branch = _child_merge_value(child, "child_branch", "branch") or ""
+    key = child_merge_idempotency_key(
+        mst_session_id=mst_session_id,
+        req_id=req_id,
+        task_id=task_id,
+        child_id=child_id,
+        child_branch=child_branch,
+        target_branch=session_branch,
+    )
+    strategy = {
+        "name": "no_ff_child_to_session",
+        "target_branch": session_branch,
+        "child_branch": child_branch,
+        "child_to_session": True,
+        "session_to_original": False,
+    }
+    commit_metadata = {
+        "mst_session_id": mst_session_id,
+        "req_id": req_id,
+        "task_id": task_id,
+        "child_id": child_id,
+        "child_branch": child_branch,
+        "target_branch": session_branch,
+        "message": f"[{req_id}] Merge T{task_id} child {child_id} to session branch",
+    }
+    return {
+        "queue_position": queue_position,
+        "child_id": child_id,
+        "req_id": req_id,
+        "task_id": task_id,
+        "child_branch": child_branch,
+        "idempotency_key": key,
+        "merge_target": session_branch,
+        "merge_strategy": strategy,
+        "commit_metadata": commit_metadata,
+        "child_to_session": True,
+        "session_to_original": False,
+    }
+
+def _child_merge_blocker(entry: dict[str, object], state: str, reason: str) -> dict[str, object]:
+    return {"child_id": entry.get("child_id"), "state": state, "reason": reason}
+
+def _classify_child_merge_entry(
+    child: dict,
+    entry: dict[str, object],
+    *,
+    completed_keys: set[str],
+    seen_ready_keys: set[str],
+) -> tuple[dict[str, object], dict[str, object] | None, dict[str, object] | None]:
+    state = str(child.get("state") or "").strip()
+    merge_outcome = str(child.get("merge_outcome") or "").strip()
+    cleanup_outcome = str(child.get("cleanup_outcome") or "").strip()
+    key = str(entry["idempotency_key"])
+    diagnostic = None
+
+    if state in {"conflicted", "conflict", "child_conflict"} or merge_outcome == "conflict":
+        entry.update({"merge_state": "child_conflict", "merge_required": False, "next_action": "resolve_child_conflict"})
+        return entry, _child_merge_blocker(entry, "child_conflict", "resolve_child_conflict"), diagnostic
+    if state in {"partial", "partial_merge"} or merge_outcome == "partial":
+        entry.update(
+            {
+                "merge_state": "partial_merge",
+                "merge_required": False,
+                "next_action": "resume_or_reconcile_partial_merge",
+            }
+        )
+        return entry, _child_merge_blocker(entry, "partial_merge", "resume_or_reconcile_partial_merge"), diagnostic
+    if state == "late_arriving_child":
+        entry.update(
+            {
+                "merge_state": "late_arriving_child",
+                "merge_required": False,
+                "next_action": "reconcile_child_before_final_merge",
+            }
+        )
+        return entry, _child_merge_blocker(entry, "late_arriving_child", "reconcile_child_before_final_merge"), diagnostic
+    if cleanup_outcome in {"remove_failed", "cleanup_failed", "child_remove_failed"}:
+        entry.update(
+            {
+                "merge_state": "merged_to_session_cleanup_failed",
+                "merge_required": False,
+                "next_action": "retry_child_cleanup",
+            }
+        )
+        return entry, _child_merge_blocker(entry, "merged_to_session_cleanup_failed", "retry_child_cleanup"), diagnostic
+    if key in completed_keys:
+        entry.update({"merge_state": "already_merged", "merge_required": False, "next_action": "none"})
+        return entry, None, diagnostic
+    if key in seen_ready_keys:
+        diagnostic = {
+            "code": "duplicate_child_merge",
+            "child_id": entry.get("child_id"),
+            "idempotency_key": key,
+        }
+        entry.update(
+            {
+                "merge_state": "duplicate_child",
+                "merge_required": False,
+                "duplicate_of": key,
+                "next_action": "skip_duplicate_child_merge",
+            }
+        )
+        return entry, None, diagnostic
+
+    seen_ready_keys.add(key)
+    entry.update({"merge_state": "ready", "merge_required": True, "next_action": "merge_child_to_session"})
+    return entry, None, diagnostic
+
+def resolve_child_merge_queue_state(
+    *,
+    mst_session_id: str,
+    session_branch: str,
+    children: list[dict] | None = None,
+    durable_events: list[dict] | None = None,
+) -> dict[str, object]:
+    session_id = str(mst_session_id or "").strip()
+    target_branch = str(session_branch or "").strip()
+    child_items = [dict(child) for child in (children or []) if isinstance(child, dict)]
+    event_items = [dict(event) for event in (durable_events or []) if isinstance(event, dict)]
+    ordered_children = sorted(child_items, key=_child_merge_sort_key)
+    completed_keys = _completed_child_merge_keys(event_items)
+    seen_ready_keys: set[str] = set()
+    queue: list[dict[str, object]] = []
+    blockers: list[dict[str, object]] = []
+    diagnostics: list[dict[str, object]] = []
+
+    for index, child in enumerate(ordered_children, start=1):
+        entry = _child_merge_base_entry(
+            child=child,
+            mst_session_id=session_id,
+            session_branch=target_branch,
+            queue_position=index,
+        )
+        entry, blocker, diagnostic = _classify_child_merge_entry(
+            child,
+            entry,
+            completed_keys=completed_keys,
+            seen_ready_keys=seen_ready_keys,
+        )
+        queue.append(entry)
+        if blocker is not None:
+            blockers.append(blocker)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+
+    merge_required = any(bool(entry.get("merge_required")) for entry in queue)
+    all_already_merged = bool(queue) and all(entry.get("merge_state") == "already_merged" for entry in queue)
+    if blockers:
+        merge_queue_state = "blocked"
+    elif all_already_merged:
+        merge_queue_state = "idempotent_replay"
+    elif merge_required:
+        merge_queue_state = "ready"
+    else:
+        merge_queue_state = "empty"
+
+    return {
+        "ok": not blockers,
+        "mst_session_id": session_id,
+        "target_branch": target_branch,
+        "merge_queue_state": merge_queue_state,
+        "serialization": "deterministic_queue",
+        "queue": queue,
+        "blockers": blockers,
+        "diagnostics": diagnostics,
+        "idempotency_keys": [str(entry["idempotency_key"]) for entry in queue],
+        "session_final_merge_blocked": bool(blockers or merge_required),
+        "child_to_session": True,
+        "session_to_original": False,
+    }
 def _resolve_worktree_source_root() -> Path:
     project_root = _project_root()
     source_claude_dir = project_root / ".claude"

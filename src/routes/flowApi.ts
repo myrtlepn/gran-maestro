@@ -1,8 +1,10 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
 import { resolveBaseDir } from "../config.ts";
 import {
+  buildSessionGraphViews,
   getExecutionFlowViews,
   getFlowEvents,
+  getFlowViewConsistencyDiagnostics,
   initFlowWatcher,
   subscribeFlowSse,
 } from "../flow-watcher.ts";
@@ -36,11 +38,24 @@ flowApi.get("/agile/:agiId/flow/view", async (c) => {
     getFlowEvents(agiId, baseDir),
     getExecutionFlowViews(agiId, baseDir),
   ]);
+  const sessionGraphs = buildSessionGraphViews(events, executionFlowViews);
+  const diagnostics = getFlowViewConsistencyDiagnostics(events, executionFlowViews);
   return c.json({
     schema_version: 1,
     view_kind: "gran-maestro.flow-view",
     events,
     execution_flow_views: executionFlowViews,
+    session_graphs: sessionGraphs,
+    graph_consistency: {
+      status: sessionGraphs.some((graph) => graph.graph_consistency.status === "mismatch") ||
+          diagnostics.some((diagnostic) => diagnostic.severity === "error")
+        ? "mismatch"
+        : sessionGraphs.some((graph) => graph.graph_consistency.status === "degraded") || diagnostics.length
+        ? "degraded"
+        : "consistent",
+      diagnostics,
+      session_count: sessionGraphs.length,
+    },
     display_only: true,
     next_action_authority: false,
     transition_authority: "dod016_transition_graph",

@@ -773,6 +773,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
 SESSION_MERGE_SCOPE_CHILD_CALLERS = frozenset(
     {
         "request_child_accept",
+        "auto_accept_result_child",
         "auto_accept_result_for_child",
     }
 )
@@ -785,9 +786,10 @@ SESSION_MERGE_SCOPE_FORBIDDEN_CALLERS = frozenset(
         "tool_exit",
         "subskill_return",
         "review_pass_only",
+        "cancel",
+        "recover_dry_run",
     }
 )
-SESSION_MERGE_SCOPE_NON_MERGE_CALLERS = frozenset({"cancel", "recover_dry_run"})
 SESSION_MERGE_SCOPE_ALLOWED_TARGETS = frozenset({"auto", "child_to_session", "session_to_original"})
 SESSION_FINAL_MERGE_REQUIRED_EVIDENCE = (
     "all_must_dod_eligible",
@@ -1146,6 +1148,716 @@ def _resolve_final_merge_scope(
         evidence={**evidence_payload, "current_original_base_sha": current_base_sha},
         required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
     )
+SESSION_START_LEGACY_DIAGNOSTIC_FIELDS = (
+    "owner_session_id",
+    "owner_pid",
+    "owner_ppid",
+    "session_id",
+    "sessionId",
+    "MST_STATE_PPID",
+    "MST_SNAPSHOT_SESSION_ID",
+    "hook_session_id",
+    "transcript_uuid",
+)
+def _session_start_legacy_diagnostics(payload: dict | None) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        return {}
+    diagnostics: dict[str, object] = {}
+    for key in SESSION_START_LEGACY_DIAGNOSTIC_FIELDS:
+        value = payload.get(key)
+        if _string_or_none(value) is not None or isinstance(value, (int, float)) and not isinstance(value, bool):
+            diagnostics[key] = value
+    return diagnostics
+
+def _session_start_path(value: object) -> str | None:
+    text = _string_or_none(value)
+    if not text:
+        return None
+    return os.path.abspath(os.path.expanduser(text))
+
+def _session_start_bool(payload: dict, key: str) -> bool:
+    return bool(payload.get(key)) if isinstance(payload, dict) else False
+
+def _dirty_base_policy(git_status: dict | None) -> tuple[str, list[str]]:
+    status = git_status if isinstance(git_status, dict) else {}
+    if _session_start_bool(status, "conflicted"):
+        return "conflicted_index", ["conflicted"]
+    if _session_start_bool(status, "staged"):
+        return "staged_changes", ["staged"]
+    if _session_start_bool(status, "dirty") or _session_start_bool(status, "modified"):
+        return "dirty_worktree", ["dirty"]
+    if _session_start_bool(status, "untracked"):
+        return "untracked_files", ["untracked"]
+    return "clean", []
+
+def _canonical_session_payload(session_metadata: dict | None) -> dict[str, object]:
+    if not isinstance(session_metadata, dict):
+        return {}
+    mst_session_id = _string_or_none(session_metadata.get("mst_session_id"))
+    if not mst_session_id:
+        return {}
+    payload: dict[str, object] = {"mst_session_id": mst_session_id}
+    for key in ("state", "session_worktree_path", "session_branch", "base_branch", "base_sha"):
+        value = _string_or_none(session_metadata.get(key))
+        if value:
+            payload[key] = value
+    return payload
+
+def _session_start_result(
+    *,
+    ok: bool,
+    classification: str,
+    dirty_base_policy: str,
+    resume_action: str,
+    nested_session_action: str,
+    action: str,
+    reason: str | None = None,
+    canonical_session: dict | None = None,
+    legacy_diagnostics: dict | None = None,
+    target_project_root: str | None = None,
+    unsafe_merge_blocked: bool = False,
+    parent_session: dict | None = None,
+    diagnostics: list[dict] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ok": ok,
+        "classification": classification,
+        "dirty_base_policy": dirty_base_policy,
+        "resume_action": resume_action,
+        "nested_session_action": nested_session_action,
+        "action": action,
+        "target_project_root": target_project_root,
+        "unsafe_merge_blocked": unsafe_merge_blocked,
+        "destructive_action_allowed": False,
+        "canonical_session": canonical_session or {},
+        "legacy_diagnostics": legacy_diagnostics or {},
+        "diagnostics": diagnostics or [],
+    }
+    if reason:
+        payload["reason"] = reason
+    if parent_session is not None:
+        payload["parent_session"] = parent_session
+    return payload
+
+def resolve_session_start_policy_state(
+    *,
+    git_status: dict | None = None,
+    entry_context: dict | None = None,
+    session_metadata: dict | None = None,
+) -> dict[str, object]:
+    status = git_status if isinstance(git_status, dict) else {}
+    context = entry_context if isinstance(entry_context, dict) else {}
+    metadata = session_metadata if isinstance(session_metadata, dict) else None
+    dirty_policy, dirty_signals = _dirty_base_policy(status)
+    canonical_session = _canonical_session_payload(metadata)
+    legacy_diagnostics = _session_start_legacy_diagnostics(metadata)
+    entry_type = _string_or_none(context.get("entry_type")) or "start"
+    cwd = _session_start_path(context.get("cwd"))
+    session_root = _session_start_path(canonical_session.get("session_worktree_path"))
+
+    if dirty_policy != "clean":
+        return _session_start_result(
+            ok=False,
+            classification="blocked_dirty_base",
+            dirty_base_policy=dirty_policy,
+            resume_action="clean_or_stash_before_session_start",
+            nested_session_action="none",
+            action="clean_or_stash_before_session_start",
+            reason=dirty_policy,
+            canonical_session=canonical_session,
+            legacy_diagnostics=legacy_diagnostics,
+            unsafe_merge_blocked=True,
+            diagnostics=[{"code": "dirty_base_policy", "signals": dirty_signals}],
+        )
+
+    if entry_type in {"resume", "recover"} and not canonical_session:
+        return _session_start_result(
+            ok=False,
+            classification="session_identity_required",
+            dirty_base_policy="clean",
+            resume_action="provide_canonical_mst_session_id",
+            nested_session_action="none",
+            action="provide_canonical_mst_session_id",
+            reason="missing_canonical_mst_session_id",
+            legacy_diagnostics=legacy_diagnostics,
+            unsafe_merge_blocked=True,
+        )
+
+    if entry_type == "recover" and bool(context.get("recover_dry_run")):
+        return _session_start_result(
+            ok=False,
+            classification="recover_dry_run",
+            dirty_base_policy="clean",
+            resume_action="recover_dry_run",
+            nested_session_action="none",
+            action="report_recovery_plan_without_mutation",
+            reason="recover_dry_run",
+            canonical_session=canonical_session,
+            legacy_diagnostics=legacy_diagnostics,
+            target_project_root=session_root,
+            unsafe_merge_blocked=True,
+        )
+
+    if entry_type == "resume":
+        if not session_root:
+            return _session_start_result(
+                ok=False,
+                classification="repair_session_metadata",
+                dirty_base_policy="clean",
+                resume_action="repair_session_metadata",
+                nested_session_action="none",
+                action="repair_or_remove_conflicting_session_metadata",
+                reason="missing_session_worktree_path",
+                canonical_session=canonical_session,
+                legacy_diagnostics=legacy_diagnostics,
+                unsafe_merge_blocked=True,
+            )
+        if not _string_or_none(canonical_session.get("session_branch")):
+            return _session_start_result(
+                ok=False,
+                classification="repair_session_metadata",
+                dirty_base_policy="clean",
+                resume_action="repair_session_metadata",
+                nested_session_action="none",
+                action="repair_or_remove_conflicting_session_metadata",
+                reason="missing_session_branch",
+                canonical_session=canonical_session,
+                legacy_diagnostics=legacy_diagnostics,
+                target_project_root=session_root,
+                unsafe_merge_blocked=True,
+            )
+        if context.get("worktree_exists") is False:
+            return _session_start_result(
+                ok=False,
+                classification="repair_session_worktree",
+                dirty_base_policy="clean",
+                resume_action="repair_missing_session_worktree",
+                nested_session_action="none",
+                action="repair_or_remove_stale_session_metadata",
+                reason="session_worktree_missing",
+                canonical_session=canonical_session,
+                legacy_diagnostics=legacy_diagnostics,
+                target_project_root=session_root,
+                unsafe_merge_blocked=True,
+            )
+        return _session_start_result(
+            ok=True,
+            classification="resume_existing_session",
+            dirty_base_policy="clean",
+            resume_action="resume_existing_session",
+            nested_session_action="none",
+            action="use_session_worktree",
+            canonical_session=canonical_session,
+            legacy_diagnostics=legacy_diagnostics,
+            target_project_root=session_root,
+        )
+
+    if entry_type == "nested":
+        nested_intent = _string_or_none(context.get("nested_intent")) or "inherit"
+        if nested_intent == "top_level":
+            return _session_start_result(
+                ok=False,
+                classification="blocked_nested_top_level",
+                dirty_base_policy="clean",
+                resume_action="inherit_parent_session",
+                nested_session_action="block_top_level_session",
+                action="inherit_parent_session_or_create_child_worktree",
+                reason="nested_top_level_session_blocked",
+                canonical_session=canonical_session,
+                legacy_diagnostics=legacy_diagnostics,
+                target_project_root=session_root,
+                unsafe_merge_blocked=True,
+                parent_session=canonical_session,
+            )
+        if nested_intent == "child_worktree":
+            return _session_start_result(
+                ok=True,
+                classification="nested_session_entry",
+                dirty_base_policy="clean",
+                resume_action="inherit_parent_session",
+                nested_session_action="create_child_worktree",
+                action="create_child_worktree_under_parent_session",
+                canonical_session=canonical_session,
+                legacy_diagnostics=legacy_diagnostics,
+                target_project_root=cwd or session_root,
+                parent_session=canonical_session,
+            )
+        return _session_start_result(
+            ok=True,
+            classification="nested_session_entry",
+            dirty_base_policy="clean",
+            resume_action="inherit_parent_session",
+            nested_session_action="inherit_parent_session",
+            action="use_parent_session_context",
+            canonical_session=canonical_session,
+            legacy_diagnostics=legacy_diagnostics,
+            target_project_root=session_root or cwd,
+            parent_session=canonical_session,
+        )
+
+    return _session_start_result(
+        ok=True,
+        classification="top_level_session_start",
+        dirty_base_policy="clean",
+        resume_action="create_new_session",
+        nested_session_action="none",
+        action="create_session_worktree",
+        canonical_session=canonical_session,
+        legacy_diagnostics=legacy_diagnostics,
+        target_project_root=cwd,
+    )
+
+SESSION_RESERVATION_FIELDS = (
+    "mst_session_id",
+    "session_branch",
+    "session_worktree_path",
+    "metadata_path",
+    "base_branch",
+    "base_sha",
+)
+SESSION_RESERVATION_COLLISION_FIELDS = (
+    "metadata_path",
+    "mst_session_id",
+    "session_branch",
+    "session_worktree_path",
+)
+
+def _session_reservation_candidate_payload(candidate: dict | None) -> dict[str, object]:
+    if not isinstance(candidate, dict):
+        return {}
+    payload: dict[str, object] = {}
+    for key in SESSION_RESERVATION_FIELDS:
+        value = _string_or_none(candidate.get(key))
+        if value:
+            payload[key] = value
+    return payload
+
+def session_reservation_idempotency_key(*, candidate: dict | None = None) -> str:
+    payload = _session_reservation_candidate_payload(candidate)
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "session-reservation:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+def _session_reservation_legacy_diagnostics(payload: dict | None) -> dict[str, object]:
+    return _session_start_legacy_diagnostics(payload)
+
+def _session_reservation_collisions(
+    candidate_payload: dict[str, object],
+    existing_reservations: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    collisions: list[dict[str, object]] = []
+    existing = existing_reservations if isinstance(existing_reservations, list) else []
+    for index, reservation in enumerate(existing):
+        if not isinstance(reservation, dict):
+            continue
+        fields = [
+            key
+            for key in SESSION_RESERVATION_COLLISION_FIELDS
+            if _string_or_none(candidate_payload.get(key))
+            and _string_or_none(candidate_payload.get(key)) == _string_or_none(reservation.get(key))
+        ]
+        if fields:
+            collisions.append(
+                {
+                    "index": index,
+                    "fields": fields,
+                    "policy": "retry_with_new_session_identity",
+                }
+            )
+    return collisions
+
+def _reservation_result(
+    *,
+    ok: bool,
+    classification: str,
+    reservation_policy: str,
+    collision_policy: str,
+    lock_policy: str,
+    base_drift_policy: str,
+    final_merge_action: str,
+    action: str,
+    reservation: dict | None = None,
+    collisions: list[dict] | None = None,
+    legacy_diagnostics: dict | None = None,
+    diagnostics: list[dict] | None = None,
+    unsafe_merge_blocked: bool = False,
+    idempotency_key: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ok": ok,
+        "classification": classification,
+        "reservation_policy": reservation_policy,
+        "collision_policy": collision_policy,
+        "lock_policy": lock_policy,
+        "base_drift_policy": base_drift_policy,
+        "final_merge_action": final_merge_action,
+        "action": action,
+        "reservation": reservation or {},
+        "collisions": collisions or [],
+        "legacy_diagnostics": legacy_diagnostics or {},
+        "diagnostics": diagnostics or [],
+        "unsafe_merge_blocked": unsafe_merge_blocked,
+        "destructive_action_allowed": False,
+    }
+    if idempotency_key:
+        payload["idempotency_key"] = idempotency_key
+    return payload
+
+def _resolve_final_merge_lock_policy(
+    *,
+    candidate_payload: dict[str, object],
+    final_merge_context: dict,
+) -> tuple[str, str, bool]:
+    lock = final_merge_context.get("lock") if isinstance(final_merge_context.get("lock"), dict) else {}
+    lock_state = _string_or_none(lock.get("state")) or "missing"
+    owner = _string_or_none(lock.get("owner_mst_session_id"))
+    session_id = _string_or_none(candidate_payload.get("mst_session_id"))
+    if lock_state == "busy":
+        return "lock_busy", "wait_for_base_merge_lock", True
+    if lock_state == "stale":
+        return "stale_lock", "recover_or_repair_base_merge_lock", True
+    if lock_state != "held":
+        return "lock_missing", "acquire_base_merge_lock", True
+    if owner != session_id:
+        return "lock_owner_mismatch", "wait_for_or_recover_base_merge_lock", True
+    return "owned_lock", "authorize_final_merge", False
+
+def resolve_parallel_session_reservation_state(
+    *,
+    candidate: dict | None = None,
+    existing_reservations: list[dict[str, object]] | None = None,
+    final_merge_context: dict | None = None,
+) -> dict[str, object]:
+    candidate_payload = _session_reservation_candidate_payload(candidate)
+    legacy_diagnostics = _session_reservation_legacy_diagnostics(candidate)
+    session_id = _string_or_none(candidate_payload.get("mst_session_id"))
+    context = final_merge_context if isinstance(final_merge_context, dict) else {}
+    final_merge_requested = bool(context.get("requested"))
+
+    if not session_id:
+        return _reservation_result(
+            ok=False,
+            classification="session_identity_required",
+            reservation_policy="canonical_identity_required",
+            collision_policy="none",
+            lock_policy="canonical_identity_required" if final_merge_requested else "not_requested",
+            base_drift_policy="not_checked",
+            final_merge_action="provide_canonical_mst_session_id",
+            action="provide_canonical_mst_session_id",
+            legacy_diagnostics=legacy_diagnostics,
+            unsafe_merge_blocked=True,
+        )
+
+    collisions = _session_reservation_collisions(candidate_payload, existing_reservations)
+    idempotency_key = session_reservation_idempotency_key(candidate=candidate_payload)
+    reservation = {**candidate_payload, "idempotency_key": idempotency_key}
+    if collisions:
+        return _reservation_result(
+            ok=False,
+            classification="reservation_collision",
+            reservation_policy="collision_detected",
+            collision_policy="retry_with_new_session_identity",
+            lock_policy="not_requested",
+            base_drift_policy="not_checked",
+            final_merge_action="reserve_session_before_final_merge",
+            action="allocate_new_session_identity_or_resume_existing",
+            reservation=reservation,
+            collisions=collisions,
+            legacy_diagnostics=legacy_diagnostics,
+            unsafe_merge_blocked=True,
+            idempotency_key=idempotency_key,
+        )
+
+    if final_merge_requested:
+        lock_policy, lock_action, lock_blocked = _resolve_final_merge_lock_policy(
+            candidate_payload=candidate_payload,
+            final_merge_context=context,
+        )
+        current_base_sha = _string_or_none(context.get("current_base_sha"))
+        reserved_base_sha = _string_or_none(candidate_payload.get("base_sha"))
+        if not lock_blocked and current_base_sha and reserved_base_sha and current_base_sha != reserved_base_sha:
+            return _reservation_result(
+                ok=False,
+                classification="final_merge_blocked",
+                reservation_policy="atomic_reservation_available",
+                collision_policy="none",
+                lock_policy=lock_policy,
+                base_drift_policy="base_sha_drift",
+                final_merge_action="refresh_session_or_rebase_before_final_merge",
+                action="refresh_session_or_rebase_before_final_merge",
+                reservation=reservation,
+                legacy_diagnostics=legacy_diagnostics,
+                diagnostics=[
+                    {
+                        "code": "base_sha_drift",
+                        "reserved_base_sha": reserved_base_sha,
+                        "current_base_sha": current_base_sha,
+                        "safer_action": "refresh_session_or_rebase_before_final_merge",
+                    }
+                ],
+                unsafe_merge_blocked=True,
+                idempotency_key=idempotency_key,
+            )
+        if lock_blocked:
+            return _reservation_result(
+                ok=False,
+                classification="final_merge_blocked",
+                reservation_policy="atomic_reservation_available",
+                collision_policy="none",
+                lock_policy=lock_policy,
+                base_drift_policy="not_checked",
+                final_merge_action=lock_action,
+                action=lock_action,
+                reservation=reservation,
+                legacy_diagnostics=legacy_diagnostics,
+                unsafe_merge_blocked=True,
+                idempotency_key=idempotency_key,
+            )
+        return _reservation_result(
+            ok=True,
+            classification="final_merge_authorized",
+            reservation_policy="atomic_reservation_available",
+            collision_policy="none",
+            lock_policy=lock_policy,
+            base_drift_policy="clean",
+            final_merge_action="authorize_final_merge",
+            action="authorize_final_merge",
+            reservation=reservation,
+            legacy_diagnostics=legacy_diagnostics,
+            idempotency_key=idempotency_key,
+        )
+
+    return _reservation_result(
+        ok=True,
+        classification="reservation_available",
+        reservation_policy="atomic_reservation_available",
+        collision_policy="none",
+        lock_policy="not_requested",
+        base_drift_policy="not_checked",
+        final_merge_action="reserve_session_before_final_merge",
+        action="create_session_reservation",
+        reservation=reservation,
+        legacy_diagnostics=legacy_diagnostics,
+        idempotency_key=idempotency_key,
+    )
+
+SECURITY_CONTRACT_MAX_VALUE_LENGTH = 160
+SECURITY_CONTRACT_SHELL_META = set(";&|`$<>(){}[]!\\\n\r")
+SECURITY_CONTRACT_HTML_MARKERS = ("<", ">", "javascript:", "onerror=", "onload=", "script")
+SECURITY_CONTRACT_DESTRUCTIVE_GIT = (
+    ("git", "branch", "-d"),
+    ("git", "worktree", "remove", "--force"),
+    ("git", "reset"),
+    ("git", "clean"),
+    ("git", "checkout", "--"),
+)
+
+def _security_legacy_diagnostics(payload: dict | None) -> dict[str, object]:
+    return _session_start_legacy_diagnostics(payload)
+
+def _security_text(value: object) -> str | None:
+    return _string_or_none(value)
+
+def _security_reason(value: object, *, allow_slash: bool = False, allow_query: bool = False) -> str | None:
+    text = _security_text(value)
+    if text is None:
+        return "missing"
+    if len(text) > SECURITY_CONTRACT_MAX_VALUE_LENGTH:
+        return "too_long"
+    lowered = text.lower()
+    if "%2e" in lowered or "%2f" in lowered or ".." in text:
+        return "path_traversal"
+    if not allow_slash and "/" in text:
+        return "slash_not_allowed"
+    if any(char in text for char in SECURITY_CONTRACT_SHELL_META):
+        return "shell_metacharacter"
+    if any(marker in lowered for marker in SECURITY_CONTRACT_HTML_MARKERS):
+        return "ui_injection"
+    if text != unicodedata.normalize("NFKC", text):
+        return "unicode_normalization"
+    if not text.isascii():
+        return "non_ascii"
+    if allow_query:
+        return None
+    return None
+
+def _security_session_reason(value: object) -> str | None:
+    reason = _security_reason(value)
+    if reason is not None:
+        return reason
+    text = _security_text(value)
+    if text is None:
+        return "missing"
+    try:
+        validate_mst_session_id(text)
+    except ValueError:
+        return "invalid_structured_mst_session_id"
+    return None
+
+def _security_branch_reason(value: object, mst_session_id: str) -> str | None:
+    reason = _security_reason(value, allow_slash=True)
+    if reason is not None:
+        return reason
+    text = _security_text(value)
+    if text != session_worktree_branch_name(mst_session_id):
+        return "unexpected_session_branch"
+    return None
+
+def _security_path_reason(value: object) -> str | None:
+    text = _security_text(value)
+    if text is None:
+        return "missing"
+    if len(text) > SECURITY_CONTRACT_MAX_VALUE_LENGTH:
+        return "too_long"
+    lowered = text.lower()
+    if "%2e" in lowered or "%2f" in lowered:
+        return "path_traversal"
+    parts = Path(text).parts
+    if ".." in parts:
+        return "path_traversal"
+    if any(char in text for char in SECURITY_CONTRACT_SHELL_META - {"/"}):
+        return "shell_metacharacter"
+    if any(marker in lowered for marker in SECURITY_CONTRACT_HTML_MARKERS):
+        return "ui_injection"
+    if text != unicodedata.normalize("NFKC", text):
+        return "unicode_normalization"
+    if not text.isascii():
+        return "non_ascii"
+    return None
+
+def _security_shell_arg_reason(value: object) -> str | None:
+    reason = _security_reason(value, allow_slash=True)
+    if reason is not None:
+        return reason
+    return None
+
+def _security_api_reason(value: object) -> str | None:
+    reason = _security_reason(value, allow_slash=True, allow_query=True)
+    if reason is not None:
+        return reason
+    return None
+
+def _security_ui_reason(value: object) -> str | None:
+    reason = _security_reason(value, allow_slash=True, allow_query=True)
+    if reason is not None:
+        return reason
+    return None
+
+def _security_add_boundary_diagnostic(diagnostics: list[dict], *, boundary: str, code: str, value: object, reason: str) -> None:
+    diagnostics.append({"code": code, "boundary": boundary, "reason": reason, "value": value})
+
+def _security_command_parts(command: object) -> list[str]:
+    if isinstance(command, list):
+        return [str(part) for part in command]
+    text = _security_text(command)
+    return text.split() if text else []
+
+def _security_is_destructive_git_command(parts: list[str]) -> bool:
+    lowered = tuple(part.lower() for part in parts)
+    return any(lowered[: len(pattern)] == pattern for pattern in SECURITY_CONTRACT_DESTRUCTIVE_GIT)
+
+def _security_destructive_diagnostics(commands: object) -> list[dict[str, object]]:
+    diagnostics: list[dict[str, object]] = []
+    items = commands if isinstance(commands, list) else []
+    for item in items:
+        command = item.get("command") if isinstance(item, dict) else item
+        parts = _security_command_parts(command)
+        if not _security_is_destructive_git_command(parts):
+            continue
+        dry_run_evidence = item.get("dry_run_evidence") if isinstance(item, dict) else None
+        explicit_authorization = bool(item.get("explicit_authorization")) if isinstance(item, dict) else False
+        if dry_run_evidence and explicit_authorization:
+            continue
+        diagnostics.append(
+            {
+                "code": "blocked_destructive",
+                "command": parts,
+                "target": item.get("target") if isinstance(item, dict) else None,
+                "reason": "dry_run_evidence_required",
+                "safer_action": "run_dry_run_and_revalidate_contract",
+                "dry_run_required": True,
+            }
+        )
+    return diagnostics
+
+def resolve_security_diagnostic_contract_state(context: dict | None = None) -> dict[str, object]:
+    payload = context if isinstance(context, dict) else {}
+    diagnostics: list[dict[str, object]] = []
+    legacy_diagnostics = _security_legacy_diagnostics(payload)
+    mst_session_id = _security_text(payload.get("mst_session_id"))
+    session_reason = _security_session_reason(mst_session_id)
+    if session_reason is not None:
+        _security_add_boundary_diagnostic(
+            diagnostics,
+            boundary="session_id",
+            code="invalid_session_id",
+            value=mst_session_id,
+            reason=session_reason,
+        )
+    if session_reason is None and mst_session_id is not None:
+        branch = _security_text(payload.get("session_branch"))
+        branch_reason = _security_branch_reason(branch, mst_session_id)
+        if branch_reason is not None:
+            _security_add_boundary_diagnostic(
+                diagnostics,
+                boundary="branch",
+                code="unsafe_branch",
+                value=branch,
+                reason=branch_reason,
+            )
+        worktree_path = _security_text(payload.get("session_worktree_path"))
+        path_reason = _security_path_reason(worktree_path)
+        if path_reason is not None:
+            _security_add_boundary_diagnostic(
+                diagnostics,
+                boundary="path",
+                code="unsafe_path",
+                value=worktree_path,
+                reason=path_reason,
+            )
+        shell_args = payload.get("shell_args") if isinstance(payload.get("shell_args"), list) else []
+        for index, arg in enumerate(shell_args):
+            reason = _security_shell_arg_reason(arg)
+            if reason is not None:
+                diagnostics.append({"code": "unsafe_shell_arg", "boundary": "shell", "index": index, "reason": reason, "value": arg})
+        api_params = payload.get("api_params") if isinstance(payload.get("api_params"), dict) else {}
+        for key, value in api_params.items():
+            if key == "mst_session_id" and value != mst_session_id:
+                reason = "canonical_identity_mismatch"
+            else:
+                reason = _security_api_reason(value)
+            if reason is not None:
+                diagnostics.append({"code": "unsafe_api_param", "boundary": "api", "field": key, "reason": reason, "value": value})
+        ui_payload = payload.get("ui_payload") if isinstance(payload.get("ui_payload"), dict) else {}
+        for key, value in ui_payload.items():
+            reason = _security_ui_reason(value)
+            if reason is not None:
+                diagnostics.append({"code": "unsafe_ui_value", "boundary": "ui", "field": key, "reason": reason, "value": value})
+    destructive_diagnostics = _security_destructive_diagnostics(payload.get("destructive_commands"))
+    ok = not diagnostics and not destructive_diagnostics
+    boundary_payload: dict[str, object] = {}
+    if ok and mst_session_id is not None:
+        boundary_payload = {
+            "mst_session_id": mst_session_id,
+            "session_branch": _security_text(payload.get("session_branch")),
+            "session_worktree_path": _security_text(payload.get("session_worktree_path")),
+            "shell_args": list(payload.get("shell_args") if isinstance(payload.get("shell_args"), list) else []),
+            "api_params": dict(payload.get("api_params") if isinstance(payload.get("api_params"), dict) else {}),
+            "ui_payload": dict(payload.get("ui_payload") if isinstance(payload.get("ui_payload"), dict) else {}),
+        }
+    classification = "security_contract_clear" if ok else "security_boundary_blocked"
+    if destructive_diagnostics:
+        classification = "blocked_destructive"
+    return {
+        "ok": ok,
+        "classification": classification,
+        "canonical_identity_source": "mst_session_id" if ok and mst_session_id else "blocked",
+        "boundary_payload": boundary_payload,
+        "diagnostics": diagnostics,
+        "destructive_diagnostics": destructive_diagnostics,
+        "legacy_diagnostics": legacy_diagnostics,
+        "destructive_action_allowed": False,
+    }
+
 def resolve_session_merge_scope(
     project_root: Path,
     *,
@@ -1184,21 +1896,6 @@ def resolve_session_merge_scope(
             action="resume_parent_session_workflow",
             evidence={"safer_action": "use_request_child_accept_or_session_level_accept"},
             forbidden_caller=True,
-        )
-    if caller_value in SESSION_MERGE_SCOPE_NON_MERGE_CALLERS:
-        return _merge_scope_payload(
-            ok=False,
-            caller=caller_value,
-            requested_target=requested_target_value,
-            merge_state="non_success_diagnostic",
-            child_to_session=False,
-            session_to_original=False,
-            target_branch=None,
-            session_branch=session_context["session_branch"],
-            original_base_branch=session_context["original_base_branch"],
-            original_base_sha=session_context["original_base_sha"],
-            reason="non_merge_caller",
-            action="cleanup_or_recover_only",
         )
     if caller_value in SESSION_MERGE_SCOPE_CHILD_CALLERS or (
         caller_value in SESSION_MERGE_SCOPE_CHILD_OPTIONAL_CALLERS

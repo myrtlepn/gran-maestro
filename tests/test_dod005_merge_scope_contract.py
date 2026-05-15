@@ -13,9 +13,8 @@ from scripts.mst_cmds.worktree import cmd_worktree_resolve_base, role_branch_nam
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST_REPO_ROOT = ROOT.parents[4]
 OBJECTIVE_DETAIL = (
-    HOST_REPO_ROOT
+    ROOT
     / ".gran-maestro"
     / "agile"
     / "AGI-038"

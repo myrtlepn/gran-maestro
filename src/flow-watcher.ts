@@ -8,6 +8,7 @@ import { BASE_DIR } from "./config.ts";
 
 export type FlowEvent = Record<string, unknown> & {
   session_id?: string;
+  mst_session_id?: string;
   timestamp?: string;
   ts?: string;
 };
@@ -15,6 +16,37 @@ export type FlowEvent = Record<string, unknown> & {
 export type ExecutionFlowView = Record<string, unknown> & {
   view_kind: "dod017.execution-flow.dashboard-view";
   mst_session_id?: string;
+};
+
+export type GraphConsistencyDiagnostic = {
+  code: string;
+  severity: "info" | "warning" | "error";
+  detail: string;
+  mst_session_id?: string;
+  legacy_session_id?: string;
+  field?: string;
+};
+
+export type GraphConsistency = {
+  status: "consistent" | "degraded" | "mismatch";
+  diagnostics: GraphConsistencyDiagnostic[];
+  event_count: number;
+  joined_event_count: number;
+  orphan_event_count?: number;
+};
+
+export type SessionGraphView = Record<string, unknown> & {
+  view_kind: "gran-maestro.session-graph.dashboard-view";
+  mst_session_id: string;
+  nodes: Record<string, unknown>[];
+  edges: Record<string, unknown>[];
+  events: FlowEvent[];
+  worktrees: {
+    session: Record<string, unknown> | null;
+    children: Record<string, unknown>[];
+  };
+  recovery_action: unknown;
+  graph_consistency: GraphConsistency;
 };
 
 type Subscriber = (event: FlowEvent) => void;
@@ -57,6 +89,85 @@ function flowTimestamp(event: FlowEvent): string {
   return typeof value === "string" ? value : String(value);
 }
 
+function lifecycleEventFamily(eventType: string | undefined): string {
+  if (!eventType) return "unknown";
+  if (eventType.startsWith("session_")) return "session";
+  if (eventType.startsWith("child_")) return "child";
+  if (eventType.includes("worktree")) return "worktree";
+  if (eventType.includes("cleanup")) return "cleanup";
+  if (eventType.includes("recovery")) return "recovery";
+  return eventType.split("_", 1)[0] || "unknown";
+}
+
+function flowEventIdentity(event: FlowEvent): string | undefined {
+  return stringValue(event.idempotency_key) ?? stringValue(event.event_id);
+}
+
+function normalizeLifecycleEvent(event: FlowEvent): FlowEvent {
+  const eventType = stringValue(event.event_type);
+  const canonical = eventCanonicalSessionId(event);
+  const timestamp = flowTimestamp(event);
+  const identity = flowEventIdentity(event) ?? [canonical, eventType, timestamp].filter(Boolean).join(":");
+  return {
+    schema_version: event.schema_version ?? 1,
+    ...event,
+    event_id: stringValue(event.event_id) ?? identity,
+    idempotency_key: stringValue(event.idempotency_key) ?? identity,
+    ordering_key: stringValue(event.ordering_key) ?? timestamp,
+    event_family: stringValue(event.event_family) ?? lifecycleEventFamily(eventType),
+    replay_compatible: canonical ? event.replay_compatible ?? true : false,
+  };
+}
+
+function normalizeLifecycleEvents(events: FlowEvent[]): {
+  events: FlowEvent[];
+  diagnostics: GraphConsistencyDiagnostic[];
+} {
+  const diagnostics: GraphConsistencyDiagnostic[] = [];
+  const seen = new Set<string>();
+  const normalized: FlowEvent[] = [];
+  let previousSourceOrder = "";
+  const sourceOrderedEvents = [...events].sort((a, b) => {
+    const left = typeof a.__source_order === "number" ? a.__source_order : 0;
+    const right = typeof b.__source_order === "number" ? b.__source_order : 0;
+    return left - right;
+  });
+  for (const event of sourceOrderedEvents) {
+    const item = normalizeLifecycleEvent(event);
+    const orderingKey = stringValue(item.ordering_key) ?? flowTimestamp(item);
+    if (previousSourceOrder && orderingKey && orderingKey < previousSourceOrder) {
+      diagnostics.push({
+        code: "out_of_order_lifecycle_event",
+        severity: "warning",
+        detail: "lifecycle event source order differs from replay ordering",
+        mst_session_id: eventCanonicalSessionId(item),
+      });
+    }
+    if (orderingKey) previousSourceOrder = orderingKey;
+
+    const identity = flowEventIdentity(item);
+    if (identity && seen.has(identity)) {
+      diagnostics.push({
+        code: "duplicate_lifecycle_event",
+        severity: "warning",
+        detail: "duplicate lifecycle event idempotency key ignored",
+        mst_session_id: eventCanonicalSessionId(item),
+        field: "idempotency_key",
+        idempotency_key: identity,
+      } as GraphConsistencyDiagnostic & { idempotency_key: string });
+      continue;
+    }
+    if (identity) seen.add(identity);
+    normalized.push(item);
+  }
+  normalized.sort((a, b) => {
+    const left = stringValue(a.ordering_key) ?? flowTimestamp(a);
+    const right = stringValue(b.ordering_key) ?? flowTimestamp(b);
+    return left.localeCompare(right);
+  });
+  return { events: normalized, diagnostics };
+}
+
 function parseFlowLine(line: string, sessionId?: string): FlowEvent | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
@@ -66,12 +177,12 @@ function parseFlowLine(line: string, sessionId?: string): FlowEvent | null {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
-    return {
+    return normalizeLifecycleEvent({
       ...(parsed as Record<string, unknown>),
       session_id: typeof parsed.session_id === "string"
         ? parsed.session_id
         : sessionId,
-    };
+    });
   } catch {
     return null;
   }
@@ -126,6 +237,7 @@ export async function getFlowEvents(
   baseDir = BASE_DIR,
 ): Promise<FlowEvent[]> {
   const events: FlowEvent[] = [];
+  let sourceOrder = 0;
 
   for (const path of await listFlowFiles(baseDir)) {
     const sessionId = sessionIdFromFlowPath(path);
@@ -133,7 +245,7 @@ export async function getFlowEvents(
       const text = await Deno.readTextFile(path);
       for (const line of text.split("\n")) {
         const event = parseFlowLine(line, sessionId);
-        if (event) events.push(event);
+        if (event) events.push({ ...event, __source_order: sourceOrder++ });
       }
     } catch {
       // ignore sessions without flow logs
@@ -154,6 +266,24 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function arrayRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[]
+    : [];
+}
+
+function eventCanonicalSessionId(event: FlowEvent): string | undefined {
+  return stringValue(event.mst_session_id);
+}
+
+function eventLegacySessionId(event: FlowEvent): string | undefined {
+  return stringValue(event.session_id);
+}
+
+function eventSessionId(event: FlowEvent): string | undefined {
+  return eventCanonicalSessionId(event) ?? eventLegacySessionId(event);
+}
+
 async function readCurrentHistoryHead(sessionDir: string): Promise<string | undefined> {
   try {
     return (await Deno.readTextFile(join(sessionDir, "history.head"))).trim() ||
@@ -171,8 +301,13 @@ async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowV
 
     const source = objectRecord(projection.source);
     const coverage = objectRecord(projection.coverage);
-    const nodes = Array.isArray(projection.nodes) ? projection.nodes : [];
-    const edges = Array.isArray(projection.edges) ? projection.edges : [];
+    const nodes = arrayRecords(projection.nodes);
+    const edges = arrayRecords(projection.edges);
+    const projectionWorktrees = objectRecord(projection.worktrees);
+    const sessionWorktree = objectRecord(projection.session_worktree);
+    const nestedSessionWorktree = objectRecord(projectionWorktrees.session);
+    const childWorktrees = arrayRecords(projection.child_worktrees);
+    const nestedChildWorktrees = arrayRecords(projectionWorktrees.children);
     const currentHead = await readCurrentHistoryHead(dirname(path));
     const sourceHead = stringValue(source.history_head);
     const sourceHash = stringValue(source.source_hash) ??
@@ -223,6 +358,17 @@ async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowV
       last_transition: projection.last_transition,
       next_action: projection.next_action,
       blocker: projection.blocker,
+      nodes,
+      edges,
+      worktrees: {
+        session: Object.keys(sessionWorktree).length
+          ? sessionWorktree
+          : Object.keys(nestedSessionWorktree).length
+          ? nestedSessionWorktree
+          : null,
+        children: childWorktrees.length ? childWorktrees : nestedChildWorktrees,
+      },
+      recovery_action: projection.recovery_action ?? objectRecord(projection.recovery).primary_action ?? null,
       views: projection.views ?? {},
       display_only: true,
       derived_artifact: true,
@@ -246,6 +392,170 @@ export async function getExecutionFlowViews(
   return views.sort((a, b) =>
     String(a.mst_session_id ?? "").localeCompare(String(b.mst_session_id ?? ""))
   );
+}
+
+function diagnosticStatus(
+  diagnostics: GraphConsistencyDiagnostic[],
+): GraphConsistency["status"] {
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return "mismatch";
+  }
+  if (diagnostics.length) return "degraded";
+  return "consistent";
+}
+
+function fieldSessionMismatchDiagnostic(
+  mstSessionId: string,
+  source: Record<string, unknown>,
+  field: string,
+): GraphConsistencyDiagnostic | undefined {
+  const value = stringValue(source[field]);
+  if (!value || value === mstSessionId) return undefined;
+  return {
+    code: "worktree_session_mismatch",
+    severity: "error",
+    detail: `${field} does not match graph mst_session_id`,
+    mst_session_id: mstSessionId,
+    field,
+  };
+}
+
+function worktreeSessionDiagnostics(
+  mstSessionId: string,
+  worktrees: { session: Record<string, unknown> | null; children: Record<string, unknown>[] },
+): GraphConsistencyDiagnostic[] {
+  const diagnostics: GraphConsistencyDiagnostic[] = [];
+  if (worktrees.session) {
+    const diagnostic = fieldSessionMismatchDiagnostic(
+      mstSessionId,
+      worktrees.session,
+      "mst_session_id",
+    );
+    if (diagnostic) diagnostics.push(diagnostic);
+  }
+
+  for (const child of worktrees.children) {
+    const diagnostic = fieldSessionMismatchDiagnostic(
+      mstSessionId,
+      child,
+      "parent_mst_session_id",
+    ) ?? fieldSessionMismatchDiagnostic(mstSessionId, child, "mst_session_id");
+    if (diagnostic) diagnostics.push(diagnostic);
+  }
+  return diagnostics;
+}
+
+function eventConsistencyDiagnostics(
+  mstSessionId: string,
+  events: FlowEvent[],
+): GraphConsistencyDiagnostic[] {
+  const diagnostics: GraphConsistencyDiagnostic[] = [];
+  for (const event of events) {
+    const canonical = eventCanonicalSessionId(event);
+    const legacy = eventLegacySessionId(event);
+    if (canonical === mstSessionId && legacy && legacy !== mstSessionId) {
+      diagnostics.push({
+        code: "legacy_session_id_mismatch",
+        severity: "warning",
+        detail: "event legacy session_id differs from canonical mst_session_id",
+        mst_session_id: mstSessionId,
+        legacy_session_id: legacy,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+export function getFlowViewConsistencyDiagnostics(
+  events: FlowEvent[],
+  executionFlowViews: ExecutionFlowView[],
+): GraphConsistencyDiagnostic[] {
+  const projectedSessionIds = new Set(
+    executionFlowViews
+      .map((view) => stringValue(view.mst_session_id))
+      .filter((value): value is string => Boolean(value)),
+  );
+  const diagnostics: GraphConsistencyDiagnostic[] = [];
+
+  for (const event of events) {
+    const canonical = eventCanonicalSessionId(event);
+    const legacy = eventLegacySessionId(event);
+    if (!canonical && legacy) {
+      diagnostics.push({
+        code: "legacy_only_event",
+        severity: "warning",
+        detail: "event has legacy session_id but no canonical mst_session_id",
+        legacy_session_id: legacy,
+      });
+      continue;
+    }
+    if (canonical && !projectedSessionIds.has(canonical)) {
+      diagnostics.push({
+        code: "orphan_flow_event",
+        severity: "warning",
+        detail: "event has canonical mst_session_id without execution-flow projection",
+        mst_session_id: canonical,
+        legacy_session_id: legacy,
+      });
+    }
+  }
+
+  return diagnostics;
+}
+
+export function buildSessionGraphViews(
+  events: FlowEvent[],
+  executionFlowViews: ExecutionFlowView[],
+): SessionGraphView[] {
+  return executionFlowViews
+    .filter((view) => Boolean(view.mst_session_id))
+    .map((view) => {
+      const mstSessionId = String(view.mst_session_id);
+      const viewWorktrees = objectRecord(view.worktrees);
+      const sessionWorktree = objectRecord(viewWorktrees.session);
+      const children = arrayRecords(viewWorktrees.children);
+      const worktrees = {
+        session: Object.keys(sessionWorktree).length ? sessionWorktree : null,
+        children,
+      };
+      const recovery = objectRecord(view.recovery);
+      const joinedEventState = normalizeLifecycleEvents(
+        events.filter((event) => eventCanonicalSessionId(event) === mstSessionId),
+      );
+      const joinedEvents = joinedEventState.events;
+      const diagnostics = [
+        ...joinedEventState.diagnostics,
+        ...eventConsistencyDiagnostics(mstSessionId, joinedEvents),
+        ...worktreeSessionDiagnostics(mstSessionId, worktrees),
+      ];
+      return {
+        view_kind: "gran-maestro.session-graph.dashboard-view",
+        schema_version: 1,
+        mst_session_id: mstSessionId,
+        root_mst_id: view.root_mst_id,
+        status: view.blocker ? "blocked" : "active",
+        nodes: arrayRecords(view.nodes),
+        edges: arrayRecords(view.edges),
+        events: joinedEvents,
+        current_node: view.current_node,
+        last_transition: view.last_transition,
+        next_action: view.next_action ?? null,
+        blocker: view.blocker ?? null,
+        coverage: view.coverage ?? {},
+        worktrees,
+        recovery_action: view.recovery_action ?? recovery.primary_action ?? null,
+        projection_status: view.projection_status ?? {},
+        graph_consistency: {
+          status: diagnosticStatus(diagnostics),
+          diagnostics,
+          event_count: events.length,
+          joined_event_count: joinedEvents.length,
+        },
+        display_only: true,
+        next_action_authority: false,
+        transition_authority: "dod016_transition_graph",
+      };
+    });
 }
 
 export function subscribeFlowSse(

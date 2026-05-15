@@ -8,12 +8,5 @@ frontend/node_modules/
 /frontend/.gran-maestro/
 /.omx/
 /.claude/*
-!/.claude/hooks/
-/.claude/hooks/*
-!/.claude/hooks/lib/
-/.claude/hooks/lib/*
-!/.claude/hooks/lib/bootstrap.bash
-!/.claude/hooks/lib/logging.bash
-!/.claude/hooks/lib/session_identity.bash
 .pytest_cache/
 *.backup-*.json

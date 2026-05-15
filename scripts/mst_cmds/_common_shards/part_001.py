@@ -87,6 +87,272 @@ def base_dir_from_project(project_root: Path) -> Path:
     return project_root / _base_dir_name()
 def cwd_base_dir() -> Path:
     return Path.cwd().resolve() / _base_dir_name()
+RUNTIME_ROOT_POINTER_FIELDS = (
+    "canonical_runtime_root",
+    "runtime_metadata_root",
+    "mst_runtime_root",
+    "MST_RUNTIME_ROOT",
+)
+RUNTIME_LEGACY_DIAGNOSTIC_FIELDS = (
+    "owner_session_id",
+    "owner_pid",
+    "owner_ppid",
+    "session_id",
+    "sessionId",
+    "MST_STATE_PPID",
+    "MST_SNAPSHOT_SESSION_ID",
+    "hook_session_id",
+    "transcript_uuid",
+)
+RUNTIME_CONTEXT_SECTIONS = (
+    "current_session",
+    "session",
+    "child_metadata",
+    "child",
+    "request",
+    "metadata",
+)
+def _runtime_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+def _runtime_normalize_path(value: object) -> str | None:
+    text = _runtime_string(value)
+    if not text:
+        return None
+    return str(Path(text).expanduser().resolve(strict=False))
+def _runtime_payloads(context: dict) -> list[tuple[str, dict]]:
+    payloads: list[tuple[str, dict]] = [("context", context)]
+    for section in RUNTIME_CONTEXT_SECTIONS:
+        value = context.get(section)
+        if isinstance(value, dict):
+            payloads.append((section, value))
+    return payloads
+def _runtime_pointer_sources(context: dict) -> list[dict[str, object]]:
+    sources: list[dict[str, object]] = []
+    for name, payload in _runtime_payloads(context):
+        for field in RUNTIME_ROOT_POINTER_FIELDS:
+            value = _runtime_string(payload.get(field))
+            normalized = _runtime_normalize_path(value)
+            if value and normalized:
+                sources.append({
+                    "source": f"{name}.{field}",
+                    "field": field,
+                    "value": value,
+                    "normalized": normalized,
+                })
+    return sources
+def _runtime_legacy_diagnostics(context: dict) -> dict[str, dict[str, object]]:
+    diagnostics: dict[str, dict[str, object]] = {}
+    for name, payload in _runtime_payloads(context):
+        section: dict[str, object] = {}
+        for field in RUNTIME_LEGACY_DIAGNOSTIC_FIELDS:
+            value = payload.get(field)
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            section[field] = value
+        if section:
+            diagnostics[name] = section
+    return diagnostics
+def _runtime_trusted_original_root(context: dict) -> str | None:
+    direct = _runtime_normalize_path(context.get("trusted_original_runtime_root"))
+    if direct:
+        return direct
+    project_root = _runtime_normalize_path(context.get("trusted_original_project_root"))
+    if project_root:
+        return str((Path(project_root) / _base_dir_name()).resolve(strict=False))
+    if context.get("original_project_root_trusted") is True:
+        original_root = _runtime_normalize_path(context.get("original_project_root"))
+        if original_root:
+            return str((Path(original_root) / _base_dir_name()).resolve(strict=False))
+    return None
+def _runtime_local_roots(context: dict) -> list[dict[str, object]]:
+    roots: list[dict[str, object]] = []
+    raw_roots = context.get("local_runtime_roots")
+    if isinstance(raw_roots, list):
+        for index, value in enumerate(raw_roots):
+            normalized = _runtime_normalize_path(value)
+            if normalized:
+                roots.append({"source": f"local_runtime_roots[{index}]", "normalized": normalized})
+    for field in ("local_runtime_root", "cwd_runtime_root", "detected_runtime_root"):
+        normalized = _runtime_normalize_path(context.get(field))
+        if normalized:
+            roots.append({"source": field, "normalized": normalized})
+    if context.get("has_local_gran_maestro") is True:
+        current = _runtime_normalize_path(context.get("current_cwd") or context.get("current_root"))
+        if current:
+            roots.append({"source": "current_cwd/.gran-maestro", "normalized": str((Path(current) / _base_dir_name()).resolve(strict=False))})
+    deduped: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for root in roots:
+        normalized = str(root["normalized"])
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(root)
+    return deduped
+def _runtime_context_mst_session_id(context: dict, explicit_mst_session_id: str | None) -> str | None:
+    if explicit_mst_session_id:
+        return explicit_mst_session_id
+    for _, payload in _runtime_payloads(context):
+        value = _runtime_string(payload.get("mst_session_id"))
+        if value:
+            return value
+    return None
+def _runtime_context_req_id(context: dict, explicit_req_id: str | None) -> str | None:
+    if explicit_req_id:
+        return explicit_req_id
+    for field in ("req_id", "request_id", "id"):
+        value = _runtime_string(context.get(field))
+        if value:
+            return value
+    request = context.get("request")
+    if isinstance(request, dict):
+        value = _runtime_string(request.get("id") or request.get("req_id"))
+        if value:
+            return value
+    return None
+def _runtime_safe_component(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if is_path_safe_mst_session_id(text):
+        return text
+    return None
+def _runtime_metadata_paths(canonical_runtime_root: str, mst_session_id: str | None, req_id: str | None) -> dict[str, str]:
+    root = Path(canonical_runtime_root)
+    paths: dict[str, str] = {
+        "runtime_root": str(root),
+        "sessions_dir": str(root / "sessions"),
+        "state_dir": str(root / "state"),
+        "requests_dir": str(root / "requests"),
+        "worktrees_dir": str(root / "worktrees"),
+    }
+    safe_session_id = _runtime_safe_component(mst_session_id)
+    if safe_session_id:
+        session_dir = root / "sessions" / safe_session_id
+        state_session_dir = root / "state" / safe_session_id
+        paths.update({
+            "session_dir": str(session_dir),
+            "session_history": str(session_dir / "history.jsonl"),
+            "execution_flow": str(session_dir / "execution-flow.json"),
+            "lifecycle_events": str(session_dir / "lifecycle.ndjson"),
+            "state_session_dir": str(state_session_dir),
+            "state_snapshot": str(state_session_dir / "snapshot.json"),
+            "flow_detail": str(state_session_dir / "flow-detail.ndjson"),
+        })
+    safe_req_id = _runtime_safe_component(req_id)
+    if safe_req_id:
+        request_dir = root / "requests" / safe_req_id
+        paths.update({
+            "request_dir": str(request_dir),
+            "request_json": str(request_dir / "request.json"),
+        })
+    return paths
+def _runtime_root_payload(
+    *,
+    classification: str,
+    allowed: bool,
+    canonical_runtime_root: str | None,
+    metadata_paths: dict[str, str] | None,
+    diagnostics: dict[str, object],
+    legacy_diagnostics: dict[str, dict[str, object]],
+    reason: str,
+) -> dict[str, object]:
+    return {
+        "classification": classification,
+        "allowed": allowed,
+        "canonical_runtime_root": canonical_runtime_root,
+        "metadata_paths": metadata_paths or {},
+        "diagnostics": diagnostics,
+        "legacy_diagnostics": legacy_diagnostics,
+        "reason": reason,
+        "destructive_action_allowed": False,
+    }
+def resolve_canonical_runtime_root_state(context, *, mst_session_id=None, req_id=None) -> dict[str, object]:
+    payload = context if isinstance(context, dict) else {}
+    pointer_sources = _runtime_pointer_sources(payload)
+    pointer_roots = sorted({str(source["normalized"]) for source in pointer_sources})
+    local_roots = _runtime_local_roots(payload)
+    trusted_original_root = _runtime_trusted_original_root(payload)
+    diagnostics: dict[str, object] = {
+        "pointer_sources": pointer_sources,
+        "local_runtime_roots": local_roots,
+        "trusted_original_runtime_root": trusted_original_root,
+    }
+    legacy_diagnostics = _runtime_legacy_diagnostics(payload)
+
+    if len(pointer_roots) > 1:
+        return _runtime_root_payload(
+            classification="split_runtime_root_blocked",
+            allowed=False,
+            canonical_runtime_root=None,
+            metadata_paths=None,
+            diagnostics=diagnostics,
+            legacy_diagnostics=legacy_diagnostics,
+            reason="runtime_root_pointer_mismatch",
+        )
+
+    resolved_session_id = _runtime_context_mst_session_id(payload, mst_session_id)
+    resolved_req_id = _runtime_context_req_id(payload, req_id)
+    if pointer_roots:
+        canonical_root = pointer_roots[0]
+        return _runtime_root_payload(
+            classification="canonical_runtime_root",
+            allowed=True,
+            canonical_runtime_root=canonical_root,
+            metadata_paths=_runtime_metadata_paths(canonical_root, resolved_session_id, resolved_req_id),
+            diagnostics=diagnostics,
+            legacy_diagnostics=legacy_diagnostics,
+            reason="explicit_runtime_root_pointer",
+        )
+
+    if trusted_original_root:
+        conflicting_local_roots = [root for root in local_roots if root.get("normalized") != trusted_original_root]
+        diagnostics["conflicting_local_runtime_roots"] = conflicting_local_roots
+        if conflicting_local_roots:
+            return _runtime_root_payload(
+                classification="split_runtime_root_blocked",
+                allowed=False,
+                canonical_runtime_root=None,
+                metadata_paths=None,
+                diagnostics=diagnostics,
+                legacy_diagnostics=legacy_diagnostics,
+                reason="local_runtime_root_conflicts_with_trusted_original",
+            )
+        return _runtime_root_payload(
+            classification="trusted_original_root",
+            allowed=True,
+            canonical_runtime_root=trusted_original_root,
+            metadata_paths=_runtime_metadata_paths(trusted_original_root, resolved_session_id, resolved_req_id),
+            diagnostics=diagnostics,
+            legacy_diagnostics=legacy_diagnostics,
+            reason="trusted_original_runtime_root_fallback",
+        )
+
+    if local_roots:
+        return _runtime_root_payload(
+            classification="split_runtime_root_blocked",
+            allowed=False,
+            canonical_runtime_root=None,
+            metadata_paths=None,
+            diagnostics=diagnostics,
+            legacy_diagnostics=legacy_diagnostics,
+            reason="missing_trusted_runtime_root_pointer",
+        )
+
+    return _runtime_root_payload(
+        classification="missing_runtime_root",
+        allowed=False,
+        canonical_runtime_root=None,
+        metadata_paths=None,
+        diagnostics=diagnostics,
+        legacy_diagnostics=legacy_diagnostics,
+        reason="missing_canonical_runtime_root_pointer",
+    )
 def requests_dir() -> Path:
     return BASE_DIR / "requests"
 def plans_dir() -> Path:
