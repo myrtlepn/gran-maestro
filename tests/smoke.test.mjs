@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +12,50 @@ function readRepoFile(path) {
 
 test('smoke test runner executes deterministically', () => {
   assert.equal(1 + 1, 2);
+});
+
+test('manifest versions remain synchronized across packages', () => {
+  const versions = [
+    JSON.parse(readRepoFile('package.json')).version,
+    JSON.parse(readRepoFile('.claude-plugin/plugin.json')).version,
+    JSON.parse(readRepoFile('.claude-plugin/marketplace.json')).plugins[0].version,
+    JSON.parse(readRepoFile('extension/manifest.json')).version,
+    JSON.parse(readRepoFile('extension/package.json')).version,
+  ];
+
+  assert.equal(new Set(versions).size, 1);
+});
+
+test('plugin manifest agents exactly match agents markdown files', () => {
+  const plugin = JSON.parse(readRepoFile('.claude-plugin/plugin.json'));
+  const actualAgents = readdirSync(join(repoRoot, 'agents'))
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => `./agents/${name}`)
+    .sort();
+
+  assert.deepEqual([...plugin.agents].sort(), actualAgents);
+});
+
+test('plugin manifest uses canonical hooks registration', () => {
+  const plugin = JSON.parse(readRepoFile('.claude-plugin/plugin.json'));
+  const hooks = JSON.parse(readRepoFile('hooks/hooks.json'));
+
+  assert.equal(plugin.hooks, './hooks/hooks.json');
+  assert.ok(hooks.hooks);
+
+  const commands = Object.values(hooks.hooks).flatMap((entries) =>
+    entries.flatMap((entry) => entry.hooks.map((hook) => hook.command)),
+  );
+
+  assert.deepEqual(
+    [...new Set(commands)].sort(),
+    [
+      '${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh',
+      '${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh',
+      '${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh',
+      '${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh',
+    ],
+  );
 });
 
 test('AskUserQuestion contract requires meaningful labels and preview details', () => {
