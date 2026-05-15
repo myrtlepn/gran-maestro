@@ -141,6 +141,22 @@ def _print_resolve_base_payload(
         payload["parent_session_worktree_path"] = parent_session["session_worktree_path"]
         payload["original_base_branch"] = parent_session.get("base_branch")
         payload["original_base_sha"] = parent_session.get("base_sha")
+        payload["merge_scope"] = {
+            "ok": True,
+            "caller": "request_child_accept",
+            "requested_target": "child_to_session",
+            "merge_state": "authorized_child_merge",
+            "child_to_session": True,
+            "session_to_original": False,
+            "target_branch": parent_session["session_branch"],
+            "session_branch": parent_session["session_branch"],
+            "original_base_branch": parent_session.get("base_branch"),
+            "original_base_sha": parent_session.get("base_sha"),
+            "forbidden_caller": False,
+            "required_evidence": [],
+            "reference_only_fields": ["original_base_branch", "original_base_sha"],
+            "evidence": {"merge_target": "parent_session_branch"},
+        }
     print(json.dumps(payload, ensure_ascii=False))
 def _session_child_non_success(reason: str, action: str, *, details: dict | None = None) -> dict:
     payload = {

@@ -770,6 +770,475 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             outcome="created",
         ),
     )
+SESSION_MERGE_SCOPE_CHILD_CALLERS = frozenset(
+    {
+        "request_child_accept",
+        "auto_accept_result_for_child",
+    }
+)
+SESSION_MERGE_SCOPE_CHILD_OPTIONAL_CALLERS = frozenset({"review_completed"})
+SESSION_MERGE_SCOPE_FINAL_CALLERS = frozenset({"session_level_accept", "terminal_success"})
+SESSION_MERGE_SCOPE_FORBIDDEN_CALLERS = frozenset(
+    {
+        "assistant_turn_end",
+        "stop_hook_continuation",
+        "tool_exit",
+        "subskill_return",
+        "review_pass_only",
+    }
+)
+SESSION_MERGE_SCOPE_NON_MERGE_CALLERS = frozenset({"cancel", "recover_dry_run"})
+SESSION_MERGE_SCOPE_ALLOWED_TARGETS = frozenset({"auto", "child_to_session", "session_to_original"})
+SESSION_FINAL_MERGE_REQUIRED_EVIDENCE = (
+    "all_must_dod_eligible",
+    "children_clean",
+    "base_branch_lock_acquired",
+    "destructive_command_policy_passed",
+)
+def _merge_scope_payload(
+    *,
+    ok: bool,
+    caller: str,
+    requested_target: str,
+    merge_state: str,
+    child_to_session: bool,
+    session_to_original: bool,
+    target_branch: str | None,
+    session_branch: str | None,
+    original_base_branch: str | None,
+    original_base_sha: str | None,
+    reason: str | None = None,
+    action: str | None = None,
+    evidence: dict | None = None,
+    forbidden_caller: bool = False,
+    required_evidence: tuple[str, ...] = (),
+    legacy_diagnostics: dict | None = None,
+) -> dict:
+    payload = {
+        "ok": ok,
+        "caller": caller,
+        "requested_target": requested_target,
+        "merge_state": merge_state,
+        "child_to_session": child_to_session,
+        "session_to_original": session_to_original,
+        "target_branch": target_branch,
+        "session_branch": session_branch,
+        "original_base_branch": original_base_branch,
+        "original_base_sha": original_base_sha,
+        "forbidden_caller": forbidden_caller,
+        "required_evidence": list(required_evidence),
+        "reference_only_fields": ["original_base_branch", "original_base_sha"],
+        "evidence": dict(evidence or {}),
+    }
+    if reason:
+        payload["reason"] = reason
+    if action:
+        payload["action"] = action
+    if legacy_diagnostics:
+        payload["legacy_diagnostics"] = legacy_diagnostics
+    return payload
+def _normalize_merge_requested_target(value: str | None) -> str:
+    normalized = _string_or_none(value) or "auto"
+    if normalized not in SESSION_MERGE_SCOPE_ALLOWED_TARGETS:
+        raise ValueError(
+            "requested_target must be one of "
+            f"{', '.join(sorted(SESSION_MERGE_SCOPE_ALLOWED_TARGETS))}"
+        )
+    return normalized
+def _merge_scope_identity_non_success(
+    caller: str,
+    requested_target: str,
+    *,
+    error: object | None = None,
+) -> dict:
+    diagnostics = _common.legacy_session_diagnostics()
+    code = _common.session_identity_non_success_code(error, diagnostics) or "missing_canonical_mst_session_id"
+    reason_map = {
+        "mst_session_id_mismatch": "canonical_identity_conflict",
+        "invalid_canonical_mst_session_id": "invalid_canonical_identity",
+        "legacy_identity_not_canonical_source": "legacy_identity_not_canonical_source",
+        "missing_canonical_mst_session_id": "missing_canonical_identity",
+    }
+    action_map = {
+        "mst_session_id_mismatch": "repair_canonical_identity_conflict",
+        "invalid_canonical_mst_session_id": "emit_diagnostic_no_mutation",
+        "legacy_identity_not_canonical_source": "emit_diagnostic_no_mutation",
+        "missing_canonical_mst_session_id": "emit_diagnostic_no_mutation",
+    }
+    return _merge_scope_payload(
+        ok=False,
+        caller=caller,
+        requested_target=requested_target,
+        merge_state="non_success_diagnostic",
+        child_to_session=False,
+        session_to_original=False,
+        target_branch=None,
+        session_branch=None,
+        original_base_branch=None,
+        original_base_sha=None,
+        reason=reason_map.get(code, code),
+        action=action_map.get(code, "emit_diagnostic_no_mutation"),
+        evidence={"mutation_performed": False},
+        legacy_diagnostics=diagnostics,
+    )
+def _resolve_merge_scope_session_context(
+    project_root: Path,
+    *,
+    caller: str,
+    requested_target: str,
+    mst_session_id: str | None = None,
+) -> tuple[dict | None, dict | None]:
+    raw_session_id = _string_or_none(mst_session_id) or os.environ.get("MST_SESSION_ID", "").strip()
+    if not raw_session_id:
+        return None, _merge_scope_identity_non_success(caller, requested_target)
+    try:
+        parsed = validate_mst_session_id(raw_session_id)
+    except ValueError as exc:
+        return None, _merge_scope_identity_non_success(caller, requested_target, error=exc)
+
+    base_dir = _common.base_dir_from_project(project_root)
+    session_path = session_metadata_path(base_dir, parsed.mst_session_id)
+    payload = _load_session_metadata_payload(session_path)
+    if not isinstance(payload, dict):
+        return None, _merge_scope_payload(
+            ok=False,
+            caller=caller,
+            requested_target=requested_target,
+            merge_state="non_success_diagnostic",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=None,
+            original_base_branch=None,
+            original_base_sha=None,
+            reason="session_metadata_missing",
+            action="ensure_session_worktree_contract_before_merge",
+            evidence={"session_metadata_path": str(session_path)},
+        )
+
+    state = _string_or_none(payload.get("state")) or ""
+    session_branch = _string_or_none(payload.get("session_branch"))
+    worktree_path = _string_or_none(payload.get("session_worktree_path"))
+    original_base_branch = _string_or_none(payload.get("base_branch"))
+    original_base_sha = _string_or_none(payload.get("base_sha"))
+    expected_branch = session_worktree_branch_name(parsed.mst_session_id)
+    expected_path = str(session_worktree_path(project_root, parsed.mst_session_id).resolve(strict=False))
+    if state not in SESSION_WORKTREE_ACTIVE_STATES:
+        return None, _merge_scope_payload(
+            ok=False,
+            caller=caller,
+            requested_target=requested_target,
+            merge_state="non_success_diagnostic",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=session_branch,
+            original_base_branch=original_base_branch,
+            original_base_sha=original_base_sha,
+            reason=_string_or_none(payload.get("reason")) or "session_worktree_not_active",
+            action=_string_or_none(payload.get("action")) or "repair_or_remove_conflicting_session_metadata",
+            evidence={"state": state, "outcome": payload.get("outcome")},
+        )
+    if not session_branch or not worktree_path or not original_base_branch or not original_base_sha:
+        return None, _merge_scope_payload(
+            ok=False,
+            caller=caller,
+            requested_target=requested_target,
+            merge_state="non_success_diagnostic",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=session_branch,
+            original_base_branch=original_base_branch,
+            original_base_sha=original_base_sha,
+            reason="session_metadata_incomplete",
+            action="repair_or_remove_conflicting_session_metadata",
+            evidence={"session_metadata_path": str(session_path)},
+        )
+    if session_branch != expected_branch or worktree_path != expected_path:
+        return None, _merge_scope_payload(
+            ok=False,
+            caller=caller,
+            requested_target=requested_target,
+            merge_state="non_success_diagnostic",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=session_branch,
+            original_base_branch=original_base_branch,
+            original_base_sha=original_base_sha,
+            reason="session_metadata_mismatch",
+            action="repair_or_remove_conflicting_session_metadata",
+            evidence={
+                "expected_session_branch": expected_branch,
+                "expected_session_worktree_path": expected_path,
+                "session_metadata_path": str(session_path),
+            },
+        )
+
+    return {
+        "mst_session_id": parsed.mst_session_id,
+        "session_branch": session_branch,
+        "session_worktree_path": worktree_path,
+        "original_base_branch": original_base_branch,
+        "original_base_sha": original_base_sha,
+        "session_metadata_path": str(session_path),
+    }, None
+def _merge_scope_git_stdout(path: Path, *args: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
+    return True, result.stdout.strip()
+def _merge_scope_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on", "ok", "pass", "passed"}
+    return False
+def _final_merge_blocked_payload(
+    caller: str,
+    requested_target: str,
+    session_context: dict,
+    *,
+    reason: str,
+    action: str,
+    evidence: dict | None = None,
+) -> dict:
+    return _merge_scope_payload(
+        ok=False,
+        caller=caller,
+        requested_target=requested_target,
+        merge_state="blocked_final_merge",
+        child_to_session=False,
+        session_to_original=False,
+        target_branch=None,
+        session_branch=session_context["session_branch"],
+        original_base_branch=session_context["original_base_branch"],
+        original_base_sha=session_context["original_base_sha"],
+        reason=reason,
+        action=action,
+        evidence=evidence,
+        required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
+    )
+def _resolve_final_merge_scope(
+    project_root: Path,
+    *,
+    caller: str,
+    requested_target: str,
+    session_context: dict,
+    evidence: dict | None = None,
+) -> dict:
+    evidence_payload = dict(evidence or {})
+    session_worktree = Path(session_context["session_worktree_path"]).resolve(strict=False)
+    if not session_worktree.is_dir():
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="session_worktree_missing",
+            action="repair_or_remove_conflicting_session_metadata",
+            evidence={"session_worktree_path": str(session_worktree)},
+        )
+
+    ok_status, status_output = _merge_scope_git_stdout(session_worktree, "status", "--porcelain")
+    if not ok_status:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="session_worktree_status_failed",
+            action="inspect_session_worktree_before_final_merge",
+            evidence={"git_error": status_output},
+        )
+    if status_output:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="dirty_session_branch",
+            action="clean_session_branch_before_final_merge",
+            evidence={"git_status": status_output.splitlines()},
+        )
+
+    ok_unmerged, unmerged_output = _merge_scope_git_stdout(session_worktree, "diff", "--name-only", "--diff-filter=U")
+    if not ok_unmerged:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="session_conflict_check_failed",
+            action="inspect_session_conflicts_before_final_merge",
+            evidence={"git_error": unmerged_output},
+        )
+    if unmerged_output:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="child_conflict",
+            action="resolve_child_conflicts_before_final_merge",
+            evidence={"conflicted_paths": unmerged_output.splitlines()},
+        )
+
+    for key in SESSION_FINAL_MERGE_REQUIRED_EVIDENCE:
+        if not _merge_scope_bool(evidence_payload.get(key)):
+            return _final_merge_blocked_payload(
+                caller,
+                requested_target,
+                session_context,
+                reason=f"missing_{key}",
+                action="collect_required_final_merge_evidence",
+                evidence={**evidence_payload, "missing_evidence": key},
+            )
+
+    if _merge_scope_bool(evidence_payload.get("conflict_detected")):
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="final_merge_conflict",
+            action="resolve_conflict_before_final_merge",
+            evidence=evidence_payload,
+        )
+
+    ok_base_sha, current_base_sha = _merge_scope_git_stdout(project_root, "rev-parse", session_context["original_base_branch"])
+    if not ok_base_sha:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="original_base_missing",
+            action="inspect_original_base_reference",
+            evidence={"git_error": current_base_sha},
+        )
+    if current_base_sha != session_context["original_base_sha"]:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="original_base_drift_detected",
+            action="refresh_session_against_original_base",
+            evidence={
+                **evidence_payload,
+                "expected_original_base_sha": session_context["original_base_sha"],
+                "current_original_base_sha": current_base_sha,
+            },
+        )
+
+    return _merge_scope_payload(
+        ok=True,
+        caller=caller,
+        requested_target=requested_target,
+        merge_state="authorized_final_merge",
+        child_to_session=False,
+        session_to_original=True,
+        target_branch=session_context["original_base_branch"],
+        session_branch=session_context["session_branch"],
+        original_base_branch=session_context["original_base_branch"],
+        original_base_sha=session_context["original_base_sha"],
+        evidence={**evidence_payload, "current_original_base_sha": current_base_sha},
+        required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
+    )
+def resolve_session_merge_scope(
+    project_root: Path,
+    *,
+    caller: str,
+    requested_target: str | None = None,
+    mst_session_id: str | None = None,
+    evidence: dict | None = None,
+) -> dict:
+    caller_value = _string_or_none(caller)
+    if not caller_value:
+        raise ValueError("caller is required")
+    requested_target_value = _normalize_merge_requested_target(requested_target)
+    session_context, session_error = _resolve_merge_scope_session_context(
+        Path(project_root).resolve(strict=False),
+        caller=caller_value,
+        requested_target=requested_target_value,
+        mst_session_id=mst_session_id,
+    )
+    if session_error is not None:
+        return session_error
+    assert session_context is not None
+
+    if caller_value in SESSION_MERGE_SCOPE_FORBIDDEN_CALLERS:
+        return _merge_scope_payload(
+            ok=False,
+            caller=caller_value,
+            requested_target=requested_target_value,
+            merge_state="forbidden_caller",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=session_context["session_branch"],
+            original_base_branch=session_context["original_base_branch"],
+            original_base_sha=session_context["original_base_sha"],
+            reason="forbidden_caller",
+            action="resume_parent_session_workflow",
+            evidence={"safer_action": "use_request_child_accept_or_session_level_accept"},
+            forbidden_caller=True,
+        )
+    if caller_value in SESSION_MERGE_SCOPE_NON_MERGE_CALLERS:
+        return _merge_scope_payload(
+            ok=False,
+            caller=caller_value,
+            requested_target=requested_target_value,
+            merge_state="non_success_diagnostic",
+            child_to_session=False,
+            session_to_original=False,
+            target_branch=None,
+            session_branch=session_context["session_branch"],
+            original_base_branch=session_context["original_base_branch"],
+            original_base_sha=session_context["original_base_sha"],
+            reason="non_merge_caller",
+            action="cleanup_or_recover_only",
+        )
+    if caller_value in SESSION_MERGE_SCOPE_CHILD_CALLERS or (
+        caller_value in SESSION_MERGE_SCOPE_CHILD_OPTIONAL_CALLERS
+        and requested_target_value == "child_to_session"
+    ):
+        return _merge_scope_payload(
+            ok=True,
+            caller=caller_value,
+            requested_target=requested_target_value,
+            merge_state="authorized_child_merge",
+            child_to_session=True,
+            session_to_original=False,
+            target_branch=session_context["session_branch"],
+            session_branch=session_context["session_branch"],
+            original_base_branch=session_context["original_base_branch"],
+            original_base_sha=session_context["original_base_sha"],
+            evidence={"merge_target": "parent_session_branch"},
+        )
+    if caller_value in SESSION_MERGE_SCOPE_FINAL_CALLERS:
+        return _resolve_final_merge_scope(
+            Path(project_root).resolve(strict=False),
+            caller=caller_value,
+            requested_target=requested_target_value,
+            session_context=session_context,
+            evidence=evidence,
+        )
+    return _merge_scope_payload(
+        ok=False,
+        caller=caller_value,
+        requested_target=requested_target_value,
+        merge_state="non_success_diagnostic",
+        child_to_session=False,
+        session_to_original=False,
+        target_branch=None,
+        session_branch=session_context["session_branch"],
+        original_base_branch=session_context["original_base_branch"],
+        original_base_sha=session_context["original_base_sha"],
+        reason="unsupported_caller",
+        action="inspect_merge_scope_truth_table",
+    )
 ZERO_HISTORY_HASH = "0" * 64
 def _utc_now_history() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")

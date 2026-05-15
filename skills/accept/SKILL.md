@@ -1,13 +1,13 @@
 ---
 name: accept
-description: "완료된 결과물을 최종 수락합니다 (Phase 3 → Phase 5). Worktree를 감지된 base 브랜치에 머지하고 정리합니다. 사용자가 '수락', '머지', '최종 수락'을 말하거나 /mst:accept를 호출할 때 사용. 기본적으로 /mst:approve에서 자동 호출되며, workflow.auto_accept_result=false 시 수동 사용."
+description: "완료된 결과물을 최종 수락합니다 (Phase 3 → Phase 5). request child accept는 감지된 session base에만 반영하고, session-level accept 또는 terminal_success에서만 original base merge를 검토합니다. 사용자가 '수락', '머지', '최종 수락'을 말하거나 /mst:accept를 호출할 때 사용. 기본적으로 /mst:approve에서 자동 호출되며, workflow.auto_accept_result=false 시 수동 사용."
 user-invocable: true
 argument-hint: "[REQ-ID]"
 ---
 
 # maestro:accept
 
-Phase 3 리뷰를 통과한 결과물을 최종 수락하여 감지된 base 브랜치에 머지하고 정리합니다.
+Phase 3 리뷰를 통과한 결과물을 최종 수락합니다. request child accept는 감지된 session base branch에만 merge하고 정리하며, session-level accept 또는 `terminal_success` transition에서만 original base merge를 검토합니다.
 
 ## 호출 방식
 
@@ -33,6 +33,21 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락하여 감지된 base 브�
 - 리뷰 PASS 확인 없이 머지/정리 단계부터 실행한다.
 - squash-merge 후 `git branch -d`만 사용해 정리 실패를 방치한다.
 - `source_plan`이 있는데도 Step 6 동기화 확인을 생략하고 완료 처리한다.
+
+## DOD-005 Merge Scope Contract
+
+- accept scope truth table vocabulary는 `child_to_session`, `session_to_original`, `forbidden_caller`, `request_child_accept`, `session_level_accept`, `terminal_success`로 고정한다.
+- `request_child_accept`는 항상 `child_to_session=true`, `session_to_original=false`다. target은 parent session branch이며 original base branch로 merge할 권한이 없다.
+- `request child accept`와 `session-level manual accept`는 서로 다른 scope다. child accept는 parent session branch까지만 반영하고, final original merge evidence는 session scope에서만 소비한다.
+- `request.json.detected_base`와 session branch는 child/session merge target 판정에 사용한다. `original_base_branch`와 `original_base_sha`는 final original merge evidence/reference로만 사용하며 `detected_base`와 혼용하지 않는다.
+- `session_level_accept`와 `terminal_success`만 `session_to_original=true` 후보가 되며 `original_base_branch`와 `original_base_sha`는 reference/evidence로만 사용한다.
+- `assistant_turn_end`, `stop_hook_continuation`, `tool_exit`, `subskill_return`, `review_pass_only`는 forbidden caller다.
+- `Stop hook continuation`, `subskill return`, review PASS-only completion은 final original merge trigger가 아니다.
+- forbidden caller는 session→original merge를 실행하지 않는다. continuation 안내, diagnostic 반환, parent workflow control return만 수행한다.
+- accept scope는 child와 session으로 분리한다.
+- terminal success는 상태머신 전이로만 인정한다.
+- DOD-005는 DOD-013 full truth table과 DOD-014 multi-child ordering/idempotency를 범위 밖으로 유지한다.
+- DOD-013과 DOD-014는 terminal success 확장과 multi-child ordering을 다루며, 이 단계에서는 final original merge authorization을 확장하지 않는다.
 
 ## Anti-Rationalization Checklist
 
@@ -118,7 +133,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - `type_strategies = Read({PLUGIN_ROOT}/templates/defaults/type-strategies.json)` 시도
    - `strategy = type_strategies[plan_type] || type_strategies["code"]`
    - `type-strategies.json` Read 실패/파싱 실패/키 누락 시 `strategy = {"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback해 기존 수락 경로를 유지한다.
-3. **Worktree → REQ 브랜치 → base squash-merge** (기본: `strategy.accept_mode != "file-placement"`)
+3. **Worktree → REQ 브랜치 → session target squash-merge** (기본: `strategy.accept_mode != "file-placement"`)
    - `if strategy.accept_mode == "file-placement"`:
      - squash-merge를 실행하지 않고 문서 파일을 대상 경로로 배치(복사/이동)한다.
      - 배치 대상 경로는 각 태스크 spec/doc-spec에 정의된 문서 산출 경로를 따른다.
@@ -128,8 +143,10 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - approve 단계(Step 4a)에서 생성된 다계층 REQ 브랜치를 사용합니다.
    - 단일 태스크 REQ도 동일한 플로우를 적용합니다.
    - **base/브랜치 변수 준비 (MANDATORY)**:
+     - DOD-005 기준으로 child/request accept의 merge target은 `request.json.detected_base`가 가리키는 session branch 또는 session-derived integration branch다.
      - `request.json.detected_base`가 있으면 해당 값을 최우선 base로 사용한다.
      - `request.json.detected_base`가 없으면 fallback: `config.worktree.base_branch` → `master` 순서로 사용한다.
+     - `original_base_branch`와 `original_base_sha`는 final original merge evidence다. 이 Step 3에서는 reference로만 보존하며 child/request accept가 original base branch로 직접 merge하지 않는다.
      - branch name은 `worktree branch-name` helper로만 산출하며, AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/...` 형식을 사용한다.
      - accept worktree 생성 실패 시 감지 base와 실제 git 상태가 불일치한 것으로 보고 명시적 오류를 출력한 뒤 중단한다.
      ```bash
@@ -159,6 +176,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      git -C "$ACCEPT_WORKTREE" merge --squash "${REQ_BRANCH}"
      ```
      실제 실행은 감지 base 변수를 사용하며, 원본 `PROJECT_ROOT`에서는 checkout/merge를 수행하지 않는다.
+     이 단계의 squash target은 session scope다. final session→original merge는 여기서 수행하지 않으며 `session_level_accept` 또는 `terminal_success` evidence gate에서만 검토한다.
      예: `request.json.detected_base="feature/branch-rules"`, `AGI_ID="AGI-026"`이면 accept worktree가 `feature/branch-rules`에서 생성되고 그 내부에서 `gran-maestro/feature-branch-rules/AGI-026/REQ-NNN`를 squash merge한다.
      [커밋 양식 감지]
      1. `git -C {PROJECT_ROOT} log --pretty=format:"%s" -10`을 실행해 최근 10개 커밋 subject를 수집한다.

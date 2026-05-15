@@ -191,6 +191,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
    - `auto_approve`: CLI `--auto`/`-a` 감지 시 `true` (최우선); 없고 `config.auto_mode.request=true`이면 `true`; 그 외 `false`
    - `source_plan`: `null`(plan 없이 생성), `"PLN-NNN"`(plan 기반), 필드 부재(구버전)
    - `dag_auto_chain`: `false`(기본, 현재 REQ만), `true`(DAG 연쇄 실행), 필드 부재 시 `false` 간주
+   - DOD-005 scope split: `request` 단계는 merge authority를 부여하지 않는다. `request.json.detected_base`는 approve 이후 session branch로 기록될 수 있고, `original_base_branch`/`original_base_sha`는 final original merge evidence로만 후속 단계에서 기록/사용한다.
    - `AUTO_APPROVE=true`이면 workflow state를 기록한다 (non-blocking):
      - `ACTIVE_REQ_ID`는 재개 분기에서는 `RESUME_REQ_ID`, 신규 생성 분기에서는 `REQ-NNN`
      ```bash

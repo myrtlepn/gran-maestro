@@ -272,6 +272,41 @@ def cmd_session_resolve(args):
     else:
         print(session_id)
     return 0
+def _parse_json_object_argument(raw_value: str | None, *, argument: str) -> dict:
+    text = str(raw_value or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{argument} must be a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{argument} must be a JSON object")
+    return payload
+def cmd_session_merge_scope(args):
+    try:
+        project_root = (
+            Path(args.project_root).expanduser().resolve(strict=False)
+            if getattr(args, "project_root", None)
+            else _common._project_root()
+        )
+        evidence = _parse_json_object_argument(getattr(args, "evidence_json", None), argument="--evidence-json")
+        payload = resolve_session_merge_scope(
+            project_root,
+            caller=getattr(args, "caller", None),
+            requested_target=getattr(args, "requested_target", None),
+            mst_session_id=getattr(args, "mst_session_id", None),
+            evidence=evidence,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(payload.get("merge_state") or "")
+    return 0 if payload.get("ok") else 2
 def _parse_started_at_arg(value: str) -> datetime:
     text = value.strip()
     if not text:
@@ -470,6 +505,14 @@ def register(subparsers):
     sess_flow = sess_sub.add_parser("flow")
     sess_flow.add_argument("mst_session_id")
     sess_flow.add_argument("--json", action="store_true")
+
+    sess_merge_scope = sess_sub.add_parser("merge-scope")
+    sess_merge_scope.add_argument("--caller", required=True)
+    sess_merge_scope.add_argument("--requested-target", dest="requested_target", default="auto")
+    sess_merge_scope.add_argument("--mst-session-id", dest="mst_session_id")
+    sess_merge_scope.add_argument("--project-root")
+    sess_merge_scope.add_argument("--evidence-json")
+    sess_merge_scope.add_argument("--json", action="store_true")
 
     sess_resolve = sess_sub.add_parser("resolve")
     sess_resolve.add_argument("--json", action="store_true")

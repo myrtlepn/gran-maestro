@@ -303,15 +303,18 @@ def test_effective_root_boundary_documents_session_worktree_handoff() -> None:
     assert "MST_SESSION_ID" in combined
 
 
-def test_accept_scope_unchanged_keeps_original_merge_out_of_dod004() -> None:
+def test_accept_scope_keeps_child_merge_scoped_to_session_not_original_base() -> None:
     approve_skill = _read_repo_text("skills/approve/SKILL.md")
     accept_skill = _read_repo_text("skills/accept/SKILL.md")
+    worktree_block = accept_skill[accept_skill.index("3. **Worktree") : accept_skill.index("[커밋 양식 감지]")]
 
     assert "DOD-005/DOD-013" in approve_skill
     assert "final original" in approve_skill
     assert "request.json.detected_base" in accept_skill
     assert "merge --squash" in accept_skill
-    assert "session branch" not in accept_skill[accept_skill.index("3. **Worktree") : accept_skill.index("[커밋 양식 감지]")]
+    assert "session branch" in worktree_block
+    assert "child/request accept가 original base branch로 직접 merge하지 않는다" in worktree_block
+    assert "final session→original merge는 여기서 수행하지" in worktree_block
 
 
 def test_nested_guard_allows_session_owned_child_and_blocks_general_nested_target(

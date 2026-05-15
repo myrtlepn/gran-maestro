@@ -7,7 +7,7 @@ argument-hint: "[-a|--auto] [REQ-ID...] [--stop-on-fail | --continue] [--paralle
 
 # maestro:approve
 
-PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다. 단건/배치 승인 모두 지원. Phase 3 PASS 후 최종 수락은 `workflow.auto_accept_result` 설정에 따라 자동 실행.
+PM이 작성한 구현 스펙을 승인하고 Phase 2 실행을 시작합니다. 단건/배치 승인 모두 지원. Phase 3 PASS 후 최종 수락은 `workflow.auto_accept_result` 설정에 따라 자동 실행되지만, request child accept는 session branch까지만 반영되며 original base merge는 session-level accept 또는 `terminal_success` evidence gate에 남겨둡니다.
 
 ## Gate
 
