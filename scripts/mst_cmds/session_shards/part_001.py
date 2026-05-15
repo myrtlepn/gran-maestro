@@ -457,30 +457,6 @@ def _git_branch_exists(project_root: Path, branch: str) -> bool:
         text=True,
     )
     return result.returncode == 0
-def _git_branch_candidates_for_head(project_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "for-each-ref", "--format=%(refname:short)", "--points-at", "HEAD", "refs/heads"],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-def _restore_detached_head_symbolic_ref(project_root: Path) -> str | None:
-    candidates = _git_branch_candidates_for_head(project_root)
-    if len(candidates) != 1:
-        return None
-    branch = candidates[0]
-    result = subprocess.run(
-        ["git", "symbolic-ref", "HEAD", f"refs/heads/{branch}"],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    return branch
 def _load_session_metadata_payload(path: Path) -> dict | None:
     payload = load_json_object(path)
     return dict(payload) if isinstance(payload, dict) else None
@@ -677,7 +653,6 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
         )
 
     if base_ref_type != "branch":
-        restored_branch = _restore_detached_head_symbolic_ref(project_root)
         return _write_session_worktree_payload(
             session_path,
             _session_worktree_payload(
@@ -691,7 +666,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_detached_head",
-                diagnostic={"restored_head_branch": restored_branch},
+                diagnostic={"worktree_creation": "skipped_detached_head"},
             ),
         )
 
