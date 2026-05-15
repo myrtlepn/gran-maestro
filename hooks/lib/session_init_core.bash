@@ -415,6 +415,31 @@ check_hook_version_mismatch() {
   return 0
 }
 
+ensure_session_worktree_contract() {
+  local plugin_root mst_script
+  if [ -z "${MST_SESSION_ID:-}" ] || [ -z "${PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  plugin_root="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"
+  if [ -z "$plugin_root" ]; then
+    plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  fi
+  mst_script="${plugin_root}/scripts/mst.py"
+  if [ ! -f "$mst_script" ]; then
+    debug_log "session_init_session_worktree_skipped" "reason=mst_script_missing path=$mst_script"
+    return 0
+  fi
+
+  if ! MST_INVOCATION_HISTORY_ACTIVE=1 MST_SESSION_ID="$MST_SESSION_ID" python3 "$mst_script" session ensure-worktree --project-root "$PROJECT_ROOT" --json >/dev/null; then
+    debug_log "session_init_session_worktree_failed" "project_root=$PROJECT_ROOT session_id=$MST_SESSION_ID"
+    return 1
+  fi
+
+  debug_log "session_init_session_worktree_ok" "project_root=$PROJECT_ROOT session_id=$MST_SESSION_ID"
+  return 0
+}
+
 cleanup_stale_markers() {
   local tmp_dir my_ppid state_file pid_str
   tmp_dir="${MST_TMP}"

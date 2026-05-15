@@ -134,6 +134,9 @@ fi
 if ! append_session_lifecycle_events; then
   echo "[mst-session-init] warning: failed to append session lifecycle history events." >&2
 fi
+if ! ensure_session_worktree_contract; then
+  echo "[mst-session-init] warning: failed to ensure session worktree contract." >&2
+fi
 
 # === Auto-gardening trigger (PLN-475 / REQ-633-T03) ===
 # config.gardening.auto_archive.enabled=true일 때만 백그라운드로 실행
