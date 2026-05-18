@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assertCodexPluginDiscoverySmokeEvidence,
+  buildCodexPluginDiscoverySmokeEvidence,
+  generatedManifestPath,
+  generatedMarketplacePath,
+  integrationEvidencePath,
+  inventoryArtifactPath,
+  parityEvidencePath,
+  stableEvidenceRelativePath,
+} from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -55,6 +65,62 @@ test('plugin manifest uses canonical hooks registration', () => {
       '${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh',
       '${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh',
     ],
+  );
+});
+
+test('codex plugin discovery smoke finds generated assets without parse errors', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.discovery_results.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.deepEqual(evidence.discovery_results.assets, [
+    {
+      path: generatedManifestPath,
+      exists: true,
+      parse_ok: true,
+      error: null,
+    },
+    {
+      path: generatedMarketplacePath,
+      exists: true,
+      parse_ok: true,
+      error: null,
+    },
+  ]);
+});
+
+test('codex plugin discovery smoke records stable evidence metadata and zero drift', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+
+  assertCodexPluginDiscoverySmokeEvidence(evidence);
+  assert.deepEqual(
+    evidence.input_paths_read.slice(0, 4),
+    [
+      inventoryArtifactPath,
+      evidence.source_artifact_paths.inventory_validation_path,
+      parityEvidencePath,
+      integrationEvidencePath,
+    ],
+  );
+  assert.equal(evidence.validation_evidence_path, stableEvidenceRelativePath);
+  assert.equal(
+    evidence.discovery_smoke_result_path,
+    `${stableEvidenceRelativePath}#discovery_results`,
+  );
+});
+
+test('codex plugin discovery smoke preserves DOD-003 scope exclusions', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+
+  assert.match(evidence.scope_exclusions.join('\n'), /hook wrapper/i);
+  assert.match(evidence.scope_exclusions.join('\n'), /runtime projection/i);
+  assert.match(evidence.scope_exclusions.join('\n'), /workflow E2E parity/i);
+  assert.equal(evidence.out_of_scope_artifact_check.status, 'pass');
+  assert.ok(
+    evidence.out_of_scope_artifact_check.checks.every((check) =>
+      check.assets.every((asset) => asset.exists === false),
+    ),
   );
 });
 
