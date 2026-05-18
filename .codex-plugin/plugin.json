@@ -1,0 +1,19 @@
+{
+  "name": "mst",
+  "description": "AI 오케스트라의 그랜드마스터 — PM이 코드를 쓰지 않고 AI 에이전트를 지휘하여 개발",
+  "version": "0.59.8",
+  "author": {
+    "name": "myrtlepn"
+  },
+  "repository": "https://github.com/myrtlepn/gran-maestro",
+  "homepage": "https://github.com/myrtlepn/gran-maestro",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": [
+    "orchestration",
+    "pm",
+    "ai-agents",
+    "claude-code"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}

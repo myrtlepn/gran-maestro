@@ -1,0 +1,31 @@
+{
+  "name": "gran-maestro",
+  "interface": {
+    "displayName": "Gran Maestro"
+  },
+  "plugins": [
+    {
+      "name": "mst",
+      "description": "AI 오케스트레이션의 그랜드마스터 — PM이 코드를 쓰지 않고 AI 에이전트를 지휘하여 개발",
+      "version": "0.59.8",
+      "author": {
+        "name": "bran.dev"
+      },
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/myrtlepn/gran-maestro",
+      "tags": [
+        "orchestration",
+        "ai-agents",
+        "claude-code"
+      ]
+    }
+  ]
+}
