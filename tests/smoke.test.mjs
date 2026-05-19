@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,14 +30,26 @@ import {
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 import {
   assertCodexHookAdapterParityEvidence,
+  assertCodexHookAdapterValidationEvidence,
   buildCodexHookAdapterParityEvidence,
+  buildCodexHookAdapterValidationEvidence,
+  buildReq890Dod005RequestMetadata,
   canonicalHookScripts,
+  defaultCodexHookAdapterValidationSummary,
   excludedDodIds as hookAdapterExcludedDodIds,
   req888BaselineEvidencePath,
   stableEvidenceRelativePath as hookAdapterEvidencePath,
+  validationEvidenceRelativePath as hookAdapterValidationEvidencePath,
 } from '../scripts/lib/codex-hook-adapter-parity.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const req890ValidationSummary = {
+  ...defaultCodexHookAdapterValidationSummary,
+  parity_generator: {
+    ...defaultCodexHookAdapterValidationSummary.parity_generator,
+    generated_output_path: '/tmp/req-890-codex-hook-adapter-parity.test.json',
+  },
+};
 
 function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), 'utf8');
@@ -413,6 +425,86 @@ test('codex hook adapter parity generator writes parseable evidence shape', () =
 
     const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
     assertCodexHookAdapterParityEvidence(evidence);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('codex hook adapter validation evidence records command summaries and DOD-005 pass signals', () => {
+  const parityEvidence = buildCodexHookAdapterParityEvidence();
+  const validationEvidence = buildCodexHookAdapterValidationEvidence({
+    parityEvidence,
+    verificationSummary: req890ValidationSummary,
+  });
+
+  assertCodexHookAdapterValidationEvidence(validationEvidence, req890ValidationSummary);
+  assert.equal(validationEvidence.request_evidence_path, hookAdapterValidationEvidencePath);
+  assert.equal(validationEvidence.parity_evidence_path, hookAdapterEvidencePath);
+  assert.equal(validationEvidence.duplicate_registration_count, 0);
+  assert.equal(validationEvidence.continuation_loss_count, 0);
+  assert.equal(validationEvidence.no_go_guard.status, 'pass');
+});
+
+test('REQ-890 request metadata snapshot stays aligned with DOD-005 validation evidence', () => {
+  const validationEvidence = buildCodexHookAdapterValidationEvidence({
+    verificationSummary: req890ValidationSummary,
+  });
+  const metadata = buildReq890Dod005RequestMetadata({
+    validationEvidence,
+    taskCommit: 'bbbe542',
+    integrationCommit: '54f547e',
+    validatedAt: '2026-05-19T05:42:00.000Z',
+  });
+
+  assert.equal(
+    metadata.tasks['REQ-890-02'].verification.evidence_path,
+    hookAdapterValidationEvidencePath,
+  );
+  assert.equal(
+    metadata.tasks['REQ-890-02'].verification.parity_evidence_path,
+    hookAdapterEvidencePath,
+  );
+  assert.equal(metadata.tasks['REQ-890-02'].verification.tests_total, 42);
+  assert.equal(metadata.tasks['REQ-890-02'].verification.tests_pass, 42);
+  assert.equal(metadata.tasks['REQ-890-02'].verification.tests_fail, 0);
+  assert.equal(metadata.tasks['REQ-890-02'].verification.duplicate_registration_count, 0);
+  assert.equal(metadata.tasks['REQ-890-02'].verification.continuation_loss_count, 0);
+  assert.equal(metadata.phase2_result.status, 'pass');
+  assert.equal(metadata.phase2_result.checks.hook_adapter_parity, 'pass');
+  assert.equal(metadata.phase2_result.checks.hook_regression_subset, 'pass');
+  assert.equal(metadata.phase2_result.checks.npm_test, 'pass');
+  assert.equal(metadata.phase2_result.checks.parity_generator_parse, 'pass');
+  assert.equal(metadata.result_paths.request_evidence_path, hookAdapterValidationEvidencePath);
+  assert.equal(metadata.result_paths.parity_evidence_path, hookAdapterEvidencePath);
+  assert.equal(metadata.result_paths.baseline_evidence_path, req888BaselineEvidencePath);
+});
+
+test('codex hook adapter validation generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-hook-adapter-validation-'));
+  const outputPath = join(tempDir, 'evidence.json');
+  const verificationPath = join(tempDir, 'verification-summary.json');
+
+  try {
+    writeFileSync(`${verificationPath}`, `${JSON.stringify(req890ValidationSummary, null, 2)}\n`, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/generate-dod-005-codex-hook-adapter-validation.mjs',
+        outputPath,
+        verificationPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexHookAdapterValidationEvidence(evidence, req890ValidationSummary);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
