@@ -6,13 +6,24 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  assertCodexSkillAgentProjectionValidationEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
+  assertCodexRoleMappingEvidence,
+  assertCodexSkillProjectionEvidence,
+  buildCodexSkillAgentProjectionValidationEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
+  buildCodexRoleMappingEvidence,
+  buildCodexSkillProjectionEvidence,
   collectUnsupportedBlockers,
+  coreMstSkillNames,
+  defaultCodexSkillAgentProjectionValidationSummary,
+  excludedDodIds as skillProjectionExcludedDodIds,
   fallbackSkillDiscoveryRootPath,
   fallbackSkillRepoTargetPath,
   fallbackSkillSymlinkPath,
   forcedWireEvidenceRelativePath,
+  skillProjectionEvidenceRelativePath,
+  roleMappingEvidenceRelativePath,
   generatedAssetBaselinePaths,
   generatedManifestPath,
   generatedMarketplacePath,
@@ -21,7 +32,10 @@ import {
   orchestrationRoot,
   parityEvidencePath,
   req888Dod004Metadata,
+  req891RequestMetadataRelativePath,
+  requiredAgentRoleNames,
   repoRoot as smokeRepoRoot,
+  skillAgentProjectionValidationEvidenceRelativePath,
   sprint4IntegrationContextPath,
   sprint4SelectionReason,
   stableEvidenceRelativePath,
@@ -50,9 +64,106 @@ const req890ValidationSummary = {
     generated_output_path: '/tmp/req-890-codex-hook-adapter-parity.test.json',
   },
 };
+const req891ValidationSummary = {
+  ...defaultCodexSkillAgentProjectionValidationSummary,
+  skill_projection_generator: {
+    ...defaultCodexSkillAgentProjectionValidationSummary.skill_projection_generator,
+    generated_output_path: '/tmp/req-891-skill-projection.test.json',
+  },
+  role_mapping_generator: {
+    ...defaultCodexSkillAgentProjectionValidationSummary.role_mapping_generator,
+    generated_output_path: '/tmp/req-891-role-mapping.test.json',
+  },
+  npm_test: {
+    ...defaultCodexSkillAgentProjectionValidationSummary.npm_test,
+    tests_total: 30,
+    tests_pass: 30,
+    tests_fail: 0,
+  },
+};
 
 function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), 'utf8');
+}
+
+function assertMetadataPathIsScoped(path) {
+  assert.equal(typeof path, 'string');
+  assert.ok(path.length > 0);
+  assert.doesNotMatch(path, /^[A-Za-z]:[\\/]/u);
+  assert.doesNotMatch(path, /^(?:\/|\\\\)/u);
+  assert.doesNotMatch(path, /(^|\/)\.\.(?:\/|$)/u);
+  assert.doesNotMatch(path, /\\/u);
+  assert.doesNotMatch(path, /^~\//u);
+  assert.doesNotMatch(path, /\$HOME|\$\{HOME\}/u);
+}
+
+function collectStringLeaves(value, strings = []) {
+  if (typeof value === 'string') {
+    strings.push(value);
+    return strings;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectStringLeaves(entry, strings));
+    return strings;
+  }
+
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach((entry) => collectStringLeaves(entry, strings));
+  }
+
+  return strings;
+}
+
+function assertNoForbiddenSkillProjectionEvidenceLiterals(evidence, forbiddenLiterals = []) {
+  const stringLeaves = collectStringLeaves(evidence);
+  const defaultForbiddenLiterals = [
+    repoRoot,
+    orchestrationRoot,
+    '/tmp/evidence.json',
+    '/tmp/',
+    '/private/',
+    'C:\\\\',
+    '~/',
+    '$HOME',
+    '${HOME}',
+    'ln -s',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+  ];
+
+  for (const stringValue of stringLeaves) {
+    assert.doesNotMatch(stringValue, /(^|[\\/])\.\.(?:[\\/]|$)/u);
+    assert.doesNotMatch(stringValue, /%2e%2e/iu);
+    assert.doesNotMatch(stringValue, /^~\//u);
+    assert.doesNotMatch(stringValue, /\$HOME|\$\{HOME\}/u);
+  }
+
+  for (const literal of [...defaultForbiddenLiterals, ...forbiddenLiterals]) {
+    assert.ok(
+      stringLeaves.every((stringValue) => !stringValue.includes(literal)),
+      `Forbidden literal found in skill projection evidence: ${literal}`,
+    );
+  }
+}
+
+function assertNoForbiddenRoleMappingEvidenceLiterals(evidence, forbiddenLiterals = []) {
+  assertNoForbiddenSkillProjectionEvidenceLiterals(evidence, [
+    '~/.codex/config.toml',
+    '~/.agents/skills',
+    'danger-full-access',
+    'full-access',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'ln -s',
+    'chmod ',
+    'chown ',
+    'curl ',
+    '| bash',
+    ...forbiddenLiterals,
+  ]);
 }
 
 test('smoke test runner executes deterministically', () => {
@@ -344,6 +455,433 @@ test('codex plugin discovery smoke no-go artifact guard stays repo-scoped and pa
         asset.root === 'orchestration',
     ),
   );
+});
+
+test('codex skill projection evidence inventories every source skill with validated records', () => {
+  const evidence = buildCodexSkillProjectionEvidence();
+  const actualSkillPaths = readdirSync(join(repoRoot, 'skills'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `skills/${entry.name}/SKILL.md`)
+    .filter((path) => {
+      try {
+        readRepoFile(path);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+
+  assertCodexSkillProjectionEvidence(evidence);
+  evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assert.deepEqual(evidence.source_skill_inventory.skill_paths, actualSkillPaths);
+  assert.equal(
+    evidence.coverage.validated_projection_count,
+    evidence.source_skill_inventory.source_skill_count,
+  );
+  assert.ok(
+    evidence.projection_records.every((record) =>
+      record.source_path === record.projected_path &&
+      record.parse_status === 'pass' &&
+      /^[a-f0-9]{64}$/u.test(record.source_digest),
+    ),
+  );
+  assertNoForbiddenSkillProjectionEvidenceLiterals(evidence);
+});
+
+test('codex skill projection evidence builds core MST smoke metadata without runtime side effects', () => {
+  const evidence = buildCodexSkillProjectionEvidence();
+  const coreSmoke = evidence.core_skill_smoke;
+
+  assert.equal(coreSmoke.status, 'pass');
+  assert.deepEqual(coreSmoke.core_skill_names, coreMstSkillNames);
+  assert.deepEqual(
+    coreSmoke.records.map((record) => record.skill_name),
+    coreMstSkillNames,
+  );
+  assert.ok(
+    coreSmoke.records.every((record) =>
+      record.invocation_metadata.mode === 'metadata-only' &&
+      typeof record.invocation_metadata.command_id === 'string' &&
+      record.invocation_metadata.command_id.length > 0,
+    ),
+  );
+  assert.equal(coreSmoke.runtime_side_effects.created_request_count, 0);
+  assert.equal(coreSmoke.runtime_side_effects.advanced_request_count, 0);
+  assert.equal(coreSmoke.runtime_side_effects.request_state_transition_count, 0);
+  assert.equal(coreSmoke.runtime_side_effects.hook_execution_count, 0);
+  assert.equal(coreSmoke.runtime_side_effects.session_execution_count, 0);
+  assert.equal(coreSmoke.runtime_side_effects.workflow_execution_count, 0);
+});
+
+test('codex skill projection evidence rejects repository escape and install fixtures', () => {
+  const evidence = buildCodexSkillProjectionEvidence();
+  const failedPathCodes = evidence.no_go_guard.path_fixtures
+    .filter((fixture) => fixture.status === 'fail')
+    .map((fixture) => fixture.code)
+    .sort();
+  const failedCommandCodes = evidence.no_go_guard.command_fixtures
+    .filter((fixture) => fixture.status === 'fail')
+    .map((fixture) => fixture.code)
+    .sort();
+
+  assert.equal(evidence.no_go_guard.status, 'pass');
+  assert.deepEqual(failedPathCodes, [
+    'absolute_host_path',
+    'absolute_host_path',
+    'encoded_traversal',
+    'env_expansion',
+    'env_expansion',
+    'home_expansion',
+    'path_traversal',
+    'path_traversal',
+  ]);
+  assert.deepEqual(failedCommandCodes, [
+    'cache_refresh',
+    'external_install',
+    'symlink_creation',
+  ]);
+  assert.deepEqual(
+    evidence.no_go_guard.path_fixtures.map((fixture) => fixture.fixture_id),
+    [
+      'repo_relative_skill_path',
+      'parent_traversal_posix',
+      'parent_traversal_windows',
+      'encoded_parent_traversal',
+      'tilde_home_expansion',
+      'env_home_expansion',
+      'env_home_braced_expansion',
+      'absolute_posix_path',
+      'absolute_windows_path',
+    ],
+  );
+  assert.deepEqual(
+    evidence.no_go_guard.command_fixtures.map((fixture) => fixture.fixture_id),
+    ['relative_generator_cli', 'symlink_cli', 'install_cli', 'refresh_cli'],
+  );
+  assertNoForbiddenSkillProjectionEvidenceLiterals(evidence);
+});
+
+test('codex skill projection generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-skill-projection-'));
+  const outputPath = join(tempDir, 'evidence.json');
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/generate-codex-skill-projection-smoke.mjs', outputPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexSkillProjectionEvidence(evidence);
+    assert.equal(evidence.request_evidence_path, skillProjectionEvidenceRelativePath);
+    evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assertNoForbiddenSkillProjectionEvidenceLiterals(evidence, [tempDir, outputPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('codex skill projection evidence preserves DOD-007 and DOD-008 excluded boundaries', () => {
+  const evidence = buildCodexSkillProjectionEvidence();
+
+  assert.deepEqual(evidence.excluded_surfaces.map((surface) => surface.dod_id), skillProjectionExcludedDodIds);
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.status === 'pass'));
+  assert.equal(evidence.baseline_evidence.status, 'pass');
+  assert.equal(evidence.baseline_evidence.request_id, 'REQ-890');
+  assert.equal(evidence.baseline_evidence.dod_id, 'DOD-005');
+});
+
+test('codex role mapping evidence inventories every canonical agent role with full coverage', () => {
+  const evidence = buildCodexRoleMappingEvidence();
+  const actualAgentPaths = readdirSync(join(repoRoot, 'agents'), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => `agents/${entry.name}`)
+    .sort();
+
+  assertCodexRoleMappingEvidence(evidence);
+  evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assert.deepEqual(evidence.source_agent_inventory.agent_paths, actualAgentPaths);
+  assert.deepEqual(evidence.role_coverage.required_roles, requiredAgentRoleNames);
+  assert.deepEqual(
+    evidence.role_coverage.mapped_roles,
+    [...requiredAgentRoleNames].sort(),
+  );
+  assert.equal(evidence.role_coverage.coverage_percent, 100);
+  assert.equal(evidence.role_coverage.missing_role_count, 0);
+  assert.equal(evidence.role_coverage.extra_role_count, 0);
+  assert.ok(
+    evidence.role_mapping_records.every((record) =>
+      record.source_path === `agents/${record.role_name}.md` &&
+      record.manifest_path === `./agents/${record.role_name}.md` &&
+      record.codex_mapping.mapping_mode === 'metadata-only' &&
+      record.codex_mapping.routing_surface === `/prompts:${record.role_name}` &&
+      /^[a-f0-9]{64}$/u.test(record.source_digest),
+    ),
+  );
+  assertNoForbiddenRoleMappingEvidenceLiterals(evidence);
+});
+
+test('codex role mapping evidence enforces exact Claude manifest parity without codex-only paths', () => {
+  const evidence = buildCodexRoleMappingEvidence();
+  const sourceManifest = JSON.parse(readRepoFile('.claude-plugin/plugin.json'));
+  const expectedAgents = readdirSync(join(repoRoot, 'agents'))
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => `./agents/${name}`)
+    .sort();
+
+  assert.equal(evidence.claude_manifest_parity.status, 'pass');
+  assert.deepEqual(evidence.claude_manifest_parity.expected_agents, expectedAgents);
+  assert.deepEqual(evidence.claude_manifest_parity.manifest_agents, [...sourceManifest.agents].sort());
+  assert.equal(evidence.claude_manifest_parity.missing_agent_count, 0);
+  assert.equal(evidence.claude_manifest_parity.extra_agent_count, 0);
+  assert.equal(evidence.claude_manifest_parity.forbidden_projection_path_count, 0);
+  assert.deepEqual(evidence.claude_manifest_parity.forbidden_projection_paths, []);
+});
+
+test('codex role mapping evidence aligns codex plugin marketplace and T01/T02 coverage metadata', () => {
+  const evidence = buildCodexRoleMappingEvidence();
+  const consistency = evidence.cross_file_consistency;
+
+  assert.equal(consistency.status, 'pass');
+  assert.equal(consistency.plugin_identity.status, 'pass');
+  assert.ok(consistency.plugin_identity.checks.every((check) => check.status === 'pass'));
+  assert.equal(consistency.repository_relative_paths.status, 'pass');
+  assert.ok(consistency.repository_relative_paths.checks.every((check) => check.status === 'pass'));
+  assert.equal(consistency.skill_inventory_coverage.status, 'pass');
+  assert.equal(consistency.skill_inventory_coverage.missing_skill_count, 0);
+  assert.equal(consistency.skill_inventory_coverage.extra_skill_count, 0);
+  assert.equal(consistency.skill_inventory_coverage.drift_count, 0);
+  assert.equal(consistency.agent_role_coverage.status, 'pass');
+  assert.equal(consistency.agent_role_coverage.missing_role_count, 0);
+  assert.equal(consistency.agent_role_coverage.extra_role_count, 0);
+  assert.equal(consistency.agent_role_coverage.manifest_missing_agent_count, 0);
+  assert.equal(consistency.agent_role_coverage.manifest_extra_agent_count, 0);
+  assert.equal(
+    evidence.source_dependencies.skill_projection_evidence_path,
+    skillProjectionEvidenceRelativePath,
+  );
+  assert.equal(evidence.request_evidence_path, roleMappingEvidenceRelativePath);
+});
+
+test('codex role mapping privilege guard rejects escalation fixtures via allowlist schema', () => {
+  const evidence = buildCodexRoleMappingEvidence();
+  const guard = evidence.privilege_guard;
+  const fixtureMap = new Map(
+    guard.deny_fixture_rejections.fixtures.map((fixture) => [fixture.fixture_id, fixture]),
+  );
+
+  assert.equal(guard.status, 'pass');
+  assert.equal(guard.schema_basis, 'allowlist');
+  assert.equal(guard.skill_metadata_schema.status, 'pass');
+  assert.equal(guard.role_metadata_schema.status, 'pass');
+  assert.deepEqual(guard.regression_signal_counts, {
+    bypass_permissions: 0,
+    sandbox_disable: 0,
+    arbitrary_command_fields: 0,
+    user_home_mutation: 0,
+    plugin_cache_refresh: 0,
+    codex_external_install: 0,
+    chmod_chown: 0,
+    curl_bash: 0,
+  });
+  assert.equal(guard.deny_fixture_rejections.status, 'pass');
+  assert.deepEqual(
+    guard.deny_fixture_rejections.fixtures.map((fixture) => fixture.fixture_id),
+    [
+      'bypass_permissions_camelcase',
+      'sandbox_disable_mode',
+      'arbitrary_command_field',
+      'user_home_mutation_path',
+      'plugin_cache_refresh_field',
+      'codex_external_install_field',
+      'chmod_field',
+      'chown_field',
+      'curl_bash_shell_command',
+      'symlink_creation_field',
+    ],
+  );
+  assert.ok(guard.deny_fixture_rejections.fixtures.every((fixture) => fixture.matched_expected));
+  assert.ok(fixtureMap.get('bypass_permissions_camelcase').violation_codes.includes('permission_bypass_key'));
+  assert.ok(fixtureMap.get('sandbox_disable_mode').violation_codes.includes('sandbox_disable_key'));
+  assert.ok(fixtureMap.get('arbitrary_command_field').violation_codes.includes('arbitrary_command_key'));
+  assert.ok(fixtureMap.get('user_home_mutation_path').violation_codes.includes('home_expansion'));
+  assert.ok(fixtureMap.get('plugin_cache_refresh_field').violation_codes.includes('plugin_cache_refresh_key'));
+  assert.ok(fixtureMap.get('codex_external_install_field').violation_codes.includes('external_install_key'));
+  assert.ok(fixtureMap.get('chmod_field').violation_codes.includes('chmod_chown_key'));
+  assert.ok(fixtureMap.get('chown_field').violation_codes.includes('chmod_chown_key'));
+  assert.ok(fixtureMap.get('curl_bash_shell_command').violation_codes.includes('arbitrary_command_key'));
+  assert.ok(fixtureMap.get('symlink_creation_field').violation_codes.includes('user_home_mutation_key'));
+  assertNoForbiddenRoleMappingEvidenceLiterals(evidence);
+});
+
+test('codex role mapping generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-role-mapping-'));
+  const outputPath = join(tempDir, 'evidence.json');
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/generate-codex-role-mapping-smoke.mjs', outputPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexRoleMappingEvidence(evidence);
+    assert.equal(evidence.request_evidence_path, roleMappingEvidenceRelativePath);
+    evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assertNoForbiddenRoleMappingEvidenceLiterals(evidence, [tempDir, outputPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('codex skill-agent projection validation evidence records REQ-891 request-level linkage', () => {
+  const evidence = buildCodexSkillAgentProjectionValidationEvidence({
+    verificationSummary: req891ValidationSummary,
+  });
+
+  assertCodexSkillAgentProjectionValidationEvidence(evidence, req891ValidationSummary);
+  evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assert.equal(
+    evidence.request_evidence_path,
+    skillAgentProjectionValidationEvidenceRelativePath,
+  );
+  assert.equal(evidence.request_metadata_snapshot.path, req891RequestMetadataRelativePath);
+  assert.equal(evidence.source_commit.status, 'pass');
+  assert.deepEqual(
+    evidence.source_commit.tasks.map((task) => task.task_id),
+    ['REQ-891-01', 'REQ-891-02'],
+  );
+  assert.deepEqual(evidence.source_commit.tasks.map((task) => task.source_commit), [
+    '2f5c3da',
+    '5a6d3f5',
+  ]);
+  assert.equal(evidence.t01_evidence_summary.evidence_path, skillProjectionEvidenceRelativePath);
+  assert.equal(evidence.t02_evidence_summary.evidence_path, roleMappingEvidenceRelativePath);
+  assert.equal(evidence.t01_evidence_summary.self_check.command_count, 3);
+  assert.equal(evidence.t02_evidence_summary.self_check.command_count, 4);
+  assert.ok(!('commands' in evidence.t01_evidence_summary.self_check));
+  assert.ok(!('commands' in evidence.t02_evidence_summary.self_check));
+  assert.equal(evidence.t02_evidence_summary.privilege_regression_count, 0);
+  assert.equal(evidence.dod_005_baseline_summary.parse_ok, true);
+  assert.equal(evidence.dod_005_baseline_summary.test_command_totals.tests_fail, 0);
+  assert.equal(evidence.evidence_lifecycle.missing_required_artifact_paths.length, 0);
+  assertNoForbiddenRoleMappingEvidenceLiterals(evidence);
+});
+
+test('codex skill-agent projection validation evidence lifecycle gates pass on generators tests and artifact paths', () => {
+  const passingEvidence = buildCodexSkillAgentProjectionValidationEvidence({
+    verificationSummary: req891ValidationSummary,
+  });
+  assert.equal(passingEvidence.status, 'pass');
+  assert.equal(passingEvidence.evidence_lifecycle.status, 'pass');
+
+  const failingGeneratorEvidence = buildCodexSkillAgentProjectionValidationEvidence({
+    verificationSummary: {
+      ...req891ValidationSummary,
+      role_mapping_generator: {
+        ...req891ValidationSummary.role_mapping_generator,
+        status: 'fail',
+        parse_ok: false,
+      },
+    },
+  });
+  assert.equal(failingGeneratorEvidence.status, 'fail');
+  assert.equal(failingGeneratorEvidence.evidence_lifecycle.status, 'fail');
+  assert.equal(
+    failingGeneratorEvidence.evidence_lifecycle.implementation_artifact_generation_pass,
+    false,
+  );
+
+  const missingPathEvidence = buildCodexSkillAgentProjectionValidationEvidence({
+    verificationSummary: {
+      ...req891ValidationSummary,
+      skill_projection_generator: {
+        ...req891ValidationSummary.skill_projection_generator,
+        generated_artifact_path: '/tmp/req-891-skill-projection.test.json',
+      },
+    },
+  });
+  assert.equal(missingPathEvidence.status, 'fail');
+  assert.equal(missingPathEvidence.evidence_lifecycle.required_artifact_paths_present, false);
+  assert.ok(
+    missingPathEvidence.evidence_lifecycle.missing_required_artifact_paths.includes(
+      'skill_projection_generator_artifact_path',
+    ),
+  );
+  assert.equal(
+    missingPathEvidence.test_command_results.skill_projection_generator.generated_output_path,
+    null,
+  );
+
+  const failingTestEvidence = buildCodexSkillAgentProjectionValidationEvidence({
+    verificationSummary: {
+      ...req891ValidationSummary,
+      npm_test: {
+        ...req891ValidationSummary.npm_test,
+        status: 'fail',
+        tests_fail: 1,
+      },
+    },
+  });
+  assert.equal(failingTestEvidence.status, 'fail');
+  assert.equal(failingTestEvidence.evidence_lifecycle.tests_pass, false);
+});
+
+test('codex skill-agent projection validation generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-skill-agent-projection-validation-'));
+  const outputPath = join(tempDir, 'evidence.json');
+  const verificationPath = join(tempDir, 'verification-summary.json');
+
+  try {
+    writeFileSync(`${verificationPath}`, `${JSON.stringify(req891ValidationSummary, null, 2)}\n`, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/generate-dod-006-codex-skill-agent-projection-validation.mjs',
+        outputPath,
+        verificationPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexSkillAgentProjectionValidationEvidence(evidence, req891ValidationSummary);
+    evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assert.equal(
+      evidence.request_evidence_path,
+      skillAgentProjectionValidationEvidenceRelativePath,
+    );
+    assert.equal(evidence.test_command_results.skill_projection_generator.generated_output_path, null);
+    assert.equal(evidence.test_command_results.role_mapping_generator.generated_output_path, null);
+    assert.equal(evidence.t02_evidence_summary.privilege_regression_count, 0);
+    assert.ok(!('commands' in evidence.t01_evidence_summary.self_check));
+    assert.ok(!('commands' in evidence.t02_evidence_summary.self_check));
+    assertNoForbiddenRoleMappingEvidenceLiterals(evidence, [tempDir, outputPath, verificationPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {
