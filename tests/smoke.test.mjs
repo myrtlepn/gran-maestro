@@ -9,6 +9,7 @@ import {
   assertCodexPluginDiscoverySmokeEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
   collectUnsupportedBlockers,
+  generatedAssetBaselinePaths,
   generatedManifestPath,
   generatedMarketplacePath,
   integrationEvidencePath,
@@ -16,7 +17,10 @@ import {
   orchestrationRoot,
   parityEvidencePath,
   repoRoot as smokeRepoRoot,
+  sprint4IntegrationContextPath,
+  sprint4SelectionReason,
   stableEvidenceRelativePath,
+  validationEntrypoints,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -118,6 +122,32 @@ test('codex plugin discovery smoke records stable evidence metadata and zero dri
     evidence.discovery_smoke_result_path,
     `${stableEvidenceRelativePath}#discovery_results`,
   );
+});
+
+test('codex plugin discovery smoke records Sprint 4 forced wire observability', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+
+  assert.equal(evidence.selection_reason, sprint4SelectionReason);
+  assert.equal(evidence.s04_integration_context_path, sprint4IntegrationContextPath);
+  assert.deepEqual(evidence.generated_asset_baseline_paths, generatedAssetBaselinePaths);
+  assert.deepEqual(evidence.validation_entrypoints, validationEntrypoints);
+  assert.equal(evidence.sprint4_forced_wire.selection_reason, sprint4SelectionReason);
+  assert.equal(
+    evidence.sprint4_forced_wire.integration_context_path,
+    sprint4IntegrationContextPath,
+  );
+  assert.ok(evidence.input_paths_read.includes(sprint4IntegrationContextPath));
+  assert.deepEqual(
+    evidence.sprint4_forced_wire.generated_asset_baseline_paths,
+    generatedAssetBaselinePaths,
+  );
+  assert.deepEqual(evidence.sprint4_forced_wire.validation_entrypoints, validationEntrypoints);
+  assert.deepEqual(evidence.sprint4_forced_wire.out_of_scope_dod_guard.dod_ids, [
+    'DOD-005',
+    'DOD-006',
+    'DOD-008',
+  ]);
+  assert.equal(evidence.sprint4_forced_wire.out_of_scope_dod_guard.status, 'pass');
 });
 
 test('codex plugin discovery smoke generator writes parseable stable evidence shape', () => {

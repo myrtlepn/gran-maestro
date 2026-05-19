@@ -44,6 +44,12 @@ export const stableEvidenceAbsolutePath = join(
   stableEvidenceOrchestrationRelativePath,
 );
 
+export const sprint4SelectionReason = 'integration-review forced wire';
+export const sprint4IntegrationContextPath = join(
+  orchestrationRoot,
+  'agile/AGI-039/sprints/S04/integration-context.md',
+);
+
 export const generatedManifestPath = '.codex-plugin/plugin.json';
 export const generatedMarketplacePath = '.agents/plugins/marketplace.json';
 export const sourceManifestPath = '.claude-plugin/plugin.json';
@@ -71,6 +77,17 @@ export const changedFilesChecked = [
   'tests/smoke.test.mjs',
   'scripts/lib/codex-plugin-discovery-smoke.mjs',
   'scripts/generate-codex-plugin-discovery-smoke.mjs',
+];
+
+export const generatedAssetBaselinePaths = [
+  generatedManifestPath,
+  generatedMarketplacePath,
+];
+
+export const validationEntrypoints = [
+  'scripts/lib/codex-plugin-discovery-smoke.mjs',
+  'scripts/generate-codex-plugin-discovery-smoke.mjs',
+  'tests/smoke.test.mjs',
 ];
 
 export const manifestFields = [
@@ -134,6 +151,14 @@ function readJsonFromRepo(path) {
 
 function readJsonFromAbsolutePath(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 function collectJsonArtifact(path, reader, parseFailures) {
@@ -416,13 +441,37 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
 
   const discoveryResults = buildDiscoveryResults(discoveryAssets);
   const outOfScopeArtifactCheck = buildOutOfScopeArtifactCheck();
+  const sprint4IntegrationContextText = readTextIfExists(sprint4IntegrationContextPath);
+  const sprint4IntegrationContextAssertions = {
+    exists: sprint4IntegrationContextText.length > 0,
+    force_wire_recommended: sprint4IntegrationContextText.includes(
+      'force_wire_recommended: True',
+    ),
+    generated_manifest_new_island: sprint4IntegrationContextText.includes(generatedManifestPath),
+    generated_marketplace_new_island: sprint4IntegrationContextText.includes(
+      generatedMarketplacePath,
+    ),
+    validation_entrypoints_wired: validationEntrypoints.every((entrypoint) =>
+      sprint4IntegrationContextText.includes(entrypoint),
+    ),
+  };
+  const sprint4ForcedWireBlockers = Object.entries(sprint4IntegrationContextAssertions)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => `Sprint 4 forced wire integration context assertion failed: ${name}.`);
 
-  const unsupportedBlockers = collectUnsupportedBlockers({
+  const upstreamDodBlockers = collectUnsupportedBlockers({
     inventoryValidation: inventoryValidation.value,
     parityEvidence: parityEvidence.value,
     integrationEvidence: integrationEvidence.value,
     outOfScopeArtifactCheck,
   });
+  const unsupportedBlockers = [
+    ...upstreamDodBlockers,
+    ...sprint4ForcedWireBlockers,
+  ];
+  const upstreamDodGatingBlockers = upstreamDodBlockers.filter((blocker) =>
+    blocker.startsWith('DOD-001') || blocker.startsWith('DOD-002'),
+  );
 
   const claudeHookCommands = canonicalHookCommands(hookConfig.value);
   const claudePluginRegressionStatus =
@@ -452,6 +501,10 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
         : 'fail',
     validation_evidence_path: stableEvidenceRelativePath,
     discovery_smoke_result_path: `${stableEvidenceRelativePath}#discovery_results`,
+    selection_reason: sprint4SelectionReason,
+    s04_integration_context_path: sprint4IntegrationContextPath,
+    generated_asset_baseline_paths: generatedAssetBaselinePaths,
+    validation_entrypoints: validationEntrypoints,
     root_metadata: {
       repo_root: repoRoot,
       orchestration_root: orchestrationRoot,
@@ -468,7 +521,43 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       sourceHookConfigPath,
       generatedManifestPath,
       generatedMarketplacePath,
+      sprint4IntegrationContextPath,
     ],
+    sprint4_forced_wire: {
+      selection_reason: sprint4SelectionReason,
+      integration_context_path: sprint4IntegrationContextPath,
+      integration_context_assertions: sprint4IntegrationContextAssertions,
+      generated_asset_baseline_paths: generatedAssetBaselinePaths,
+      validation_entrypoints: validationEntrypoints,
+      repo_root_orchestration_root_separation: {
+        repo_root: repoRoot,
+        orchestration_root: orchestrationRoot,
+        repository_asset_root: repoRoot,
+        orchestration_evidence_root: orchestrationRoot,
+        roots_are_distinct: repoRoot !== orchestrationRoot,
+      },
+      upstream_dod_gating: {
+        status: upstreamDodGatingBlockers.length === 0 ? 'pass' : 'fail',
+        dod_001: {
+          inventory_artifact_path: inventoryArtifactPath,
+          inventory_validation_path: inventoryValidationPath,
+          blocker_count: upstreamDodBlockers.filter((blocker) =>
+            blocker.startsWith('DOD-001'),
+          ).length,
+        },
+        dod_002: {
+          parity_evidence_path: parityEvidencePath,
+          integration_evidence_path: integrationEvidencePath,
+          blocker_count: upstreamDodBlockers.filter((blocker) =>
+            blocker.startsWith('DOD-002'),
+          ).length,
+        },
+      },
+      out_of_scope_dod_guard: {
+        status: outOfScopeArtifactCheck.status,
+        dod_ids: outOfScopeArtifactCheck.checks.map((check) => check.dod_id),
+      },
+    },
     generated_manifest_path: generatedManifestPath,
     generated_marketplace_path: generatedMarketplacePath,
     parse_error_count: parseFailures.length,
@@ -529,6 +618,37 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
   assert.equal(evidence.unsupported_blocker_count, 0);
   assert.equal(evidence.discovery_results.status, 'pass');
   assert.equal(evidence.claude_plugin_regression.status, 'pass');
+  assert.equal(evidence.selection_reason, sprint4SelectionReason);
+  assert.equal(evidence.s04_integration_context_path, sprint4IntegrationContextPath);
+  assert.deepEqual(evidence.generated_asset_baseline_paths, generatedAssetBaselinePaths);
+  assert.deepEqual(evidence.validation_entrypoints, validationEntrypoints);
+  assert.equal(evidence.sprint4_forced_wire.selection_reason, sprint4SelectionReason);
+  assert.deepEqual(evidence.sprint4_forced_wire.integration_context_assertions, {
+    exists: true,
+    force_wire_recommended: true,
+    generated_manifest_new_island: true,
+    generated_marketplace_new_island: true,
+    validation_entrypoints_wired: true,
+  });
+  assert.equal(
+    evidence.sprint4_forced_wire.integration_context_path,
+    sprint4IntegrationContextPath,
+  );
+  assert.deepEqual(
+    evidence.sprint4_forced_wire.generated_asset_baseline_paths,
+    generatedAssetBaselinePaths,
+  );
+  assert.deepEqual(evidence.sprint4_forced_wire.validation_entrypoints, validationEntrypoints);
+  assert.equal(
+    evidence.sprint4_forced_wire.repo_root_orchestration_root_separation.roots_are_distinct,
+    true,
+  );
+  assert.equal(evidence.sprint4_forced_wire.upstream_dod_gating.status, 'pass');
+  assert.deepEqual(evidence.sprint4_forced_wire.out_of_scope_dod_guard.dod_ids, [
+    'DOD-005',
+    'DOD-006',
+    'DOD-008',
+  ]);
   assert.deepEqual(evidence.changed_files_checked, changedFilesChecked);
   assert.deepEqual(
     evidence.discovery_results.assets.map((asset) => asset.path),
