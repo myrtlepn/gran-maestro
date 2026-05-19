@@ -7,16 +7,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertCodexSkillAgentProjectionValidationEvidence,
+  assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
   assertCodexRoleMappingEvidence,
   assertCodexSkillProjectionEvidence,
   buildCodexSkillAgentProjectionValidationEvidence,
+  buildDod007RequestEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
   buildCodexRoleMappingEvidence,
   buildCodexSkillProjectionEvidence,
   collectUnsupportedBlockers,
   coreMstSkillNames,
   defaultCodexSkillAgentProjectionValidationSummary,
+  defaultDod007RequestEvidenceVerificationSummary,
+  dod007ExcludedSurfaceIds,
+  dod007RequestEvidenceRelativePath,
   excludedDodIds as skillProjectionExcludedDodIds,
   fallbackSkillDiscoveryRootPath,
   fallbackSkillRepoTargetPath,
@@ -33,6 +38,7 @@ import {
   parityEvidencePath,
   req888Dod004Metadata,
   req891RequestMetadataRelativePath,
+  req893RequestMetadataRelativePath,
   requiredAgentRoleNames,
   repoRoot as smokeRepoRoot,
   skillAgentProjectionValidationEvidenceRelativePath,
@@ -79,6 +85,51 @@ const req891ValidationSummary = {
     tests_total: 30,
     tests_pass: 30,
     tests_fail: 0,
+  },
+};
+const req893ValidationSummary = {
+  ...defaultDod007RequestEvidenceVerificationSummary,
+  focused_verify_command: {
+    ...defaultDod007RequestEvidenceVerificationSummary.focused_verify_command,
+    tests_total: 25,
+    tests_pass: 25,
+    tests_fail: 0,
+    summary: '25 passed in 31.42s',
+  },
+  state_transition_integrity: {
+    ...defaultDod007RequestEvidenceVerificationSummary.state_transition_integrity,
+    tests_total: 8,
+    tests_pass: 8,
+    tests_fail: 0,
+    summary: '8 passed in 1.82s',
+  },
+  continuation_contract: {
+    ...defaultDod007RequestEvidenceVerificationSummary.continuation_contract,
+    tests_total: 6,
+    tests_pass: 6,
+    tests_fail: 0,
+    summary: '6 passed',
+  },
+  auto_continuation_contract: {
+    ...defaultDod007RequestEvidenceVerificationSummary.auto_continuation_contract,
+    tests_total: 7,
+    tests_pass: 7,
+    tests_fail: 0,
+    summary: '7 passed in 20.65s',
+  },
+  run_wrapper_session_contract: {
+    ...defaultDod007RequestEvidenceVerificationSummary.run_wrapper_session_contract,
+    tests_total: 10,
+    tests_pass: 10,
+    tests_fail: 0,
+    summary: '10 passed in 9.13s',
+  },
+  npm_test: {
+    ...defaultDod007RequestEvidenceVerificationSummary.npm_test,
+    tests_total: 42,
+    tests_pass: 42,
+    tests_fail: 0,
+    summary: '42 passed',
   },
 };
 
@@ -164,6 +215,41 @@ function assertNoForbiddenRoleMappingEvidenceLiterals(evidence, forbiddenLiteral
     '| bash',
     ...forbiddenLiterals,
   ]);
+}
+
+function assertNoForbiddenDod007EvidenceLiterals(evidence, forbiddenLiterals = []) {
+  const stringLeaves = collectStringLeaves(evidence);
+  const forbiddenDefaults = [
+    repoRoot,
+    orchestrationRoot,
+    '/Users/',
+    '/private/',
+    '~/',
+    '$HOME',
+    '${HOME}',
+    '~/.codex',
+    '~/.agents',
+    '.claude/hooks',
+    'ln -s',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'cache refresh',
+    ...forbiddenLiterals,
+  ];
+
+  for (const stringValue of stringLeaves) {
+    assert.doesNotMatch(stringValue, /(^|[\\/])\.\.(?:[\\/]|$)/u);
+    assert.doesNotMatch(stringValue, /%2e%2e/iu);
+    assert.doesNotMatch(stringValue, /^[A-Za-z]:[\\/]/u);
+  }
+
+  for (const literal of forbiddenDefaults) {
+    assert.ok(
+      stringLeaves.every((stringValue) => !stringValue.includes(literal)),
+      `Forbidden literal found in DOD-007 evidence: ${literal}`,
+    );
+  }
 }
 
 test('smoke test runner executes deterministically', () => {
@@ -879,6 +965,123 @@ test('codex skill-agent projection validation generator writes parseable request
     assert.ok(!('commands' in evidence.t01_evidence_summary.self_check));
     assert.ok(!('commands' in evidence.t02_evidence_summary.self_check));
     assertNoForbiddenRoleMappingEvidenceLiterals(evidence, [tempDir, outputPath, verificationPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('DOD-007 request evidence records REQ-893 linkage and contract summaries', () => {
+  const evidence = buildDod007RequestEvidence({
+    verificationSummary: req893ValidationSummary,
+  });
+
+  assertDod007RequestEvidence(evidence, req893ValidationSummary);
+  evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assert.equal(evidence.request_evidence_path, dod007RequestEvidenceRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.path, req893RequestMetadataRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.request_id, 'REQ-893');
+  assert.equal(evidence.request_metadata_snapshot.agi_id, 'AGI-039');
+  assert.equal(evidence.request_metadata_snapshot.sprint, 8);
+  assert.equal(evidence.request_metadata_snapshot.dod_id, 'DOD-007');
+  assert.equal(evidence.request_metadata_snapshot.plan_id, 'PLN-720');
+  assert.deepEqual(
+    evidence.source_commit.tasks.map((task) => task.source_commit),
+    [
+      'f73bf3916fd9b661a093b6e096963f1d66c918d6',
+      '4e26b50b0d749142f1c11e41f806c7cc70eb7762',
+      '471e6f50f6dce193c465cd07031df8e27ddfe590',
+      '50649a02dce132aa2dedcf21df938fe570f1539f',
+    ],
+  );
+  assert.equal(evidence.state_contract_summary.status, 'pass');
+  assert.equal(evidence.continuation_contract_summary.status, 'pass');
+  assert.equal(evidence.wrapper_contract_summary.status, 'pass');
+  assertNoForbiddenDod007EvidenceLiterals(evidence);
+});
+
+test('DOD-007 request evidence status gates on supplied focused verify summaries', () => {
+  const passingEvidence = buildDod007RequestEvidence({
+    verificationSummary: req893ValidationSummary,
+  });
+  assert.equal(passingEvidence.status, 'pass');
+
+  const missingSummaryEvidence = buildDod007RequestEvidence();
+  assert.equal(missingSummaryEvidence.status, 'fail');
+  assert.equal(missingSummaryEvidence.evidence_lifecycle.verification_summary_supplied, false);
+
+  const failingFocusedVerifyEvidence = buildDod007RequestEvidence({
+    verificationSummary: {
+      ...req893ValidationSummary,
+      focused_verify_command: {
+        ...req893ValidationSummary.focused_verify_command,
+        status: 'fail',
+        tests_pass: 24,
+        tests_fail: 1,
+      },
+    },
+  });
+  assert.equal(failingFocusedVerifyEvidence.status, 'fail');
+  assert.equal(failingFocusedVerifyEvidence.evidence_lifecycle.focused_verify_pass, false);
+
+  const failingContractEvidence = buildDod007RequestEvidence({
+    verificationSummary: {
+      ...req893ValidationSummary,
+      run_wrapper_session_contract: {
+        ...req893ValidationSummary.run_wrapper_session_contract,
+        status: 'fail',
+        tests_pass: 9,
+        tests_fail: 1,
+      },
+    },
+  });
+  assert.equal(failingContractEvidence.status, 'fail');
+  assert.equal(failingContractEvidence.evidence_lifecycle.contract_summaries_pass, false);
+});
+
+test('DOD-007 request evidence preserves excluded surfaces with zero counts', () => {
+  const evidence = buildDod007RequestEvidence({
+    verificationSummary: req893ValidationSummary,
+  });
+
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod007ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.status === 'pass'));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+});
+
+test('DOD-007 request evidence generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'dod-007-request-evidence-'));
+  const outputPath = join(tempDir, 'evidence.json');
+  const verificationPath = join(tempDir, 'verification-summary.json');
+
+  try {
+    writeFileSync(`${verificationPath}`, `${JSON.stringify(req893ValidationSummary, null, 2)}\n`, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/generate-dod-007-request-evidence.mjs',
+        outputPath,
+        verificationPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertDod007RequestEvidence(evidence, req893ValidationSummary);
+    evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assert.equal(evidence.test_command_results.generator.generated_output_path, null);
+    assertNoForbiddenDod007EvidenceLiterals(evidence, [tempDir, outputPath, verificationPath]);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

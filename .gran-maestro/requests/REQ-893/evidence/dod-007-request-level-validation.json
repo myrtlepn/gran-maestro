@@ -1,0 +1,344 @@
+{
+  "artifact_id": "REQ-893-DOD-007-request-level-validation",
+  "request_id": "REQ-893",
+  "agi_id": "AGI-039",
+  "sprint": 8,
+  "task_id": "05",
+  "dod_id": "DOD-007",
+  "plan_id": "PLN-720",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-19T14:45:00.000Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+  "source_commit": {
+    "status": "pass",
+    "tasks": [
+      {
+        "task_id": "REQ-893-01",
+        "source_commit": "f73bf3916fd9b661a093b6e096963f1d66c918d6",
+        "task_commit": "fda194f457bd4b5643cb8ac23fd37051c2be41cc",
+        "integration_commit": "f73bf3916fd9b661a093b6e096963f1d66c918d6"
+      },
+      {
+        "task_id": "REQ-893-02",
+        "source_commit": "4e26b50b0d749142f1c11e41f806c7cc70eb7762",
+        "task_commit": "1e09770f0c67db73f153103cf16de102ac9702e7",
+        "integration_commit": "4e26b50b0d749142f1c11e41f806c7cc70eb7762"
+      },
+      {
+        "task_id": "REQ-893-03",
+        "source_commit": "471e6f50f6dce193c465cd07031df8e27ddfe590",
+        "task_commit": "425a6d9f85bd41c833b258dd1141d76d7ed9c8b7",
+        "integration_commit": "471e6f50f6dce193c465cd07031df8e27ddfe590"
+      },
+      {
+        "task_id": "REQ-893-04",
+        "source_commit": "50649a02dce132aa2dedcf21df938fe570f1539f",
+        "task_commit": "2d06576a046a8afaf293e8479c0a42676181a3eb",
+        "integration_commit": "50649a02dce132aa2dedcf21df938fe570f1539f"
+      }
+    ]
+  },
+  "test_command_results": {
+    "focused_verify_command": {
+      "command": "python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py tests/test_run_wrapper.py -q",
+      "status": "pass",
+      "tests_total": 25,
+      "tests_pass": 25,
+      "tests_fail": 0,
+      "summary": "25 passed in 30.95s"
+    },
+    "npm_test": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 39,
+      "tests_pass": 39,
+      "tests_fail": 0,
+      "summary": "39 passed in 643.851125ms"
+    },
+    "generator": {
+      "command": "node scripts/generate-dod-007-request-evidence.mjs .gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json <summary-fixture>",
+      "generated_artifact_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "generated_output_path": null,
+      "status": "pass",
+      "parse_ok": true
+    },
+    "totals": {
+      "tests_total": 70,
+      "tests_pass": 70,
+      "tests_fail": 0
+    }
+  },
+  "contract_summaries": {
+    "state_transition_integrity": {
+      "command": "python3 -m pytest tests/test_workflow_state_transition_integrity.py -q",
+      "status": "pass",
+      "tests_total": 8,
+      "tests_pass": 8,
+      "tests_fail": 0,
+      "summary": "8 passed"
+    },
+    "continuation_contract": {
+      "command": "python3 tests/test_dod011_continuation_contract.py",
+      "status": "pass",
+      "tests_total": 6,
+      "tests_pass": 6,
+      "tests_fail": 0,
+      "summary": "6 passed"
+    },
+    "auto_continuation_contract": {
+      "command": "python3 -m pytest tests/test_dod012_auto_continuation_contract.py -q",
+      "status": "pass",
+      "tests_total": 7,
+      "tests_pass": 7,
+      "tests_fail": 0,
+      "summary": "7 passed"
+    },
+    "run_wrapper_session_contract": {
+      "command": "python3 -m pytest tests/test_run_wrapper.py -q",
+      "status": "pass",
+      "tests_total": 10,
+      "tests_pass": 10,
+      "tests_fail": 0,
+      "summary": "10 passed"
+    }
+  },
+  "state_contract_summary": {
+    "status": "pass",
+    "tests_total": 8,
+    "tests_pass": 8,
+    "tests_fail": 0,
+    "canonical_identity": "MST_SESSION_ID"
+  },
+  "continuation_contract_summary": {
+    "status": "pass",
+    "tests_total": 13,
+    "tests_pass": 13,
+    "tests_fail": 0,
+    "continuation_mode": "continue_unless_critical"
+  },
+  "wrapper_contract_summary": {
+    "status": "pass",
+    "tests_total": 10,
+    "tests_pass": 10,
+    "tests_fail": 0,
+    "session_identity_source": "MST_SESSION_ID"
+  },
+  "evidence_lifecycle": {
+    "status": "pass",
+    "verification_summary_supplied": true,
+    "focused_verify_pass": true,
+    "contract_summaries_pass": true,
+    "npm_test_pass": true,
+    "generator_pass": true,
+    "source_commits_present": true,
+    "excluded_surfaces_pass": true,
+    "forbidden_metadata_scan_pass": true
+  },
+  "excluded_surfaces": [
+    {
+      "surface_id": "DOD-008",
+      "dod_id": "DOD-008",
+      "category": "workflow-e2e-parity",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; workflow E2E parity remains outside DOD-007 evidence validation."
+    },
+    {
+      "surface_id": "DOD-009",
+      "dod_id": "DOD-009",
+      "category": "claude-regression-matrix",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; Claude regression matrix remains outside DOD-007 evidence validation."
+    },
+    {
+      "surface_id": "docs/release",
+      "dod_id": null,
+      "category": "documentation-release",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; documentation and release work remain outside DOD-007 evidence validation."
+    }
+  ],
+  "request_metadata_snapshot": {
+    "path": ".gran-maestro/requests/REQ-893/request.json",
+    "request_id": "REQ-893",
+    "agi_id": "AGI-039",
+    "sprint": 8,
+    "dod_id": "DOD-007",
+    "plan_id": "PLN-720",
+    "request_status": "phase2_execution",
+    "phase": 2,
+    "tasks": [
+      {
+        "task_id": "REQ-893-01",
+        "status": "completed",
+        "source_commit": "f73bf3916fd9b661a093b6e096963f1d66c918d6",
+        "task_commit": "fda194f457bd4b5643cb8ac23fd37051c2be41cc",
+        "integration_commit": "f73bf3916fd9b661a093b6e096963f1d66c918d6",
+        "validated_at": "2026-05-19T13:45:00.000Z",
+        "self_check": {
+          "status": "pass",
+          "command_count": 1,
+          "summaries": [
+            {
+              "command_id": "self_check_1",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t01/tests/test_workflow_state_transition_integrity.py -q",
+              "status": "pass",
+              "summary": "6 passed in 1.58s",
+              "tests_total": 6,
+              "tests_pass": 6,
+              "tests_fail": 0
+            }
+          ],
+          "tests_total": 6,
+          "tests_pass": 6,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-893-02",
+        "status": "completed",
+        "source_commit": "4e26b50b0d749142f1c11e41f806c7cc70eb7762",
+        "task_commit": "1e09770f0c67db73f153103cf16de102ac9702e7",
+        "integration_commit": "4e26b50b0d749142f1c11e41f806c7cc70eb7762",
+        "validated_at": "2026-05-19T14:05:00.000Z",
+        "self_check": {
+          "status": "pass",
+          "command_count": 2,
+          "summaries": [
+            {
+              "command_id": "self_check_1",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t02/tests/test_workflow_state_transition_integrity.py -q",
+              "status": "pass",
+              "summary": "8 passed in 1.82s",
+              "tests_total": 8,
+              "tests_pass": 8,
+              "tests_fail": 0
+            },
+            {
+              "command_id": "self_check_2",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t02/tests/test_session_id_migration.py .gran-maestro/worktrees/AGI-039/REQ-893/task-t02/tests/test_workflow_state_transition_integrity.py -q",
+              "status": "pass",
+              "summary": "17 passed in 3.90s",
+              "tests_total": 17,
+              "tests_pass": 17,
+              "tests_fail": 0
+            }
+          ],
+          "tests_total": 25,
+          "tests_pass": 25,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-893-03",
+        "status": "completed",
+        "source_commit": "471e6f50f6dce193c465cd07031df8e27ddfe590",
+        "task_commit": "425a6d9f85bd41c833b258dd1141d76d7ed9c8b7",
+        "integration_commit": "471e6f50f6dce193c465cd07031df8e27ddfe590",
+        "validated_at": "2026-05-19T14:18:00.000Z",
+        "self_check": {
+          "status": "pass",
+          "command_count": 2,
+          "summaries": [
+            {
+              "command_id": "self_check_1",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t03/tests/test_dod011_continuation_contract.py .gran-maestro/worktrees/AGI-039/REQ-893/task-t03/tests/test_dod012_auto_continuation_contract.py -q",
+              "status": "pass",
+              "summary": "7 passed in 20.65s",
+              "tests_total": 7,
+              "tests_pass": 7,
+              "tests_fail": 0
+            },
+            {
+              "command_id": "self_check_2",
+              "command": "git diff --check",
+              "status": "pass",
+              "summary": "no whitespace errors",
+              "tests_total": 0,
+              "tests_pass": 0,
+              "tests_fail": 0
+            }
+          ],
+          "tests_total": 7,
+          "tests_pass": 7,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-893-04",
+        "status": "completed",
+        "source_commit": "50649a02dce132aa2dedcf21df938fe570f1539f",
+        "task_commit": "2d06576a046a8afaf293e8479c0a42676181a3eb",
+        "integration_commit": "50649a02dce132aa2dedcf21df938fe570f1539f",
+        "validated_at": "2026-05-19T14:38:00.000Z",
+        "self_check": {
+          "status": "pass",
+          "command_count": 4,
+          "summaries": [
+            {
+              "command_id": "self_check_1",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_run_wrapper.py -q",
+              "status": "pass",
+              "summary": "10 passed in 9.13s",
+              "tests_total": 10,
+              "tests_pass": 10,
+              "tests_fail": 0
+            },
+            {
+              "command_id": "self_check_2",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_dod011_continuation_contract.py .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_dod012_auto_continuation_contract.py -q",
+              "status": "pass",
+              "summary": "7 passed in 20.52s",
+              "tests_total": 7,
+              "tests_pass": 7,
+              "tests_fail": 0
+            },
+            {
+              "command_id": "self_check_3",
+              "command": "python3 -m pytest .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_workflow_state_transition_integrity.py .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_dod011_continuation_contract.py .gran-maestro/worktrees/AGI-039/REQ-893/task-t04/tests/test_dod012_auto_continuation_contract.py -q",
+              "status": "pass",
+              "summary": "15 passed in 22.21s",
+              "tests_total": 15,
+              "tests_pass": 15,
+              "tests_fail": 0
+            },
+            {
+              "command_id": "self_check_4",
+              "command": "git diff --check",
+              "status": "pass",
+              "summary": "no whitespace errors",
+              "tests_total": 0,
+              "tests_pass": 0,
+              "tests_fail": 0
+            }
+          ],
+          "tests_total": 32,
+          "tests_pass": 32,
+          "tests_fail": 0
+        }
+      }
+    ]
+  },
+  "input_paths_read": [
+    ".gran-maestro/requests/REQ-893/request.json",
+    ".gran-maestro/plans/PLN-720/plan.md",
+    ".gran-maestro/plans/PLN-720/plan.ids.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "status": "pass",
+  "forbidden_metadata_scan": {
+    "status": "pass",
+    "scanned_string_count": 141,
+    "violation_count": 0,
+    "violations": []
+  }
+}

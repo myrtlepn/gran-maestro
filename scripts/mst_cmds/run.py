@@ -64,7 +64,18 @@ def _started_by_pid() -> int:
     return resolve_started_by_pid()
 
 
-def _register_state(args) -> str:
+def _run_session_metadata_fields(session_id: str) -> dict[str, str | int]:
+    fields: dict[str, str | int] = {"mst_session_id": session_id}
+    try:
+        parsed = session_mod.validate_mst_session_id(session_id)
+    except ValueError:
+        return fields
+    fields["schema_version"] = 1
+    fields["root_mst_id"] = parsed.root_mst_id
+    return fields
+
+
+def _register_state(args, session_id: str) -> str:
     now = _now_iso()
     pid = os.getpid()
     pid_start_time = _process_start_time(pid) or f"pid:{pid}:started_at:{now}"
@@ -81,14 +92,23 @@ def _register_state(args) -> str:
         "worktree_dir": str(Path.cwd()),
         "last_heartbeat": now,
     }
+    payload.update(_run_session_metadata_fields(session_id))
     _atomic_save_json(_dispatch_state_path(payload["task_id"]), payload)
     return now
 
 
-def _write_heartbeat(task_id: str, *, phase: str | None = None, final: bool = False, exit_code: int | None = None) -> None:
+def _write_heartbeat(
+    task_id: str,
+    *,
+    session_id: str,
+    phase: str | None = None,
+    final: bool = False,
+    exit_code: int | None = None,
+) -> None:
     now = _now_iso()
     payload = _load_state(task_id)
     payload["task_id"] = task_id
+    payload.update(_run_session_metadata_fields(session_id))
     payload["last_heartbeat"] = now
     if phase:
         payload["phase"] = str(phase).strip()
@@ -122,6 +142,7 @@ def _write_trace_file(
     duration_ms: int,
     exit_code: int,
     running_log_path: Path,
+    session_id: str,
 ) -> None:
     traces_dir = log_dir / "traces"
     traces_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +155,7 @@ def _write_trace_file(
         f"task_id: {task_id}",
         f"provider: {provider}",
         f"model: {model}",
+        f"mst_session_id: {session_id}",
         f"trace_label: {trace}",
         f"started_at: {started_at}",
         f"terminated_at: {terminated_at}",
@@ -143,12 +165,73 @@ def _write_trace_file(
         "---",
         "",
     ]
+    metadata = _run_session_metadata_fields(session_id)
+    root_mst_id = metadata.get("root_mst_id")
+    if isinstance(root_mst_id, str) and root_mst_id:
+        content.insert(5, f"root_mst_id: {root_mst_id}")
     trace_path.write_text("\n".join(content), encoding="utf-8")
+
+
+def _ensure_context_session_id(context_payload: dict, session_id: str, root_mst_id: str) -> None:
+    existing = context_payload.get("mst_session_id")
+    if isinstance(existing, str) and existing.strip() and existing.strip() != session_id:
+        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+    context_payload["mst_session_id"] = session_id
+
+    existing_root = context_payload.get("root_mst_id")
+    if isinstance(existing_root, str) and existing_root.strip() and existing_root.strip() != root_mst_id:
+        raise ValueError("MST_SESSION_ID and structured root_mst_id mismatch")
+    context_payload.setdefault("root_mst_id", root_mst_id)
+    context_payload.setdefault("schema_version", 1)
+
+
+def _child_env_with_run_context(child_env: dict[str, str], session_id: str) -> dict[str, str]:
+    try:
+        parsed = session_mod.validate_mst_session_id(session_id)
+    except ValueError:
+        return child_env
+
+    raw_context = child_env.get("MST_CONTEXT_JSON", "").strip()
+    if raw_context:
+        try:
+            context_payload = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
+        if not isinstance(context_payload, dict):
+            raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+    else:
+        context_payload = {}
+
+    _ensure_context_session_id(context_payload, session_id, parsed.root_mst_id)
+
+    core = context_payload.get("core_rehydration")
+    if isinstance(core, dict):
+        _ensure_context_session_id(core, session_id, parsed.root_mst_id)
+        next_execution = core.setdefault("next_execution", {})
+        if not isinstance(next_execution, dict):
+            raise ValueError("core_rehydration.next_execution must be a JSON object")
+
+        env = next_execution.setdefault("env", {})
+        if not isinstance(env, dict):
+            raise ValueError("core_rehydration.next_execution.env must be a JSON object")
+        existing_env_sid = env.get("MST_SESSION_ID")
+        if isinstance(existing_env_sid, str) and existing_env_sid.strip() and existing_env_sid.strip() != session_id:
+            raise ValueError("MST_SESSION_ID and recovered next_execution env mismatch")
+        env["MST_SESSION_ID"] = session_id
+
+        context = next_execution.setdefault("context", {})
+        if not isinstance(context, dict):
+            raise ValueError("core_rehydration.next_execution.context must be a JSON object")
+        _ensure_context_session_id(context, session_id, parsed.root_mst_id)
+
+    child_env["MST_CONTEXT_JSON"] = json.dumps(context_payload, ensure_ascii=False, separators=(",", ":"))
+    return child_env
 
 
 def _child_env_with_run_session_id() -> dict[str, str]:
     try:
-        return session_mod.child_env_with_session_id()
+        child_env = session_mod.child_env_with_session_id()
+        return _child_env_with_run_context(child_env, child_env["MST_SESSION_ID"])
     except ValueError as exc:
         message = str(exc)
         if "missing MST_SESSION_ID" not in message and "invalid structured mst_session_id" not in message:
@@ -160,7 +243,7 @@ def _child_env_with_run_session_id() -> dict[str, str]:
     child_env = os.environ.copy()
     child_env["MST_SESSION_ID"] = session_id
     os.environ["MST_SESSION_ID"] = session_id
-    return child_env
+    return _child_env_with_run_context(child_env, session_id)
 
 
 def _tee_output(proc: subprocess.Popen, log_fd: int, stream_log_fds: dict[int, int] | None = None) -> None:
@@ -220,13 +303,15 @@ def cmd_run(args):
     timeout_sec = _wrapper_timeout_sec(args)
     state_lock = threading.Lock()
     stop_event = threading.Event()
+    child_env = _child_env_with_run_session_id()
+    run_session_id = child_env["MST_SESSION_ID"]
 
-    _register_state(args)
+    _register_state(args, run_session_id)
 
     def heartbeat_loop() -> None:
         while not stop_event.wait(heartbeat_interval):
             with state_lock:
-                _write_heartbeat(task_id, phase="running")
+                _write_heartbeat(task_id, session_id=run_session_id, phase="running")
                 current_state = _load_state(task_id)
                 try:
                     record_delegate_io_attention(
@@ -275,7 +360,7 @@ def cmd_run(args):
                 stderr=subprocess.PIPE,
                 bufsize=0,
                 text=False,
-                env=_child_env_with_run_session_id(),
+                env=child_env,
             )
             tee_error: list[BaseException] = []
 
@@ -323,7 +408,7 @@ def cmd_run(args):
         hb_thread.join(timeout=max(1.0, heartbeat_interval + 0.5))
 
         with state_lock:
-            _write_heartbeat(task_id, final=True, exit_code=exit_code)
+            _write_heartbeat(task_id, session_id=run_session_id, final=True, exit_code=exit_code)
 
         terminated_at = _now_iso()
         duration_ms = max(0, (time.time_ns() - started_mono) // 1_000_000)
@@ -339,6 +424,7 @@ def cmd_run(args):
                 duration_ms=duration_ms,
                 exit_code=exit_code,
                 running_log_path=running_log_path,
+                session_id=run_session_id,
             )
 
         signal.signal(signal.SIGTERM, previous_term)

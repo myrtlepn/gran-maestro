@@ -265,6 +265,31 @@ final_path.write_text(json.dumps({"decision": payload["decision"], "reason": rea
 PY
 }
 
+append_invalid_judge_continuation_evidence() {
+  local code_root
+  code_root="$(cd "$script_dir/.." && pwd)"
+  PYTHONPATH="$code_root${PYTHONPATH:+:$PYTHONPATH}" python3 - "$code_root" "$PROJECT_ROOT" "$stdin_file" "$HOOK_JUDGE_TIMEOUT_MS" <<'PY' 2>/dev/null || true
+import sys
+from pathlib import Path
+
+code_root = Path(sys.argv[1]).resolve()
+if str(code_root) not in sys.path:
+    sys.path.insert(0, str(code_root))
+
+from scripts.mst_cmds import stop_judge
+
+project_root = Path(sys.argv[2]).resolve()
+stdin_file = Path(sys.argv[3]).resolve()
+timeout_ms = int(sys.argv[4])
+decision = stop_judge.evaluate_stop_judge(
+    project_root=project_root,
+    stdin_file=stdin_file,
+    hook_timeout_ms=timeout_ms,
+)
+stop_judge.apply_stop_judge_side_effects(project_root=project_root, decision=decision)
+PY
+}
+
 emit_final_file_once() {
   local final_file="$1"
   if claim_judge_timeout_emit; then
@@ -364,6 +389,7 @@ if [ "$judge_status" -eq 0 ] && validate_judge_stdout "$stdout_capture" "$final_
 fi
 
 printf '[mst-stop-hook] judge_invalid_output exit=%s fallback=startup_failure\n' "$judge_status" >&2
+append_invalid_judge_continuation_evidence
 python3 - "$final_file" <<'PY'
 import json
 import sys

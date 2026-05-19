@@ -16,8 +16,8 @@ from tests.fixtures.snapshot_factory import build_snapshot, write_snapshot
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
-UUID_V4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
-VALID_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+MST_SESSION_RE = re.compile(r"^MST-AGI-039-\d{8}T\d{9}Z-[a-z0-9]{8,}$")
+VALID_SESSION_ID = "MST-AGI-039-20260519T130000000Z-validsid"
 
 
 def _hook_payload(session_id: str) -> dict:
@@ -40,7 +40,7 @@ def test_session_b_sees_no_a_snapshot(tmp_path):
 
     payload = stdout_json(result)
     assert payload["decision"] == "approve"
-    assert "no-mst-session" in payload["reason"]
+    assert "workflow_inactive" in payload["reason"]
     assert "snapshot_present=false" in payload["reason"]
 
 
@@ -93,14 +93,14 @@ def test_session_resolve_returns_existing_env_without_writes(tmp_path: Path) -> 
     assert _workspace_files(tmp_path) == before
 
 
-def test_session_resolve_generates_uuid_without_state_side_effects(tmp_path: Path) -> None:
+def test_session_resolve_generates_structured_id_without_state_side_effects(tmp_path: Path) -> None:
     (tmp_path / ".gran-maestro").mkdir()
     before = _workspace_files(tmp_path)
 
-    result = _run_mst(tmp_path, "session", "resolve", env={"MST_SESSION_ID": ""})
+    result = _run_mst(tmp_path, "session", "resolve", "--root-mst-id", "AGI-039", env={"MST_SESSION_ID": ""})
 
     assert result.returncode == 0, result.stderr
-    assert UUID_V4_RE.match(result.stdout.strip())
+    assert MST_SESSION_RE.match(result.stdout.strip())
     assert _workspace_files(tmp_path) == before
 
 
@@ -110,7 +110,11 @@ def test_session_resolve_json_output_is_side_effect_free(tmp_path: Path) -> None
     result = _run_mst(tmp_path, "session", "resolve", "--json", env={"MST_SESSION_ID": VALID_SESSION_ID})
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"session_id": VALID_SESSION_ID}
+    payload = json.loads(result.stdout)
+    assert payload["mst_session_id"] == VALID_SESSION_ID
+    assert payload["session_id"] == VALID_SESSION_ID
+    assert payload["source"] == "env:MST_SESSION_ID"
+    assert payload["valid"] is True
 
 
 def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) -> None:
@@ -118,11 +122,11 @@ def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) 
     script = (
         'export MST_SESSION_ID="${MST_SESSION_ID:-$(python3 '
         + str(MST_SCRIPT)
-        + ' session resolve)}"; '
+        + ' session resolve --root-mst-id AGI-039)}"; '
         'first="$MST_SESSION_ID"; '
         'export MST_SESSION_ID="${MST_SESSION_ID:-$(python3 '
         + str(MST_SCRIPT)
-        + ' session resolve)}"; '
+        + ' session resolve --root-mst-id AGI-039)}"; '
         'printf "%s\\n%s\\n" "$first" "$MST_SESSION_ID"'
     )
 
@@ -137,7 +141,7 @@ def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) 
 
     assert result.returncode == 0, result.stderr
     first, second = result.stdout.strip().splitlines()
-    assert UUID_V4_RE.match(first)
+    assert MST_SESSION_RE.match(first)
     assert second == first
 
 
@@ -150,58 +154,60 @@ def test_session_resolve_prefers_mst_session_id_over_legacy_aliases(tmp_path: Pa
         "session",
         "resolve",
         env={
-            "MST_SESSION_ID": "canonical-session",
+            "MST_SESSION_ID": VALID_SESSION_ID,
             "MST_STATE_PPID": "legacy-ppid-session",
             "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session",
         },
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "canonical-session"
+    assert result.stdout.strip() == VALID_SESSION_ID
     assert "legacy" not in result.stdout.strip()
 
 
-def test_session_resolve_legacy_only_snapshot_alias_falls_back_with_deprecation_signal(tmp_path: Path) -> None:
-    """DOD-010: 0.60.x MST_SNAPSHOT_SESSION_ID remains a warned fallback."""
+def test_session_resolve_legacy_only_snapshot_alias_is_diagnostic_only(tmp_path: Path) -> None:
+    """DOD-007: MST_SNAPSHOT_SESSION_ID is diagnostic-only for canonical identity."""
     (tmp_path / ".gran-maestro").mkdir()
 
     result = _run_mst(
         tmp_path,
         "session",
         "resolve",
+        "--json",
         env={
             "MST_SESSION_ID": "",
             "MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session",
         },
     )
 
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "legacy-snapshot-session"
-    warning = result.stderr.lower()
-    assert "legacy-env-alias" in warning
-    assert "mst_snapshot_session_id" in warning
-    assert "deprecated" in warning
-    assert "migration" in warning
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["code"] == "legacy_identity_not_canonical_source"
+    assert payload["canonical_mst_session_id"] is None
+    assert payload["mutation_performed"] is False
+    assert payload["legacy_diagnostics"] == {"MST_SNAPSHOT_SESSION_ID": "legacy-snapshot-session"}
 
 
-def test_session_resolve_legacy_only_state_ppid_alias_falls_back_with_deprecation_signal(tmp_path: Path) -> None:
-    """DOD-010: 0.60.x MST_STATE_PPID remains a warned fallback."""
+def test_session_resolve_legacy_only_state_ppid_alias_is_diagnostic_only(tmp_path: Path) -> None:
+    """DOD-007: MST_STATE_PPID is diagnostic-only for canonical identity."""
     (tmp_path / ".gran-maestro").mkdir()
 
     result = _run_mst(
         tmp_path,
         "session",
         "resolve",
+        "--json",
         env={
             "MST_SESSION_ID": "",
             "MST_STATE_PPID": "424242",
         },
     )
 
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "424242"
-    warning = result.stderr.lower()
-    assert "legacy-env-alias" in warning
-    assert "mst_state_ppid" in warning
-    assert "deprecated" in warning
-    assert "migration" in warning
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["code"] == "legacy_identity_not_canonical_source"
+    assert payload["canonical_mst_session_id"] is None
+    assert payload["mutation_performed"] is False
+    assert payload["legacy_diagnostics"] == {"MST_STATE_PPID": "424242"}

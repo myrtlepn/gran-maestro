@@ -42,6 +42,15 @@ TEXT_QUESTION_PATTERNS = (
     "자연스럽게 끊고",
     "멈추고 잠시",
 )
+USER_WAIT_RE = re.compile(
+    r"AskUserQuestion"
+    r"|waiting\s+for\s+user"
+    r"|wait\s+for\s+user"
+    r"|pause\s+here"
+    r"|resume\s+in\s+the\s+next\s+session"
+    r"|preventContinuation",
+    re.IGNORECASE,
+)
 SELF_PAUSE_RE = re.compile(
     r"stash[^\x00-\x1f\x7f]{0,20}squash[^\x00-\x1f\x7f]{0,20}부담"
     r"|반복\s*stash"
@@ -228,6 +237,118 @@ def _queued_next_action(payload: Mapping[str, Any], state_payload: Mapping[str, 
         if action:
             return action
     return None
+
+
+def _history_head_from_snapshot(project_root: Path, session_id: str, snapshot: Mapping[str, Any] | None) -> str:
+    if isinstance(snapshot, Mapping):
+        history = snapshot.get("history")
+        if isinstance(history, Mapping):
+            for key in ("head_hash", "last_event_id"):
+                value = history.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    try:
+        path = _base_dir(project_root) / "sessions" / session_id / "history.head"
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _normalized_action(action: Mapping[str, Any] | None) -> str:
+    if not isinstance(action, Mapping):
+        return "unknown"
+    explicit = _safe_text(action.get("normalized_action"))
+    if explicit:
+        return explicit
+    tool = _safe_text(action.get("tool") or action.get("expected_skill") or action.get("skill")).lower()
+    command = _safe_text(action.get("command") or action.get("args") or action.get("source_id") or action.get("source"))
+    if tool and command:
+        return f"{tool}:{command}"
+    return tool or command or "unknown"
+
+
+def _normalized_error(payload: Mapping[str, Any], action: Mapping[str, Any] | None, message: str) -> str:
+    failure = payload.get("failure")
+    if isinstance(failure, Mapping):
+        value = _safe_text(failure.get("normalized_error"))
+        if value:
+            return value
+    if isinstance(action, Mapping):
+        value = _safe_text(action.get("normalized_error"))
+        if value:
+            return value
+    return "recoverable:" + hashlib.sha256(message.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _action_command(action: Mapping[str, Any]) -> str:
+    return _safe_text(action.get("command") or action.get("args") or "")
+
+
+def _classify_action(action: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(action, Mapping) or not action:
+        return None
+    scope_hint = _safe_text(action.get("scope") or action.get("scope_hint")).lower()
+    command = _action_command(action).lower()
+    destructive = any(token in scope_hint for token in ("destructive", "shared_state", "external_shared"))
+    destructive = destructive or bool(re.search(r"\brm\s+-rf\b|\bgit\s+push\b|\bsudo\b|>\s*/|/shared/", command))
+    read_only = "read_only" in scope_hint or command.startswith(("python3 -m pytest", "pytest", "rg ", "sed ", "cat ", "git status", "git diff"))
+    local_reversible = "local_reversible" in scope_hint or (read_only and not destructive)
+    if destructive:
+        scope = "destructive_external_shared_state"
+        auto_start_allowed = False
+        safe_alternatives = [
+            "record security confirmation requirement",
+            "request explicit user approval before executing shared-state mutation",
+        ]
+    elif read_only and local_reversible:
+        scope = "read_only_local_reversible"
+        auto_start_allowed = True
+        safe_alternatives = ["execute queued read-only verification", "record continuation evidence and continue"]
+    elif read_only:
+        scope = "read_only"
+        auto_start_allowed = True
+        safe_alternatives = ["execute queued read-only verification"]
+    else:
+        scope = scope_hint or "local_reversible"
+        auto_start_allowed = True
+        safe_alternatives = ["continue with queued action after recording evidence"]
+    return {
+        "source": "queued_action_tool_envelope",
+        "scope": scope,
+        "auto_start_allowed": auto_start_allowed,
+        "normalized_action": _normalized_action(action),
+        "safe_alternatives": safe_alternatives,
+    }
+
+
+def _critical_blocker_from_candidate(
+    *,
+    candidate: Mapping[str, Any] | None,
+    blocker_type: str,
+    session_id: str,
+    history_head: str,
+    evidence_source: str,
+    default_evidence: str,
+    default_recovery: str,
+    default_next_safe_action: str,
+) -> dict[str, Any]:
+    payload = dict(candidate or {})
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        evidence = [default_evidence]
+    attempted_recovery = payload.get("attempted_recovery")
+    if not isinstance(attempted_recovery, list) or not attempted_recovery:
+        attempted_recovery = [default_recovery]
+    next_safe_action = _safe_text(payload.get("next_safe_action")) or default_next_safe_action
+    return {
+        "type": _safe_text(payload.get("type")) or blocker_type,
+        "evidence": evidence,
+        "attempted_recovery": attempted_recovery,
+        "next_safe_action": next_safe_action,
+        "mst_session_id": session_id,
+        "history_head": history_head or "unknown",
+        "evidence_source": evidence_source,
+    }
 
 
 def _is_terminal_status(status: Any, terminal: set[str]) -> bool:
@@ -440,11 +561,14 @@ def collect_stop_judge_context(
     if snapshot_error:
         context["diagnostics"]["snapshot_error"] = snapshot_error
     if snapshot_payload and canonical_session_id:
+        context["diagnostics"]["history_head"] = _history_head_from_snapshot(project_root, canonical_session_id, snapshot_payload)
         snapshot_mst_id = _safe_text(snapshot_payload.get("mst_session_id"))
         if snapshot_mst_id and snapshot_mst_id != canonical_session_id:
             context["signals"]["canonical_mismatch"] = True
             context["diagnostics"]["snapshot_mst_session_id"] = snapshot_mst_id
             return context
+    elif canonical_session_id:
+        context["diagnostics"]["history_head"] = _history_head_from_snapshot(project_root, canonical_session_id, None)
 
     state_payload: dict[str, Any] | None = None
     if canonical_session_id:
@@ -473,6 +597,18 @@ def collect_stop_judge_context(
     declared_stop_reason = _declared_stop_reason(message)
     if declared_stop_reason in LEGITIMATE_STOP_REASONS:
         context["signals"]["legitimate_stop_intent"] = declared_stop_reason
+    critical_blocker_candidate = payload_dict.get("critical_blocker_candidate")
+    if isinstance(critical_blocker_candidate, Mapping):
+        context["signals"]["critical_blocker_candidate"] = deepcopy(dict(critical_blocker_candidate))
+    hook_output = payload_dict.get("hook_output")
+    if isinstance(hook_output, Mapping) and hook_output.get("preventContinuation") is True:
+        context["signals"]["recoverable_hook_blocking_output"] = True
+    if payload_dict.get("preventContinuation") is True:
+        context["signals"]["prevent_continuation"] = True
+    if isinstance(payload_dict.get("failure"), Mapping):
+        context["signals"]["recoverable_failure"] = deepcopy(dict(payload_dict["failure"]))
+    if USER_WAIT_RE.search(message) or _message_has_text_question_pattern(message):
+        context["signals"]["user_wait_prose_without_critical_evidence"] = "critical_blocker_candidate" not in context["signals"]
 
     return_to = _extract_return_to(payload_dict, raw_stdin, snapshot_payload)
     snapshot_in_progress, snapshot_skill, snapshot_current, snapshot_total, snapshot_status = _snapshot_progress(snapshot_payload)
@@ -503,6 +639,11 @@ def collect_stop_judge_context(
     next_action = _queued_next_action(payload_dict, state_payload)
     if next_action:
         context["signals"]["queued_next_action"] = next_action
+        classification = _classify_action(next_action)
+        if classification:
+            context["signals"]["action_classification"] = classification
+            if classification.get("auto_start_allowed") is False:
+                context["signals"]["security_confirmation_required"] = True
     if state_payload:
         if state_payload.get("workflow_active") is True:
             context["signals"]["workflow_active"] = True
@@ -566,6 +707,147 @@ def _workflow_reason(diagnostics: Mapping[str, Any], next_action: Mapping[str, A
     return reason
 
 
+def _append_continuation_history_side_effects(
+    side_effects: list[dict[str, Any]],
+    *,
+    diagnostics: Mapping[str, Any],
+    signals: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    message: str,
+) -> None:
+    canonical_session_id = _safe_session_path(diagnostics.get("canonical_mst_session_id"))
+    if not canonical_session_id:
+        return
+    next_action = signals.get("queued_next_action") if isinstance(signals.get("queued_next_action"), Mapping) else None
+    classification = signals.get("action_classification") if isinstance(signals.get("action_classification"), Mapping) else None
+    history_head = _safe_text(diagnostics.get("history_head")) or "unknown"
+    base_event: dict[str, Any] = {
+        "mst_session_id": canonical_session_id,
+        "history_head": history_head,
+        "decision_source": "stop_judge",
+    }
+    if classification:
+        side_effects.append(
+            {
+                "kind": "append_history_event",
+                "event": {
+                    **base_event,
+                    "event_type": "continue.action_classified",
+                    "type": "continue.action_classified",
+                    "next_action": deepcopy(dict(next_action or {})),
+                    "action_classification": deepcopy(dict(classification)),
+                },
+            }
+        )
+
+    security_required = signals.get("security_confirmation_required") is True
+    critical_candidate = signals.get("critical_blocker_candidate") if isinstance(signals.get("critical_blocker_candidate"), Mapping) else None
+    if security_required:
+        blocker = _critical_blocker_from_candidate(
+            candidate=None,
+            blocker_type="security_confirmation_required",
+            session_id=canonical_session_id,
+            history_head=history_head,
+            evidence_source="queued_action_security_boundary",
+            default_evidence="queued action is destructive or mutates shared external state",
+            default_recovery="classified queued action before auto-start",
+            default_next_safe_action="request explicit security confirmation",
+        )
+        side_effects.append(
+            {
+                "kind": "append_history_event",
+                "event": {
+                    **base_event,
+                    "event_type": "terminal.security_confirmation_required",
+                    "type": "terminal.security_confirmation_required",
+                    "next_action": deepcopy(dict(next_action or {})),
+                    "action_classification": deepcopy(dict(classification or {})),
+                    "critical_blocker": blocker,
+                },
+            }
+        )
+        return
+
+    if critical_candidate:
+        blocker = _critical_blocker_from_candidate(
+            candidate=critical_candidate,
+            blocker_type="external_auth_unavailable",
+            session_id=canonical_session_id,
+            history_head=history_head,
+            evidence_source="critical_blocker_candidate",
+            default_evidence="structured critical blocker candidate supplied",
+            default_recovery="evaluated stop intent before terminal wait",
+            default_next_safe_action="request user confirmation",
+        )
+        side_effects.append(
+            {
+                "kind": "append_history_event",
+                "event": {
+                    **base_event,
+                    "event_type": "terminal.critical_blocker",
+                    "type": "terminal.critical_blocker",
+                    "critical_blocker": blocker,
+                    "next_action": deepcopy(dict(next_action or {})) if next_action else None,
+                },
+            }
+        )
+        return
+
+    if signals.get("recoverable_failure"):
+        side_effects.append(
+            {
+                "kind": "append_circuit_breaker_event",
+                "action": deepcopy(dict(next_action or {})),
+                "normalized_action": _normalized_action(next_action),
+                "normalized_error": _normalized_error(payload, next_action, message),
+            }
+        )
+
+    event_type = ""
+    if signals.get("recoverable_hook_blocking_output"):
+        event_type = "continue.hook_blocking_observed"
+    elif signals.get("user_wait_prose_without_critical_evidence"):
+        event_type = "continue.queued_action"
+    elif signals.get("recoverable_failure"):
+        event_type = "continue.recoverable_issue"
+    elif next_action:
+        event_type = "continue.queued_action"
+    elif signals.get("workflow_active") or signals.get("agile_loop_active"):
+        event_type = "continue.rehydrate_retry"
+
+    if event_type:
+        side_effects.append(
+            {
+                "kind": "append_history_event",
+                "event": {
+                    **base_event,
+                    "event_type": event_type,
+                    "type": event_type,
+                    "next_action": deepcopy(dict(next_action or {})) if next_action else None,
+                    "next_action_execution": {
+                        "status": "queued",
+                        "reason": event_type,
+                    }
+                    if next_action
+                    else None,
+                },
+            }
+        )
+    if next_action:
+        side_effects.append(
+            {
+                "kind": "append_history_event",
+                "event": {
+                    **base_event,
+                    "event_type": "action.queued",
+                    "type": "action.queued",
+                    "next_action": deepcopy(dict(next_action)),
+                    "action_classification": deepcopy(dict(classification or {})) if classification else None,
+                },
+            }
+        )
+
+
 def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
     hook_timeout_ms = int(context.get("hook_timeout_ms") or DEFAULT_HOOK_TIMEOUT_MS)
     diagnostics = dict(context.get("diagnostics") or {})
@@ -575,6 +857,15 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
     wrapper_mode = diagnostics.get("wrapper_mode") is True
     message = _safe_text(diagnostics.get("last_assistant_message"))
     current_skill = _safe_text(diagnostics.get("current_skill"))
+    payload = context.get("payload") if isinstance(context.get("payload"), Mapping) else {}
+
+    _append_continuation_history_side_effects(
+        side_effects,
+        diagnostics=diagnostics,
+        signals=signals,
+        payload=payload,
+        message=message,
+    )
 
     if failsafe == "invalid_stdin":
         diagnostics["failsafe"] = failsafe
@@ -617,7 +908,7 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
         side_effects.append({"kind": "persist_block_state", "reason": "ask_user_question"})
         side_effects.append({"kind": "append_agile_audit", "classification": "blocked", "block_reason": "ask_user_question", "message": message})
         return _decision("block", "AskUserQuestion is allowed only with agile whitelist markers.", diagnostics=diagnostics, side_effects=side_effects)
-    agile_auto = context.get("payload", {}).get("agile_auto_mode") if isinstance(context.get("payload"), Mapping) else None
+    agile_auto = payload.get("agile_auto_mode") if isinstance(payload, Mapping) else None
     queued_for_message = signals.get("queued_next_action")
     next_action_auto = isinstance(queued_for_message, Mapping) and queued_for_message.get("auto") is True
     steering_forces_block = agile_auto is True or next_action_auto or diagnostics.get("steering_disabled") is True
@@ -737,6 +1028,127 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return dict(payload or {})
 
 
+def _policy_home() -> Path:
+    explicit = os.environ.get("MST_POLICY_HOME", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    claude_home = Path(os.environ.get("MST_CLAUDE_HOME", str(Path.home()))).expanduser()
+    return claude_home / ".claude" / "gran-maestro-policy"
+
+
+def _history_events(project_root: Path, session_id: str) -> list[dict[str, Any]]:
+    history_file = _base_dir(project_root) / "sessions" / session_id / "history.ndjson"
+    events: list[dict[str, Any]] = []
+    try:
+        lines = history_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return events
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event = row.get("event") if isinstance(row, dict) else None
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def _event_action_matches(event: Mapping[str, Any], normalized_action: str) -> bool:
+    if _safe_text(event.get("normalized_action")) == normalized_action:
+        return True
+    action = event.get("action")
+    if isinstance(action, Mapping) and _normalized_action(action) == normalized_action:
+        return True
+    next_action = event.get("next_action")
+    return isinstance(next_action, Mapping) and _normalized_action(next_action) == normalized_action
+
+
+def _next_circuit_count(project_root: Path, session_id: str, key: str, normalized_action: str) -> int:
+    count = 0
+    for event in _history_events(project_root, session_id):
+        event_type = _safe_text(event.get("event_type") or event.get("type"))
+        if event_type == "action.completed" and _event_action_matches(event, normalized_action):
+            count = 0
+            continue
+        circuit = event.get("circuit_breaker")
+        if isinstance(circuit, Mapping) and circuit.get("key") == key:
+            existing = circuit.get("count")
+            if isinstance(existing, int) and not isinstance(existing, bool):
+                count = max(count, existing)
+            else:
+                count += 1
+    return count + 1
+
+
+def _append_history_event_side_effect(project_root: Path, decision: Mapping[str, Any], event: Mapping[str, Any]) -> None:
+    from scripts.mst_cmds import hook as hook_cmds
+
+    diagnostics = decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}
+    session_id = _safe_session_path(event.get("mst_session_id")) or _safe_session_path(diagnostics.get("canonical_mst_session_id"))
+    if not session_id:
+        return
+    payload = {key: value for key, value in dict(event).items() if value is not None}
+    current_head = _history_head_from_snapshot(project_root, session_id, None)
+    if current_head:
+        payload["history_head"] = current_head
+        blocker = payload.get("critical_blocker")
+        if isinstance(blocker, dict):
+            blocker["history_head"] = current_head
+    hook_cmds.append_history_event(project_root, _policy_home(), session_id, payload)
+
+
+def _append_circuit_breaker_side_effect(project_root: Path, decision: Mapping[str, Any], effect: Mapping[str, Any]) -> None:
+    diagnostics = decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}
+    session_id = _safe_session_path(diagnostics.get("canonical_mst_session_id"))
+    if not session_id:
+        return
+    action = effect.get("action") if isinstance(effect.get("action"), Mapping) else {}
+    normalized_action = _safe_text(effect.get("normalized_action")) or _normalized_action(action)
+    normalized_error = _safe_text(effect.get("normalized_error")) or "unknown"
+    key = f"{session_id}:{normalized_action}:{normalized_error}"
+    count = _next_circuit_count(project_root, session_id, key, normalized_action)
+    limit = 3
+    event = {
+        "event_type": "continue.retry_circuit",
+        "type": "continue.retry_circuit",
+        "mst_session_id": session_id,
+        "next_action": deepcopy(dict(action)),
+        "normalized_action": normalized_action,
+        "normalized_error": normalized_error,
+        "circuit_breaker": {
+            "key": key,
+            "count": count,
+            "limit": limit,
+            "open": count >= limit,
+            "scope": "session_action_error",
+        },
+    }
+    _append_history_event_side_effect(project_root, decision, event)
+    evidence_error = f"retry_evidence:{normalized_error}"
+    evidence_key = f"{session_id}:{normalized_action}:{evidence_error}"
+    evidence_count = _next_circuit_count(project_root, session_id, evidence_key, normalized_action)
+    evidence_event = {
+        "event_type": "continue.retry_evidence",
+        "type": "continue.retry_evidence",
+        "mst_session_id": session_id,
+        "next_action": deepcopy(dict(action)),
+        "normalized_action": normalized_action,
+        "normalized_error": evidence_error,
+        "circuit_breaker": {
+            "key": evidence_key,
+            "count": evidence_count,
+            "limit": limit,
+            "open": evidence_count >= limit,
+            "scope": "session_action_error",
+            "evidence_role": "retry_attempt_observed",
+        },
+    }
+    _append_history_event_side_effect(project_root, decision, evidence_event)
+
+
 def _state_path_for_block(project_root: Path, diagnostics: Mapping[str, Any]) -> Path:
     raw_path = _safe_text(diagnostics.get("state_path"))
     if raw_path:
@@ -809,6 +1221,15 @@ def _apply_side_effect(project_root: Path, decision: Mapping[str, Any], effect: 
     applied = deepcopy(dict(effect))
     if kind == "persist_block_state":
         applied["block_count"] = _persist_block_state(project_root, decision.get("diagnostics") if isinstance(decision.get("diagnostics"), Mapping) else {}, str(decision.get("reason") or ""))
+        return applied
+    if kind == "append_history_event":
+        event = effect.get("event")
+        if isinstance(event, Mapping):
+            _append_history_event_side_effect(project_root, decision, event)
+            return applied
+        return None
+    if kind == "append_circuit_breaker_event":
+        _append_circuit_breaker_side_effect(project_root, decision, effect)
         return applied
     if kind == "append_boundary_log":
         _log_boundary_event(

@@ -12,18 +12,30 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST = REPO_ROOT / "scripts" / "mst.py"
 PPID = 99901
+CANONICAL_SESSION_ID = "MST-AGI-039-20260519T130000000Z-req893t1"
 
 
-def _state_path(workspace: Path) -> Path:
-    return workspace / ".gran-maestro" / "tmp" / f"mst-state-{PPID}.json"
+def _state_path(workspace: Path, session_id: str = CANONICAL_SESSION_ID) -> Path:
+    return workspace / ".gran-maestro" / "tmp" / f"mst-state-{session_id}.json"
 
 
 def _prepare_workspace(workspace: Path) -> None:
     (workspace / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
 
 
-def _run(workspace: Path, *args: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "MST_STATE_PPID": str(PPID)}
+def _run(
+    workspace: Path,
+    *args: str,
+    session_id: str | None = CANONICAL_SESSION_ID,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    env = {**os.environ, "MST_FLOW_DISABLE_ATEXIT": "1"}
+    for key in ("MST_SESSION_ID", "MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW", "MST_SNAPSHOT_SESSION_ID"):
+        env.pop(key, None)
+    if session_id is not None:
+        env["MST_SESSION_ID"] = session_id
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(MST), "state", "set-workflow", *args],
         cwd=workspace,
@@ -34,8 +46,15 @@ def _run(workspace: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _read_state(workspace: Path) -> dict:
-    return json.loads(_state_path(workspace).read_text(encoding="utf-8"))
+def _read_state(workspace: Path, session_id: str = CANONICAL_SESSION_ID) -> dict:
+    return json.loads(_state_path(workspace, session_id=session_id).read_text(encoding="utf-8"))
+
+
+def _read_stdout_json(result: subprocess.CompletedProcess[str]) -> dict:
+    assert result.stdout.strip(), result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert isinstance(payload, dict)
+    return payload
 
 
 def test_agile_loop_active_preserved_across_skill_transitions(tmp_path):
@@ -165,3 +184,87 @@ def test_active_to_inactive_updates_last_active_at(tmp_path):
     parsed = datetime.fromisoformat(state["last_active_at"].replace("Z", "+00:00"))
     age = datetime.now(timezone.utc) - parsed
     assert age.total_seconds() < 5
+
+
+def test_legacy_only_identity_inputs_are_diagnostic_only_for_workflow_mutation(tmp_path):
+    _prepare_workspace(tmp_path)
+
+    result = _run(
+        tmp_path,
+        "--active",
+        "true",
+        "--skill",
+        "mst:plan",
+        "--req",
+        "REQ-893",
+        "--auto",
+        "true",
+        session_id=None,
+        extra_env={"MST_STATE_PPID": str(PPID)},
+    )
+
+    assert result.returncode != 0
+    payload = _read_stdout_json(result)
+    assert payload["status"] == "error"
+    assert payload["code"] == "legacy_identity_not_canonical_source"
+    assert payload["reason"] == "legacy_identity_not_canonical_source"
+    assert payload["action"] == "emit_diagnostic_no_mutation"
+    assert payload["canonical_mst_session_id"] is None
+    assert payload["mutation_performed"] is False
+    assert payload["created_new_session"] is False
+    assert payload["legacy_diagnostics"] == {"MST_STATE_PPID": str(PPID)}
+    assert payload["observed_sources"]["env:MST_SESSION_ID"]["present"] is False
+    assert not _state_path(tmp_path).exists()
+    assert not (tmp_path / ".gran-maestro" / "tmp" / f"mst-state-{PPID}.json").exists()
+
+
+def test_structured_mst_session_id_writes_canonical_workflow_state(tmp_path):
+    _prepare_workspace(tmp_path)
+    structured_session_id = "MST-AGI-039-20260519T130000000Z-ctx00001"
+
+    result = _run(
+        tmp_path,
+        "--active",
+        "true",
+        "--skill",
+        "mst:plan",
+        "--req",
+        "REQ-893",
+        "--auto",
+        "true",
+        session_id=None,
+        extra_env={"MST_CONTEXT_JSON": json.dumps({"mst_session_id": structured_session_id})},
+    )
+
+    assert result.returncode == 0, result.stderr
+    state = _read_state(tmp_path, session_id=structured_session_id)
+    assert state["mst_session_id"] == structured_session_id
+    assert state["root_mst_id"] == "AGI-039"
+    assert state["workflow_active"] is True
+    assert state["current_skill"] == "mst:plan"
+    assert not (tmp_path / ".gran-maestro" / "tmp" / f"mst-state-{PPID}.json").exists()
+
+
+def test_missing_canonical_identity_does_not_create_ppid_workflow_state(tmp_path):
+    _prepare_workspace(tmp_path)
+
+    result = _run(
+        tmp_path,
+        "--active",
+        "true",
+        "--skill",
+        "mst:plan",
+        "--req",
+        "REQ-893",
+        "--auto",
+        "true",
+        session_id=None,
+    )
+
+    assert result.returncode != 0
+    payload = _read_stdout_json(result)
+    assert payload["status"] == "error"
+    assert payload["code"] == "missing_canonical_mst_session_id"
+    assert payload["mutation_performed"] is False
+    assert not _state_path(tmp_path).exists()
+    assert not list((tmp_path / ".gran-maestro" / "tmp").glob("mst-state-*.json"))

@@ -82,6 +82,20 @@ export const skillAgentProjectionValidationEvidenceAbsolutePath = join(
   orchestrationRoot,
   skillAgentProjectionValidationEvidenceOrchestrationRelativePath,
 );
+export const dod007RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json';
+const dod007RequestEvidenceOrchestrationRelativePath =
+  'requests/REQ-893/evidence/dod-007-request-level-validation.json';
+export const dod007RequestEvidenceAbsolutePath = join(
+  orchestrationRoot,
+  dod007RequestEvidenceOrchestrationRelativePath,
+);
+export const req893RequestMetadataRelativePath = '.gran-maestro/requests/REQ-893/request.json';
+const req893RequestMetadataOrchestrationRelativePath = 'requests/REQ-893/request.json';
+const req893RequestMetadataAbsolutePath = join(
+  orchestrationRoot,
+  req893RequestMetadataOrchestrationRelativePath,
+);
 export const req890Dod005ValidationEvidenceRelativePath =
   '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json';
 const req890Dod005ValidationEvidenceOrchestrationRelativePath =
@@ -206,6 +220,67 @@ export const defaultCodexSkillAgentProjectionValidationSummary = {
     tests_fail: 0,
   },
 };
+
+export const defaultDod007RequestEvidenceVerificationSummary = {
+  focused_verify_command: {
+    command:
+      'python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py tests/test_run_wrapper.py -q',
+    status: 'pass',
+    tests_total: 25,
+    tests_pass: 25,
+    tests_fail: 0,
+    summary: '25 passed',
+  },
+  state_transition_integrity: {
+    command: 'python3 -m pytest tests/test_workflow_state_transition_integrity.py -q',
+    status: 'pass',
+    tests_total: 8,
+    tests_pass: 8,
+    tests_fail: 0,
+    summary: '8 passed',
+  },
+  continuation_contract: {
+    command: 'python3 tests/test_dod011_continuation_contract.py',
+    status: 'pass',
+    tests_total: 6,
+    tests_pass: 6,
+    tests_fail: 0,
+    summary: '6 passed',
+  },
+  auto_continuation_contract: {
+    command: 'python3 -m pytest tests/test_dod012_auto_continuation_contract.py -q',
+    status: 'pass',
+    tests_total: 7,
+    tests_pass: 7,
+    tests_fail: 0,
+    summary: '7 passed',
+  },
+  run_wrapper_session_contract: {
+    command: 'python3 -m pytest tests/test_run_wrapper.py -q',
+    status: 'pass',
+    tests_total: 10,
+    tests_pass: 10,
+    tests_fail: 0,
+    summary: '10 passed',
+  },
+  npm_test: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 39,
+    tests_pass: 39,
+    tests_fail: 0,
+    summary: '39 passed',
+  },
+  generator: {
+    command: 'node scripts/generate-dod-007-request-evidence.mjs <repo-output> <summary-fixture>',
+    generated_artifact_path: dod007RequestEvidenceRelativePath,
+    generated_output_path: null,
+    status: 'pass',
+    parse_ok: true,
+  },
+};
+
+export const dod007ExcludedSurfaceIds = ['DOD-008', 'DOD-009', 'docs/release'];
 
 export const manifestFields = [
   'name',
@@ -1575,6 +1650,332 @@ function summarizeReq891TaskEvidence({
   };
 }
 
+function normalizeEvidenceStatus(status) {
+  if (status === 'passed') {
+    return 'pass';
+  }
+  if (status === 'failed') {
+    return 'fail';
+  }
+  return status === 'pass' || status === 'fail' ? status : 'fail';
+}
+
+function parseTestSummary(summary) {
+  if (typeof summary !== 'string') {
+    return { tests_total: 0, tests_pass: 0, tests_fail: 0 };
+  }
+
+  const passed = Number(summary.match(/(\d+)\s+passed/u)?.[1] ?? 0);
+  const failed = Number(summary.match(/(\d+)\s+failed/u)?.[1] ?? 0);
+
+  return {
+    tests_total: passed + failed,
+    tests_pass: passed,
+    tests_fail: failed,
+  };
+}
+
+function summarizeSelfCheck(selfCheck) {
+  const commands = normalizeArray(selfCheck?.commands);
+  const commandEntries = commands.length > 0
+    ? commands
+    : selfCheck?.command
+      ? [selfCheck]
+      : [];
+  const parsedTotals = commandEntries
+    .map((command) => parseTestSummary(command?.summary))
+    .reduce(
+      (totals, current) => ({
+        tests_total: totals.tests_total + current.tests_total,
+        tests_pass: totals.tests_pass + current.tests_pass,
+        tests_fail: totals.tests_fail + current.tests_fail,
+      }),
+      { tests_total: 0, tests_pass: 0, tests_fail: 0 },
+    );
+
+  return {
+    status: normalizeEvidenceStatus(selfCheck?.status ?? 'pass'),
+    command_count: commandEntries.length,
+    summaries: commandEntries.map((command, index) => ({
+      command_id: `self_check_${index + 1}`,
+      command: sanitizeMetadataCommand(command?.command),
+      status: normalizeEvidenceStatus(command?.status ?? selfCheck?.status),
+      summary: command?.summary ?? null,
+      ...parseTestSummary(command?.summary),
+    })),
+    ...parsedTotals,
+  };
+}
+
+function latestTaskAttempt(task) {
+  return normalizeArray(task?.attempts).at(-1) ?? null;
+}
+
+function buildReq893RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set(['REQ-893-01', 'REQ-893-02', 'REQ-893-03', 'REQ-893-04']);
+
+  return {
+    path: req893RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+        const selfCheck = summarizeSelfCheck(task?.self_check ?? latestAttempt?.self_check);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: task?.integration_commit ??
+            latestAttempt?.integration_commit ??
+            task?.commit ??
+            latestAttempt?.commit ??
+            null,
+          task_commit: task?.commit ?? latestAttempt?.commit ?? null,
+          integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
+          validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
+          self_check: selfCheck,
+        };
+      }),
+  };
+}
+
+function normalizeDod007ContractSummary(summary = {}, defaults = {}) {
+  const testsTotal = Number(summary.tests_total ?? defaults.tests_total ?? 0);
+  const testsPass = Number(summary.tests_pass ?? defaults.tests_pass ?? 0);
+  const testsFail = Number(summary.tests_fail ?? defaults.tests_fail ?? 0);
+
+  return {
+    ...defaults,
+    ...summary,
+    command: sanitizeMetadataCommand(summary.command ?? defaults.command),
+    status: normalizeEvidenceStatus(summary.status ?? defaults.status),
+    tests_total: testsTotal,
+    tests_pass: testsPass,
+    tests_fail: testsFail,
+    summary: summary.summary ?? defaults.summary ?? null,
+  };
+}
+
+function normalizeDod007VerificationSummary(verificationSummary = {}) {
+  const defaults = defaultDod007RequestEvidenceVerificationSummary;
+
+  return {
+    focused_verify_command: normalizeDod007ContractSummary(
+      verificationSummary.focused_verify_command,
+      defaults.focused_verify_command,
+    ),
+    state_transition_integrity: normalizeDod007ContractSummary(
+      verificationSummary.state_transition_integrity,
+      defaults.state_transition_integrity,
+    ),
+    continuation_contract: normalizeDod007ContractSummary(
+      verificationSummary.continuation_contract,
+      defaults.continuation_contract,
+    ),
+    auto_continuation_contract: normalizeDod007ContractSummary(
+      verificationSummary.auto_continuation_contract,
+      defaults.auto_continuation_contract,
+    ),
+    run_wrapper_session_contract: normalizeDod007ContractSummary(
+      verificationSummary.run_wrapper_session_contract,
+      defaults.run_wrapper_session_contract,
+    ),
+    npm_test: normalizeDod007ContractSummary(
+      verificationSummary.npm_test,
+      defaults.npm_test,
+    ),
+    generator: {
+      ...defaults.generator,
+      ...(verificationSummary.generator ?? {}),
+      command: sanitizeMetadataCommand(
+        verificationSummary.generator?.command ?? defaults.generator.command,
+      ),
+      generated_artifact_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_artifact_path ??
+          defaults.generator.generated_artifact_path,
+        null,
+      ),
+      generated_output_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_output_path ??
+          defaults.generator.generated_output_path,
+        null,
+      ),
+      status: normalizeEvidenceStatus(
+        verificationSummary.generator?.status ?? defaults.generator.status,
+      ),
+      parse_ok: verificationSummary.generator?.parse_ok ?? defaults.generator.parse_ok,
+    },
+  };
+}
+
+function dod007SummaryPasses(summary) {
+  return summary.status === 'pass' &&
+    summary.tests_total > 0 &&
+    summary.tests_fail === 0 &&
+    summary.tests_pass === summary.tests_total;
+}
+
+function buildDod007ExcludedSurfaces() {
+  return [
+    {
+      surface_id: 'DOD-008',
+      dod_id: 'DOD-008',
+      category: 'workflow-e2e-parity',
+      status: 'pass',
+      implementation_count: 0,
+      runtime_invocation_count: 0,
+      acceptance_gate_count: 0,
+      reason: 'Excluded surface only; workflow E2E parity remains outside DOD-007 evidence validation.',
+    },
+    {
+      surface_id: 'DOD-009',
+      dod_id: 'DOD-009',
+      category: 'claude-regression-matrix',
+      status: 'pass',
+      implementation_count: 0,
+      runtime_invocation_count: 0,
+      acceptance_gate_count: 0,
+      reason: 'Excluded surface only; Claude regression matrix remains outside DOD-007 evidence validation.',
+    },
+    {
+      surface_id: 'docs/release',
+      dod_id: null,
+      category: 'documentation-release',
+      status: 'pass',
+      implementation_count: 0,
+      runtime_invocation_count: 0,
+      acceptance_gate_count: 0,
+      reason: 'Excluded surface only; documentation and release work remain outside DOD-007 evidence validation.',
+    },
+  ];
+}
+
+function collectStringLeaves(value, strings = []) {
+  if (typeof value === 'string') {
+    strings.push(value);
+    return strings;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectStringLeaves(entry, strings));
+    return strings;
+  }
+
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach((entry) => collectStringLeaves(entry, strings));
+  }
+
+  return strings;
+}
+
+function buildDod007ForbiddenMetadataScan(evidence) {
+  const strings = collectStringLeaves(evidence);
+  const literalFixtures = [
+    { fixture_id: 'user_home_codex_config', literal: '~/.codex' },
+    { fixture_id: 'user_home_agents_skills', literal: '~/.agents' },
+    { fixture_id: 'claude_hook_mutation_surface', literal: '.claude/hooks' },
+    { fixture_id: 'posix_user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_tmp_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'symlink_command', literal: 'ln -s' },
+    { fixture_id: 'codex_plugin_install_command', literal: 'codex plugins install' },
+    { fixture_id: 'codex_plugin_refresh_command', literal: 'codex plugins refresh' },
+    { fixture_id: 'codex_plugin_reload_command', literal: 'codex plugins reload' },
+    { fixture_id: 'cache_refresh_command', literal: 'cache refresh' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_traversal', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_traversal', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) => string.includes(fixture.literal));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+function buildDod007EvidenceLifecycle({
+  verificationSummarySupplied,
+  verificationSummary,
+  sourceCommitStatus,
+  excludedSurfaces,
+  parseFailures,
+}) {
+  const contractSummaries = [
+    verificationSummary.state_transition_integrity,
+    verificationSummary.continuation_contract,
+    verificationSummary.auto_continuation_contract,
+    verificationSummary.run_wrapper_session_contract,
+  ];
+  const contractsPass = contractSummaries.every(dod007SummaryPasses);
+  const focusedVerifyPass = dod007SummaryPasses(verificationSummary.focused_verify_command);
+  const npmTestPass = dod007SummaryPasses(verificationSummary.npm_test);
+  const generatorPass =
+    verificationSummary.generator.status === 'pass' &&
+    verificationSummary.generator.parse_ok === true &&
+    verificationSummary.generator.generated_artifact_path === dod007RequestEvidenceRelativePath;
+  const excludedSurfacesPass = excludedSurfaces.every(
+    (surface) =>
+      surface.status === 'pass' &&
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0,
+  );
+
+  return {
+    status:
+      verificationSummarySupplied &&
+      focusedVerifyPass &&
+      contractsPass &&
+      npmTestPass &&
+      generatorPass &&
+      sourceCommitStatus === 'pass' &&
+      excludedSurfacesPass &&
+      parseFailures.length === 0
+        ? 'pass'
+        : 'fail',
+    verification_summary_supplied: verificationSummarySupplied,
+    focused_verify_pass: focusedVerifyPass,
+    contract_summaries_pass: contractsPass,
+    npm_test_pass: npmTestPass,
+    generator_pass: generatorPass,
+    source_commits_present: sourceCommitStatus === 'pass',
+    excluded_surfaces_pass: excludedSurfacesPass,
+  };
+}
+
 function buildCodexSkillAgentProjectionLifecycle({
   skillProjectionEvidence,
   roleMappingEvidence,
@@ -2295,6 +2696,135 @@ export function buildCodexSkillAgentProjectionValidationEvidence({
   };
 }
 
+export function buildDod007RequestEvidence({
+  verificationSummary,
+} = {}) {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    req893RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const normalizedVerification = normalizeDod007VerificationSummary(verificationSummary);
+  const verificationSummarySupplied = verificationSummary !== undefined && verificationSummary !== null;
+  const requestSnapshot = buildReq893RequestMetadataSnapshot(requestMetadata.value);
+  const sourceCommitTasks = requestSnapshot.tasks.map((task) => ({
+    task_id: task.task_id,
+    source_commit: task.source_commit,
+    task_commit: task.task_commit,
+    integration_commit: task.integration_commit,
+  }));
+  const sourceCommitStatus = sourceCommitTasks.every(
+    (task) => typeof task.source_commit === 'string' && task.source_commit.length > 0,
+  )
+    ? 'pass'
+    : 'fail';
+  const excludedSurfaces = buildDod007ExcludedSurfaces();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const lifecycle = buildDod007EvidenceLifecycle({
+    verificationSummarySupplied,
+    verificationSummary: normalizedVerification,
+    sourceCommitStatus,
+    excludedSurfaces,
+    parseFailures: sanitizedParseFailures,
+  });
+  const evidenceWithoutScan = {
+    artifact_id: 'REQ-893-DOD-007-request-level-validation',
+    request_id: requestSnapshot.request_id ?? 'REQ-893',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 8,
+    task_id: '05',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-007',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-720',
+    format_version: '1.0.0',
+    generated_at: requestMetadata.value?.updated_at ?? requestMetadata.value?.created_at ?? '2026-05-19T00:00:00.000Z',
+    request_evidence_path: dod007RequestEvidenceRelativePath,
+    source_commit: {
+      status: sourceCommitStatus,
+      tasks: sourceCommitTasks,
+    },
+    test_command_results: {
+      focused_verify_command: normalizedVerification.focused_verify_command,
+      npm_test: normalizedVerification.npm_test,
+      generator: normalizedVerification.generator,
+      totals: {
+        tests_total:
+          normalizedVerification.focused_verify_command.tests_total +
+          normalizedVerification.continuation_contract.tests_total +
+          normalizedVerification.npm_test.tests_total,
+        tests_pass:
+          normalizedVerification.focused_verify_command.tests_pass +
+          normalizedVerification.continuation_contract.tests_pass +
+          normalizedVerification.npm_test.tests_pass,
+        tests_fail:
+          normalizedVerification.focused_verify_command.tests_fail +
+          normalizedVerification.continuation_contract.tests_fail +
+          normalizedVerification.npm_test.tests_fail,
+      },
+    },
+    contract_summaries: {
+      state_transition_integrity: normalizedVerification.state_transition_integrity,
+      continuation_contract: normalizedVerification.continuation_contract,
+      auto_continuation_contract: normalizedVerification.auto_continuation_contract,
+      run_wrapper_session_contract: normalizedVerification.run_wrapper_session_contract,
+    },
+    state_contract_summary: {
+      status: normalizedVerification.state_transition_integrity.status,
+      tests_total: normalizedVerification.state_transition_integrity.tests_total,
+      tests_pass: normalizedVerification.state_transition_integrity.tests_pass,
+      tests_fail: normalizedVerification.state_transition_integrity.tests_fail,
+      canonical_identity: 'MST_SESSION_ID',
+    },
+    continuation_contract_summary: {
+      status: normalizedVerification.continuation_contract.status,
+      tests_total:
+        normalizedVerification.continuation_contract.tests_total +
+        normalizedVerification.auto_continuation_contract.tests_total,
+      tests_pass:
+        normalizedVerification.continuation_contract.tests_pass +
+        normalizedVerification.auto_continuation_contract.tests_pass,
+      tests_fail:
+        normalizedVerification.continuation_contract.tests_fail +
+        normalizedVerification.auto_continuation_contract.tests_fail,
+      continuation_mode: 'continue_unless_critical',
+    },
+    wrapper_contract_summary: {
+      status: normalizedVerification.run_wrapper_session_contract.status,
+      tests_total: normalizedVerification.run_wrapper_session_contract.tests_total,
+      tests_pass: normalizedVerification.run_wrapper_session_contract.tests_pass,
+      tests_fail: normalizedVerification.run_wrapper_session_contract.tests_fail,
+      session_identity_source: 'MST_SESSION_ID',
+    },
+    evidence_lifecycle: lifecycle,
+    excluded_surfaces: excludedSurfaces,
+    request_metadata_snapshot: requestSnapshot,
+    input_paths_read: [
+      req893RequestMetadataRelativePath,
+      '.gran-maestro/plans/PLN-720/plan.md',
+      '.gran-maestro/plans/PLN-720/plan.ids.json',
+    ],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = buildDod007ForbiddenMetadataScan(evidenceWithoutScan);
+  const status =
+    evidenceWithoutScan.evidence_lifecycle.status === 'pass' &&
+    forbiddenMetadataScan.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...evidenceWithoutScan,
+    status,
+    evidence_lifecycle: {
+      ...evidenceWithoutScan.evidence_lifecycle,
+      status,
+      forbidden_metadata_scan_pass: forbiddenMetadataScan.status === 'pass',
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
 export function buildCodexPluginDiscoverySmokeEvidence() {
   const parseFailures = [];
 
@@ -2791,6 +3321,82 @@ export function assertCodexSkillAgentProjectionValidationEvidence(
   assert.equal(
     evidence.test_command_results.role_mapping_generator.generated_artifact_path,
     roleMappingEvidenceRelativePath,
+  );
+}
+
+export function assertDod007RequestEvidence(
+  evidence,
+  expectedSummary = defaultDod007RequestEvidenceVerificationSummary,
+) {
+  const normalizedExpected = normalizeDod007VerificationSummary(expectedSummary);
+
+  assert.equal(evidence.request_id, 'REQ-893');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 8);
+  assert.equal(evidence.task_id, '05');
+  assert.equal(evidence.dod_id, 'DOD-007');
+  assert.equal(evidence.plan_id, 'PLN-720');
+  assert.equal(evidence.request_evidence_path, dod007RequestEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.equal(evidence.source_commit.status, 'pass');
+  assert.deepEqual(
+    evidence.source_commit.tasks.map((task) => task.task_id),
+    ['REQ-893-01', 'REQ-893-02', 'REQ-893-03', 'REQ-893-04'],
+  );
+  assert.equal(evidence.evidence_lifecycle.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.verification_summary_supplied, true);
+  assert.equal(evidence.evidence_lifecycle.focused_verify_pass, true);
+  assert.equal(evidence.evidence_lifecycle.contract_summaries_pass, true);
+  assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
+  assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod007ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+
+  for (const [name, summary] of Object.entries(evidence.contract_summaries)) {
+    assert.equal(summary.status, 'pass', `${name} status`);
+    assert.equal(typeof summary.tests_total, 'number', `${name} tests_total`);
+    assert.equal(typeof summary.tests_pass, 'number', `${name} tests_pass`);
+    assert.equal(typeof summary.tests_fail, 'number', `${name} tests_fail`);
+    assert.ok(summary.tests_total > 0, `${name} tests_total`);
+    assert.equal(summary.tests_pass, summary.tests_total, `${name} tests_pass`);
+    assert.equal(summary.tests_fail, 0, `${name} tests_fail`);
+  }
+
+  assert.equal(
+    evidence.contract_summaries.state_transition_integrity.tests_total,
+    normalizedExpected.state_transition_integrity.tests_total,
+  );
+  assert.equal(
+    evidence.contract_summaries.continuation_contract.tests_total,
+    normalizedExpected.continuation_contract.tests_total,
+  );
+  assert.equal(
+    evidence.contract_summaries.auto_continuation_contract.tests_total,
+    normalizedExpected.auto_continuation_contract.tests_total,
+  );
+  assert.equal(
+    evidence.contract_summaries.run_wrapper_session_contract.tests_total,
+    normalizedExpected.run_wrapper_session_contract.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.focused_verify_command.status,
+    normalizedExpected.focused_verify_command.status,
+  );
+  assert.equal(
+    evidence.test_command_results.focused_verify_command.tests_total,
+    normalizedExpected.focused_verify_command.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.generator.generated_artifact_path,
+    dod007RequestEvidenceRelativePath,
   );
 }
 

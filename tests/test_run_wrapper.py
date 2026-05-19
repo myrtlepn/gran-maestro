@@ -46,6 +46,26 @@ def _run_mst_without_session_env(
     )
 
 
+def _run_mst_with_session_env(
+    workspace: Path,
+    session_id: str,
+    *args: str,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env["MST_SESSION_ID"] = session_id
+    env.pop("MST_CONTEXT_JSON", None)
+    return subprocess.run(
+        [sys.executable, str(MST_SCRIPT), *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+        env=env,
+    )
+
+
 def test_run_basic_tee_and_state(tmp_path):
     """AC-001: stdout/stderr tee + run/{task_id}.json 생성 + 종료 필드 기록"""
     workspace = tmp_path / "ws"
@@ -141,6 +161,47 @@ def test_run_child_env_guard_survives_python_optimized_mode(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert UUID_V4_RE.match(proc.stdout.strip().splitlines()[-1])
+
+
+def test_run_wrapper_uses_parent_canonical_session_for_child_state_and_trace(tmp_path):
+    workspace = tmp_path / "ws"
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+    session_id = "MST-AGI-030-20260505T010203000Z-runwrap01"
+
+    proc = _run_mst_with_session_env(
+        workspace,
+        session_id,
+        "run",
+        "--task-id",
+        "T-CANONICAL-SESSION",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--trace",
+        "REQ-TEST/04/canonical-session",
+        "--",
+        sys.executable,
+        "-c",
+        "import os; print(os.environ.get('MST_SESSION_ID', ''))",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip().splitlines()[-1] == session_id
+
+    state = json.loads(
+        (workspace / ".gran-maestro" / "run" / "T-CANONICAL-SESSION.json").read_text(encoding="utf-8")
+    )
+    assert state["mst_session_id"] == session_id
+    assert state["root_mst_id"] == "AGI-030"
+
+    trace_content = next((log_dir / "traces").glob("codex-canonical-session-*.md")).read_text(encoding="utf-8")
+    assert f"mst_session_id: {session_id}" in trace_content
+    assert "root_mst_id: AGI-030" in trace_content
 
 
 def test_heartbeat_thread_updates(tmp_path):
