@@ -9,6 +9,10 @@ import {
   assertCodexPluginDiscoverySmokeEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
   collectUnsupportedBlockers,
+  fallbackSkillDiscoveryRootPath,
+  fallbackSkillRepoTargetPath,
+  fallbackSkillSymlinkPath,
+  forcedWireEvidenceRelativePath,
   generatedAssetBaselinePaths,
   generatedManifestPath,
   generatedMarketplacePath,
@@ -16,10 +20,12 @@ import {
   inventoryArtifactPath,
   orchestrationRoot,
   parityEvidencePath,
+  req888Dod004Metadata,
   repoRoot as smokeRepoRoot,
   sprint4IntegrationContextPath,
   sprint4SelectionReason,
   stableEvidenceRelativePath,
+  userConfigPathLiteral,
   validationEntrypoints,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 
@@ -150,6 +156,55 @@ test('codex plugin discovery smoke records Sprint 4 forced wire observability', 
   assert.equal(evidence.sprint4_forced_wire.out_of_scope_dod_guard.status, 'pass');
 });
 
+test('codex plugin discovery smoke records DOD-004 install and fallback reproducibility metadata', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+  const dod004 = evidence.dod_004_install_fallback_reproducibility;
+
+  assert.equal(dod004.dod_id, req888Dod004Metadata.dod_id);
+  assert.equal(dod004.request_id, req888Dod004Metadata.request_id);
+  assert.equal(dod004.task_id, req888Dod004Metadata.task_id);
+  assert.equal(dod004.request_evidence_path, forcedWireEvidenceRelativePath);
+  assert.equal(dod004.discovery_smoke_evidence_path, stableEvidenceRelativePath);
+  assert.equal(dod004.generated_manifest_path, generatedManifestPath);
+  assert.equal(dod004.generated_marketplace_path, generatedMarketplacePath);
+
+  assert.equal(dod004.native_plugin_install.mode, 'metadata-only');
+  assert.deepEqual(
+    dod004.native_plugin_install.source_references.map((source) => source.type),
+    ['local', 'marketplace'],
+  );
+  assert.deepEqual(
+    dod004.native_plugin_install.verification_steps.map((step) => step.phase),
+    ['install', 'enable', 'reload'],
+  );
+  assert.ok(
+    dod004.native_plugin_install.verification_steps.some((step) =>
+      step.references.includes(userConfigPathLiteral),
+    ),
+  );
+  assert.equal(dod004.native_plugin_install.executes_external_install, false);
+  assert.equal(dod004.native_plugin_install.mutates_user_config, false);
+  assert.equal(dod004.native_plugin_install.refreshes_plugin_cache, false);
+
+  assert.equal(dod004.fallback_skill_discovery.mode, 'metadata-only');
+  assert.equal(dod004.fallback_skill_discovery.discovery_root, fallbackSkillDiscoveryRootPath);
+  assert.equal(dod004.fallback_skill_discovery.repo_target, fallbackSkillRepoTargetPath);
+  assert.equal(dod004.fallback_skill_discovery.symlink_path, fallbackSkillSymlinkPath);
+  assert.match(dod004.fallback_skill_discovery.symlink_behavior, /skills\//);
+  assert.equal(dod004.fallback_skill_discovery.creates_symlink, false);
+  assert.equal(dod004.fallback_skill_discovery.mutates_user_config, false);
+
+  assert.equal(dod004.unsupported_surfaces.status, 'pass');
+  assert.deepEqual(
+    dod004.unsupported_surfaces.surfaces.map((surface) => surface.dod_id),
+    ['DOD-005', 'DOD-006', 'DOD-008'],
+  );
+  assert.equal(dod004.no_go_artifact_guard.status, 'pass');
+  assert.equal(dod004.no_go_artifact_guard.mutates_user_config, false);
+  assert.equal(dod004.no_go_artifact_guard.refreshes_plugin_cache, false);
+  assert.equal(dod004.no_go_artifact_guard.creates_symlink, false);
+});
+
 test('codex plugin discovery smoke generator writes parseable stable evidence shape', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'codex-plugin-discovery-smoke-'));
   const outputPath = join(tempDir, 'evidence.json');
@@ -253,6 +308,24 @@ test('codex plugin discovery smoke preserves DOD-003 scope exclusions', () => {
   assert.ok(
     evidence.out_of_scope_artifact_check.checks.every((check) =>
       check.assets.every((asset) => asset.exists === false),
+    ),
+  );
+});
+
+test('codex plugin discovery smoke no-go artifact guard stays repo-scoped and pass', () => {
+  const evidence = buildCodexPluginDiscoverySmokeEvidence();
+  const guard = evidence.dod_004_install_fallback_reproducibility.no_go_artifact_guard;
+
+  assert.equal(guard.status, 'pass');
+  assert.ok(guard.assets.every((asset) => asset.exists === false));
+  assert.ok(
+    guard.assets.some((asset) => asset.path === 'hooks/hooks.codex.json' && asset.root === 'repo'),
+  );
+  assert.ok(
+    guard.assets.some(
+      (asset) =>
+        asset.path === 'requests/REQ-886/evidence/codex-workflow-e2e-parity.json' &&
+        asset.root === 'orchestration',
     ),
   );
 });

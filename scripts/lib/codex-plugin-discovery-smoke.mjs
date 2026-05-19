@@ -49,6 +49,14 @@ export const stableEvidenceAbsolutePath = join(
   orchestrationRoot,
   stableEvidenceOrchestrationRelativePath,
 );
+export const forcedWireEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-887/evidence/forced-wire-integration-validation.json';
+const forcedWireEvidenceOrchestrationRelativePath =
+  'requests/REQ-887/evidence/forced-wire-integration-validation.json';
+export const forcedWireEvidenceAbsolutePath = join(
+  orchestrationRoot,
+  forcedWireEvidenceOrchestrationRelativePath,
+);
 
 export const sprint4SelectionReason = 'integration-review forced wire';
 export const sprint4IntegrationContextPath = join(
@@ -61,6 +69,15 @@ export const generatedMarketplacePath = '.agents/plugins/marketplace.json';
 export const sourceManifestPath = '.claude-plugin/plugin.json';
 export const sourceMarketplacePath = '.claude-plugin/marketplace.json';
 export const sourceHookConfigPath = 'hooks/hooks.json';
+export const userConfigPathLiteral = '~/.codex/config.toml';
+export const fallbackSkillDiscoveryRootPath = '~/.agents/skills';
+export const fallbackSkillRepoTargetPath = 'skills/';
+export const fallbackSkillSymlinkPath = '~/.agents/skills/gran-maestro';
+export const req888Dod004Metadata = {
+  request_id: 'REQ-888',
+  task_id: '01',
+  dod_id: 'DOD-004',
+};
 
 export const inventoryArtifactPath = join(
   orchestrationRoot,
@@ -118,6 +135,7 @@ const outOfScopeArtifactCandidates = [
     dod_id: 'DOD-005',
     description: 'Codex hook wrapper artifacts remain out of scope for DOD-003.',
     assets: [
+      'hooks/hooks.codex.json',
       '.codex-plugin/hooks.json',
       '.codex-plugin/hooks/',
       'hooks/codex-plugin-wrapper.sh',
@@ -144,6 +162,81 @@ const outOfScopeArtifactCandidates = [
     orchestration_assets: [
       'requests/REQ-886/evidence/codex-workflow-e2e-parity.json',
     ],
+  },
+];
+
+const dod004NoGoArtifactCandidates = [
+  {
+    category: 'hook_wrapper',
+    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: 'hooks/hooks.codex.json',
+  },
+  {
+    category: 'hook_wrapper',
+    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.codex-plugin/hooks.json',
+  },
+  {
+    category: 'hook_wrapper',
+    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.codex-plugin/hooks/',
+  },
+  {
+    category: 'hook_wrapper',
+    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: 'hooks/codex-plugin-wrapper.sh',
+  },
+  {
+    category: 'hook_wrapper',
+    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: 'scripts/generate-codex-hook-wrapper.mjs',
+  },
+  {
+    category: 'runtime_projection',
+    description: 'Codex skill and agent runtime projection artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.agents/skills/',
+  },
+  {
+    category: 'runtime_projection',
+    description: 'Codex skill and agent runtime projection artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.agents/agents/',
+  },
+  {
+    category: 'runtime_projection',
+    description: 'Codex skill and agent runtime projection artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.codex-plugin/skills-manifest.json',
+  },
+  {
+    category: 'runtime_projection',
+    description: 'Codex skill and agent runtime projection artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: '.codex-plugin/agents-manifest.json',
+  },
+  {
+    category: 'workflow_e2e',
+    description: 'Codex workflow E2E parity artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: 'tests/codex-workflow-e2e.test.mjs',
+  },
+  {
+    category: 'workflow_e2e',
+    description: 'Codex workflow E2E parity artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'repo',
+    path: 'scripts/codex-workflow-e2e-smoke.mjs',
+  },
+  {
+    category: 'workflow_e2e',
+    description: 'Codex workflow E2E parity artifacts remain unimplemented for Sprint 5 DOD-004.',
+    root: 'orchestration',
+    path: 'requests/REQ-886/evidence/codex-workflow-e2e-parity.json',
   },
 ];
 
@@ -248,6 +341,24 @@ function canonicalHookCommands(hookConfig) {
 function buildDiscoveryResults(assets) {
   return {
     status: assets.every((asset) => asset.exists && asset.parse_ok) ? 'pass' : 'fail',
+    assets,
+  };
+}
+
+function buildNoGoArtifactGuard(candidates) {
+  const assets = candidates.map((candidate) => {
+    const rootPath = candidate.root === 'orchestration' ? orchestrationRoot : repoRoot;
+    return {
+      category: candidate.category,
+      description: candidate.description,
+      root: candidate.root,
+      path: candidate.path,
+      exists: existsSync(join(rootPath, candidate.path)),
+    };
+  });
+
+  return {
+    status: assets.every((asset) => !asset.exists) ? 'pass' : 'fail',
     assets,
   };
 }
@@ -367,6 +478,11 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     readJsonFromAbsolutePath,
     parseFailures,
   );
+  const forcedWireEvidence = collectJsonArtifact(
+    forcedWireEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
   const sourceManifest = collectJsonArtifact(
     sourceManifestPath,
     readJsonFromRepo,
@@ -447,6 +563,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
 
   const discoveryResults = buildDiscoveryResults(discoveryAssets);
   const outOfScopeArtifactCheck = buildOutOfScopeArtifactCheck();
+  const noGoArtifactGuard = buildNoGoArtifactGuard(dod004NoGoArtifactCandidates);
   const sprint4IntegrationContextText = readTextIfExists(sprint4IntegrationContextPath);
   const sprint4IntegrationContextAssertions = {
     exists: sprint4IntegrationContextText.length > 0,
@@ -490,6 +607,23 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     ])
       ? 'pass'
       : 'fail';
+  const generatedMarketplacePlugin =
+    generatedMarketplace.value?.plugins?.[
+      parityEvidence.value?.component_mapping_summary?.marketplace_parity?.generated_plugin_entry_index ?? 0
+    ] ?? null;
+  const dod004UnsupportedSurfaces = outOfScopeArtifactCheck.checks
+    .filter((check) => ['DOD-005', 'DOD-006', 'DOD-008'].includes(check.dod_id))
+    .map((check) => ({
+      dod_id: check.dod_id,
+      description: check.description,
+      status: check.status,
+    }));
+  const dod004Status =
+    forcedWireEvidence.error === null &&
+    noGoArtifactGuard.status === 'pass' &&
+    dod004UnsupportedSurfaces.every((surface) => surface.status === 'pass')
+      ? 'pass'
+      : 'fail';
 
   return {
     artifact_id: 'REQ-886-DOD-003-codex-plugin-discovery-smoke',
@@ -522,6 +656,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       inventoryValidationPath,
       parityEvidencePath,
       integrationEvidencePath,
+      forcedWireEvidenceAbsolutePath,
       sourceManifestPath,
       sourceMarketplacePath,
       sourceHookConfigPath,
@@ -566,6 +701,106 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     },
     generated_manifest_path: generatedManifestPath,
     generated_marketplace_path: generatedMarketplacePath,
+    dod_004_install_fallback_reproducibility: {
+      ...req888Dod004Metadata,
+      status: dod004Status,
+      request_evidence_path: forcedWireEvidenceRelativePath,
+      discovery_smoke_evidence_path: stableEvidenceRelativePath,
+      generated_manifest_path: generatedManifestPath,
+      generated_marketplace_path: generatedMarketplacePath,
+      source_evidence: {
+        forced_wire_request_id: forcedWireEvidence.value?.request_id ?? null,
+        forced_wire_dod_id: forcedWireEvidence.value?.dod_id ?? null,
+        forced_wire_evidence_path: forcedWireEvidenceRelativePath,
+        discovery_smoke_request_id: 'REQ-886',
+        discovery_smoke_dod_id: 'DOD-003',
+        discovery_smoke_evidence_path: stableEvidenceRelativePath,
+      },
+      native_plugin_install: {
+        mode: 'metadata-only',
+        generated_manifest_path: generatedManifestPath,
+        generated_marketplace_path: generatedMarketplacePath,
+        source_references: [
+          {
+            type: 'local',
+            manifest_path: generatedManifestPath,
+            marketplace_path: generatedMarketplacePath,
+            source_path: generatedMarketplacePlugin?.source?.path ?? './',
+          },
+          {
+            type: 'marketplace',
+            manifest_path: generatedManifestPath,
+            marketplace_path: generatedMarketplacePath,
+            plugin_name: generatedManifest.value?.name ?? null,
+            marketplace_name: generatedMarketplace.value?.name ?? null,
+          },
+        ],
+        verification_steps: [
+          {
+            step_id: 'install-reference-generated-assets',
+            phase: 'install',
+            action: 'Use the generated Codex plugin manifest and marketplace JSON as the reproducible install inputs.',
+            references: [generatedManifestPath, generatedMarketplacePath],
+          },
+          {
+            step_id: 'enable-reference-config-state',
+            phase: 'enable',
+            action: 'Record enablement as a verification concept against the native Codex plugin entry without mutating user config.',
+            references: [userConfigPathLiteral, generatedManifestPath],
+          },
+          {
+            step_id: 'reload-reference-plugin-discovery',
+            phase: 'reload',
+            action: 'Describe reload verification as a data-only step that confirms generated assets remain parseable and discoverable.',
+            references: [generatedManifestPath, generatedMarketplacePath, stableEvidenceRelativePath],
+          },
+        ],
+        executes_external_install: false,
+        mutates_user_config: false,
+        refreshes_plugin_cache: false,
+      },
+      fallback_skill_discovery: {
+        mode: 'metadata-only',
+        discovery_root: fallbackSkillDiscoveryRootPath,
+        repo_target: fallbackSkillRepoTargetPath,
+        symlink_path: fallbackSkillSymlinkPath,
+        symlink_behavior: 'Reproducible fallback is described as a symlink from ~/.agents/skills/gran-maestro to the repo skills/ directory.',
+        verification_steps: [
+          {
+            step_id: 'fallback-discovery-root',
+            phase: 'discover',
+            action: 'Record ~/.agents/skills as the local Codex skill discovery root concept.',
+            references: [fallbackSkillDiscoveryRootPath],
+          },
+          {
+            step_id: 'fallback-target-repo-skills',
+            phase: 'target',
+            action: 'Record repo skills/ as the fallback target concept for local discovery.',
+            references: [fallbackSkillRepoTargetPath, generatedManifest.value?.skills ?? './skills/'],
+          },
+          {
+            step_id: 'fallback-symlink-repro',
+            phase: 'verify',
+            action: 'Describe the symlink relationship as a reproducible manual step only; do not create it in this sprint.',
+            references: [fallbackSkillSymlinkPath, fallbackSkillRepoTargetPath],
+          },
+        ],
+        creates_symlink: false,
+        mutates_user_config: false,
+      },
+      unsupported_surfaces: {
+        status: dod004UnsupportedSurfaces.every((surface) => surface.status === 'pass')
+          ? 'pass'
+          : 'fail',
+        surfaces: dod004UnsupportedSurfaces,
+      },
+      no_go_artifact_guard: {
+        ...noGoArtifactGuard,
+        mutates_user_config: false,
+        refreshes_plugin_cache: false,
+        creates_symlink: false,
+      },
+    },
     parse_error_count: parseFailures.length,
     generated_drift_count: manifestComparison.drift_count + marketplaceComparison.drift_count,
     unsupported_blocker_count: unsupportedBlockers.length,
@@ -624,6 +859,63 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
   assert.equal(evidence.unsupported_blocker_count, 0);
   assert.equal(evidence.discovery_results.status, 'pass');
   assert.equal(evidence.claude_plugin_regression.status, 'pass');
+  assert.equal(evidence.dod_004_install_fallback_reproducibility.status, 'pass');
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.request_id,
+    req888Dod004Metadata.request_id,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.dod_id,
+    req888Dod004Metadata.dod_id,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.request_evidence_path,
+    forcedWireEvidenceRelativePath,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.discovery_smoke_evidence_path,
+    stableEvidenceRelativePath,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.native_plugin_install.executes_external_install,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.native_plugin_install.mutates_user_config,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.native_plugin_install.refreshes_plugin_cache,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.fallback_skill_discovery.discovery_root,
+    fallbackSkillDiscoveryRootPath,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.fallback_skill_discovery.repo_target,
+    fallbackSkillRepoTargetPath,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.fallback_skill_discovery.creates_symlink,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.no_go_artifact_guard.status,
+    'pass',
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.no_go_artifact_guard.mutates_user_config,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.no_go_artifact_guard.refreshes_plugin_cache,
+    false,
+  );
+  assert.equal(
+    evidence.dod_004_install_fallback_reproducibility.no_go_artifact_guard.creates_symlink,
+    false,
+  );
   assert.equal(evidence.selection_reason, sprint4SelectionReason);
   assert.equal(evidence.s04_integration_context_path, sprint4IntegrationContextPath);
   assert.deepEqual(evidence.generated_asset_baseline_paths, generatedAssetBaselinePaths);
@@ -655,6 +947,12 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
     'DOD-006',
     'DOD-008',
   ]);
+  assert.deepEqual(
+    evidence.dod_004_install_fallback_reproducibility.unsupported_surfaces.surfaces.map(
+      (surface) => surface.dod_id,
+    ),
+    ['DOD-005', 'DOD-006', 'DOD-008'],
+  );
   assert.deepEqual(evidence.changed_files_checked, changedFilesChecked);
   assert.deepEqual(
     evidence.discovery_results.assets.map((asset) => asset.path),

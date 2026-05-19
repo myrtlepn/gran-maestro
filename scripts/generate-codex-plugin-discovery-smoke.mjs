@@ -14,7 +14,7 @@ try {
   process.stdout.write(`${outputPath}\n`);
 } catch (error) {
   process.stderr.write(
-    `Failed to write DOD-003 evidence to ${outputPath}. ` +
+    `Failed to write DOD-003/DOD-004 discovery smoke evidence to ${outputPath}. ` +
       'Pass an explicit writable output path when running inside a sandbox.\n',
   );
   throw error;
