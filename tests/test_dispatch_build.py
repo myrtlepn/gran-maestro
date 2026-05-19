@@ -9,7 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000"
 
 
 def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:

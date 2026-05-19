@@ -9,6 +9,22 @@ argument-hint: "{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--file
 
 Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포함)에서 단일 진입점 역할. discussion/ideation/debug/explore/plan-review의 병렬 dispatch에서는 Bash 직접 호출을 사용합니다. 대용량 문서/프론트엔드/넓은 컨텍스트 작업에 적합. Maestro 모드 활성 여부 무관.
 
+## DOD-004 Gemini Identity Protection Contract
+
+- command_identity: `mst:gemini`
+- `/mst:gemini` 호출은 path rules상 `/mst:plan`, `/mst:request`, built-in plan mode 후보로 재분류하지 않는다.
+- model resolve는 provider `gemini`의 configured default tier를 사용하고 실패 시 `gemini-3.1-pro-preview`로만 fallback한다.
+- trace label은 호출자가 전달한 `--trace {REQ-ID}/{TASK-NUM}/{label}` 값을 유지하며 다른 MST skill identity로 rewrite하지 않는다.
+- Codex parity baseline: DOD-003 context contract, forbidden marker contract, exit-code behavior, prompt-file path handling을 `/mst:codex`와 동등하게 유지한다.
+
+## DOD-004 Gemini Delegation Failure and Fallback Contract
+
+- context file path와 prompt-file path는 실행 전 직접 inspection 대상으로 남기고, output contract에는 worktree path, running log path, trace label, evidence path, evidence id를 포함한다.
+- verification criteria는 verify_cmd, expected_signal, final exit code, structured failure_kind를 함께 기록한다.
+- structured failure_kind 값은 `rate_limit`, `timeout`, `empty_result`, `nonzero_exit`로 구분한다. 429/rate-limit/quota 신호는 `rate_limit`으로 분류한다.
+- Codex fallback 조건은 `gemini-dev → codex fallback` 정책에 맞춰 failure_kind, exit code, log/evidence path가 존재할 때만 충족된다.
+- full provider runner replacement, lifecycle artifact schema 전면 구현, shell injection hardening 전체 범위는 DOD-004 범위가 아니다.
+
 ## DOD-003 Context Transfer Contract
 
 이 entrypoint는 구현/분석 위임 시 prompt-file path와 context file path를 먼저 전달하는 wrapper-owned lifecycle boundary다. `--prompt-file`이 있으면 prompt-file path가 canonical prompt source이며, wrapper는 prompt source tracking과 함께 worktree path, task id, trace label, running log, exit code propagation을 공통 lifecycle evidence로 남긴다.

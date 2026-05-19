@@ -566,6 +566,14 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 
 {task_dir} = {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/
 
+## DOD-004 gemini-dev Direct Bash Exception Contract
+
+- `gemini-dev` direct Bash exception은 병렬 dispatch(parallel dispatch)에서 `Skill(mst:gemini)` 직렬 호출로 전환할 수 없는 경우에만 허용한다.
+- direct Bash exception은 protected `/mst:gemini` identity를 대체하지 않으며, prompt-file path와 context file path inspection 결과를 브리프와 completion report에 남겨야 한다.
+- lifecycle evidence는 `running.log`, worktree path, trace label 또는 trace-equivalent id, final exit evidence, evidence path, evidence id를 포함한다.
+- failure_kind는 `rate_limit`, `timeout`, `empty_result`, `nonzero_exit`로 구분하고, 429/rate-limit/quota 신호는 `rate_limit`으로 기록한다.
+- Codex fallback은 `gemini-dev → codex fallback` 정책에 따라 structured failure_kind와 lifecycle evidence가 존재할 때만 실행 또는 갭 태스크로 기록한다.
+
 > ⚠️ **gemini-dev Bash 강제 (MANDATORY)**: gemini-dev는 단건/병렬 무관하게 **항상** `Bash(run_in_background: true)`로 실행한다.
 > `Skill(mst:gemini)` 전환 불가. trace는 `running.log`로 대체된다.
 

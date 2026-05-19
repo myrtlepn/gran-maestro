@@ -738,6 +738,7 @@ def cmd_dispatch_build(args):
         f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}"'
     )
 
+    gemini_failure_cmd = ""
     if provider == "codex":
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" codex exec --full-auto -m {q(resolved_model)} -C {q(str(worktree_dir))} '
@@ -747,6 +748,18 @@ def cmd_dispatch_build(args):
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" gemini -p \"$(cat {q(str(prompt_file))})\" --model {q(resolved_model)} '
             "--approval-mode yolo --sandbox=false"
+        )
+        gemini_failure_cmd = (
+            'MST_GEMINI_FAILURE_KIND=""; '
+            f"if grep -Eiq '(429|rate.?limit|quota|resource exhausted)' {q(str(log_file))}; then MST_GEMINI_FAILURE_KIND=rate_limit; "
+            f"elif grep -Eiq '(timed? ?out|timeout|deadline exceeded)' {q(str(log_file))}; then MST_GEMINI_FAILURE_KIND=timeout; "
+            f"elif [ ! -s {q(str(log_file))} ]; then MST_GEMINI_FAILURE_KIND=empty_result; "
+            'elif [ "$EC" -ne 0 ]; then MST_GEMINI_FAILURE_KIND=nonzero_exit; fi; '
+            f"MST_GEMINI_EVIDENCE_ID={q(task_id + ':gemini-failure')}; "
+            'MST_GEMINI_CODEX_FALLBACK_CONDITION="${MST_GEMINI_FAILURE_KIND:+codex_fallback_required}"; '
+            f'echo "GEMINI_FAILURE_KIND:${{MST_GEMINI_FAILURE_KIND:-none}}" >> {q(str(log_file))}; '
+            f'echo "GEMINI_CODEX_FALLBACK_CONDITION:${{MST_GEMINI_CODEX_FALLBACK_CONDITION:-none}}" >> {q(str(log_file))}; '
+            f'echo "GEMINI_EVIDENCE_ID:$MST_GEMINI_EVIDENCE_ID" >> {q(str(log_file))}; '
         )
 
     heartbeat_cmd = (
@@ -767,6 +780,7 @@ def cmd_dispatch_build(args):
         f"{cli_cmd} < /dev/null 2>&1 | tee {q(str(log_file))}; "
         "EC=${PIPESTATUS[0]}; "
         "kill \"$HB_PID\" 2>/dev/null || true; wait \"$HB_PID\" 2>/dev/null || true; "
+        f"{gemini_failure_cmd}"
         f"echo \"EXIT_CODE:$EC\" >> {q(str(log_file))}; "
         f"{final_heartbeat_cmd}; "
         "exit $EC"
