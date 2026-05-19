@@ -149,6 +149,17 @@ argument-hint: "[REQ-ID] [--auto]"
    - `source_plan` 존재 시: `plan.md`의 `## 요청 (Refined)` + `## Intent (JTBD)`를 `{PLAN_INTENT_CONTEXT}`로 보관.
    - `Intent Trace`의 `근거 출처`에 포함된 `docs/` 경로를 Read하여 `{INTENT_DOCS_CONTEXT}`로 보관 (없으면 skip).
    - 섹션 미존재 시: `intent_fidelity_skip_reason = "Intent Fidelity 리뷰 skip (Intent Trace 없음)"` 설정 후 auto-skip.
+4-b-1. **PO 의도 검증 컨텍스트 수집 (po_intent_validation 전용, MANDATORY)**:
+   - `po_intent_validation`은 accept 단계가 소비하는 별도 산출물이며, 기존 `intent_fidelity` 산출물이나 blocking 판정을 대체하지 않는다.
+   - `request.json.source_plan`이 없으면 `po_intent_validation.verdict="SKIP"`, `reason="NO_SOURCE_PLAN"`으로 기록할 준비를 하고 원본 비교를 임의 PASS 처리하지 않는다.
+   - `source_plan`이 있으면 아래 원본 의도 소스를 모두 수집해 `{PO_INTENT_SOURCE_CONTEXT}`로 보관한다.
+     - 원본 문서: `request.json.original_request` 및 spec `## 3.2 Intent Trace`의 `근거 출처`에 포함된 직접 문서 경로(존재하는 경우 Read).
+     - plan: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`의 `## 요청 (Refined)`, `## Intent (JTBD)`, `## 결정 사항`, `## 범위`, `## 제약사항`.
+     - PAC: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`의 `id`, `grade`, `tags`, `text`.
+     - spec Intent Trace: 현재 태스크 `spec.md`의 `## 3.2 Intent Trace` 원문.
+   - spec `## 3.2 Intent Trace`가 없으면 `po_intent_validation.verdict="SKIP"`, `reason="NO_INTENT_TRACE"`으로 기록할 준비를 한다.
+   - 변경 내용 비교 소스는 `changed_files`와 `git diff <base>..HEAD` 또는 동등한 현재 iteration diff를 `{PO_INTENT_CHANGE_CONTEXT}`로 보관한다. 변경 파일과 diff를 모두 확보할 수 없으면 `reason="NO_CHANGED_FILES_OR_DIFF"`으로 SKIP한다.
+   - PASS 조건은 엄격하다. 원본 의도 소스(`original_documents`, `plan`, `plan_ac`, `spec_intent_trace`)와 실제 변경 소스(`changed_files` 또는 `diff`)를 모두 비교하지 않은 경우 `PASS`를 기록할 수 없다.
 4-c. **Reference 컨텍스트 수집 (MANDATORY)**:
    - Step 2 입력에서 외부 의존성 키워드를 감지하고 `Reference Lookup Protocol`을 실행한다.
    - 결과를 `reference_context_block`으로 보관해 Pass B 모든 리뷰어 프롬프트에 공통 주입한다.
@@ -428,10 +439,11 @@ argument-hint: "[REQ-ID] [--auto]"
 2. 체크리스트 (모든 항목 필수): 정확성(claim이 소스/근거와 일치), 완결성(TOC 항목 누락 없이 반영), 독자적합성(plan 목적/독자/결과물 조건 부합), 구조(H1/H2/H3 계층, 섹션 순서, 문단 흐름 일관성).
 3. `review-code.md`에 4개 축별 `PASS|FAIL`과 근거를 표 형태로 기록. FAIL 항목은 수정 권고 포함.
 
-Pass B는 Claude(인컨텍스트)와 background 에이전트 6개를 동시 시작합니다.
+Pass B는 Claude(인컨텍스트)와 PO 의도 검증 산출물 생성, background 에이전트 6개를 동시 시작합니다.
 
 ```
 Claude (인컨텍스트):        spec §3 AC 체크리스트 순차 검증  ─┐
+PO intent validation:      원본 의도 소스와 실제 변경 비교    ─┤
 code-reviewer (bg):        구현 레벨 리뷰                  ─┤─→ Step 5에서 PM 취합 → review-report.md
 arch-reviewer (bg):        설계/계획 레벨 리뷰              ─┤
 ui-reviewer (bg):          UI 설계 검토 (조건부)            ─┤
@@ -460,6 +472,47 @@ adversarial-reviewer (bg): 공격 표면 기반 적대적 리뷰       ─┘
   | PAC-1 | ✅ PASS | ... |
   ```
   `source_plan` 미존재 시 Plan AC 섹션 생략.
+
+#### PO 의도 검증 산출물 생성 규칙 (Pass B, MANDATORY)
+
+- 저장 경로:
+  - machine-readable: `reviews/RV-NNN/po-intent-validation.json`
+  - human-readable 요약: `reviews/RV-NNN/po-intent-validation.md`
+  - `review.json.po_intent_validation`에도 동일 객체를 mirror하여 accept가 최신 completed review artifact에서 안정적으로 파싱할 수 있게 한다.
+- `po_intent_validation`은 PO 포지션의 의도 검증 계약이다. 기존 `review-intent-fidelity.md`, `tasks[].self_check.intent_fidelity_result`, blocking 모드 intent_fidelity 결과 반영 규칙은 유지하며 이 산출물로 대체하거나 완화하지 않는다.
+- 생성 시 반드시 `{PO_INTENT_SOURCE_CONTEXT}`와 `{PO_INTENT_CHANGE_CONTEXT}`를 함께 비교한다. PM 요약만 근거로 삼거나 원본 의도 소스 또는 변경 소스 중 한쪽만 확인한 경우 `PASS` 금지.
+- 최소 JSON 스키마:
+  ```json
+  {
+    "verdict": "PASS | FAIL | SKIP",
+    "reason": "NO_SOURCE_PLAN | NO_INTENT_TRACE | NO_CHANGED_FILES_OR_DIFF | SOURCE_READ_FAILED | CHANGE_READ_FAILED | NOT_APPLICABLE | null",
+    "compared_sources": [
+      { "source_type": "original_documents | plan | plan_ac | spec_intent_trace", "ref": "absolute-or-repo-relative-path-or-request.json field", "summary": "비교한 의도 근거 요약" }
+    ],
+    "compared_changes": [
+      { "change_type": "changed_file | diff", "ref": "file path or diff hunk ref", "summary": "의도와 대조한 실제 변경 요약" }
+    ],
+    "rationale": "원본 의도와 실제 변경이 일치/불일치/비교불가인 이유",
+    "missing_or_mismatched_intent": [
+      { "source_ref": "PAC-3 | AC-001 | plan.md section | original_request", "expected_intent": "...", "observed_change": "...", "severity": "MUST | SHOULD | INFO" }
+    ]
+  }
+  ```
+- 허용 verdict는 `PASS`, `FAIL`, `SKIP` 세 가지뿐이다.
+- `PASS` 필수 조건:
+  - `compared_sources`에 `original_documents`, `plan`, `plan_ac`, `spec_intent_trace`가 각각 1건 이상 포함된다.
+  - `compared_changes`에 실제 변경 파일 또는 diff 근거가 1건 이상 포함된다.
+  - `missing_or_mismatched_intent`가 비어 있거나, 남은 항목이 blocking 불일치가 아님을 `rationale`에 명시한다.
+- `FAIL` 조건:
+  - 원본 의도 소스와 실제 변경을 비교한 결과, MUST PAC/Spec AC/Intent Trace 의도가 누락되었거나 실제 변경과 충돌한다.
+  - 비교는 완료됐지만 `missing_or_mismatched_intent`에 blocking 불일치가 남아 있다.
+- `SKIP` 조건:
+  - `source_plan` 없음: `reason="NO_SOURCE_PLAN"`.
+  - spec `## 3.2 Intent Trace` 없음: `reason="NO_INTENT_TRACE"`.
+  - 변경 파일과 diff를 모두 확보하지 못함: `reason="NO_CHANGED_FILES_OR_DIFF"`.
+  - 원본 의도 소스 Read 실패: `reason="SOURCE_READ_FAILED"`.
+  - 변경 내용 Read 실패: `reason="CHANGE_READ_FAILED"`.
+  - SKIP은 legacy 호환 또는 비교 불가 상태를 명시하는 값이며, source_plan이 있는 요청의 의도 일치 PASS로 간주하지 않는다.
 
 #### Background 에이전트 dispatch
 
@@ -610,7 +663,7 @@ Agent(
 1. **완료 폴링**: background 에이전트(skip 제외) 완료 대기.
    - 에이전트 실패 시: 해당 역할 "에이전트 실패" 표시 후 나머지 취합 계속.
    - fallback (FILE_NOT_FOUND): 각 `review-*.md` 파일이 없으면 Agent 반환값(`TaskOutput`)에서 텍스트 추출. `# ` 또는 `## ` 헤더 1개 이상이면 유효로 간주, PM이 해당 경로에 Write. 그 외 "에이전트 실패" 처리.
-2. **취합 파일**: `ac-results.md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `review-adversarial.md` + `coverage-matrix.json/md` + `full-backend-test-report.md`(선택).
+2. **취합 파일**: `ac-results.md` + `po-intent-validation.json/md` + `review-code.md` + `review-arch.md` + `review-ui.md` + `review-intent-fidelity.md` + `review-impact.md` + `review-adversarial.md` + `coverage-matrix.json/md` + `full-backend-test-report.md`(선택).
 3. **review-report.md 작성**: `reviews/RV-NNN/review-report.md`
    ```markdown
    # 리뷰 리포트 — RV-NNN (REQ-NNN 반복 N)
@@ -640,6 +693,15 @@ Agent(
    ## Intent Fidelity 검증 결과
    - 모드: blocking(기본) | advisory
    - ✅ Verified N개 / ⚠️ Partial N개 / ❌ Missing N개 / ℹ️ INTENT-GAP N개
+
+   ## PO 의도 검증 결과
+   - 산출물: `po-intent-validation.json`
+   - verdict: PASS | FAIL | SKIP
+   - reason: {null 또는 SKIP/FAIL 사유}
+   - compared_sources: original_documents={N}, plan={N}, plan_ac={N}, spec_intent_trace={N}
+   - compared_changes: changed_file={N}, diff={N}
+   - missing_or_mismatched_intent: {N건}
+
    ## 영향 범위 분석 결과
    ## Adversarial 리뷰 결과
    ```
@@ -680,6 +742,18 @@ Pass B에서 `[MUST] [impact-check]` AC FAIL 1건이라도 있으면 `review.jso
 2. `EVIDENCE_COMPLETE`: `review.json`, `evidence-ledger.md`, `coverage-matrix.json`, `coverage-matrix.md` 모두 존재+비어있지 않으면 true.
 3. `NO_BLOCKING_EXCEPTION`: `pass_a_result==fail`, `static_validation_gate_result in {fail,gap_found}`, `coverage_matrix_gate_result==gap_found`, `full_backend_test_gate_result in {fail,limit_reached}`, blocking 모드 intent_fidelity 실패가 모두 없어야 true.
 4. 기존 Step 6 분기가 `(a)`(pass 후보)일 때만 최종 확정 직전에 평가. `PM_PASS=false`이면 `(a)` 취소 → `(c)` 경로 강등 (`review.json.status="gap_found"`, `gap_source="ac_gap"`). 이미 확정된 `(b)/(c)/(d)/(e)`는 덮어쓰지 않음.
+
+#### PO 의도 검증 결과 반영 규칙 (Step 6 공통)
+
+1. `po-intent-validation.json`을 Read하고 동일 객체를 `review.json.po_intent_validation`에 기록한다.
+2. `po-intent-validation.json`이 없으면 즉시 생성한다.
+   - `source_plan` 없음이면 `verdict="SKIP"`, `reason="NO_SOURCE_PLAN"`.
+   - spec `## 3.2 Intent Trace` 없음이면 `verdict="SKIP"`, `reason="NO_INTENT_TRACE"`.
+   - 변경 파일과 diff를 모두 확보하지 못하면 `verdict="SKIP"`, `reason="NO_CHANGED_FILES_OR_DIFF"`.
+   - 그 외 산출물 생성 실패는 `verdict="FAIL"`, `reason="SOURCE_READ_FAILED"` 또는 `reason="CHANGE_READ_FAILED"` 중 관찰된 원인을 기록한다.
+3. source_plan이 있는 요청에서 `po_intent_validation.verdict != "PASS"`이면 review 자체의 기존 PAC/objective/evidence-ledger 판정을 덮어쓰지 않고, review-report에 별도 PO 검증 미통과로 기록한다. accept hard gate 구현은 accept 단계 책임이지만, review는 accept가 소비할 수 있는 원인(`reason`, 빈 `compared_sources`, 빈 `compared_changes`, `missing_or_mismatched_intent`)을 반드시 남긴다.
+4. `po_intent_validation.verdict == "PASS"`여도 기존 PAC/objective/evidence-ledger 실패, `PM_PASS=false`, 또는 blocking 모드 intent_fidelity 실패를 상쇄할 수 없다.
+5. 이 규칙은 `Intent Fidelity 결과 반영 규칙`과 별도로 실행한다. `intent_fidelity_result`의 `Verified/Partial/Missing` 카운트와 `po_intent_validation.verdict`는 서로 다른 필드에 보존한다.
 
 #### 커스텀 Loop 종료 조건 게이트 (Step 6 선행)
 
@@ -919,6 +993,20 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
     "auto_fixed": [],
     "skipped": []
   },
+  "po_intent_validation": {
+    "verdict": "PASS | FAIL | SKIP",
+    "reason": "NO_SOURCE_PLAN | NO_INTENT_TRACE | NO_CHANGED_FILES_OR_DIFF | SOURCE_READ_FAILED | CHANGE_READ_FAILED | NOT_APPLICABLE | null",
+    "compared_sources": [
+      { "source_type": "original_documents | plan | plan_ac | spec_intent_trace", "ref": "string", "summary": "string" }
+    ],
+    "compared_changes": [
+      { "change_type": "changed_file | diff", "ref": "string", "summary": "string" }
+    ],
+    "rationale": "string",
+    "missing_or_mismatched_intent": [
+      { "source_ref": "string", "expected_intent": "string", "observed_change": "string", "severity": "MUST | SHOULD | INFO" }
+    ]
+  },
   "pm_gate": {
     "pm_pass": true,
     "must_automatable_pass": true,
@@ -931,6 +1019,21 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
 ```
 
 `pm_gate`는 Step 6 Boolean Gate 계산 결과 선택 필드 (하위 호환).
+
+### review.json.po_intent_validation
+
+`po_intent_validation`은 `reviews/RV-NNN/po-intent-validation.json`의 mirror 필드이며 accept 단계의 stable contract이다. 최소 필드는 아래와 같다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `verdict` | string | `PASS` \| `FAIL` \| `SKIP` 중 하나. |
+| `reason` | string \| null | SKIP/FAIL 사유. source_plan 없음은 `NO_SOURCE_PLAN`, Intent Trace 없음은 `NO_INTENT_TRACE`, 변경 비교 대상 부재는 `NO_CHANGED_FILES_OR_DIFF`. |
+| `compared_sources` | array | 원본 의도 비교 근거. PASS 시 `original_documents`, `plan`, `plan_ac`, `spec_intent_trace` source_type을 모두 포함해야 한다. |
+| `compared_changes` | array | 실제 변경 비교 근거. PASS 시 변경 파일 또는 diff 근거를 1건 이상 포함해야 한다. |
+| `rationale` | string | verdict 판단 이유. |
+| `missing_or_mismatched_intent` | array | 누락 또는 불일치한 의도 목록. blocking 불일치가 있으면 PASS 금지. |
+
+이 필드는 기존 `tasks[].self_check.intent_fidelity_result`와 별개이며, PO 의도 검증 PASS가 기존 PAC/objective/evidence-ledger 또는 blocking intent_fidelity 실패를 대체하지 않는다.
 
 ### review_issues_summary 스키마
 

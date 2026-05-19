@@ -122,9 +122,10 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
 2. **요약 리포트 생성**: 모든 태스크 완료 결과 → `summary.md` 작성
 2.5. **Evidence Verification Gate (PAC 증거 검증)**:
    - 목적: `source_plan` 기반 PAC 검증 증거가 최신 review 산출물에 모두 첨부되었는지 확인한다.
+   - 이 gate는 PAC/objective/evidence-ledger 검증 전용이며, 아래 PO 의도 검증 gate와 서로 대체 관계가 아니다.
    - 실행 순서:
      1. `request.json.source_plan` 확인.
-        - 미존재 시: `"[INFO] Evidence gate skip (source_plan 없음)"` 출력 후 다음 단계 진행 (하위 호환).
+        - 미존재 시: `"[INFO] Evidence gate skip (source_plan 없음)"` 및 `"[INFO] PO intent validation gate skip: reason=NO_SOURCE_PLAN"` 출력 후 다음 단계 진행 (하위 호환).
      2. `source_plan`이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json` Read.
         - 파일 미존재 시: `"[INFO] Evidence gate skip (plan.ids.json 없음)"` 출력 후 다음 단계 진행 (하위 호환).
      3. `plan.ids.json`에서 PAC ID 목록(`PAC-N`)을 로드한다.
@@ -144,6 +145,23 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
         - MUST objective anchor가 `N/A`로만 사라졌거나 매핑 증거가 없으면 accept를 블로킹한다.
         - 누락 anchor가 1개 이상이면 `증거 미첨부 objective anchor: {anchor ID 목록}`을 출력하고 중단한다.
         - 누락이 없으면 다음 단계 진행.
+     7. **PO 의도 검증 hard gate (source_plan 기반 추가 gate)**:
+        - 실행 조건: `request.json.source_plan`이 존재하는 현재 REQ에만 적용한다. `source_plan`이 없으면 위 1번의 `reason=NO_SOURCE_PLAN` skip만 남기고 PO gate로 실패시키지 않는다.
+        - 이 gate는 기존 PAC/objective/evidence-ledger 검증을 약화하거나 대체하지 않는다. 위 5번 또는 6번에서 이미 블로킹된 실패는 `po_intent_validation.verdict == PASS`로 상쇄할 수 없다.
+        - 최신 review 선택 기준:
+          1. `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/request.json`의 `review_iterations` 배열만 사용한다.
+          2. `status == "completed"`인 항목만 후보로 인정한다.
+          3. 배열 순서상 가장 뒤의 completed 항목을 현재 request의 최신 completed review artifact로 선택하고, 해당 `rv_id`의 `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/review.json`만 Read한다.
+          4. 이전 completed iteration의 PASS, `in_progress`/`failed`/`limit_reached` iteration, 다른 REQ의 review artifact, 파일명만 유사한 외부 산출물은 PASS 근거로 인정하지 않는다.
+        - 판정 규칙:
+          1. 최신 completed review artifact가 없거나 `review.json`을 Read할 수 없으면 accept를 즉시 블로킹하고 `PO 의도 검증 산출물 없음: 최신 completed review artifact 없음`을 출력한다.
+          2. `review.json.po_intent_validation` 객체가 없으면 accept를 즉시 블로킹하고 `PO 의도 검증 산출물 없음: po_intent_validation 없음`을 출력한다.
+          3. `po_intent_validation.verdict != "PASS"`이면 accept를 즉시 블로킹하고 `PO 의도 검증 verdict 불일치: expected=PASS actual={verdict}`를 출력한다. `FAIL`, `SKIP`, 빈 값, 알 수 없는 값은 모두 불일치다.
+          4. `po_intent_validation.compared_sources`가 없거나 빈 배열/빈 문자열이면 accept를 즉시 블로킹하고 `PO 의도 검증 원본 문서 비교 누락: compared_sources 비어 있음`을 출력한다.
+          5. `po_intent_validation.compared_changes`가 없거나 빈 배열/빈 문자열이면 accept를 즉시 블로킹하고 `PO 의도 검증 변경 내용 비교 누락: compared_changes 비어 있음`을 출력한다.
+          6. `po_intent_validation.rationale` 필드는 존재해야 하며, 누락 시 `PO 의도 검증 산출물 없음: rationale 누락`으로 블로킹한다.
+          7. `po_intent_validation.missing_or_mismatched_intent` 필드는 존재해야 한다. PASS일 때 빈 배열/빈 문자열은 허용하지만, 필드 자체가 없으면 `PO 의도 검증 산출물 없음: missing_or_mismatched_intent 누락`으로 블로킹한다.
+        - 통과 조건: 현재 REQ의 최신 completed review artifact에 `po_intent_validation.verdict == PASS`가 있고, `compared_sources`와 `compared_changes`가 비어 있지 않으며, `rationale`과 `missing_or_mismatched_intent` 필드가 존재할 때만 다음 단계로 진행한다.
 2.6. **수락 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.
    - `plan_type = plan.json.type` (`type` 누락 또는 Read 실패 시 `"code"` fallback)
