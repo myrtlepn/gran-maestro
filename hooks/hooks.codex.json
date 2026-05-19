@@ -1,0 +1,60 @@
+{
+  "mode": "fixture-only",
+  "generated_from": "hooks/hooks.json",
+  "adapter_runner": "./scripts/codex-hook-adapter-fixture.mjs",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/codex-hook-adapter-fixture.mjs SessionStart"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/codex-hook-adapter-fixture.mjs PreToolUse Skill"
+          }
+        ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/codex-hook-adapter-fixture.mjs PreToolUse ScheduleWakeup"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/codex-hook-adapter-fixture.mjs Stop"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/codex-hook-adapter-fixture.mjs UserPromptSubmit"
+          }
+        ]
+      }
+    ]
+  }
+}

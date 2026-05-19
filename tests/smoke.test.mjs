@@ -28,6 +28,14 @@ import {
   userConfigPathLiteral,
   validationEntrypoints,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
+import {
+  assertCodexHookAdapterParityEvidence,
+  buildCodexHookAdapterParityEvidence,
+  canonicalHookScripts,
+  excludedDodIds as hookAdapterExcludedDodIds,
+  req888BaselineEvidencePath,
+  stableEvidenceRelativePath as hookAdapterEvidencePath,
+} from '../scripts/lib/codex-hook-adapter-parity.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -149,7 +157,6 @@ test('codex plugin discovery smoke records Sprint 4 forced wire observability', 
   );
   assert.deepEqual(evidence.sprint4_forced_wire.validation_entrypoints, validationEntrypoints);
   assert.deepEqual(evidence.sprint4_forced_wire.out_of_scope_dod_guard.dod_ids, [
-    'DOD-005',
     'DOD-006',
     'DOD-008',
   ]);
@@ -197,7 +204,7 @@ test('codex plugin discovery smoke records DOD-004 install and fallback reproduc
   assert.equal(dod004.unsupported_surfaces.status, 'pass');
   assert.deepEqual(
     dod004.unsupported_surfaces.surfaces.map((surface) => surface.dod_id),
-    ['DOD-005', 'DOD-006', 'DOD-008'],
+    ['DOD-006', 'DOD-008'],
   );
   assert.equal(dod004.no_go_artifact_guard.status, 'pass');
   assert.equal(dod004.no_go_artifact_guard.mutates_user_config, false);
@@ -319,15 +326,96 @@ test('codex plugin discovery smoke no-go artifact guard stays repo-scoped and pa
   assert.equal(guard.status, 'pass');
   assert.ok(guard.assets.every((asset) => asset.exists === false));
   assert.ok(
-    guard.assets.some((asset) => asset.path === 'hooks/hooks.codex.json' && asset.root === 'repo'),
-  );
-  assert.ok(
     guard.assets.some(
       (asset) =>
         asset.path === 'requests/REQ-886/evidence/codex-workflow-e2e-parity.json' &&
         asset.root === 'orchestration',
     ),
   );
+});
+
+test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {
+  const evidence = buildCodexHookAdapterParityEvidence();
+
+  assertCodexHookAdapterParityEvidence(evidence);
+  assert.equal(evidence.evidence_path, hookAdapterEvidencePath);
+  assert.equal(evidence.root_metadata.baseline_evidence_path, req888BaselineEvidencePath);
+  assert.deepEqual(
+    evidence.root_metadata.canonical_hook_script_paths,
+    Object.values(canonicalHookScripts),
+  );
+});
+
+test('codex hook adapter parity fixtures normalize the four target events', () => {
+  const evidence = buildCodexHookAdapterParityEvidence();
+
+  assert.equal(evidence.fixtures.SessionStart.fixture.normalized_stdin.hook_event_name, 'SessionStart');
+  assert.equal(evidence.fixtures.SessionStart.fixture.normalized_env.MST_PROJECT_ROOT, '.');
+
+  assert.equal(evidence.fixtures.PreToolUse.fixtures.skill_like.detected_matcher, 'Skill');
+  assert.equal(
+    evidence.fixtures.PreToolUse.fixtures.schedule_wakeup_like.detected_matcher,
+    'ScheduleWakeup',
+  );
+  assert.deepEqual(evidence.fixtures.PreToolUse.blocker_codes, [
+    'permission_metadata_loss',
+    'unsupported_direct_shell_escape',
+  ]);
+
+  assert.equal(evidence.fixtures.Stop.continuation_loss_count, 0);
+  assert.equal(
+    evidence.fixtures.Stop.fixture.normalized_stdin.refeed_context.target_dod,
+    'DOD-005',
+  );
+
+  assert.equal(
+    evidence.fixtures.UserPromptSubmit.fixture.normalized_stdin.auto_chain_context.plan_id,
+    'PLN-717',
+  );
+});
+
+test('codex hook adapter manifest stays duplicate-free and plugin-root relative', () => {
+  const evidence = buildCodexHookAdapterParityEvidence();
+
+  assert.equal(evidence.codex_manifest.command_audit.status, 'pass');
+  assert.equal(evidence.codex_manifest.command_audit.violation_count, 0);
+  assert.equal(evidence.duplicate_registration_count, 0);
+  assert.deepEqual(
+    evidence.codex_manifest.command_audit.commands.map((entry) => entry.path_token),
+    [
+      './scripts/codex-hook-adapter-fixture.mjs',
+      './scripts/codex-hook-adapter-fixture.mjs',
+      './scripts/codex-hook-adapter-fixture.mjs',
+      './scripts/codex-hook-adapter-fixture.mjs',
+      './scripts/codex-hook-adapter-fixture.mjs',
+    ],
+  );
+  assert.equal(evidence.no_go_guard.status, 'pass');
+  assert.deepEqual(evidence.no_go_guard.excluded_dod_ids, hookAdapterExcludedDodIds);
+});
+
+test('codex hook adapter parity generator writes parseable evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-hook-adapter-parity-'));
+  const outputPath = join(tempDir, 'evidence.json');
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/generate-codex-hook-adapter-parity.mjs', outputPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexHookAdapterParityEvidence(evidence);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('AskUserQuestion contract requires meaningful labels and preview details', () => {

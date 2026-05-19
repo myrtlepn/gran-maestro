@@ -132,17 +132,6 @@ export const marketplaceFields = [
 
 const outOfScopeArtifactCandidates = [
   {
-    dod_id: 'DOD-005',
-    description: 'Codex hook wrapper artifacts remain out of scope for DOD-003.',
-    assets: [
-      'hooks/hooks.codex.json',
-      '.codex-plugin/hooks.json',
-      '.codex-plugin/hooks/',
-      'hooks/codex-plugin-wrapper.sh',
-      'scripts/generate-codex-hook-wrapper.mjs',
-    ],
-  },
-  {
     dod_id: 'DOD-006',
     description: 'Codex skill/agent runtime projection artifacts remain out of scope for DOD-003.',
     assets: [
@@ -166,36 +155,6 @@ const outOfScopeArtifactCandidates = [
 ];
 
 const dod004NoGoArtifactCandidates = [
-  {
-    category: 'hook_wrapper',
-    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
-    root: 'repo',
-    path: 'hooks/hooks.codex.json',
-  },
-  {
-    category: 'hook_wrapper',
-    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
-    root: 'repo',
-    path: '.codex-plugin/hooks.json',
-  },
-  {
-    category: 'hook_wrapper',
-    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
-    root: 'repo',
-    path: '.codex-plugin/hooks/',
-  },
-  {
-    category: 'hook_wrapper',
-    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
-    root: 'repo',
-    path: 'hooks/codex-plugin-wrapper.sh',
-  },
-  {
-    category: 'hook_wrapper',
-    description: 'Codex hook wrapper artifacts remain unimplemented for Sprint 5 DOD-004.',
-    root: 'repo',
-    path: 'scripts/generate-codex-hook-wrapper.mjs',
-  },
   {
     category: 'runtime_projection',
     description: 'Codex skill and agent runtime projection artifacts remain unimplemented for Sprint 5 DOD-004.',
@@ -612,7 +571,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       parityEvidence.value?.component_mapping_summary?.marketplace_parity?.generated_plugin_entry_index ?? 0
     ] ?? null;
   const dod004UnsupportedSurfaces = outOfScopeArtifactCheck.checks
-    .filter((check) => ['DOD-005', 'DOD-006', 'DOD-008'].includes(check.dod_id))
+    .filter((check) => ['DOD-006', 'DOD-008'].includes(check.dod_id))
     .map((check) => ({
       dod_id: check.dod_id,
       description: check.description,
@@ -818,7 +777,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       },
     },
     scope_exclusions: [
-      'Codex hook wrapper implementation is out of scope for DOD-003.',
+      'Codex hook wrapper parity is tracked by downstream DOD-005 evidence and is not a DOD-003 blocker.',
       'Codex skill/agent runtime projection is out of scope for DOD-003.',
       'Codex workflow E2E parity is out of scope for DOD-003.',
       'hooks/hooks.json command replacement is out of scope for DOD-003.',
@@ -943,7 +902,6 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
   );
   assert.equal(evidence.sprint4_forced_wire.upstream_dod_gating.status, 'pass');
   assert.deepEqual(evidence.sprint4_forced_wire.out_of_scope_dod_guard.dod_ids, [
-    'DOD-005',
     'DOD-006',
     'DOD-008',
   ]);
@@ -951,7 +909,7 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
     evidence.dod_004_install_fallback_reproducibility.unsupported_surfaces.surfaces.map(
       (surface) => surface.dod_id,
     ),
-    ['DOD-005', 'DOD-006', 'DOD-008'],
+    ['DOD-006', 'DOD-008'],
   );
   assert.deepEqual(evidence.changed_files_checked, changedFilesChecked);
   assert.deepEqual(
