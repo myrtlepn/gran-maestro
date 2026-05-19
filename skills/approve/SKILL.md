@@ -541,17 +541,24 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 ```
 
 브리프는 `templates/impl-request.md` 템플릿 사용. (`strategy.worktree_policy != "skip"` 경로)
+- 브리프는 DOD-003 path-first contract를 유지해야 하며, 렌더링 결과에 `[CONTEXT_FILES]`와 `[WORK_CONTRACT]` block이 모두 포함되어야 한다.
+- `[CONTEXT_FILES]` 필수 항목: `objective`, `objective_ids`, `plan`, `plan_json`, `plan_ids`, `spec`, `spec_context_manifest`, `previous_feedback`
+- `[WORK_CONTRACT]` 필수 항목: `read_requirements`, `output_contract`, `verification_contract`, `failure_contract`
+- 완료 보고 필수 항목: 변경 파일 목록, 생성/수정한 테스트, `completion report`, `Read/inspection evidence`, `verify_cmd`, `expected_signal`
 - `{{IMPL_CONTEXT}}`: PM 작성 — 3~5줄 자유 형식 (무엇을, 왜, 어떻게 + 주의사항)
   - Step 4b 시작 시 `Reference Lookup Protocol`을 먼저 실행하고, 생성된 `[REFERENCE_CONTEXT]` 블록을 `{{IMPL_CONTEXT}}` 끝에 주입한다.
   - `reference.auto_search != true`이면 자동 WebSearch 없이 기존 REF 캐시 조회 결과만 주입한다.
   - `request.json`에 `linked_designs`가 존재하고 비어있지 않으면, `{{IMPL_CONTEXT}}` 끝에 `"spec.md §10의 Stitch HTML 파일을 참조하되 기술 스택에 맞게 구현하세요."` 자동 추가.
 - `{{SPEC_PATH}}`, `{{WORKTREE_PATH}}`, `{{REQ_ID}}`, `{{TASK_ID}}`: 자동 주입
-- `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `"N/A"`
+- `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `NO_SOURCE_PLAN`
 - `{{PREV_FEEDBACK_PATH}}`: 첫 실행 시 "N/A", 재실행 시 feedback 파일 경로
-- `{{PLAN_JSON_META}}`: resolve 순서 `request.json` → `plan.json` → `plan.ids.json` → `objective.md`. `request.json.source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하여 `cynefin_domain`, `linked_objective`, `linked_intent`, `linked_captures` 필드와 원본 경로를 3~5줄 요약으로 주입. `linked_intent`가 있으면 `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`으로 원본 intent를 조회하고, 반환된 원본 경로 또는 `{PROJECT_ROOT}/.gran-maestro/intent/{INTENT_ID}*.md` 조회 패턴과 확인 결과를 함께 주입한다. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
-- `{{PAC_LIST}}`: `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`을 Read하여 경로와 각 항목의 `id`, `grade`, `tags`, `text` 필드를 목록으로 주입. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
-- `{{OBJECTIVE_SECTION}}`: `plan.json.linked_objective`가 존재하면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.md`와 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.ids.json`(존재 시)을 Read하여 원본 경로, JTBD 요약, 프로젝트 DoD 항목, 성공 지표, objective anchor coverage evidence를 3~5줄 요약으로 주입. legacy plan에서 linked_objective/linked_intent/plan.ids.json 각각 미존재 시 warn 로그 + 명시적 skip 사유("N/A", `NO_LINKED_OBJECTIVE`, `NO_LINKED_INTENT`, `NO_PLAN_IDS` 등) 치환 가능. agile-origin objective anchor metadata가 있는데 anchor manifest나 coverage evidence가 없으면 "N/A"로 숨기지 말고 brief에 누락 evidence를 남기고 review/accept가 확인할 수 있게 전달한다.
-- source_plan이 있는 브리프는 PM 작성 요약만 신뢰하지 말고 `plan.md`, `plan.json`, `plan.ids.json`, linked objective/intent 원본, spec `§0 Context Manifest` 원본 파일을 구현 전 직접 Read/inspection하라는 지시와 완료 보고의 `Read/inspection evidence` 기록 요구를 반드시 포함한다. source_plan이 없는 legacy 요청은 이 요구를 hard fail로 적용하지 않고 `NO_SOURCE_PLAN`에 준하는 명시적 skip 사유를 남긴다.
+- `{{PLAN_JSON_META}}`: resolve 순서 `request.json` → `plan.json` → `plan.ids.json` → `objective.md`. `request.json.source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하여 `cynefin_domain`, `linked_objective`, `linked_intent`, `linked_captures` 필드와 원본 경로를 3~5줄 요약으로 주입한다. `linked_intent`가 있으면 `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`으로 원본 intent를 조회하고, 반환된 원본 경로 또는 `{PROJECT_ROOT}/.gran-maestro/intent/{INTENT_ID}*.md` 조회 패턴과 확인 결과를 함께 주입한다. 미존재 시 warn 로그 + `NO_PLAN_JSON`, `NO_LINKED_INTENT`, `missing_context`, 또는 명시적 skip reason으로 치환한다.
+- `{{PAC_LIST}}`: `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`을 Read하여 경로와 각 항목의 `id`, `grade`, `tags`, `text` 필드를 목록으로 주입한다. 미존재 시 warn 로그 + `NO_PLAN_IDS`, `missing_context`, 또는 명시적 skip reason으로 치환한다.
+- `{{OBJECTIVE_SECTION}}`: `plan.json.linked_objective`가 존재하면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.md`와 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.ids.json`(존재 시)을 Read하여 원본 경로, JTBD 요약, 프로젝트 DoD 항목, 성공 지표, objective anchor coverage evidence를 3~5줄 요약으로 주입한다. legacy plan에서 linked_objective/linked_intent/plan.ids.json 각각 미존재 시 warn 로그 + `NO_LINKED_OBJECTIVE`, `NO_OBJECTIVE_IDS`, `NO_LINKED_INTENT`, `NO_PLAN_IDS`, `missing_context`, 또는 명시적 skip reason으로 치환한다. agile-origin objective anchor metadata가 있는데 anchor manifest나 coverage evidence가 없으면 "N/A"로 숨기지 말고 brief에 누락 evidence를 남기고 review/accept가 확인할 수 있게 전달한다.
+- `spec_context_manifest`는 항상 `{{SPEC_PATH}}#§0-Context-Manifest`로 전달하고, spec에 해당 섹션이 없으면 `NO_CONTEXT_MANIFEST` 또는 `missing_context`를 남긴다.
+- `previous_feedback`는 첫 실행에만 `N/A` 허용, 그 외 재실행 경로에서는 feedback 파일 경로나 명시적 skip reason을 남긴다.
+- source_plan이 있는 브리프는 PM 작성 요약만 신뢰하지 말고 `plan.md`, `plan.json`, `plan.ids.json`, linked objective/intent 원본, spec `§0 Context Manifest` 원본 파일을 구현 전 직접 Read/inspection하라는 지시와 완료 보고의 `Read/inspection evidence` 기록 요구를 반드시 포함한다. source_plan이 없는 legacy 요청은 이 요구를 hard fail로 적용하지 않고 `NO_SOURCE_PLAN` 또는 동등한 structured skip reason을 남긴다.
+- required context slot 규칙: `plan:`은 path-first required slot이므로 `N/A`로 렌더링하지 않는다. `{{PLAN_PATH}}`는 실제 `plan.md` 절대경로이거나 `NO_SOURCE_PLAN`이어야 하며, `previous_feedback`만 첫 실행에서 `N/A`를 유지할 수 있다.
 
 ##### 4c. 독립 태스크 동시 실행
 
@@ -585,8 +592,13 @@ Bash(
 if (wave_claude_task_count > 1):
   Task(subagent_type: "general-purpose", prompt: {prompt_file 내용}, run_in_background: true)
 else:
-  Skill(skill: "mst:claude", args: "--trace {REQ-ID}/{TASK-NUM}/phase2-impl")
+  Skill(skill: "mst:claude", args: "--prompt-file {prompt_file} --dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase2-impl")
 ```
+
+`claude-dev` 단건 실행은 bare `--trace`만 넘기지 않는다. Phase 2 dispatch가 만든 동일 lifecycle boundary 안에서 다음 항목이 함께 묶여야 한다:
+- dispatch 입력: `--prompt-file {prompt_file}`, `--dir {worktree_path}`, `--trace {REQ-ID}/{TASK-NUM}/phase2-impl`
+- wrapper-owned 파생/전달: `python3 {PLUGIN_ROOT}/scripts/mst.py run`, `--task-id {REQ-ID}-T{TASK-NUM}`, `--provider claude`, `--model "$MODEL"`, `--log-dir {task_dir}`
+- lifecycle evidence: `{task_dir}/running.log`, trace path, session metadata, output/failure contract, exit-code propagation
 
 각 실행에서 background `task_id`를 받은 직후, 아래 실제 CLI를 즉시 호출해 dispatch attempt metadata를 `request.json`에 영구 저장:
 

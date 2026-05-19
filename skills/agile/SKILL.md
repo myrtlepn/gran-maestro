@@ -510,6 +510,29 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
 
 ##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider, MANDATORY)
 
+0. Sprint prompt에는 아래 path-first context transfer contract를 반드시 포함한다. `templates/sprint-dispatch-prompt.md`를 조립할 때 이 블록을 그대로 채우고, path가 없으면 `N/A`로 숨기지 말고 명시적 상태값을 사용한다.
+   ```text
+   [CONTEXT_FILES]
+   - objective: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+   - objective_ids: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.ids.json or NO_OBJECTIVE_IDS
+   - plan: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.md or NO_SOURCE_PLAN
+   - plan_json: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.json or NO_PLAN_JSON
+   - plan_ids: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.ids.json or NO_PLAN_IDS
+   - spec: {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{TASK_ID}/spec.md or NO_ACTIVE_SPEC
+   - spec_context_manifest: {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{TASK_ID}/spec.md#§0-Context-Manifest or NO_SPEC_CONTEXT_MANIFEST
+   - sprint_context: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{CURRENT_SPRINT}/integration-context.md or NO_SPRINT_CONTEXT
+   - previous_feedback: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{PREV_SPRINT}/retrospective.md or NO_PREVIOUS_FEEDBACK
+   [/CONTEXT_FILES]
+
+   [WORK_CONTRACT]
+   - read_requirements: 구현 전 위 context file과 spec §0 Context Manifest 파일을 직접 Read/inspection한다.
+   - output_contract: agile/agile-plan/prompt-template 변경 파일, dispatch result contract, completion report를 보고한다.
+   - verification_contract: verify_cmd, expected_signal, integration_smoke_id를 보고한다.
+   - failure_contract: timeout, empty result, blocked, missing_context 상태를 구조화해 남긴다.
+   [/WORK_CONTRACT]
+   ```
+   - completion report에는 최소 `changed files`, `simplifications made`, `remaining risks`, `Read/inspection evidence`, `verification evidence`를 포함한다.
+   - objective/spec/plan 원문 대량 삽입 금지. path-first contract를 전달하고 child가 직접 Read/inspection하게 한다.
 1. Sprint prompt 조립: `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
 2. worktree 생성: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
 3. managed Claude delegation dispatch 실행:
@@ -518,6 +541,7 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
      ```text
      Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")
      ```
+   - sprint dispatch lifecycle tuple: `sprint-prompt.md`, sprint worktree path, trace label, `{AGI_ID}-S{NN}`, sprint log dir는 같은 dispatch attempt에 속한다. caller는 `--prompt-file`, `--dir`, `--trace`를 명시하고, `/mst:claude` wrapper는 같은 경계에서 task/log/runtime evidence를 파생하거나 전달한다.
    - `/mst:claude`는 `python3 {PLUGIN_ROOT}/scripts/mst.py run` lifecycle wrapper를 통해 다음 계약을 유지해야 한다:
      - `--task-id "{AGI_ID}-S{NN}"`
      - `--provider claude`
@@ -525,7 +549,11 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
      - `--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"`
      - prompt source: `sprint-prompt.md`
      - cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
-   - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록하고, running log tee / trace path / session metadata / output-failure contract / exit code propagation을 공통 관리한다.
+   - lifecycle boundary mapping:
+     - running log path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/running.log`
+     - trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/claude-*.md`
+     - wrapper register/heartbeat state: `${baseDir}/run/{AGI_ID}-S{NN}.json`
+   - wrapper가 위 artifact를 자동 기록하고, running log tee / trace path / session metadata / output-failure contract / exit code propagation을 공통 관리한다.
 4. 종료 신호 수신: Claude provider exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
 5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
@@ -574,7 +602,7 @@ Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력
 규칙:
 - `plan -a` 입력에 완료 시점/잔여 횟수 예측 문구를 포함하지 않는다.
 - 스프린트 목표는 작업 항목 명사가 아니라 **관찰 가능한 결과/동작**으로 작성한다.
-- 컨텍스트가 비어 있으면 `"N/A"`로 채워 graceful fallback 한다.
+- 컨텍스트가 비어 있으면 `"N/A"`로 숨기지 말고 `missing_context`, `NO_OBJECTIVE_IDS`, `NO_PLAN_JSON`, `NO_PLAN_IDS`, `NO_ACTIVE_SPEC`, `NO_SPEC_CONTEXT_MANIFEST`, `NO_PREVIOUS_FEEDBACK` 같은 명시적 상태값을 남긴다.
 
 ##### 2.2.3.b MANDATORY Read 누락 자동 재지시 루프
 

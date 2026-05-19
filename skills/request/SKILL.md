@@ -289,8 +289,12 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - Read 실패 시 fallback: `{"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`
         - `plan_strategy.template == "templates/doc-request.md"` → `DOC_SPEC_MODE=true`; 그 외 → `DOC_SPEC_MODE=false`
       - **§0 Context Manifest 후보 수집 (MANDATORY)**:
+        - `source_plan`이 있으면 `plan.md`, `plan.json`, `plan.ids.json`을 `context_manifest_files`의 기본 시드로 먼저 추가한다.
+        - agile-origin objective details가 있으면 `context-transfer-contract.md` 같은 objective details 원본을 dedupe 추가한다.
+        - 현재 요청이 skill/template contract 변경이면 `skills/request/SKILL.md`, `skills/approve/SKILL.md`, `templates/impl-request.md`, `templates/spec.md` 같은 governing source를 dedupe 추가한다.
         - 1차 소스: plan.md의 범위 섹션에서 `시작점 힌트` 파일 목록 추출 → `context_manifest_files`
         - 1차 소스가 비어있으면 fallback: Step 1c 탐색 결과의 핵심 진입 파일 + 요청 분석에서 1~3개 경로 추론 (디렉토리는 대표 진입 파일로 정규화)
+        - 필수 source를 찾지 못하면 silent skip 대신 spec 본문 또는 생성 메모에 `missing_context`, `NO_SOURCE_PLAN`, `NO_PLAN_JSON`, `NO_PLAN_IDS`, `NO_LINKED_OBJECTIVE`, `NO_OBJECTIVE_IDS`, `NO_CONTEXT_MANIFEST` 중 적절한 표식을 남긴다.
         - `context_manifest_files`는 최소 1개 이상 유지 (빈 목록 금지)
       - **linked_designs 감지** (`plan.json`의 `linked_designs` 배열 비어있지 않을 때):
         - 각 DES-NNN에 대해 `designs/DES-NNN/design.json` Read (미존재 시 silent skip)
@@ -512,10 +516,14 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - `anchor_missing_ids`가 비어있지 않으면 graceful fallback으로 닫지 않고 blocking/MAJOR failure evidence를 기록한다.
       - **`## §0 Context Manifest` 자동 채움 규칙 (MANDATORY)**:
         - `context_manifest_files`를 bullet 목록으로 삽입
+        - `source_plan`이 있으면 `plan.md`, `plan.json`, `plan.ids.json`이 최종 목록에 포함되도록 보강한다.
+        - objective details가 있으면 `context-transfer-contract.md` 같은 linked detail source를 dedupe 추가한다.
+        - skill/template contract 작업이면 `skills/request/SKILL.md`, `skills/approve/SKILL.md`, `templates/impl-request.md`, `templates/spec.md`를 포함한다.
         - `objective_context.objective_md_path`가 있으면 dedupe 추가; 없으면 skip (graceful)
         - `--plan` 없는 경우에도 동일 규칙 적용 (Step 1c 탐색 + 요청 분석 기반)
         - `MST_SESSION_ID`와 active session worktree metadata가 있는 정상 경로에서는 session worktree를 effective project root로 관찰한 파일 경로를 우선 사용한다.
         - original checkout에서 호출된 경우에는 session worktree 재진입 또는 structured diagnostic 경계로 분류하고, legacy owner/session field를 effective root source로 사용하지 않는다.
+        - 최종 목록에서 채울 수 없는 required context는 spec 요약 또는 생성 메모에 `missing_context`/`NO_*`/명시적 skip reason으로 남기고 조용히 생략하지 않는다.
         - 최종 §0 목록은 최소 1개 이상 파일 경로를 포함해야 한다
       - **`## 3.2 Intent Trace` 작성 규칙 (MANDATORY)**: `intent_context_active=true`일 때만 §3.2 채움. 각 AC마다 최소 1개 의도 근거 연결. 근거를 찾지 못하면 `[INTENT-GAP]` 표기. docs 근거 사용 시 `intent_snapshot`에 `doc_path`, `last_modified`, `spec_generated_at` 기록. `intent_context_active=false`면 §3.2 전체 skip.
       - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**: `objective_context` 존재 + `project_dod_items[]` 1개 이상일 때 생성한다. agile-origin objective anchor metadata가 있으면 §3.4를 skip하지 말고 objective trace evidence로 DoD/anchor → Spec AC 매핑을 남긴다. 표 형식: `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`. 매핑 가능한 AC 없으면 `[UNMAPPED]`/`Gap`. legacy/non-agile에서 `objective_context` 없거나 비어있으면 §3.4는 N/A 또는 skip 가능.

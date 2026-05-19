@@ -9,6 +9,33 @@ argument-hint: "{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--json
 
 Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포함)에서 단일 진입점 역할. discussion/ideation/debug/explore/plan-review의 병렬 dispatch에서는 Bash 직접 호출을 사용합니다. Maestro 모드 활성 여부 무관.
 
+## DOD-003 Context Transfer Contract
+
+이 entrypoint는 구현/분석 위임 시 prompt-file path와 context file path를 먼저 전달하는 wrapper-owned lifecycle boundary다. `--prompt-file`이 있으면 prompt-file path가 canonical prompt source이며, wrapper는 prompt source tracking과 함께 worktree path, task id, trace label, running log, exit code propagation을 공통 lifecycle evidence로 남긴다.
+
+```text
+[CONTEXT_FILES]
+- objective: {path or NO_LINKED_OBJECTIVE}
+- objective_ids: {path or NO_OBJECTIVE_IDS}
+- plan: {path or NO_SOURCE_PLAN}
+- plan_json: {path or NO_PLAN_JSON}
+- plan_ids: {path or NO_PLAN_IDS}
+- spec: {path}
+- spec_context_manifest: {path or NO_CONTEXT_MANIFEST}
+- previous_feedback: {path or N/A}
+[/CONTEXT_FILES]
+
+[WORK_CONTRACT]
+- read_requirements: 구현 전 위 context file path와 spec_context_manifest를 직접 Read/inspection한다.
+- output_contract: prompt-file path, worktree path, task id, trace label, running log path, output artifact 또는 completion report를 보고한다.
+- verification_contract: verify_cmd, expected_signal, trace path, exit code propagation을 보고한다.
+- failure_contract: timeout, empty result, blocked, missing_context, NO_SOURCE_PLAN, NO_CONTEXT_MANIFEST를 구조화해 남긴다.
+[/WORK_CONTRACT]
+```
+
+- wrapper-owned lifecycle boundary: `mst.py run`이 register, heartbeat, running log tee, trace, session metadata, cwd/worktree binding, output/failure contract를 소유한다.
+- provider subprocess detail: 실제 provider argv 조합과 permission flags는 runtime-owned internals이며 active implementation guidance는 이를 사용자 대면 계약으로 승격하지 않는다.
+
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->

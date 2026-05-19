@@ -9,6 +9,33 @@ argument-hint: "[REQ-ID] [--auto]"
 
 구현 완성도를 반복 검토합니다. spec §3 AC 체크리스트 검증(인컨텍스트)과 코드/아키텍처/UI 리뷰(background 에이전트 병렬)를 동시 수행하여 갭을 탐지하고, 발견 시 태스크를 자동 생성합니다.
 
+## DOD-003 Review Context Transfer Contract
+
+review delegation은 PM 요약이 아니라 context file path와 diff evidence를 직접 Read/inspection하는 경로를 표준 계약으로 사용한다. review prompt와 하위 리뷰어 프롬프트는 spec/source plan/objective 원문을 path-first로 전달하고, 읽지 못한 컨텍스트를 임의 추론하지 않고 missing_context 또는 명시적 skip reason으로 보고해야 한다.
+
+```text
+[CONTEXT_FILES]
+- objective: {path or NO_LINKED_OBJECTIVE}
+- objective_ids: {path or NO_OBJECTIVE_IDS}
+- plan: {path or NO_SOURCE_PLAN}
+- plan_json: {path or NO_PLAN_JSON}
+- plan_ids: {path or NO_PLAN_IDS}
+- spec: {path}
+- spec_context_manifest: {path or NO_CONTEXT_MANIFEST}
+- previous_feedback: {path or N/A}
+[/CONTEXT_FILES]
+
+[WORK_CONTRACT]
+- read_requirements: review 시작 전 위 context file path와 spec_context_manifest를 직접 Read/inspection한다.
+- output_contract: output schema 또는 markdown finding report, po-intent-validation.json, review-report.md, completion report를 남긴다.
+- verification_contract: verify_cmd, expected_signal, evidence-ledger, coverage-matrix, verification evidence를 보고한다.
+- failure_contract: timeout, empty result, blocked, missing_context, NO_SOURCE_PLAN, NO_CONTEXT_MANIFEST, SOURCE_READ_FAILED, CHANGE_READ_FAILED를 구조화해 남긴다.
+[/WORK_CONTRACT]
+```
+
+- review completion report 최소 항목: 읽은 context file 목록, 사용한 diff/changed file 근거, output artifact 경로, verification evidence, skip/missing_context 사유.
+- review output contract: 각 리뷰어는 output schema를 따르는 JSON 산출물 또는 markdown finding report를 생성해야 하며, source plan이나 manifest가 없으면 `NO_SOURCE_PLAN`, `NO_CONTEXT_MANIFEST`, `missing_context` 중 해당 값을 명시한다.
+
 ## 전제조건 가드 (수동 호출 시)
 
 `/mst:review REQ-NNN` 직접 호출 시 실행 전 아래를 검증합니다.

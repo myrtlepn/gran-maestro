@@ -36,8 +36,11 @@ def test_dispatch_d_uses_managed_claude_delegation():
     assert "--provider claude" in text
     assert '--model "$MODEL"' in text
     assert '--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"' in text
+    assert "sprint dispatch lifecycle tuple" in text
     assert "prompt source: `sprint-prompt.md`" in text
     assert "cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`" in text
+    assert "running log path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/running.log`" in text
+    assert "trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/claude-*.md`" in text
     assert "running log tee / trace path / session metadata / output-failure contract / exit code propagation" in text
     assert forbidden_print_mode not in text
 

@@ -1278,3 +1278,51 @@ test('AskUserQuestion multiSelect samples keep detail in descriptions', () => {
   assert.match(stitchSkill, /`"A\. \{스타일명1\}"`/);
   assert.match(stitchSkill, /각 option\.description에는 `\[장점\]`, `\[단점\]`, `\[적합\]`/);
 });
+
+test('request and approve implementation brief contract keeps DOD-003 path-first context fields', () => {
+  const requestSkill = readRepoFile('skills/request/SKILL.md');
+  const approveSkill = readRepoFile('skills/approve/SKILL.md');
+  const implRequestTemplate = readRepoFile('templates/impl-request.md');
+
+  assert.match(requestSkill, /§0 Context Manifest 후보 수집/);
+  assert.match(requestSkill, /plan\.md/);
+  assert.match(requestSkill, /plan\.json/);
+  assert.match(requestSkill, /plan\.ids\.json/);
+  assert.match(requestSkill, /context-transfer-contract\.md/);
+  assert.match(requestSkill, /skills\/request\/SKILL\.md/);
+  assert.match(requestSkill, /skills\/approve\/SKILL\.md/);
+  assert.match(requestSkill, /templates\/impl-request\.md/);
+  assert.match(requestSkill, /templates\/spec\.md/);
+  assert.match(requestSkill, /missing_context/);
+
+  assert.match(approveSkill, /\[CONTEXT_FILES\]/);
+  assert.match(approveSkill, /\[WORK_CONTRACT\]/);
+  assert.match(approveSkill, /spec_context_manifest/);
+  assert.match(approveSkill, /previous_feedback/);
+  assert.match(approveSkill, /Read\/inspection evidence/);
+  assert.match(approveSkill, /verify_cmd/);
+  assert.match(approveSkill, /expected_signal/);
+  assert.match(approveSkill, /missing_context/);
+  assert.match(approveSkill, /NO_SOURCE_PLAN/);
+  assert.doesNotMatch(approveSkill, /\{\{PLAN_PATH\}\}.*"N\/A"/);
+  assert.match(approveSkill, /Skill\(skill: "mst:claude", args: "--prompt-file \{prompt_file\} --dir \{worktree_path\} --trace \{REQ-ID\}\/\{TASK-NUM\}\/phase2-impl"\)/);
+  assert.match(approveSkill, /python3 \{PLUGIN_ROOT\}\/scripts\/mst\.py run/);
+  assert.match(approveSkill, /--log-dir \{task_dir\}/);
+
+  assert.match(implRequestTemplate, /\[CONTEXT_FILES\]/);
+  assert.match(implRequestTemplate, /\[WORK_CONTRACT\]/);
+  assert.match(implRequestTemplate, /NO_LINKED_OBJECTIVE/);
+  assert.match(implRequestTemplate, /NO_OBJECTIVE_IDS/);
+  assert.match(implRequestTemplate, /NO_SOURCE_PLAN/);
+  assert.match(implRequestTemplate, /NO_PLAN_JSON/);
+  assert.match(implRequestTemplate, /NO_PLAN_IDS/);
+  assert.match(implRequestTemplate, /NO_CONTEXT_MANIFEST/);
+  assert.match(implRequestTemplate, /missing_context/);
+  assert.match(implRequestTemplate, /completion report/);
+  assert.match(implRequestTemplate, /변경 파일 목록/);
+  assert.match(implRequestTemplate, /verify_cmd/);
+  assert.match(implRequestTemplate, /expected_signal/);
+  assert.doesNotMatch(implRequestTemplate, /\{\{PLAN_PATH\}\}.*"N\/A"/);
+  assert.match(implRequestTemplate, /\{\{PLAN_PATH\}\}`가 `NO_SOURCE_PLAN`이 아니면/);
+  assert.match(implRequestTemplate, /NO_SOURCE_PLAN`이면 source_plan 없음으로 보고/);
+});

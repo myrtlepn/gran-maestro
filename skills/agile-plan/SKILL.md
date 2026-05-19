@@ -533,6 +533,36 @@ Step 1A.9.5 도메인 클러스터링 (및 Step 1A.9.6 완성된 모습 미리�
 | `verify_cmd` | 골격 필수 (비대화식 실행 정의) | 실제 명령 확정 | 실행 + 신호 매칭, `true`/`exit 0`/`echo` 단독 거부 |
 | `expected_signal` | TBD 허용 | TBD 해소 | 정규식/문자열 매칭 |
 
+###### downstream context transfer contract (MANDATORY)
+
+objective 저장 직후, downstream agile/request/approve handoff는 아래 path-first 계약을 기본으로 사용한다. objective anchor나 source plan이 없으면 조용히 생략하지 않고 명시적으로 보고한다.
+
+```text
+[CONTEXT_FILES]
+- objective: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
+- objective_ids: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.ids.json or NO_OBJECTIVE_IDS
+- objective_details: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/details/{domain}.md or NO_OBJECTIVE_DETAILS
+- plan: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.md or NO_SOURCE_PLAN
+- plan_json: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.json or NO_PLAN_JSON
+- plan_ids: {PROJECT_ROOT}/.gran-maestro/plans/{PLAN_ID}/plan.ids.json or NO_PLAN_IDS
+- spec: {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{TASK_ID}/spec.md or NO_ACTIVE_SPEC
+- spec_context_manifest: {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/tasks/{TASK_ID}/spec.md#§0-Context-Manifest or NO_CONTEXT_MANIFEST
+- previous_feedback: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{PREV_SPRINT}/retrospective.md or NO_PREVIOUS_FEEDBACK
+[/CONTEXT_FILES]
+
+[WORK_CONTRACT]
+- read_requirements: 구현 전 위 context file과 spec §0 Context Manifest 파일을 직접 Read/inspection한다.
+- output_contract: agile/agile-plan/prompt-template 변경 파일, dispatch result contract, completion report를 보고한다.
+- verification_contract: verify_cmd, expected_signal, integration_smoke_id를 보고한다.
+- failure_contract: timeout, empty result, blocked, missing_context 상태를 구조화해 남긴다.
+[/WORK_CONTRACT]
+```
+
+추가 규칙:
+- `objective.ids.json`이 아직 생성되지 않았거나 읽기 실패면 `NO_OBJECTIVE_IDS` 또는 `missing_context`로 기록한다. objective anchor coverage evidence를 조용히 skip하지 않는다.
+- source plan/spec context manifest가 없으면 `NO_SOURCE_PLAN`, `NO_PLAN_JSON`, `NO_PLAN_IDS`, `NO_CONTEXT_MANIFEST` 같은 explicit skip reason을 남긴다.
+- downstream completion report에는 `Read/inspection evidence`, `changed files`, `simplifications made`, `remaining risks`, `verify_cmd`, `expected_signal`, `integration_smoke_id`를 포함한다.
+
 `templates/objective.md` 포맷으로 아래 경로에 저장:
 
 ```

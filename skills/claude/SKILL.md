@@ -9,6 +9,35 @@ argument-hint: "{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--trac
 
 PM Conductor 원칙 유지 목적으로 Claude provider 작업은 `mst.py run` lifecycle wrapper가 소유하는 managed delegation path로 위임한다. 직접 Claude one-shot print-mode argv를 구현 지침으로 노출하지 않으며, Codex/Gemini와 동일하게 provider subprocess detail은 runtime 내부 계약으로 취급한다.
 
+## DOD-003 Context Transfer Contract
+
+이 entrypoint는 구현/분석 위임 시 prompt-file path와 context file path를 먼저 전달하는 wrapper-owned lifecycle boundary다. `--prompt-file`이 있으면 prompt-file path가 canonical prompt source이며, wrapper는 prompt source tracking과 함께 worktree path, task id, trace label, running log, exit code propagation을 공통 lifecycle evidence로 남긴다.
+
+caller-facing dispatch contract와 wrapper-owned runtime contract는 분리하되 같은 lifecycle boundary를 공유한다. dispatch caller는 `--prompt-file`, `--dir`, `--trace`를 넘기고, wrapper는 같은 dispatch scope에서 `--task-id`, `--provider`, `--model`, `--log-dir`, running log path, trace path, exit code propagation을 파생하거나 고정한다.
+
+```text
+[CONTEXT_FILES]
+- objective: {path or NO_LINKED_OBJECTIVE}
+- objective_ids: {path or NO_OBJECTIVE_IDS}
+- plan: {path or NO_SOURCE_PLAN}
+- plan_json: {path or NO_PLAN_JSON}
+- plan_ids: {path or NO_PLAN_IDS}
+- spec: {path}
+- spec_context_manifest: {path or NO_CONTEXT_MANIFEST}
+- previous_feedback: {path or N/A}
+[/CONTEXT_FILES]
+
+[WORK_CONTRACT]
+- read_requirements: 구현 전 위 context file path와 spec_context_manifest를 직접 Read/inspection한다.
+- output_contract: prompt-file path, worktree path, task id, trace label, running log path, output artifact 또는 completion report를 보고한다.
+- verification_contract: verify_cmd, expected_signal, trace path, exit code propagation을 보고한다.
+- failure_contract: timeout, empty result, blocked, missing_context, NO_SOURCE_PLAN, NO_CONTEXT_MANIFEST를 구조화해 남긴다.
+[/WORK_CONTRACT]
+```
+
+- wrapper-owned lifecycle boundary: `mst.py run`이 register, heartbeat, running log tee, trace, session metadata, cwd/worktree binding, output/failure contract를 소유한다.
+- provider subprocess detail: 실제 provider argv 조합과 permission flags는 runtime-owned internals이며 active implementation guidance는 이를 사용자 대면 계약으로 승격하지 않는다.
+
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->
@@ -41,6 +70,10 @@ PM Conductor 원칙 유지 목적으로 Claude provider 작업은 `mst.py run` l
      - required wrapper fields: `--task-id`, `--provider claude`, `--model "$MODEL"`, `--log-dir "{task_dir}"`.
      - optional trace field: `--trace "{REQ-ID}/{TASK-NUM}/{label}"`.
      - prompt source is the inline payload or the contents of `{prompt_file}`.
+   - lifecycle boundary mapping:
+     - caller-owned dispatch fields: `--prompt-file {prompt_file}`, `--dir {worktree_path}`, `--trace {REQ-ID}/{TASK-NUM}/{label}`
+     - wrapper-owned runtime fields: `--task-id {task_id}`, `--provider claude`, `--model "$MODEL"`, `--log-dir {task_dir}`
+     - derived artifacts: `{task_dir}/running.log`, `{task_dir}/traces/claude-{label}-{YYYYMMDD-HHmmss}.md`, register/heartbeat/session metadata, exit code propagation
    - provider subprocess detail contract:
      - provider argv assembly, prompt stdin/argv handoff, permission flags, and print-mode compatibility are runtime-owned internals.
      - active implementation guidance must not instruct direct Claude print-mode execution outside the wrapper.
