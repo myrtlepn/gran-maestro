@@ -1,38 +1,48 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(scriptDir, '..', '..');
+export const repoRoot = resolve(scriptDir, '..', '..');
 
-function findProjectRoot(startDir) {
+function findOrchestrationRoot(startDir) {
+  if (process.env.GRAN_MAESTRO_ORCHESTRATION_ROOT) {
+    return resolve(process.env.GRAN_MAESTRO_ORCHESTRATION_ROOT);
+  }
+
   let currentDir = startDir;
 
   while (true) {
-    if (
-      existsSync(join(currentDir, '.gran-maestro')) &&
-      existsSync(join(currentDir, 'package.json'))
-    ) {
+    if (basename(currentDir) === '.gran-maestro') {
       return currentDir;
+    }
+
+    const candidateRoot = join(currentDir, '.gran-maestro');
+    if (existsSync(candidateRoot)) {
+      return candidateRoot;
     }
 
     const parentDir = dirname(currentDir);
     if (parentDir === currentDir) {
-      throw new Error(`Could not locate project root for ${startDir}`);
+      throw new Error(`Could not locate .gran-maestro orchestration root for ${startDir}`);
     }
 
     currentDir = parentDir;
   }
 }
 
-export const projectRoot = findProjectRoot(repoRoot);
-export const orchestrationRoot = join(projectRoot, '.gran-maestro');
+export const orchestrationRoot = findOrchestrationRoot(repoRoot);
 
 export const stableEvidenceRelativePath =
   '.gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json';
-export const stableEvidenceAbsolutePath = join(projectRoot, stableEvidenceRelativePath);
+const stableEvidenceOrchestrationRelativePath =
+  'requests/REQ-886/evidence/codex-plugin-discovery-smoke.json';
+export const stableEvidenceAbsolutePath = join(
+  orchestrationRoot,
+  stableEvidenceOrchestrationRelativePath,
+);
 
 export const generatedManifestPath = '.codex-plugin/plugin.json';
 export const generatedMarketplacePath = '.agents/plugins/marketplace.json';
@@ -107,7 +117,9 @@ const outOfScopeArtifactCandidates = [
     assets: [
       'tests/codex-workflow-e2e.test.mjs',
       'scripts/codex-workflow-e2e-smoke.mjs',
-      '.gran-maestro/requests/REQ-886/evidence/codex-workflow-e2e-parity.json',
+    ],
+    orchestration_assets: [
+      'requests/REQ-886/evidence/codex-workflow-e2e-parity.json',
     ],
   },
 ];
@@ -211,10 +223,18 @@ function buildDiscoveryResults(assets) {
 
 function buildOutOfScopeArtifactCheck() {
   const checks = outOfScopeArtifactCandidates.map((check) => {
-    const assets = check.assets.map((path) => ({
-      path,
-      exists: existsSync(join(projectRoot, path)),
-    }));
+    const assets = [
+      ...check.assets.map((path) => ({
+        path,
+        root: 'repo',
+        exists: existsSync(join(repoRoot, path)),
+      })),
+      ...normalizeArray(check.orchestration_assets).map((path) => ({
+        path,
+        root: 'orchestration',
+        exists: existsSync(join(orchestrationRoot, path)),
+      })),
+    ];
 
     return {
       dod_id: check.dod_id,
@@ -228,6 +248,69 @@ function buildOutOfScopeArtifactCheck() {
     status: checks.every((check) => check.status === 'pass') ? 'pass' : 'fail',
     checks,
   };
+}
+
+function hasCompleteInventoryValidationCoverage(coverage) {
+  return Boolean(
+    coverage &&
+      Number(coverage.missing_component_count) === 0 &&
+      Number(coverage.actual_component_count) === Number(coverage.expected_component_count) &&
+      (Number(coverage.coverage_percent) === 100 || Number(coverage.coverage_ratio) === 1),
+  );
+}
+
+export function collectUnsupportedBlockers({
+  inventoryValidation,
+  parityEvidence,
+  integrationEvidence,
+  outOfScopeArtifactCheck,
+}) {
+  const unsupportedBlockers = [];
+  const inventoryValidationChecks = inventoryValidation?.checks;
+
+  if (!hasCompleteInventoryValidationCoverage(inventoryValidation?.coverage)) {
+    unsupportedBlockers.push('DOD-001 inventory validation coverage is incomplete.');
+  }
+
+  if (!Array.isArray(inventoryValidationChecks)) {
+    unsupportedBlockers.push('DOD-001 inventory validation checks are missing.');
+  } else if (inventoryValidationChecks.some((check) => check?.status !== 'pass')) {
+    unsupportedBlockers.push('DOD-001 inventory validation checks did not all pass.');
+  }
+
+  for (const field of [
+    'parse_error_count',
+    'generated_drift_count',
+    'unsupported_blocker_count',
+  ]) {
+    if (parityEvidence?.[field] !== 0) {
+      unsupportedBlockers.push(`DOD-002 parity evidence ${field} is not zero.`);
+    }
+  }
+
+  if (integrationEvidence?.status !== 'pass') {
+    unsupportedBlockers.push('DOD-002 integration evidence status is not pass.');
+  }
+
+  if (integrationEvidence?.dod_002_blocker !== false) {
+    unsupportedBlockers.push('DOD-002 integration evidence reported a blocker.');
+  }
+
+  for (const field of [
+    'parse_error_count',
+    'generated_drift_count',
+    'unsupported_blocker_count',
+  ]) {
+    if (integrationEvidence?.parity_evidence_counts?.[field] !== 0) {
+      unsupportedBlockers.push(`DOD-002 integration parity evidence ${field} is not zero.`);
+    }
+  }
+
+  if (outOfScopeArtifactCheck.status !== 'pass') {
+    unsupportedBlockers.push('Out-of-scope DOD artifacts were detected.');
+  }
+
+  return unsupportedBlockers;
 }
 
 export function buildCodexPluginDiscoverySmokeEvidence() {
@@ -334,23 +417,12 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
   const discoveryResults = buildDiscoveryResults(discoveryAssets);
   const outOfScopeArtifactCheck = buildOutOfScopeArtifactCheck();
 
-  const unsupportedBlockers = [];
-
-  if ((inventoryArtifact.value?.coverage?.missing_component_count ?? 0) !== 0) {
-    unsupportedBlockers.push('DOD-001 inventory coverage is incomplete.');
-  }
-
-  if ((parityEvidence.value?.unsupported_blocker_count ?? 0) !== 0) {
-    unsupportedBlockers.push('DOD-002 parity evidence reported unsupported blockers.');
-  }
-
-  if ((integrationEvidence.value?.parity_evidence_counts?.unsupported_blocker_count ?? 0) !== 0) {
-    unsupportedBlockers.push('DOD-002 integration evidence reported unsupported blockers.');
-  }
-
-  if (outOfScopeArtifactCheck.status !== 'pass') {
-    unsupportedBlockers.push('Out-of-scope DOD artifacts were detected.');
-  }
+  const unsupportedBlockers = collectUnsupportedBlockers({
+    inventoryValidation: inventoryValidation.value,
+    parityEvidence: parityEvidence.value,
+    integrationEvidence: integrationEvidence.value,
+    outOfScopeArtifactCheck,
+  });
 
   const claudeHookCommands = canonicalHookCommands(hookConfig.value);
   const claudePluginRegressionStatus =
@@ -380,6 +452,12 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
         : 'fail',
     validation_evidence_path: stableEvidenceRelativePath,
     discovery_smoke_result_path: `${stableEvidenceRelativePath}#discovery_results`,
+    root_metadata: {
+      repo_root: repoRoot,
+      orchestration_root: orchestrationRoot,
+      repository_asset_root: repoRoot,
+      orchestration_evidence_root: orchestrationRoot,
+    },
     input_paths_read: [
       inventoryArtifactPath,
       inventoryValidationPath,
@@ -396,6 +474,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     parse_error_count: parseFailures.length,
     generated_drift_count: manifestComparison.drift_count + marketplaceComparison.drift_count,
     unsupported_blocker_count: unsupportedBlockers.length,
+    unsupported_blockers: unsupportedBlockers,
     drift_comparison: {
       manifest: {
         source_path: sourceManifestPath,

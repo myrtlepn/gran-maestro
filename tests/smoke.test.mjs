@@ -1,16 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertCodexPluginDiscoverySmokeEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
+  collectUnsupportedBlockers,
   generatedManifestPath,
   generatedMarketplacePath,
   integrationEvidencePath,
   inventoryArtifactPath,
+  orchestrationRoot,
   parityEvidencePath,
+  repoRoot as smokeRepoRoot,
   stableEvidenceRelativePath,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 
@@ -94,6 +99,11 @@ test('codex plugin discovery smoke records stable evidence metadata and zero dri
   const evidence = buildCodexPluginDiscoverySmokeEvidence();
 
   assertCodexPluginDiscoverySmokeEvidence(evidence);
+  assert.equal(evidence.root_metadata.repo_root, smokeRepoRoot);
+  assert.equal(evidence.root_metadata.repository_asset_root, smokeRepoRoot);
+  assert.equal(evidence.root_metadata.orchestration_root, orchestrationRoot);
+  assert.equal(evidence.root_metadata.orchestration_evidence_root, orchestrationRoot);
+  assert.ok(orchestrationRoot.endsWith('.gran-maestro'));
   assert.deepEqual(
     evidence.input_paths_read.slice(0, 4),
     [
@@ -108,6 +118,99 @@ test('codex plugin discovery smoke records stable evidence metadata and zero dri
     evidence.discovery_smoke_result_path,
     `${stableEvidenceRelativePath}#discovery_results`,
   );
+});
+
+test('codex plugin discovery smoke generator writes parseable stable evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'codex-plugin-discovery-smoke-'));
+  const outputPath = join(tempDir, 'evidence.json');
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/generate-codex-plugin-discovery-smoke.mjs', outputPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertCodexPluginDiscoverySmokeEvidence(evidence);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('codex plugin discovery smoke gates upstream DOD validation status', () => {
+  const passingBlockers = collectUnsupportedBlockers({
+    inventoryValidation: {
+      coverage: {
+        expected_component_count: 2,
+        actual_component_count: 2,
+        missing_component_count: 0,
+        coverage_percent: 100,
+      },
+      checks: [{ status: 'pass' }],
+    },
+    parityEvidence: {
+      parse_error_count: 0,
+      generated_drift_count: 0,
+      unsupported_blocker_count: 0,
+    },
+    integrationEvidence: {
+      status: 'pass',
+      dod_002_blocker: false,
+      parity_evidence_counts: {
+        parse_error_count: 0,
+        generated_drift_count: 0,
+        unsupported_blocker_count: 0,
+      },
+    },
+    outOfScopeArtifactCheck: { status: 'pass' },
+  });
+  assert.deepEqual(passingBlockers, []);
+
+  const failingBlockers = collectUnsupportedBlockers({
+    inventoryValidation: {
+      coverage: {
+        expected_component_count: 2,
+        actual_component_count: 1,
+        missing_component_count: 1,
+        coverage_percent: 50,
+      },
+      checks: [{ status: 'pass' }, { status: 'fail' }],
+    },
+    parityEvidence: {
+      parse_error_count: 1,
+      generated_drift_count: 1,
+      unsupported_blocker_count: 1,
+    },
+    integrationEvidence: {
+      status: 'fail',
+      dod_002_blocker: true,
+      parity_evidence_counts: {
+        parse_error_count: 1,
+        generated_drift_count: 1,
+        unsupported_blocker_count: 1,
+      },
+    },
+    outOfScopeArtifactCheck: { status: 'fail' },
+  });
+
+  assert.match(failingBlockers.join('\n'), /DOD-001 inventory validation coverage/);
+  assert.match(failingBlockers.join('\n'), /DOD-001 inventory validation checks/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 parity evidence parse_error_count/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 parity evidence generated_drift_count/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 parity evidence unsupported_blocker_count/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 integration evidence status/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 integration evidence reported a blocker/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 integration parity evidence parse_error_count/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 integration parity evidence generated_drift_count/);
+  assert.match(failingBlockers.join('\n'), /DOD-002 integration parity evidence unsupported_blocker_count/);
+  assert.match(failingBlockers.join('\n'), /Out-of-scope DOD artifacts/);
 });
 
 test('codex plugin discovery smoke preserves DOD-003 scope exclusions', () => {
