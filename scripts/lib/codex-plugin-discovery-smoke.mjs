@@ -7,6 +7,12 @@ import { isDeepStrictEqual } from 'node:util';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(scriptDir, '..', '..');
 
+function isOrchestrationEvidenceRoot(path) {
+  return existsSync(join(path, 'requests/REQ-884/evidence/plugin-component-inventory-validation.json')) &&
+    existsSync(join(path, 'requests/REQ-885/evidence/codex-plugin-parity-validation.json')) &&
+    existsSync(join(path, 'agile/AGI-039/sprints/S04/integration-context.md'));
+}
+
 function findOrchestrationRoot(startDir) {
   if (process.env.GRAN_MAESTRO_ORCHESTRATION_ROOT) {
     return resolve(process.env.GRAN_MAESTRO_ORCHESTRATION_ROOT);
@@ -15,12 +21,12 @@ function findOrchestrationRoot(startDir) {
   let currentDir = startDir;
 
   while (true) {
-    if (basename(currentDir) === '.gran-maestro') {
+    if (basename(currentDir) === '.gran-maestro' && isOrchestrationEvidenceRoot(currentDir)) {
       return currentDir;
     }
 
     const candidateRoot = join(currentDir, '.gran-maestro');
-    if (existsSync(candidateRoot)) {
+    if (isOrchestrationEvidenceRoot(candidateRoot)) {
       return candidateRoot;
     }
 
