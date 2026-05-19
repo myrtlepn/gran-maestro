@@ -22,6 +22,25 @@ REQUIRED_TRANSITION_FIELDS = {
     "auto_allowed",
     "write_allowed",
 }
+REQUIRED_LIFECYCLE_MAPPING_FIELDS = {
+    "id",
+    "from",
+    "to",
+    "terminal",
+    "auto_allowed",
+    "write_allowed",
+    "guards",
+    "required_evidence",
+    "on_reject",
+    "ledger_event_family",
+    "projection_rule",
+    "reject_failure_path",
+}
+REQUIRED_LIFECYCLE_MAPPING_IDS = {
+    "blocked.resume_confirmed",
+    "terminal.user_cancelled.lifecycle",
+    "terminal.completed.reject_split",
+}
 GRAPH_ID = "mst-transition-graph"
 VIEW_KIND = "mst-transition-graph-view"
 def compute_graph_hash(graph: dict[str, Any]) -> str:
@@ -133,6 +152,9 @@ def _declared_guards(graph: dict[str, Any]) -> set[str] | None:
     if isinstance(guards, list) and all(isinstance(item, str) for item in guards):
         return set(guards)
     return None
+def _lifecycle_mappings(graph: dict[str, Any]) -> dict[str, Any]:
+    mappings = graph.get("lifecycle_mappings")
+    return mappings if isinstance(mappings, dict) else {}
 def _reachable_nonterminal_states(states: dict[str, Any], transitions: dict[str, Any]) -> set[str]:
     reachable = {"active"} if "active" in states else set()
     changed = True
@@ -223,6 +245,227 @@ def _validate_generated_view_coverage(
                 )
                 | {"missing_transitions": missing_edge_transitions}
             )
+    return diagnostics
+def _mapping_sources(mapping: dict[str, Any]) -> list[str]:
+    sources = mapping.get("from")
+    if isinstance(sources, list):
+        return [str(source) for source in sources if isinstance(source, str) and source.strip()]
+    if isinstance(sources, str) and sources.strip():
+        return [sources.strip()]
+    return []
+def _mapping_reject_targets(mapping: dict[str, Any]) -> list[str]:
+    on_reject = mapping.get("on_reject")
+    if isinstance(on_reject, str) and on_reject.strip():
+        return [on_reject.strip()]
+    if isinstance(on_reject, dict):
+        return [value for value in on_reject.values() if isinstance(value, str) and value.strip()]
+    return []
+def _validate_lifecycle_mapping_payload(
+    graph: dict[str, Any],
+    *,
+    source: str | None,
+) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    states = graph.get("states") if isinstance(graph.get("states"), dict) else {}
+    transitions = graph.get("transitions") if isinstance(graph.get("transitions"), dict) else {}
+    evidence_keys = _declared_evidence(graph)
+    guard_names = _declared_guards(graph)
+    mappings_raw = graph.get("lifecycle_mappings")
+    mappings = mappings_raw if isinstance(mappings_raw, dict) else {}
+
+    if not isinstance(mappings_raw, dict):
+        diagnostics.append(
+            _diag(
+                "lifecycle_mapping",
+                field="lifecycle_mappings",
+                path="lifecycle_mappings",
+                reason="lifecycle_mappings must be an object containing equivalent lifecycle records",
+                graph=graph,
+                source=source,
+            )
+        )
+    for mapping_id in sorted(REQUIRED_LIFECYCLE_MAPPING_IDS - set(mappings)):
+        diagnostics.append(
+            _diag(
+                "lifecycle_mapping",
+                field="lifecycle_mappings",
+                path=f"lifecycle_mappings.{mapping_id}",
+                reason="required equivalent lifecycle mapping is missing",
+                graph=graph,
+                source=source,
+            )
+        )
+
+    for mapping_id, mapping in mappings.items():
+        path = f"lifecycle_mappings.{mapping_id}"
+        if not isinstance(mapping, dict):
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="lifecycle_mappings",
+                    path=path,
+                    reason="lifecycle mapping must be an object",
+                    graph=graph,
+                    source=source,
+                )
+            )
+            continue
+        for field in sorted(REQUIRED_LIFECYCLE_MAPPING_FIELDS - set(mapping)):
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field=field,
+                    path=f"{path}.{field}",
+                    reason=f"{field} is required for equivalent lifecycle mapping",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        if mapping.get("id") != mapping_id:
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="id",
+                    path=f"{path}.id",
+                    reason="lifecycle mapping id must match its object key",
+                    graph=graph,
+                    source=source,
+                )
+                | {"actual": mapping.get("id"), "expected": mapping_id}
+            )
+        from_states = _mapping_sources(mapping)
+        if not from_states:
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="from",
+                    path=f"{path}.from",
+                    reason="lifecycle mapping from must include one or more source states or *",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        for state in from_states:
+            if state != "*" and state not in states:
+                diagnostics.append(
+                    _diag(
+                        "lifecycle_mapping",
+                        field="from",
+                        path=f"{path}.from",
+                        reason=f"lifecycle mapping references undefined source state: {state}",
+                        graph=graph,
+                        source=source,
+                    )
+                )
+        to_state = mapping.get("to")
+        if not isinstance(to_state, str) or to_state not in states:
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="to",
+                    path=f"{path}.to",
+                    reason=f"lifecycle mapping target state is undefined: {to_state}",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        elif isinstance(states.get(to_state), dict) and mapping.get("terminal") != states[to_state].get("terminal"):
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="terminal",
+                    path=f"{path}.terminal",
+                    reason="lifecycle mapping terminal flag must match its target state",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        for bool_field in ("auto_allowed", "write_allowed"):
+            if not isinstance(mapping.get(bool_field), bool):
+                diagnostics.append(
+                    _diag(
+                        "lifecycle_mapping",
+                        field=bool_field,
+                        path=f"{path}.{bool_field}",
+                        reason=f"{bool_field} must be a bool",
+                        graph=graph,
+                        source=source,
+                    )
+                )
+        guards = mapping.get("guards")
+        if not _string_list(guards):
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="guards",
+                    path=f"{path}.guards",
+                    reason="lifecycle mapping guards must be a list of guard names",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        elif guard_names is not None:
+            for guard in guards:
+                if guard not in guard_names:
+                    diagnostics.append(
+                        _diag(
+                            "lifecycle_mapping",
+                            field="guards",
+                            path=f"{path}.guards",
+                            reason=f"lifecycle mapping guard is not declared: {guard}",
+                            graph=graph,
+                            source=source,
+                        )
+                    )
+        required_evidence = mapping.get("required_evidence")
+        if not _string_list(required_evidence):
+            diagnostics.append(
+                _diag(
+                    "lifecycle_mapping",
+                    field="required_evidence",
+                    path=f"{path}.required_evidence",
+                    reason="lifecycle mapping required_evidence must be a list of evidence keys",
+                    graph=graph,
+                    source=source,
+                )
+            )
+        elif evidence_keys:
+            for evidence in required_evidence:
+                if evidence not in evidence_keys:
+                    diagnostics.append(
+                        _diag(
+                            "lifecycle_mapping",
+                            field="required_evidence",
+                            path=f"{path}.required_evidence",
+                            reason=f"lifecycle mapping required evidence has no declared producer: {evidence}",
+                            graph=graph,
+                            source=source,
+                        )
+                    )
+        for target in _mapping_reject_targets(mapping):
+            if target not in transitions:
+                diagnostics.append(
+                    _diag(
+                        "lifecycle_mapping",
+                        field="on_reject",
+                        path=f"{path}.on_reject",
+                        reason=f"lifecycle mapping on_reject references undefined transition: {target}",
+                        graph=graph,
+                        source=source,
+                    )
+                )
+        for string_field in ("ledger_event_family", "projection_rule", "reject_failure_path"):
+            if not isinstance(mapping.get(string_field), str) or not mapping.get(string_field).strip():
+                diagnostics.append(
+                    _diag(
+                        "lifecycle_mapping",
+                        field=string_field,
+                        path=f"{path}.{string_field}",
+                        reason=f"{string_field} must be a non-empty string",
+                        graph=graph,
+                        source=source,
+                    )
+                )
     return diagnostics
 def _paths_match(actual: str, expected: str) -> bool:
     if actual == expected:
@@ -744,6 +987,8 @@ def validate_transition_graph(
                     )
                 )
 
+    diagnostics.extend(_validate_lifecycle_mapping_payload(graph, source=source))
+
     if isinstance(graph.get("hash"), str) and len(graph["hash"]) == 64:
         computed_hash = compute_graph_hash(graph)
         if graph["hash"] != computed_hash:
@@ -776,6 +1021,160 @@ def validate_transition_graph(
     if diagnostics:
         return _failure(diagnostics, graph=graph, source=source)
     return _ok(graph, source=source)
+def validate_equivalent_lifecycle_mappings(
+    graph: dict[str, Any],
+    source: str | None = None,
+) -> dict[str, Any]:
+    graph = graph if isinstance(graph, dict) else {}
+    diagnostics = _validate_lifecycle_mapping_payload(graph, source=source)
+    if diagnostics:
+        return _failure(diagnostics, graph=graph, source=source)
+    return _ok(graph, source=source) | {
+        "target": "equivalent_lifecycle_mappings",
+        "mappings": _lifecycle_mappings(graph),
+    }
+def _terminal_entry_records(state_name: str, graph: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    transitions = graph.get("transitions") if isinstance(graph.get("transitions"), dict) else {}
+    for transition_id, transition in transitions.items():
+        if isinstance(transition, dict) and transition.get("to") == state_name:
+            records.append(
+                {
+                    "coverage": "graph_transition",
+                    "id": transition_id,
+                    "required_evidence": list(transition.get("required_evidence") or []),
+                }
+            )
+    for mapping_id, mapping in _lifecycle_mappings(graph).items():
+        if isinstance(mapping, dict) and mapping.get("to") == state_name:
+            records.append(
+                {
+                    "coverage": "lifecycle_mapping",
+                    "id": mapping_id,
+                    "required_evidence": list(mapping.get("required_evidence") or []),
+                }
+            )
+    return records
+def _outgoing_records(state_name: str, graph: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    transitions = graph.get("transitions") if isinstance(graph.get("transitions"), dict) else {}
+    for transition_id, transition in transitions.items():
+        from_states = transition.get("from") if isinstance(transition, dict) else None
+        if isinstance(from_states, list) and state_name in from_states:
+            records.append({"coverage": "graph_transition", "id": transition_id})
+    for mapping_id, mapping in _lifecycle_mappings(graph).items():
+        from_states = _mapping_sources(mapping) if isinstance(mapping, dict) else []
+        if state_name in from_states or "*" in from_states:
+            records.append({"coverage": "lifecycle_mapping", "id": mapping_id})
+    return records
+def validate_state_inventory_coverage(
+    graph: dict[str, Any],
+    source: str | None = None,
+) -> dict[str, Any]:
+    graph = graph if isinstance(graph, dict) else {}
+    graph_validation = validate_transition_graph(graph, source=source)
+    if graph_validation.get("accepted") is not True:
+        return _failure(list(graph_validation.get("diagnostics") or []), graph=graph, source=source)
+
+    states = graph.get("states") if isinstance(graph.get("states"), dict) else {}
+    terminal_states = sorted(
+        state_name for state_name, state in states.items() if isinstance(state, dict) and state.get("terminal") is True
+    )
+    nonterminal_states = sorted(
+        state_name for state_name, state in states.items() if isinstance(state, dict) and state.get("terminal") is False
+    )
+    terminal_entry_coverage: dict[str, dict[str, Any]] = {}
+    nonterminal_continuation_coverage: dict[str, list[dict[str, Any]]] = {}
+    gaps: list[dict[str, Any]] = []
+
+    for state_name in nonterminal_states:
+        records = _outgoing_records(state_name, graph)
+        nonterminal_continuation_coverage[state_name] = records
+        if not records:
+            gaps.append(
+                _diag(
+                    "state_inventory",
+                    field="states",
+                    path=f"states.{state_name}",
+                    reason="nonterminal state has no graph transition or lifecycle continuation/recovery path",
+                    graph=graph,
+                    source=source,
+                )
+            )
+    for state_name in terminal_states:
+        records = _terminal_entry_records(state_name, graph)
+        if records:
+            terminal_entry_coverage[state_name] = records[0]
+        else:
+            gaps.append(
+                _diag(
+                    "state_inventory",
+                    field="states",
+                    path=f"states.{state_name}",
+                    reason="terminal state has no graph transition or equivalent lifecycle entry evidence",
+                    graph=graph,
+                    source=source,
+                )
+            )
+
+    result = _ok(graph, source=source) | {
+        "target": "state_inventory_coverage",
+        "terminal_states": terminal_states,
+        "nonterminal_states": nonterminal_states,
+        "terminal_entry_coverage": terminal_entry_coverage,
+        "nonterminal_continuation_coverage": nonterminal_continuation_coverage,
+        "gaps": gaps,
+    }
+    if gaps:
+        return result | {
+            "status": "validation_failed",
+            "accepted": False,
+            "fail_closed": True,
+            "diagnostics": gaps,
+        }
+    return result
+def build_transition_graph_evidence_result(
+    graph: dict[str, Any],
+    source: str | None = None,
+) -> dict[str, Any]:
+    graph = graph if isinstance(graph, dict) else {}
+    graph_result = validate_transition_graph(graph, source=source)
+    inventory_result = validate_state_inventory_coverage(graph, source=source)
+    diagnostics = list(graph_result.get("diagnostics") or []) + list(inventory_result.get("diagnostics") or [])
+    transitions = graph.get("transitions") if isinstance(graph.get("transitions"), dict) else {}
+    lifecycle_ids = sorted(_lifecycle_mappings(graph))
+    gaps = [
+        {
+            "code": item.get("code"),
+            "field": item.get("field"),
+            "path": item.get("path"),
+            "reason": item.get("reason"),
+        }
+        for item in diagnostics
+        if isinstance(item, dict)
+    ]
+    severity = "info" if not gaps else "high"
+    return {
+        "status": "ok" if not gaps else "validation_failed",
+        "accepted": not gaps,
+        "fail_closed": bool(gaps),
+        "dod_id": "DOD-001",
+        "mapped_dod": "DOD-001",
+        "completed_dods": ["DOD-001"],
+        "cross_references": ["DOD-004", "DOD-005"],
+        "graph_id": graph.get("id"),
+        "graph_version": graph.get("version"),
+        "graph_hash": graph.get("hash"),
+        "checked_transitions": sorted(transitions) + lifecycle_ids,
+        "gaps": gaps,
+        "severity": severity,
+        "evidence_ref": source,
+        "recommended_action": (
+            "no action required; DOD-004/DOD-005 impacts remain cross-references only"
+            if not gaps
+            else "fix listed DOD-001 transition graph gaps before claiming completion"
+        ),
+    }
 def _attempt_diag(code: str, *, field: str, path: str, reason: str, graph: dict[str, Any]) -> dict[str, Any]:
     return _diag(code, field=field, path=path, reason=reason, graph=graph, source="attempted_transition")
 def _graph_identity(envelope: dict[str, Any]) -> dict[str, Any]:

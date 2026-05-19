@@ -1,0 +1,410 @@
+{
+  "artifact_id": "REQ-899-DOD-002-hook-command-boundary-evidence",
+  "request_id": "REQ-899",
+  "task_id": "01",
+  "agi_id": "AGI-041",
+  "plan_id": "PLN-726",
+  "dod_id": "DOD-002",
+  "status": "pass",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T00:00:00Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-899/evidence/dod-002-hook-command-boundary-evidence.json",
+  "hook_manifest_ref": "hooks/hooks.json",
+  "plugin_hook_pointer": ".claude-plugin/plugin.json::hooks",
+  "severity": "low",
+  "evidence_ref": [
+    "hooks/hooks.json",
+    ".claude-plugin/plugin.json",
+    "hooks/mst-stop-hook.sh",
+    "scripts/mst.py",
+    "scripts/mst_cmds/stop_judge.py",
+    "tests/test_dod002_hook_command_timing_boundaries.py",
+    "scripts/tests/test_stop_hook_wrapper.py",
+    "scripts/tests/test_stop_judge.py",
+    "tests/test_stop_hook_timeout_emit_fence.py"
+  ],
+  "recommended_action": "Keep this artifact aligned with hooks/hooks.json, mst.py invocation history behavior, and stop-hook failure-policy regressions whenever hook registration or command-side mutation logic changes.",
+  "checked_boundaries": [
+    {
+      "boundary_id": "SessionStart",
+      "order": 1,
+      "event": "SessionStart",
+      "matcher": "",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh",
+      "trigger": "Claude session bootstrap enters the canonical plugin hook manifest.",
+      "input": [
+        "Claude hook stdin payload",
+        "plugin root bootstrap environment",
+        "session identity diagnostics"
+      ],
+      "output": [
+        "runtime bootstrap evidence",
+        "session initialization diagnostics",
+        "hook lifecycle ledger start or complete events"
+      ],
+      "allowed_side_effects": [
+        "Initialize canonical runtime prerequisites under the plugin-root hook path.",
+        "Emit bootstrap diagnostics and session initialization evidence.",
+        "Prepare bridge, sentinel, and lifecycle wrapper state for downstream commands."
+      ],
+      "forbidden_side_effects": [
+        "Treat .claude/hooks as the canonical runtime source.",
+        "Create orphan session state without canonical plugin registration.",
+        "Invent a standalone root session identity outside the validated runtime path."
+      ],
+      "failure_policy": "Fail-open startup diagnostics are allowed, but canonical registration must remain anchored to plugin.json -> hooks/hooks.json.",
+      "evidence_ref": [
+        ".claude-plugin/plugin.json",
+        "hooks/hooks.json",
+        "hooks/mst-session-init.sh",
+        "tests/test_hook_entrypoint_boundary_audit.py",
+        "tests/test_hooks_json_registration.py"
+      ]
+    },
+    {
+      "boundary_id": "UserPromptSubmit",
+      "order": 2,
+      "event": "UserPromptSubmit",
+      "matcher": "",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh",
+      "trigger": "A user prompt enters the canonical auto-chain context hook.",
+      "input": [
+        "user prompt hook payload",
+        "minimal continuation context",
+        "canonical hook registration"
+      ],
+      "output": [
+        "minimal prompt context injection",
+        "stale warning diagnostics",
+        "prompt submission evidence"
+      ],
+      "allowed_side_effects": [
+        "Inject only minimal continuation context for normal prompt flow.",
+        "Warn on stale continuation references without mutating canonical runtime source.",
+        "Preserve ordered sequencing between SessionStart and later mutation boundaries."
+      ],
+      "forbidden_side_effects": [
+        "Inject full state or history into every normal prompt.",
+        "Promote stale prompt context into authoritative next_action state.",
+        "Reference non-canonical hook sources."
+      ],
+      "failure_policy": "Prompt-context assistance may degrade, but it must not become the canonical runtime or silently mutate session state.",
+      "evidence_ref": [
+        "hooks/hooks.json",
+        "hooks/mst-auto-chain-context.sh",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    },
+    {
+      "boundary_id": "PreToolUse:Skill",
+      "order": 3,
+      "event": "PreToolUse",
+      "matcher": "Skill",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh",
+      "trigger": "A Skill tool invocation hits the canonical PreToolUse matcher.",
+      "input": [
+        "tool_name=Skill payload",
+        "canonical mst_session_id inheritance",
+        "history ledger verification state"
+      ],
+      "output": [
+        "boundary event or block payload",
+        "session inheritance diagnostics",
+        "inspect-only rejection evidence on mismatch"
+      ],
+      "allowed_side_effects": [
+        "Verify canonical parent mst_session_id inheritance.",
+        "Append boundary evidence only after history verification passes.",
+        "Reject or block when parent or child boundary evidence is stale."
+      ],
+      "forbidden_side_effects": [
+        "Silently repair a parent session mismatch and continue writing.",
+        "Allow successful tool-call append after history verification fails.",
+        "Treat child completion as parent direct-complete authority."
+      ],
+      "failure_policy": "History verification failure blocks execution before tool use and leaves only diagnostic or inspect-only evidence.",
+      "evidence_ref": [
+        "hooks/hooks.json",
+        "hooks/mst-pre-tool-use.sh",
+        "hooks/lib/history.bash",
+        "scripts/tests/test_history_ledger_contract.py"
+      ]
+    },
+    {
+      "boundary_id": "PreToolUse:ScheduleWakeup",
+      "order": 4,
+      "event": "PreToolUse",
+      "matcher": "ScheduleWakeup",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh",
+      "trigger": "A ScheduleWakeup tool invocation hits the canonical PreToolUse matcher.",
+      "input": [
+        "tool_name=ScheduleWakeup payload",
+        "canonical mst_session_id inheritance",
+        "live history head and next_action freshness"
+      ],
+      "output": [
+        "wakeup freshness evidence",
+        "stale rejection block payload",
+        "inspect-only continuation diagnostics"
+      ],
+      "allowed_side_effects": [
+        "Revalidate live ledger head before executing scheduled continuation.",
+        "Reject stale wakeup payloads without executing the scheduled action.",
+        "Reuse the canonical PreToolUse wrapper instead of a separate runtime source."
+      ],
+      "forbidden_side_effects": [
+        "Execute scheduled next_action without freshness verification.",
+        "Treat stale wakeup data as authoritative state.",
+        "Bypass the canonical matcher-defined boundary."
+      ],
+      "failure_policy": "Stale wakeup payloads are blocked or downgraded to inspect-only evidence, not auto-executed.",
+      "evidence_ref": [
+        "hooks/hooks.json",
+        "hooks/mst-pre-tool-use.sh",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    },
+    {
+      "boundary_id": "CommandMutation",
+      "order": 5,
+      "event": "CommandMutation",
+      "entrypoint": "scripts/mst.py",
+      "trigger": "PreToolUse matcher outside state/history/request/agile mutations executed through mst.py or Bash command dispatch.",
+      "input": [
+        "canonical MST_SESSION_ID or structured mst_session_id",
+        "session metadata consistency",
+        "mutation command arguments",
+        "history head and idempotency guard context"
+      ],
+      "output": [
+        "mst.invocation_start/end/error ledger events",
+        "structured reject or inspect-only payload on identity or head mismatch",
+        "state or workflow mutation evidence only after guards pass"
+      ],
+      "allowed_side_effects": [
+        "Append invocation.start, invocation.end, and invocation.error events to the canonical session ledger.",
+        "Return structured non-success payloads with mutation_performed=false when canonical identity is missing.",
+        "Gate state mutation behind session identity and history validation checks."
+      ],
+      "forbidden_side_effects": [
+        "Mutate .gran-maestro state or history using only legacy owner or session diagnostics.",
+        "Accept stale or mismatched continuation head as successful mutation evidence.",
+        "Skip invocation evidence for canonical mutation commands."
+      ],
+      "failure_policy": "If canonical session or head validation fails, the command must stop at structured reject or inspect-only evidence instead of mutating state.",
+      "evidence_ref": [
+        "scripts/mst.py",
+        "scripts/mst_cmds/_common_shards/part_001.py",
+        "scripts/mst_cmds/state_shards/part_003.py",
+        "tests/test_dod005_invocation_history.py",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    },
+    {
+      "boundary_id": "Stop",
+      "order": 6,
+      "event": "Stop",
+      "matcher": "",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh",
+      "trigger": "Assistant response completion enters the canonical Stop hook.",
+      "input": [
+        "Stop hook stdin payload",
+        "canonical mst_session_id",
+        "stop judge stdout or timeout result",
+        "current workflow snapshot and state"
+      ],
+      "output": [
+        "single-line approve or block JSON payload",
+        "continuation or blocker side-effect evidence",
+        "timeout or invalid-output diagnostics"
+      ],
+      "allowed_side_effects": [
+        "Emit only a strict single-line decision JSON payload.",
+        "Append inspect-only continuation evidence before fail-open wrapper approval on invalid output.",
+        "Persist continuation, retry, or block evidence through the Python stop judge runtime."
+      ],
+      "forbidden_side_effects": [
+        "Promote parse failure, schema mismatch, timeout, or invalid transition into terminal.completed.",
+        "Allow action auto-write from wrapper fail-open behavior alone.",
+        "Treat SubagentStop as a canonical registered completion boundary."
+      ],
+      "failure_policy": "Hook-level fail-open only allows Claude continuation; it does not authorize terminal.completed, action auto-write, or decision-bearing snapshot mutation.",
+      "evidence_ref": [
+        "hooks/mst-stop-hook.sh",
+        "scripts/mst_cmds/stop_judge.py",
+        "scripts/tests/test_stop_hook_wrapper.py",
+        "scripts/tests/test_stop_judge.py",
+        "tests/test_stop_hook_timeout_emit_fence.py"
+      ]
+    }
+  ],
+  "checked_commands": [
+    {
+      "command_id": "mst_cli_invocation",
+      "source_path": "scripts/mst.py",
+      "command_patterns": [
+        "python3 scripts/mst.py <command> [subcommand]",
+        "python3 scripts/mst.py history head --session <mst_session_id> --json"
+      ],
+      "invocation_events": {
+        "required": [
+          "mst.invocation_start",
+          "mst.invocation_end",
+          "mst.invocation_error"
+        ],
+        "required_fields": [
+          "command",
+          "argv",
+          "pid",
+          "ppid",
+          "invocation_id",
+          "mst_session_id",
+          "root_mst_id",
+          "idempotency_key"
+        ]
+      },
+      "guard_evidence": {
+        "required_fields": [
+          "mst_session_id",
+          "history_head_before",
+          "history_head_after",
+          "idempotency_key",
+          "guard_result"
+        ],
+        "on_identity_mismatch": "structured_reject",
+        "on_history_head_mismatch": "inspect_only"
+      },
+      "evidence_ref": [
+        "scripts/mst.py",
+        "tests/test_dod005_invocation_history.py",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    },
+    {
+      "command_id": "state_set",
+      "source_path": "scripts/mst_cmds/state_shards/part_003.py",
+      "command_patterns": [
+        "python3 scripts/mst.py state set --skill <skill> --step <n> --total <n> --return-to <skill/step>"
+      ],
+      "invocation_events": {
+        "required": [
+          "mst.invocation_start",
+          "mst.invocation_end",
+          "mst.invocation_error"
+        ],
+        "required_fields": [
+          "mst_session_id",
+          "idempotency_key",
+          "command",
+          "argv"
+        ]
+      },
+      "guard_evidence": {
+        "required_fields": [
+          "mst_session_id",
+          "history_head_before",
+          "history_head_after",
+          "idempotency_key",
+          "guard_result",
+          "mutation_performed"
+        ],
+        "on_identity_mismatch": "structured_reject",
+        "on_history_head_mismatch": "inspect_only"
+      },
+      "evidence_ref": [
+        "scripts/mst_cmds/state_shards/part_003.py",
+        "scripts/mst_cmds/_common_shards/part_001.py",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    },
+    {
+      "command_id": "state_set_workflow",
+      "source_path": "scripts/mst_cmds/state_shards/part_003.py",
+      "command_patterns": [
+        "python3 scripts/mst.py state set-workflow --active <bool> --skill <skill>"
+      ],
+      "invocation_events": {
+        "required": [
+          "mst.invocation_start",
+          "mst.invocation_end",
+          "mst.invocation_error"
+        ],
+        "required_fields": [
+          "mst_session_id",
+          "idempotency_key",
+          "command",
+          "argv"
+        ]
+      },
+      "guard_evidence": {
+        "required_fields": [
+          "mst_session_id",
+          "history_head_before",
+          "history_head_after",
+          "idempotency_key",
+          "guard_result",
+          "mutation_performed"
+        ],
+        "on_identity_mismatch": "structured_reject",
+        "on_history_head_mismatch": "inspect_only"
+      },
+      "evidence_ref": [
+        "scripts/mst_cmds/state_shards/part_003.py",
+        "scripts/mst_cmds/_common_shards/part_001.py",
+        "tests/test_workflow_state_transition_integrity.py",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ]
+    }
+  ],
+  "subagent_boundary": {
+    "registered_in_hooks_manifest": false,
+    "registered_in_plugin_pointer": false,
+    "parent_direct_mutation_allowed": false,
+    "parent_reconciliation_paths": [
+      "Skill",
+      "Stop",
+      "command"
+    ],
+    "evidence_ref": [
+      "hooks/hooks.json",
+      ".claude-plugin/plugin.json",
+      "tests/test_dod002_hook_command_timing_boundaries.py"
+    ]
+  },
+  "gaps": [
+    {
+      "kind": "cross_reference",
+      "related_dod": "DOD-004",
+      "severity": "medium",
+      "title": "Stop bounded retry remains a DOD-004 continuation policy detail",
+      "evidence_ref": [
+        "hooks/mst-stop-hook.sh",
+        "scripts/mst_cmds/stop_judge.py"
+      ],
+      "recommended_action": "Keep retry-budget interpretation in DOD-004 and do not upgrade wrapper fail-open to terminal or action writes."
+    },
+    {
+      "kind": "follow_up",
+      "related_dod": "DOD-005",
+      "severity": "low",
+      "title": "Projection freshness stays outside DOD-002 completion scope",
+      "evidence_ref": [
+        "scripts/mst_cmds/stop_judge.py",
+        "scripts/mst_cmds/state_shards/part_002.py"
+      ],
+      "recommended_action": "Track ledger or snapshot freshness and projection drift under DOD-005 instead of using this artifact as completion evidence for those surfaces."
+    },
+    {
+      "kind": "follow_up",
+      "related_dod": "DOD-002",
+      "severity": "medium",
+      "title": "agile objective-transition command guard coverage is not completion evidence",
+      "evidence_ref": [
+        "scripts/mst_cmds/agile_governance_shards/part_003.py",
+        "tests/test_agile_evidence_refs.py",
+        "tests/test_dod002_hook_command_timing_boundaries.py"
+      ],
+      "recommended_action": "Add dedicated canonical identity and history-head guard tests before using agile objective-transition as DOD-002 completion evidence."
+    }
+  ]
+}
