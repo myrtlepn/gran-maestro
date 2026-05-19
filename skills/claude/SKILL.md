@@ -1,13 +1,13 @@
 ---
 name: claude
-description: "Claude CLI를 호출하여 코드 작업을 실행합니다. 사용자가 '클로드로 실행', '클로드 서브에이전트'를 말하거나 /mst:claude를 호출할 때 사용. Gran Maestro 워크플로우 내 claude-dev 태스크 디스패치는 이 스킬을 경유합니다."
+description: "Claude provider 전용 managed delegation entrypoint. 사용자가 '클로드로 실행', '클로드 서브에이전트'를 말하거나 /mst:claude를 호출할 때 사용한다. Gran Maestro 워크플로우 내 claude-dev 태스크 디스패치는 이 protected path를 경유한다."
 user-invocable: true
 argument-hint: "{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--trace {REQ/TASK/label}]"
 ---
 
 # maestro:claude
 
-PM Conductor 원칙 유지 목적으로 Claude CLI를 `mst.py run` wrapper 경유로 호출해 구현을 위임합니다. Codex/Gemini와 동일한 CLI 기반 디스패치 패턴을 사용합니다.
+PM Conductor 원칙 유지 목적으로 Claude provider 작업은 `mst.py run` lifecycle wrapper가 소유하는 managed delegation path로 위임한다. 직접 Claude one-shot print-mode argv를 구현 지침으로 노출하지 않으며, Codex/Gemini와 동일하게 provider subprocess detail은 runtime 내부 계약으로 취급한다.
 
 ## 실행 프로토콜
 
@@ -28,42 +28,24 @@ PM Conductor 원칙 유지 목적으로 Claude CLI를 `mst.py run` wrapper 경�
    - 나머지: 인라인 프롬프트
 
 2. 프롬프트 준비:
-   - `--prompt-file`이 있으면: 실행 시 `$(cat {prompt_file})`로 파일 내용을 CLI에 직접 전달
-   - 없으면: 인라인 텍스트 사용
+   - `--prompt-file`이 있으면: 파일 내용을 provider prompt payload로 전달한다.
+   - 없으면: 인라인 텍스트를 prompt payload로 사용한다.
 
-3. Claude CLI 실행 (wrapper 경유):
+3. Managed Claude delegation 실행 (wrapper 경유):
    - 기본 모델 resolve (MANDATORY):
      ```bash
      MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default 2>/dev/null || echo "sonnet")
      ```
-   - 인라인 프롬프트:
-     ```bash
-     python3 {PLUGIN_ROOT}/scripts/mst.py run \
-       --task-id "{task_id}" \
-       --provider claude \
-       --model "$MODEL" \
-       --log-dir "{task_dir}" \
-       -- claude -p "{prompt}" --model "$MODEL" --permission-mode bypassPermissions
-     ```
-   - `--prompt-file`:
-     ```bash
-     python3 {PLUGIN_ROOT}/scripts/mst.py run \
-       --task-id "{task_id}" \
-       --provider claude \
-       --model "$MODEL" \
-       --log-dir "{task_dir}" \
-       -- claude -p "$(cat {prompt_file})" --model "$MODEL" --permission-mode bypassPermissions
-     ```
-   - `--trace`:
-     ```bash
-     python3 {PLUGIN_ROOT}/scripts/mst.py run \
-       --task-id "{task_id}" \
-       --provider claude \
-       --model "$MODEL" \
-       --log-dir "{task_dir}" \
-       --trace "{REQ-ID}/{TASK-NUM}/{label}" \
-       -- claude -p "$(cat {prompt_file})" --model "$MODEL" --permission-mode bypassPermissions
-     ```
+   - wrapper invocation contract:
+     - `python3 {PLUGIN_ROOT}/scripts/mst.py run` is the canonical lifecycle boundary.
+     - required wrapper fields: `--task-id`, `--provider claude`, `--model "$MODEL"`, `--log-dir "{task_dir}"`.
+     - optional trace field: `--trace "{REQ-ID}/{TASK-NUM}/{label}"`.
+     - prompt source is the inline payload or the contents of `{prompt_file}`.
+   - provider subprocess detail contract:
+     - provider argv assembly, prompt stdin/argv handoff, permission flags, and print-mode compatibility are runtime-owned internals.
+     - active implementation guidance must not instruct direct Claude print-mode execution outside the wrapper.
+   - preserved lifecycle contract:
+     - register, heartbeat, running log tee, trace path, exit code propagation, session metadata, cwd/worktree binding, prompt source tracking, and output/failure contract remain wrapper-owned.
 
 4. `--trace`가 있으면 wrapper가 trace 파일 저장:
    - 파일명 패턴: `claude-{label}-{YYYYMMDD-HHmmss}.md`
@@ -86,7 +68,7 @@ PM Conductor 원칙 유지 목적으로 Claude CLI를 `mst.py run` wrapper 경�
 
 - Codex: wrapper 뒤에서 `codex exec ...` 실행
 - Gemini: wrapper 뒤에서 `gemini -p ...` 실행
-- Claude: wrapper 뒤에서 `claude -p ...` 실행 (`--model` + `--permission-mode bypassPermissions` 유지)
+- Claude: wrapper 뒤에서 provider-owned subprocess를 실행하며, user-facing contract는 `/mst:claude` managed delegation과 lifecycle evidence다.
 - register/heartbeat/tee/final-state/trace 생성은 세 provider 모두 wrapper가 공통 담당
 
 ## Trace 파일 형식
@@ -117,13 +99,13 @@ running_log_path: {log_dir}/running.log
 
 ## Agile Sub-plan Isolated Execution (수동 격리 실행)
 
-agile Sprint loop에서 컨텍스트 압박이 심해질 때, sub-plan 전체 체인(plan→request→approve→accept)을 깨끗한 claude -p 격리 컨텍스트에서 실행할 수 있습니다. 이는 옵션 A(수동 escape hatch)로 제공되며, Sprint loop 자체를 우회하지 않고 plan/request/approve/accept 게이트를 모두 유지합니다.
+agile Sprint loop에서 컨텍스트 압박이 심해질 때, sub-plan 전체 체인(plan→request→approve→accept)을 `/mst:claude` managed delegation으로 격리 실행할 수 있다. 이는 옵션 A(수동 escape hatch)로 제공되며, Sprint loop 자체를 우회하지 않고 plan/request/approve/accept 게이트를 모두 유지한다.
 
 ### 사용 예시
 
 ```bash
-# 부모 세션에서 sub-plan worktree를 만들고 claude -p로 전체 체인 실행
-/mst:claude -p --dir .gran-maestro/worktrees/AGI-001/sprint-3/sub-plan-2 \
+# 부모 세션에서 sub-plan worktree를 만들고 /mst:claude managed delegation으로 전체 체인 실행
+/mst:claude --dir .gran-maestro/worktrees/AGI-001/sprint-3/sub-plan-2 \
   "/mst:plan -a '사용자 프로필 편집 기능' && /mst:request -a --plan PLN-NNN && /mst:approve -a && /mst:accept"
 ```
 
@@ -145,4 +127,5 @@ agile Sprint loop에서 컨텍스트 압박이 심해질 때, sub-plan 전체 �
 
 - 격리 실행은 Sprint의 **순차 실행이 기본**이며 이 escape hatch는 컨텍스트 압박 예외 상황에서만 사용합니다.
 - 실행 후 반드시 `auto-decisions.md` 또는 `retrospective.md`에 격리 실행 사유와 결과를 기록해야 합니다 (Anti-Rationalization Checklist 준수).
+- 직접 Claude print-mode wrapper 호출은 DOD-002 이후 active implementation contract가 아니며, 필요한 lifecycle evidence는 `/mst:claude`가 유지한다.
 - Sprint 2.2.3 자동 dispatch는 AGI-015에서 `config.agile.dispatch.enabled` 기반의 claude 단일 provider 경로로 재정의되었습니다 (ADR-005).

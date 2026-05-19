@@ -19,6 +19,16 @@ MST = [sys.executable, str(ROOT / "scripts/mst.py")]
 
 def _run_mst(cwd: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     merged_env = os.environ.copy()
+    for key in (
+        "MST_SESSION_ID",
+        "MST_CONTEXT_JSON",
+        "MST_SNAPSHOT_SESSION_ID",
+        "CLAUDE_SESSION_ID",
+        "CLAUDE_TRANSCRIPT_PATH",
+        "TRANSCRIPT_PATH",
+        "MST_TRANSCRIPT_PATH",
+    ):
+        merged_env.pop(key, None)
     if env:
         merged_env.update(env)
     return subprocess.run(

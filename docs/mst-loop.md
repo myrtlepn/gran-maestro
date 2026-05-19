@@ -6,7 +6,7 @@ Gran Maestro의 워크플로우를 **세션 외부에서 반복 호출**로 이�
 
 | 구분 | 인라인 체이닝 (기본) | mst-loop (외부 재진입) |
 |---|---|---|
-| 실행 단위 | 세션 내부 연속 호출 | `claude -p /mst:resume` 반복 호출 |
+| 실행 단위 | 세션 내부 연속 호출 | legacy headless `/mst:resume` wrapper 반복 호출 |
 | 상태 | 메모리 + PPID 임시 파일 | `.gran-maestro/pending.ndjson` (FIFO) |
 | 세션 교차 | 불가 — 동일 세션 내에서만 | 가능 — 다른 세션에서 이어가기 |
 | 크래시 복구 | 세션 재시작 시 일부 상실 | queue 기반 완전 복구 |
@@ -45,7 +45,7 @@ PLUGIN_ROOT=/custom/path bash scripts/mst-loop.sh
 ### 작동 원리
 
 1. `mst.py queue count` → 0이면 즉시 exit
-2. `claude --dangerously-skip-permissions -p "/mst:resume"` 호출
+2. configured headless continuation runner가 `/mst:resume`를 호출
 3. `/mst:resume` 스킬이 queue에서 한 action을 pop하여 해당 Skill을 호출
 4. Skill 완료 후 complete/fail 기록, iteration 종료
 5. wrapper가 sleep 후 다음 iteration 시작

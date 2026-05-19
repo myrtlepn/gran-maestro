@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # mst-loop.sh — Gran Maestro external re-entry wrapper
 #
-# Repeatedly calls `claude -p /mst:resume` to drain the pending queue.
-# Exits when the queue is empty, max iterations reached, or claude fails.
+# Historically used a Claude print-mode wrapper to drain `/mst:resume`.
+# This script keeps the continuation path alive until a lifecycle-safe runner replaces it.
+# Exits when the queue is empty, max iterations reached, or the configured runner fails.
 #
 # Usage: bash scripts/mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
 
@@ -24,7 +25,7 @@ Options:
 
 Description:
   Gran Maestro external re-entry wrapper. Each iteration calls
-  `claude --dangerously-skip-permissions -p /mst:resume` which pops one action
+  the configured legacy headless continuation runner, which pops one action
   from .gran-maestro/pending.ndjson and executes it.
   Loop exits when:
     - mst.py queue count returns 0
@@ -131,7 +132,7 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
     echo "[mst-loop] iteration $i/$MAX_ITERATIONS — queued=$COUNT"
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[mst-loop] would run: claude --dangerously-skip-permissions -p /mst:resume"
+        echo "[mst-loop] would run: legacy headless continuation runner for /mst:resume"
     else
         if ! claude --dangerously-skip-permissions -p "/mst:resume"; then
             echo "[mst-loop] claude failed at iteration $i — exiting" >&2

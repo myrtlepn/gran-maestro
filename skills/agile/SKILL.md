@@ -512,18 +512,21 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
 
 1. Sprint prompt 조립: `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
 2. worktree 생성: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
-3. 외부 프로세스 dispatch 실행 (Bash background):
+3. managed Claude delegation dispatch 실행:
    - 모델 resolve: `MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default 2>/dev/null || echo "sonnet")`
-   ```bash
-   python3 {PLUGIN_ROOT}/scripts/mst.py run \
-     --task-id "{AGI_ID}-S{NN}" \
-     --provider claude \
-     --model "$MODEL" \
-     --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
-     -- claude -p "$(cat sprint-prompt.md)" --model "$MODEL" --permission-mode bypassPermissions
-   ```
-   - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록한다.
-4. 종료 신호 수신: `claude` 프로세스 exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
+   - canonical delegation call:
+     ```text
+     Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")
+     ```
+   - `/mst:claude`는 `python3 {PLUGIN_ROOT}/scripts/mst.py run` lifecycle wrapper를 통해 다음 계약을 유지해야 한다:
+     - `--task-id "{AGI_ID}-S{NN}"`
+     - `--provider claude`
+     - `--model "$MODEL"`
+     - `--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"`
+     - prompt source: `sprint-prompt.md`
+     - cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
+   - wrapper가 `${baseDir}/run/{AGI_ID}-S{NN}.json`에 register + heartbeat를 자동 기록하고, running log tee / trace path / session metadata / output-failure contract / exit code propagation을 공통 관리한다.
+4. 종료 신호 수신: Claude provider exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
 5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
 ###### Pre-dispatch HEAD 가드 (MANDATORY)

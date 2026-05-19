@@ -1,13 +1,13 @@
 ---
 name: resume
-description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper에서 claude -p /mst:resume 한 줄로 호출됨. queue가 비어 있으면 resolver fallback을 한 번 확인한 뒤 종료."
+description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. mst-loop wrapper의 legacy headless continuation 경로가 현재 이 스킬을 호출하며, lifecycle runner 교체 전까지 temporary exception으로 유지된다. queue가 비어 있으면 resolver fallback을 한 번 확인한 뒤 종료."
 user-invocable: false
 argument-hint: "[--wakeup-hint stop-recover]"
 ---
 
 # maestro:resume
 
-**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/mst-loop.sh`) 또는 `claude -p "/mst:resume"` 한 줄로 재진입할 수 있는 **단일 진입점**. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다.
+**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. 외부 wrapper(`scripts/mst-loop.sh`) 또는 legacy headless continuation runner가 재진입시키는 **단일 진입점**이다. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다. DOD-002 기준 이 경로는 `continuation_exception_until_lifecycle_runner` temporary exception으로 취급하며, queue drain semantics를 깨뜨리는 대체는 허용하지 않는다.
 
 ## Gate
 
@@ -151,8 +151,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py queue fail --id {action.id} --error "{요�
 # 무한 루프 (wrapper가 queue count=0 감지 시 break)
 bash scripts/mst-loop.sh
 
-# 또는 사용자가 직접 한 번만 호출
-claude --dangerously-skip-permissions -p "/mst:resume"
+# 또는 사용자가 현재 configured headless continuation runner로 한 번만 호출
+# (direct provider argv는 runtime detail이며 이 문서의 active contract가 아님)
 ```
 
 ## 현재 제한사항 (Phase 1+2 스코프)
