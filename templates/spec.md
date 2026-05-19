@@ -145,6 +145,22 @@ Test: `{테스트 실행 명령어}`
 
 > 근거를 찾을 수 없는 AC는 `[INTENT-GAP]`으로 표기합니다.
 
+## 3.3 PAC Mapping
+
+> plan.ids.json의 PAC를 spec AC에 매핑합니다. `--plan` 없는 경우 N/A.
+
+| PAC ID | Grade | Mapped Spec AC IDs | Coverage |
+|--------|-------|--------------------|----------|
+| {PAC-ID} | {MUST/SHOULD} | {AC-ID 목록} | {COVERED/GAP/SPEC_ONLY/N/A} |
+
+## 3.4 Epic DoD Mapping
+
+> agile-origin objective_context 또는 objective anchor manifest가 있는 경우 DoD/objective trace를 spec AC에 매핑합니다. 일반 legacy 요청은 N/A.
+
+| DoD ID | DoD 설명 | Mapped Spec AC IDs | Coverage |
+|--------|----------|--------------------|----------|
+| {DoD-ID} | {DoD/objective anchor 요약} | {AC-ID 목록} | {COVERED/GAP/N/A} |
+
 ## 3.5 Constraints
 
 <!-- 구현 방법 지시가 아닌 준수해야 할 제약만 기술. 없으면 N/A. -->

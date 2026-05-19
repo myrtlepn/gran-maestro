@@ -597,8 +597,9 @@ Step 1A.9.5 도메인 클러스터링 (및 Step 1A.9.6 완성된 모습 미리�
   - Q&A 모드(1A): 사용자와의 대화에서 논의된 **모든** 설계 내용을 원본 그대로 `## 상세 명세` 하위에 1:1 보존한다 — 설계 결정과 그 근거, 기술 선택과 비교 대안, 디렉토리 구조, 프로세스 흐름, Gate/체크리스트, 스키마/템플릿, 예시, 합의 사항 등. PM은 사용자 발화를 누락 없이 기록하며, 대화에서 논의되었으나 details/에 없는 내용이 있으면 안 된다.
   - `--doc` 모드(1B): 원본 문서의 해당 도메인 내용 전체 + Q&A로 추가 보완된 내용. 원본 문서에 기술된 내용이 details/에서 누락되어서는 안 된다.
   - 각 `details/{domain}.md` 파일의 **첫 줄**에는 반드시 `<!-- source-mapping: original=<원본경로> sections=[<H1/H2 헤더 목록>] -->` 메타데이터를 작성한다.
+  - details 저장 직후 `.gran-maestro/agile/{AGI_ID}/objective/objective.ids.json` anchor manifest를 생성/갱신한다. 각 objective anchor는 `id`, `source_file`, `text`, `kind`, `grade`, `domain_slug`, `dod_refs`를 포함해야 하며, AD/설계 결정/DoD/NFR/리스크/체크리스트 성격의 MUST/SHOULD 요구를 deterministic하게 추적 가능해야 한다.
   - detail 파일 저장 직후 `python3 {PLUGIN_ROOT}/scripts/mst.py agile detail validate-mapping {details_file_path}` 명령으로 source-mapping 메타데이터를 검증한다.
-  - 모든 details 파일 저장 직후, `python3 {PLUGIN_ROOT}/scripts/mst.py agile coverage-check {원본문서경로} --details-dir {details_dir}` 명령으로 원본 ↔ details 집합 매칭률을 검증한다. 매칭률이 임계 미만이면 저장을 **실패**로 처리하고, 누락된 원본 슬러그 목록을 사용자에게 보고한 뒤 details 보강 후 재실행한다.
+  - 모든 details 파일 저장 직후, `python3 {PLUGIN_ROOT}/scripts/mst.py agile coverage-check {원본문서경로} --details-dir {details_dir}` 명령으로 원본 ↔ details 집합 매칭률과 objective anchor coverage evidence를 검증한다. 매칭률이 임계 미만이면 저장을 **실패**로 처리하고, 누락된 원본 슬러그 목록을 사용자에게 보고한 뒤 details 보강 후 재실행한다. `objective.ids.json`이 존재하면 출력의 `anchor_total`, `anchor_mapped`, `anchor_missing_ids`도 확인하고 downstream trace 누락을 다음 agile/plan 단계의 known evidence로 보존한다.
 - **detail 파일 내부 구조 규칙 (MANDATORY)**: 각 `details/{domain}.md` 파일은 아래 구조를 따른다.
   ```markdown
   # {도메인명}

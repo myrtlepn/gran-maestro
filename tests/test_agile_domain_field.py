@@ -86,3 +86,19 @@ def test_default_config_has_intent_redirect_max_retries():
         (PROJECT_ROOT / "templates" / "defaults" / "config.json").read_text(encoding="utf-8")
     )
     assert cfg.get("agile", {}).get("intent_redirect_max_retries") == 3
+
+
+def test_spec_template_includes_pac_and_epic_dod_mapping_sections():
+    template = (PROJECT_ROOT / "templates" / "spec.md").read_text(encoding="utf-8")
+
+    assert "## 3.3 PAC Mapping" in template
+    assert "## 3.4 Epic DoD Mapping" in template
+
+
+def test_agile_request_contract_requires_anchor_coverage_trace():
+    agile_skill = (PROJECT_ROOT / "skills" / "agile" / "SKILL.md").read_text(encoding="utf-8")
+    request_skill = (PROJECT_ROOT / "skills" / "request" / "SKILL.md").read_text(encoding="utf-8")
+    required_tokens = ("objective anchor", "anchor coverage", "objective trace")
+
+    assert any(token in agile_skill.lower() for token in required_tokens)
+    assert any(token in request_skill.lower() for token in required_tokens)

@@ -1,0 +1,10 @@
+{
+  "plan_id": "PLN-716",
+  "mapped_anchor_ids": ["OAC-002"],
+  "objective_trace": [
+    {
+      "anchor_id": "OAC-002",
+      "target": "AC-004"
+    }
+  ]
+}

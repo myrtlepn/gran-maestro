@@ -491,16 +491,38 @@ def cmd_agile_detail_append(args):
     payload = apply_chunk_append(target_path, chunk_id, content)
     _emit_chunk_append_payload(payload, args.json)
     return 0 if payload.get("valid") else 1
+def cmd_agile_detail_generate_anchors(args):
+    details_dir = Path(str(args.details_dir)).resolve()
+    output_path = Path(str(args.output)).resolve() if getattr(args, "output", None) else None
+    payload = build_objective_anchor_manifest(details_dir, output_path)
+
+    if payload.get("valid"):
+        manifest_path = Path(str(payload["manifest_path"]))
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(
+                json.dumps(payload.get("anchors") or [], ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            payload["valid"] = False
+            payload.setdefault("errors", []).append(f"failed to write manifest: {exc}")
+
+    _emit_anchor_manifest_payload(payload, args.json)
+    for error in payload.get("errors") or []:
+        print(str(error), file=sys.stderr)
+    return 0 if payload.get("valid") else 1
 def cmd_agile_detail(args):
     subcommand = getattr(args, "detail_subcommand", None)
     dispatch = {
         "validate-mapping": cmd_agile_detail_validate_mapping,
         "validate-evidence": cmd_agile_detail_validate_evidence,
         "append": cmd_agile_detail_append,
+        "generate-anchors": cmd_agile_detail_generate_anchors,
     }
     fn = dispatch.get(subcommand)
     if fn is None:
-        print("Error: detail subcommand is required (validate-mapping|validate-evidence|append)", file=sys.stderr)
+        print("Error: detail subcommand is required (validate-mapping|validate-evidence|append|generate-anchors)", file=sys.stderr)
         return 1
     return fn(args)
 def _window_sprint_ids(sprint: int, depth: int) -> List[str]:

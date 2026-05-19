@@ -1,0 +1,20 @@
+[
+  {
+    "id": "OAC-001",
+    "source_file": "details/auth.md",
+    "text": "로그인 실패가 5회 누적되면 계정을 잠그고 운영자에게 경고한다.",
+    "kind": "constraint",
+    "grade": "must",
+    "domain_slug": "auth-flow",
+    "dod_refs": ["DOD-AUTH-001"]
+  },
+  {
+    "id": "OAC-002",
+    "source_file": "details/audit.md",
+    "text": "관리자 감사 로그는 90일간 보존하고 request/spec까지 동일 의미로 추적한다.",
+    "kind": "nfr",
+    "grade": "SHOULD",
+    "domain_slug": "audit-trace",
+    "dod_refs": ["DOD-AUDIT-001"]
+  }
+]

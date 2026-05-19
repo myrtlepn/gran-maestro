@@ -20,6 +20,7 @@ from scripts.mst_cmds import session as session_cmds
 from scripts.mst_cmds.extension import _dir_content_hash, _ensure_copy_impl
 from scripts.mst_cmds.agile_detail import (
     apply_chunk_append,
+    build_objective_anchor_manifest,
     compute_coverage,
     extract_h12_slugs,
 )

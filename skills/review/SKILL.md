@@ -125,6 +125,7 @@ argument-hint: "[REQ-ID] [--auto]"
    - `plan.ids.json` 미존재 시(레거시 호환): `plan.md`의 `## 인수 기준 초안`을 추출해 `PLAN-AC-N` 임시 ID를 부여한다.
    - `source_plan` 미존재 또는 인수 기준 섹션 자체가 없으면 이 단계 skip.
    - 수집된 Plan AC/PAC는 Spec AC와 **분리하여 관리** (Pass A에서 별도 섹션으로 검증).
+   - plan/objective에 agile-origin objective anchor metadata가 있으면 `objective.ids.json`과 plan의 `## Objective Trace`/anchor coverage evidence를 함께 로드한다. MUST objective anchor가 spec AC/PAC/Epic DoD Mapping 또는 evidence-ledger에 연결되지 않으면 `gap_found` 후보로 기록하고 N/A 처리하지 않는다.
 1-b-1. **리뷰 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `plan.json`을 Read하고 `type` 필드를 확인한다 (`type` 누락/Read 실패 시 `"code"` fallback).
    - `strategy = type_strategies[plan_type] || type_strategies["code"]`; Read/파싱/키 누락 시 `{"template":"templates/impl-request.md","worktree_policy":"required","review_mode":"code","accept_mode":"squash-merge"}`로 fallback.
@@ -220,6 +221,10 @@ argument-hint: "[REQ-ID] [--auto]"
 - Plan AC(PAC) 기록 규칙 (MANDATORY):
   - `source_plan`+`plan.ids.json` 있으면 동일 형식으로 append. 없으면 PAC 섹션 skip.
   - PAC의 실행 명령이 없으면 `manual-judgement`로 기록하고 PM 판정 근거를 `Actual`에 남긴다. `Exit Code`=`N/A`.
+- Objective anchor 기록 규칙 (agile-origin, MANDATORY):
+  - objective anchor manifest 또는 plan `anchor_coverage_evidence`가 있으면 `## Objective Anchor 검증 증거` 섹션을 append한다.
+  - 각 MUST objective anchor ID의 `Expected`는 "Spec AC/PAC/Epic DoD Mapping에 연결됨", `Actual`은 매핑된 AC/PAC/DoD ID 또는 누락 사유로 기록한다.
+  - MUST objective anchor 미충족은 pass로 처리하지 않고 coverage-matrix gap 또는 review finding으로 승격한다.
 - append 타이밍 (MANDATORY): 각 AC/PAC의 PASS/FAIL/SKIP 판정 직후 즉시 append (배치 저장 금지). Exit Code 기록은 판정 직후 실제 종료 코드를 사용한다. 기존 `pass-a-result.md`를 대체하지 않는다.
 
 #### test_enforcement 게이트 (Pass A 내부, MANDATORY)

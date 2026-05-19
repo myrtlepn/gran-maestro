@@ -140,6 +140,9 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
         - 기준: `evidence-ledger.md`에 해당 PAC ID 레코드가 존재해야 한다.
         - 누락 PAC가 1개 이상이면 accept를 **즉시 블로킹**하고 아래 메시지를 출력한 뒤 중단한다.
           - `증거 미첨부 PAC: {PAC-ID 목록}`
+     6. agile-origin objective anchor metadata가 있으면 `objective.ids.json`, spec `## 3.4 Epic DoD Mapping`, 최신 `evidence-ledger.md`의 Objective Anchor 검증 증거를 확인한다.
+        - MUST objective anchor가 `N/A`로만 사라졌거나 매핑 증거가 없으면 accept를 블로킹한다.
+        - 누락 anchor가 1개 이상이면 `증거 미첨부 objective anchor: {anchor ID 목록}`을 출력하고 중단한다.
         - 누락이 없으면 다음 단계 진행.
 2.6. **수락 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.

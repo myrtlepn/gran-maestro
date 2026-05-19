@@ -196,6 +196,234 @@ def compute_coverage(original_slugs: List[str], mapped_slugs: set[str]) -> dict:
         "matched_sections": matched_sections,
         "missing_sections": missing,
     }
+_ANCHOR_REQUIRED_FIELDS = {"id", "source_file", "text", "kind", "grade", "domain_slug", "dod_refs"}
+def _resolve_anchor_manifest_path(details_path: Path, explicit_path: str | None = None) -> Path | None:
+    if explicit_path:
+        return Path(str(explicit_path)).expanduser()
+
+    candidates = [
+        details_path.parent / "objective.ids.json",
+        details_path.parent / "objective" / "objective.ids.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+def _resolve_downstream_trace_path(details_path: Path, explicit_path: str | None = None) -> Path | None:
+    if explicit_path:
+        return Path(str(explicit_path)).expanduser()
+
+    candidates = [
+        details_path.parent / "downstream" / "plan.trace.json",
+        details_path.parent / "plan.trace.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+def _normalize_anchor_id(value) -> str:
+    return str(value or "").strip()
+def _load_anchor_manifest(manifest_path: Path) -> tuple[list[dict], list[str]]:
+    errors: list[str] = []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [], [f"anchor manifest read error: {manifest_path}: {exc}"]
+
+    if not isinstance(payload, list):
+        return [], [f"anchor manifest must be a list: {manifest_path}"]
+
+    anchors: list[dict] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            errors.append(f"anchor manifest item {index} must be an object")
+            continue
+        missing_fields = sorted(_ANCHOR_REQUIRED_FIELDS - set(item))
+        if missing_fields:
+            errors.append(
+                f"anchor manifest item {index} missing fields: {', '.join(missing_fields)}"
+            )
+            continue
+        anchor_id = _normalize_anchor_id(item.get("id"))
+        if not anchor_id:
+            errors.append(f"anchor manifest item {index} has empty id")
+            continue
+        normalized = dict(item)
+        normalized["id"] = anchor_id
+        normalized["grade"] = str(item.get("grade") or "").strip().upper()
+        anchors.append(normalized)
+    return anchors, errors
+def _load_mapped_anchor_ids(trace_path: Path | None) -> tuple[set[str], list[str]]:
+    if trace_path is None:
+        return set(), ["downstream trace not found"]
+    try:
+        payload = json.loads(trace_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return set(), [f"downstream trace read error: {trace_path}: {exc}"]
+
+    mapped: set[str] = set()
+    raw_ids = payload.get("mapped_anchor_ids") if isinstance(payload, dict) else None
+    if isinstance(raw_ids, list):
+        for raw_id in raw_ids:
+            anchor_id = _normalize_anchor_id(raw_id)
+            if anchor_id:
+                mapped.add(anchor_id)
+
+    raw_trace = payload.get("objective_trace") if isinstance(payload, dict) else None
+    if isinstance(raw_trace, list):
+        for item in raw_trace:
+            if not isinstance(item, dict):
+                continue
+            anchor_id = _normalize_anchor_id(item.get("anchor_id"))
+            if anchor_id:
+                mapped.add(anchor_id)
+
+    return mapped, []
+def _compute_anchor_coverage(details_path: Path, args) -> dict:
+    manifest_path = _resolve_anchor_manifest_path(
+        details_path,
+        getattr(args, "anchor_manifest", None),
+    )
+    payload = {
+        "anchor_manifest": str(manifest_path) if manifest_path else None,
+        "anchor_downstream_trace": None,
+        "anchor_total": 0,
+        "anchor_mapped": 0,
+        "anchor_missing_ids": [],
+        "anchor_coverage": None,
+        "anchor_errors": [],
+    }
+    if manifest_path is None:
+        return payload
+    if not manifest_path.exists():
+        payload["anchor_errors"].append(f"anchor manifest not found: {manifest_path}")
+        return payload
+
+    anchors, manifest_errors = _load_anchor_manifest(manifest_path)
+    payload["anchor_errors"].extend(manifest_errors)
+    payload["anchor_total"] = len(anchors)
+
+    trace_path = _resolve_downstream_trace_path(
+        details_path,
+        getattr(args, "downstream_trace", None),
+    )
+    payload["anchor_downstream_trace"] = str(trace_path) if trace_path else None
+    mapped_anchor_ids, trace_errors = _load_mapped_anchor_ids(trace_path)
+    payload["anchor_errors"].extend(trace_errors)
+
+    known_anchor_ids = {_normalize_anchor_id(item.get("id")) for item in anchors}
+    payload["anchor_mapped"] = len(known_anchor_ids & mapped_anchor_ids)
+    payload["anchor_missing_ids"] = sorted(
+        _normalize_anchor_id(item.get("id"))
+        for item in anchors
+        if str(item.get("grade") or "").strip().upper() == "MUST"
+        and _normalize_anchor_id(item.get("id")) not in mapped_anchor_ids
+    )
+    payload["anchor_coverage"] = (
+        payload["anchor_mapped"] / payload["anchor_total"]
+        if payload["anchor_total"]
+        else 1.0
+    )
+    return payload
+_ANCHOR_DOD_RE = re.compile(r"\bDOD-[A-Za-z0-9_-]+\b")
+_ANCHOR_BULLET_RE = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s*)?(?P<text>.+?)\s*$")
+def _classify_anchor_kind(text: str) -> str:
+    lowered = str(text).lower()
+    if "nfr" in lowered or "성능" in text or "보안" in text:
+        return "nfr"
+    if "risk" in lowered or "리스크" in text or "위험" in text:
+        return "risk"
+    if "checklist" in lowered or "체크리스트" in text:
+        return "checklist"
+    if "dod" in lowered or "완료" in text:
+        return "dod"
+    if "ad-" in lowered or "결정" in text:
+        return "decision"
+    if "제약" in text or "constraint" in lowered:
+        return "constraint"
+    return "detail"
+def _classify_anchor_grade(text: str) -> str:
+    lowered = str(text).lower()
+    must_tokens = ("must", "필수", "반드시", "해야 한다", "해야한다", "금지")
+    return "MUST" if any(token in lowered or token in text for token in must_tokens) else "SHOULD"
+def _extract_detail_anchor_texts(content: str) -> list[str]:
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for line in str(content).splitlines():
+        match = _ANCHOR_BULLET_RE.match(line)
+        if match is None:
+            continue
+        text = match.group("text").strip()
+        if not text or text.startswith("<!--"):
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        anchors.append(text)
+    return anchors
+def build_objective_anchor_manifest(details_dir: Path, manifest_path: Path | None = None) -> dict:
+    output_path = manifest_path or (details_dir.parent / "objective.ids.json")
+    payload = {
+        "details_dir": str(details_dir),
+        "manifest_path": str(output_path),
+        "anchor_total": 0,
+        "anchors": [],
+        "valid": False,
+        "errors": [],
+    }
+
+    if not details_dir.exists():
+        payload["errors"].append(f"details dir not found: {details_dir}")
+        return payload
+    if not details_dir.is_dir():
+        payload["errors"].append(f"details dir is not a directory: {details_dir}")
+        return payload
+
+    anchors: list[dict] = []
+    sequence = 1
+    for details_file in sorted(details_dir.glob("*.md")):
+        try:
+            content = details_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            payload["errors"].append(f"failed to read detail: {details_file}: {exc}")
+            continue
+        doc_dod_refs = sorted(set(_ANCHOR_DOD_RE.findall(content)))
+        try:
+            source_file = str(details_file.relative_to(output_path.parent))
+        except ValueError:
+            source_file = str(details_file)
+        for text in _extract_detail_anchor_texts(content):
+            line_dod_refs = sorted(set(_ANCHOR_DOD_RE.findall(text)))
+            anchors.append(
+                {
+                    "id": f"OAC-{sequence:03d}",
+                    "source_file": source_file,
+                    "text": text,
+                    "kind": _classify_anchor_kind(text),
+                    "grade": _classify_anchor_grade(text),
+                    "domain_slug": details_file.stem,
+                    "dod_refs": line_dod_refs or doc_dod_refs,
+                }
+            )
+            sequence += 1
+
+    payload["anchors"] = anchors
+    payload["anchor_total"] = len(anchors)
+    payload["valid"] = not payload["errors"]
+    return payload
+def _emit_anchor_manifest_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+
+    print(f"Manifest: {payload.get('manifest_path')}")
+    print(f"Anchors: {payload.get('anchor_total', 0)}")
+    print(f"Valid: {'true' if payload.get('valid') else 'false'}")
+    errors = payload.get("errors") or []
+    if errors:
+        print("Errors:")
+        for error in errors:
+            print(f"- {error}")
 def _load_coverage_threshold_default() -> float:
     fallback = 0.85
     config_paths = [
@@ -273,10 +501,21 @@ def _emit_coverage_check_payload(payload: dict, as_json: bool):
         print("Missing sections:")
         for slug in missing_sections:
             print(f"- {slug}")
+    if payload.get("anchor_manifest"):
+        print(
+            "Anchor coverage: "
+            f"{payload.get('anchor_mapped', 0)}/{payload.get('anchor_total', 0)} "
+            f"- Missing MUST: {', '.join(payload.get('anchor_missing_ids') or []) or 'none'}"
+        )
     errors = payload.get("errors") or []
     if errors:
         print("Errors:")
         for error in errors:
+            print(f"- {error}")
+    anchor_errors = payload.get("anchor_errors") or []
+    if anchor_errors:
+        print("Anchor evidence warnings:")
+        for error in anchor_errors:
             print(f"- {error}")
 def _emit_evidence_check_payload(payload: dict, as_json: bool):
     if as_json:
@@ -497,6 +736,10 @@ def _print_coverage_check_fail(payload: dict):
     )
     for slug in payload.get("missing_sections", []):
         print(f"[coverage-check] missing: {slug}", file=sys.stderr)
+    for anchor_id in payload.get("anchor_missing_ids", []):
+        print(f"[coverage-check] missing objective anchor: {anchor_id}", file=sys.stderr)
+    for error in payload.get("anchor_errors", []):
+        print(f"[coverage-check] objective anchor error: {error}", file=sys.stderr)
 def cmd_agile_coverage_check(args):
     original = str(args.original_path)
     details_dir = str(args.details_dir)
@@ -511,6 +754,13 @@ def cmd_agile_coverage_check(args):
         "threshold": threshold,
         "valid": False,
         "errors": [],
+        "anchor_manifest": None,
+        "anchor_downstream_trace": None,
+        "anchor_total": 0,
+        "anchor_mapped": 0,
+        "anchor_missing_ids": [],
+        "anchor_coverage": None,
+        "anchor_errors": [],
     }
 
     original_path = Path(original)
@@ -573,6 +823,11 @@ def cmd_agile_coverage_check(args):
     payload["missing_sections"] = coverage_result["missing_sections"]
     payload["coverage"] = coverage_result["coverage"]
     payload["valid"] = payload["coverage"] >= threshold
+    payload.update(_compute_anchor_coverage(details_path, args))
+    if payload.get("anchor_manifest") and (
+        payload.get("anchor_missing_ids") or payload.get("anchor_errors")
+    ):
+        payload["valid"] = False
 
     _emit_coverage_check_payload(payload, args.json)
     if not payload["valid"]:

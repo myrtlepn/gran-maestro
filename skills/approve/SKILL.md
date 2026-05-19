@@ -550,7 +550,7 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 - `{{PREV_FEEDBACK_PATH}}`: 첫 실행 시 "N/A", 재실행 시 feedback 파일 경로
 - `{{PLAN_JSON_META}}`: resolve 순서 `request.json` → `plan.json` → `plan.ids.json` → `objective.md`. `request.json.source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하여 `cynefin_domain`, `linked_objective`, `linked_intent`, `linked_captures` 필드와 경로를 3~5줄 요약으로 주입. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
 - `{{PAC_LIST}}`: `source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`을 Read하여 각 항목의 `id`, `grade`, `tags`, `text` 필드를 목록으로 주입. 미존재 시 warn 로그 + "N/A" 치환 (graceful skip).
-- `{{OBJECTIVE_SECTION}}`: `plan.json.linked_objective`가 존재하면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.md`를 Read하여 JTBD 요약 + 프로젝트 DoD 항목 + 성공 지표를 3~5줄 요약으로 주입. linked_objective/linked_intent/plan.ids.json 각각 미존재 시 warn 로그 + "N/A" 치환 (graceful skip, 워크플로우 차단 금지).
+- `{{OBJECTIVE_SECTION}}`: `plan.json.linked_objective`가 존재하면 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.md`와 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI-NNN}/objective/objective.ids.json`(존재 시)을 Read하여 JTBD 요약 + 프로젝트 DoD 항목 + 성공 지표 + objective anchor coverage evidence를 3~5줄 요약으로 주입. legacy plan에서 linked_objective/linked_intent/plan.ids.json 각각 미존재 시 warn 로그 + "N/A" 치환 가능. agile-origin objective anchor metadata가 있는데 anchor manifest나 coverage evidence가 없으면 "N/A"로 숨기지 말고 brief에 누락 evidence를 남기고 review/accept가 확인할 수 있게 전달한다.
 
 ##### 4c. 독립 태스크 동시 실행
 

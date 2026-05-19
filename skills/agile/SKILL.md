@@ -471,7 +471,7 @@ Sprint 시작 즉시 `in_progress` 결과를 기록(`python3 {PLUGIN_ROOT}/scrip
 `mst:plan -a` 호출 시 아래 컨텍스트를 반드시 전달한다.
 
 컨텍스트 계층 (모두 전달 필수):
-- `[의도층]`: MANDATORY Read — objective.md (JTBD 원문) + `details/{DOMAIN_SLUG}.md`. plan.md 필수 기록: `충족 JTBD 조항`, `도메인 참조 ID`.
+- `[의도층]`: MANDATORY Read — objective.md (JTBD 원문) + `details/{DOMAIN_SLUG}.md` + `objective.ids.json`(존재 시). plan.md 필수 기록: `충족 JTBD 조항`, `도메인 참조 ID`, `## Objective Trace` 또는 PAC 매핑의 objective anchor coverage evidence.
 - `[고정층]`: objective.md 전체 (JTBD + 프로젝트 DoD + 제약 + 설계 결정 + NFR + 리스크)
 - `[활성층]`: 현재 선택된 미완료 DoD 항목 | `[변화층]`: 직전 Sprint 결과 | `[회고층]`: 직전 retrospective
 - `[이슈층]`: open known issues
@@ -483,7 +483,8 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 [의도층] MANDATORY Read (반드시 두 파일 모두 Read한 뒤 plan 작성):
   1. objective 원본: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
   2. 선택된 DoD 소속 도메인 상세: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/details/{DOMAIN_SLUG}.md
-  plan.md에 반드시 기록: (1) 충족 JTBD 조항 (2) 도메인 참조 ID (domain-slug + AD-NNN 목록)
+  3. objective anchor manifest: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.ids.json (존재 시)
+  plan.md에 반드시 기록: (1) 충족 JTBD 조항 (2) 도메인 참조 ID (domain-slug + AD-NNN 목록) (3) objective trace / anchor coverage evidence: 선택 DoD/domain의 MUST objective anchor ID가 plan PAC 또는 `## Objective Trace`에 100% 매핑됐는지와 누락 ID 목록
 [고정층] 목적 파일: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/objective.md
 [활성층] 현재 대상: {SELECTED_WORK_ITEM} | 소속 도메인: {DOMAIN_SLUG} | 미완료 DoD: {INCOMPLETE_DOD_LIST}
 [변화층] 직전 결과: {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{N-1}/result.md
@@ -577,9 +578,10 @@ Step 2.2.3.D 경로의 **세션 첫 실행 시 1회만** 아래 문구를 출력
 Step 2.2.3 이후 plan-a 완료 직후 parent(Sprint 진행자)는 아래 검증/복구 루프를 수행한다.
 
 1. `Read({PROJECT_ROOT}/.gran-maestro/plans/{PLN_ID}/plan.md)`로 산출물 확인.
-2. `plan.md`에 `충족 JTBD 조항`, `도메인 참조 ID` 두 필드가 모두 존재하는지 검사.
-3. 누락 시 자동 재지시 + 동일 N계층 컨텍스트로 plan-a 재호출. 최대 `agile.intent_redirect_max_retries` 회(기본 3)까지 반복.
-4. 한도 도달 후에도 누락이면 현재 Sprint의 known issue에 `agi_id`, `dod_id`, 누락 필드 목록, 재시도 횟수, 마지막 plan 경로를 포함하여 자동 등록.
+2. `plan.md`에 `충족 JTBD 조항`, `도메인 참조 ID` 두 필드가 모두 존재하는지 검사한다.
+3. `objective.ids.json`이 존재하거나 selected DoD/domain이 objective anchor metadata를 가진 경우, `plan.md`/`plan.ids.json`의 PAC 또는 `## Objective Trace`에서 선택 범위의 MUST anchor coverage를 검사한다. 필드 존재만으로 통과시키지 않는다.
+4. 누락 시 자동 재지시 + 동일 N계층 컨텍스트로 plan-a 재호출. 최대 `agile.intent_redirect_max_retries` 회(기본 3)까지 반복.
+5. 한도 도달 후에도 누락이면 현재 Sprint의 known issue에 `agi_id`, `dod_id`, 누락 필드/anchor ID 목록, 재시도 횟수, 마지막 plan 경로를 포함하여 자동 등록.
 
 ##### [추가 섹션] Sprint 중 디자인 수정 경로 (Step 번호 유지 전용)
 

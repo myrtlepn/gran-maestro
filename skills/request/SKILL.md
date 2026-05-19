@@ -278,9 +278,11 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
       - `--plan PLN-NNN` 또는 자연어 `PLN-NNN` 또는 `resolved_plan_id` 감지 시 `plans/PLN-NNN/plan.json` + `plan.md` Read
       - plan Read 성공 시: `request.json`에 `source_plan: "PLN-NNN"` 기록; `plan.json`의 `linked_requests`에 REQ-NNN 추가, `status` `active` → `in_progress`
       - plan.md 결정사항·범위·제약을 Phase 1 인풋으로 사용
-      - **Objective 컨텍스트 감지 (MANDATORY, graceful)**:
-        - plan.md에 `## Objective 컨텍스트` 섹션이 존재하면 파싱해 `objective_context` 변수로 보관 (`objective_md_path`, `jtbd_summary`, `project_dod_items[]`, `success_metrics[]`).
-        - 섹션이 없으면 `objective_context=null`로 처리 (하위 호환). 일부 항목 비어있으면 가능한 항목만 보관 (비차단).
+      - **Objective 컨텍스트 감지 (MANDATORY)**:
+        - plan.md에 `## Objective 컨텍스트` 섹션이 존재하면 파싱해 `objective_context` 변수로 보관 (`objective_md_path`, `jtbd_summary`, `project_dod_items[]`, `success_metrics[]`, `anchor_manifest_path`, `anchor_coverage_evidence`).
+        - plan.json의 `linked_objective`, plan.md의 agile N계층 마커, `objective.ids.json`, 또는 `## Objective Trace`/objective anchor coverage evidence가 있으면 agile-origin으로 판정한다.
+        - legacy/non-agile plan에서 섹션이 없으면 `objective_context=null`로 처리한다 (하위 호환).
+        - agile-origin에서 objective_context 또는 anchor manifest가 없으면 silent skip 금지: plan/objective 경로에서 자동 복원하고, 복원 불가 시 `request.json`/spec preflight에 blocking 또는 MAJOR failure evidence를 남긴다.
       - **plan type 전략 감지 (MANDATORY, plan.json Read 직후)**:
         - `plan_type = plan.json.type` (미존재 시 `"code"`)
         - `plan_strategy = type_strategies[plan_type] || type_strategies["code"]` (`{PLUGIN_ROOT}/templates/defaults/type-strategies.json` Read)
@@ -481,6 +483,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
           - 파일 존재 시: `[{id,text,grade,tags?}]` 목록을 `pac_preflight_checklist`로 로드. `tags`에서 `TIER-A`/`TIER-B` 인식해 `pac_tier` 결정 (둘 다 없으면 `TIER-B` 기본).
           - 파일 미존재 시: warn 후 plan.md `## 인수 기준 초안`에서 임시 PAC 목록 추론 (비차단).
           - `pac_anchor_list`로 보관하고 이후 spec AC 작성 프롬프트 앞단에 고정 주입.
+        - agile-origin objective trace가 있으면 `objective.ids.json` 및 plan의 `anchor_coverage_evidence`를 Read하여 `objective_anchor_list`로 보관한다. MUST objective anchor는 spec AC, `## 3.3 PAC Mapping`, 또는 `## 3.4 Epic DoD Mapping` 중 하나에 매핑되어야 하며 누락 ID는 MAJOR 이상 evidence로 남긴다.
         - docs 후보: plan.md `## 연관 컨텍스트` 표 및 본문 내 `docs/` 경로 수집.
       - `--plan` 미제공 시: `request.json.original_request`를 `intent_context`로 보관. docs 후보는 Step 1c 탐색 발견 `docs/` 파일 + 사용자 요청 명시 경로만 사용.
       - `docs_context` 구성: dedupe 후 존재하는 파일만 Read. 각 항목 `path`, `last_modified`, 핵심 요구사항 1~3줄 요약 추출.
@@ -503,6 +506,10 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - `pac_preflight_checklist`의 각 PAC를 spec AC에 최소 1회 매핑
         - spec 본문에 `## 3.3 PAC Mapping` 섹션: `PAC ID | Grade(MUST/SHOULD) | Mapped Spec AC IDs | Coverage`
         - MUST PAC의 `Mapped Spec AC IDs`는 비워서는 안 됨; plan에 없는 신규 spec AC는 `Coverage`를 `SPEC_ONLY`로 표시
+      - **Objective anchor trace 규칙 (agile-origin, MANDATORY)**:
+        - `objective_anchor_list`가 있으면 각 MUST objective anchor를 spec AC 또는 PAC/Epic DoD Mapping에 연결한다.
+        - `anchor coverage` evidence(`anchor_total`, `anchor_mapped`, `anchor_missing_ids`)를 spec 작성 메모 또는 request evidence에 보존한다.
+        - `anchor_missing_ids`가 비어있지 않으면 graceful fallback으로 닫지 않고 blocking/MAJOR failure evidence를 기록한다.
       - **`## §0 Context Manifest` 자동 채움 규칙 (MANDATORY)**:
         - `context_manifest_files`를 bullet 목록으로 삽입
         - `objective_context.objective_md_path`가 있으면 dedupe 추가; 없으면 skip (graceful)
@@ -511,7 +518,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - original checkout에서 호출된 경우에는 session worktree 재진입 또는 structured diagnostic 경계로 분류하고, legacy owner/session field를 effective root source로 사용하지 않는다.
         - 최종 §0 목록은 최소 1개 이상 파일 경로를 포함해야 한다
       - **`## 3.2 Intent Trace` 작성 규칙 (MANDATORY)**: `intent_context_active=true`일 때만 §3.2 채움. 각 AC마다 최소 1개 의도 근거 연결. 근거를 찾지 못하면 `[INTENT-GAP]` 표기. docs 근거 사용 시 `intent_snapshot`에 `doc_path`, `last_modified`, `spec_generated_at` 기록. `intent_context_active=false`면 §3.2 전체 skip.
-      - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**: `objective_context` 존재 + `project_dod_items[]` 1개 이상일 때만 생성. 표 형식: `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`. 매핑 가능한 AC 없으면 `[UNMAPPED]`/`Gap`. `objective_context` 없거나 비어있으면 §3.4 전체 skip (graceful fallback).
+      - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**: `objective_context` 존재 + `project_dod_items[]` 1개 이상일 때 생성한다. agile-origin objective anchor metadata가 있으면 §3.4를 skip하지 말고 objective trace evidence로 DoD/anchor → Spec AC 매핑을 남긴다. 표 형식: `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`. 매핑 가능한 AC 없으면 `[UNMAPPED]`/`Gap`. legacy/non-agile에서 `objective_context` 없거나 비어있으면 §3.4는 N/A 또는 skip 가능.
    h-0.7. **Regression Test 선행 태스크 생성** (Step h-1 이전, MANDATORY):
       - 트리거 조건(모두 충족 시 생성): 기존 파일/함수의 비즈니스 로직 변경 포함; 단순 boilerplate 변경만이 아님
       - 제외 조건: boilerplate-only 변경; 완전 신규 기능 (기존 코드 비즈니스 로직 변경 없음)

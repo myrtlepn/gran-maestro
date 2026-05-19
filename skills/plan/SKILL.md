@@ -845,10 +845,15 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
      ```markdown
      ## Objective 컨텍스트
      - objective.md: {objective_context_path}
+     - objective.ids.json: {objective_anchor_manifest_path | N/A}
      - JTBD 요약: {objective_jtbd_summary}
      - 프로젝트 DoD: (항목 목록)
      - 성공 지표: (지표 목록)
      ```
+   - **`## Objective Trace` 섹션** (`agile_context_active=true` + objective anchor manifest 존재 시 MANDATORY):
+     - 선택된 DoD/domain의 MUST objective anchor ID를 plan PAC 또는 Objective Trace row에 매핑한다.
+     - `anchor_total`, `anchor_mapped`, `anchor_missing_ids`를 기록한다. `anchor_missing_ids`가 비어있지 않으면 plan 완료로 판정하지 않는다.
+     - request가 재파싱할 수 있도록 objective detail path와 anchor manifest path를 그대로 남긴다.
    - UI 감지 시 `## 브라우저 테스트` 섹션 추가 (Step 4.1에서 수집된 흐름 목록 포함)
    - `debug_context` 또는 `capture_context` 활성, 또는 `UI 감지됨 + {PROJECT_ROOT}/.gran-maestro/designs/DESIGN.md 존재` 시 `## 연관 컨텍스트` 섹션 포함 — **파일 경로만 기록, 내용 복사 금지**:
      ```markdown

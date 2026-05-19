@@ -168,6 +168,11 @@ def register(subparsers):
     agile_detail_append.add_argument("--target-dir", default=".", dest="target_dir")
     agile_detail_append.add_argument("--json", action="store_true")
 
+    agile_detail_generate_anchors = agile_detail_sub.add_parser("generate-anchors")
+    agile_detail_generate_anchors.add_argument("--details-dir", required=True, dest="details_dir")
+    agile_detail_generate_anchors.add_argument("--output")
+    agile_detail_generate_anchors.add_argument("--json", action="store_true")
+
     agile_evidence_check = agile_sub.add_parser("evidence-check")
     agile_evidence_check_scope = agile_evidence_check.add_mutually_exclusive_group(required=True)
     agile_evidence_check_scope.add_argument("--sprint")
@@ -222,6 +227,8 @@ def register(subparsers):
     agile_coverage_check.add_argument("original_path")
     agile_coverage_check.add_argument("--details-dir", required=True, dest="details_dir")
     agile_coverage_check.add_argument("--threshold", type=float)
+    agile_coverage_check.add_argument("--anchor-manifest", dest="anchor_manifest")
+    agile_coverage_check.add_argument("--downstream-trace", dest="downstream_trace")
     agile_coverage_check.add_argument("--json", action="store_true")
 
     agile_objective_transition = agile_sub.add_parser("objective-transition")
