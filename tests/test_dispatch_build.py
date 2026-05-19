@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -12,12 +14,17 @@ MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000"
 
 
-def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:
+def _run_mst(
+    workspace: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(MST_SCRIPT), *args],
         cwd=workspace,
         capture_output=True,
         text=True,
+        env=env,
         check=False,
     )
 
@@ -251,3 +258,190 @@ def test_dispatch_build_command_propagates_session_env_when_executed(tmp_path):
 
     assert check.returncode == 0, check.stderr
     assert check.stdout.strip().splitlines()[-1] == SESSION_ID
+
+
+def test_dispatch_build_emits_context_envelope_with_canonical_next_execution(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+    session_id = "MST-AGI-040-20260519T150147980Z-6fdzl4qx"
+    raw_context = json.dumps(
+        {
+            "mst_session_id": session_id,
+            "root_mst_id": "AGI-040",
+            "schema_version": 1,
+        },
+        separators=(",", ":"),
+    )
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-json",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+        env={
+            **os.environ,
+            "MST_SESSION_ID": session_id,
+            "MST_CONTEXT_JSON": raw_context,
+        },
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+
+    assert payload["mst_session_id"] == session_id
+    assert payload["root_mst_id"] == "AGI-040"
+    assert payload["task_id"] == "task-json"
+    assert payload["created_new_session"] is False
+    assert payload["prompt_summary_used_as_source"] is False
+    assert payload["next_execution"]["env"]["MST_SESSION_ID"] == session_id
+    assert payload["next_execution"]["context"] == {
+        "mst_session_id": session_id,
+        "root_mst_id": "AGI-040",
+    }
+    assert payload["next_execution"]["env"]["MST_CONTEXT_JSON"] == raw_context
+    assert f"$(cat {prompt_file})" in payload["command"]
+    assert "dispatch register" in payload["command"]
+    assert str(log_file) in payload["command"]
+
+
+def test_dispatch_build_nonzero_exit_records_failure_evidence(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub_cli(
+        bin_dir,
+        "codex",
+        "#!/bin/sh\n"
+        "echo 'codex stderr' >&2\n"
+        "exit 7\n",
+    )
+
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+    task_id = "task-failure"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        task_id,
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    executed = subprocess.run(
+        ["bash", "-c", proc.stdout.strip()],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "MST_SESSION_ID": SESSION_ID,
+        },
+    )
+
+    assert executed.returncode == 7
+    state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    running_log = log_file.read_text(encoding="utf-8")
+
+    assert state["phase"] == "done"
+    assert state["exit_code"] == 7
+    assert state["failure_kind"] == "nonzero_exit"
+    assert state["fallback_condition"] == "none"
+    assert "last_heartbeat" in state
+    assert "codex stderr" in running_log
+    assert "failure_kind=nonzero_exit" in running_log
+    assert "EXIT_CODE:7" in running_log
+
+
+def test_dispatch_build_timeout_output_records_failure_evidence(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub_cli(
+        bin_dir,
+        "codex",
+        "#!/bin/sh\n"
+        "echo 'deadline exceeded while waiting'\n"
+        "exit 124\n",
+    )
+
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex-timeout.log"
+    task_id = "task-timeout"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        task_id,
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    executed = subprocess.run(
+        ["bash", "-c", proc.stdout.strip()],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "MST_SESSION_ID": SESSION_ID,
+        },
+    )
+
+    assert executed.returncode == 124
+    state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    running_log = log_file.read_text(encoding="utf-8")
+
+    assert state["phase"] == "done"
+    assert state["exit_code"] == 124
+    assert state["failure_kind"] == "timeout"
+    assert "failure_kind=timeout" in running_log

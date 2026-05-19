@@ -761,12 +761,28 @@ def cmd_dispatch_build(args):
             f'echo "GEMINI_CODEX_FALLBACK_CONDITION:${{MST_GEMINI_CODEX_FALLBACK_CONDITION:-none}}" >> {q(str(log_file))}; '
             f'echo "GEMINI_EVIDENCE_ID:$MST_GEMINI_EVIDENCE_ID" >> {q(str(log_file))}; '
         )
+    dispatch_attempt_cmd = (
+        'MST_DISPATCH_FAILURE_KIND="${MST_GEMINI_FAILURE_KIND:-}"; '
+        f'if [ -z "$MST_DISPATCH_FAILURE_KIND" ] && grep -Eiq \'(timed? ?out|timeout|deadline exceeded)\' {q(str(log_file))}; then MST_DISPATCH_FAILURE_KIND=timeout; '
+        f'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ ! -s {q(str(log_file))} ]; then MST_DISPATCH_FAILURE_KIND=empty_result; '
+        'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ "$EC" -ne 0 ]; then MST_DISPATCH_FAILURE_KIND=nonzero_exit; fi; '
+        'MST_DISPATCH_FALLBACK_CONDITION="${MST_GEMINI_CODEX_FALLBACK_CONDITION:-none}"; '
+        "printf 'DISPATCH_ATTEMPT_METADATA: task_id=%s provider=%s model=%s "
+        "prompt_file=%s output_log=%s mst_session_id=%s exit_code=%s failure_kind=%s fallback=%s\\n' "
+        f"{q(task_id)} {q(provider)} {q(resolved_model)} {q(str(prompt_file))} {q(str(log_file))} "
+        '"$MST_SESSION_ID" "$EC" "${MST_DISPATCH_FAILURE_KIND:-none}" "$MST_DISPATCH_FALLBACK_CONDITION" '
+        f">> {q(str(log_file))}; "
+    )
 
     heartbeat_cmd = (
         f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat '
         f"--task-id {q(task_id)} --log-file {q(str(log_file))}"
     )
-    final_heartbeat_cmd = f'{heartbeat_cmd} --final --exit-code "$EC"'
+    final_heartbeat_cmd = (
+        f'{heartbeat_cmd} --final --exit-code "$EC" '
+        '--failure-kind "${MST_DISPATCH_FAILURE_KIND:-none}" '
+        '--fallback-condition "$MST_DISPATCH_FALLBACK_CONDITION"'
+    )
 
     command = (
         f"{session_bootstrap_cmd}; "
@@ -781,6 +797,7 @@ def cmd_dispatch_build(args):
         "EC=${PIPESTATUS[0]}; "
         "kill \"$HB_PID\" 2>/dev/null || true; wait \"$HB_PID\" 2>/dev/null || true; "
         f"{gemini_failure_cmd}"
+        f"{dispatch_attempt_cmd}"
         f"echo \"EXIT_CODE:$EC\" >> {q(str(log_file))}; "
         f"{final_heartbeat_cmd}; "
         "exit $EC"

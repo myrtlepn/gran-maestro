@@ -124,6 +124,12 @@ def cmd_dispatch_heartbeat(args):
         payload["terminated_at"] = now
         if args.exit_code is not None:
             payload["exit_code"] = int(args.exit_code)
+        failure_kind = str(getattr(args, "failure_kind", "") or "").strip()
+        if failure_kind:
+            payload["failure_kind"] = failure_kind
+        fallback_condition = str(getattr(args, "fallback_condition", "") or "").strip()
+        if fallback_condition:
+            payload["fallback_condition"] = fallback_condition
 
     log_file = getattr(args, "log_file", None)
     if log_file and not args.final:
@@ -361,6 +367,8 @@ def register(subparsers):
     heartbeat.add_argument("--phase")
     heartbeat.add_argument("--final", action="store_true")
     heartbeat.add_argument("--exit-code")
+    heartbeat.add_argument("--failure-kind")
+    heartbeat.add_argument("--fallback-condition")
     heartbeat.add_argument("--log-file")
 
     list_cmd = dispatch_sub.add_parser("list")
