@@ -295,6 +295,16 @@ const sprint12ForcedWireRegistryExpectedEntries = {
     expected_status: 'pass',
     validator_export_name: 'assertDod010BlockerFreeMigrationReport',
   },
+  'DOD-011': {
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  },
 };
 
 const dod011RequiredPhaseOrder = [
@@ -2498,6 +2508,16 @@ test('DOD-011 persisted request evidence records top-level schema and work packa
   assert.equal(evidence.sprint, 13);
   assert.equal(evidence.dod_id, 'DOD-011');
   assert.equal(evidence.status, 'pass');
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  });
   assert.ok(Array.isArray(evidence.work_packages));
   assert.equal(evidence.work_packages.length, 8);
   assert.deepEqual(
@@ -2608,7 +2628,7 @@ test('DOD-011 persisted request evidence preserves predecessor linkage and follo
   );
 });
 
-test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkage metadata', () => {
+test('shared DOD evidence registry requires DOD-009, DOD-010, and DOD-011 linkage metadata', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
     const validation = validateSharedDodEvidenceRegistryEntry(entry);
@@ -2617,7 +2637,7 @@ test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkag
   }
 });
 
-test('Sprint 12 shared DOD evidence registry keeps DOD-009 and DOD-010 artifacts repo-scoped and validator-linked', () => {
+test('shared DOD evidence registry keeps DOD-009, DOD-010, and DOD-011 artifacts repo-scoped and validator-linked', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
     const validation = validateSharedDodEvidenceRegistryEntry(entry);
@@ -2640,6 +2660,11 @@ test('Sprint 12 shared DOD evidence registry keeps DOD-009 and DOD-010 artifacts
     if (expected.dod_id === 'DOD-009') {
       assertDod009RequestEvidence(artifact);
       assertNoForbiddenDod009EvidenceLiterals(artifact);
+      continue;
+    }
+
+    if (expected.dod_id === 'DOD-011') {
+      assertDod011RequestEvidence(artifact);
       continue;
     }
 
