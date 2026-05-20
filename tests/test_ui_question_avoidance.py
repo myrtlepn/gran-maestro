@@ -3,12 +3,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_PLAN_MODE_SIGNALS = ("Entered plan mode", "EnterPlanMode")
+FORBIDDEN_GEMINI_RECLASSIFICATION_SIGNALS = (
+    "Entered plan mode",
+    "EnterPlanMode",
+    "routing=plan",
+    "routing=request",
+    "routing=codex",
+)
 
 
 def _section_between(content: str, start: str, end: str) -> str:
     section_start = content.index(start)
     section_end = content.index(end, section_start)
     return content[section_start:section_end]
+
+
+def _line_containing(content: str, needle: str) -> str:
+    for line in content.splitlines():
+        if needle in line:
+            return line.strip()
+    raise AssertionError(f"missing contract evidence line: {needle!r}")
 
 
 def test_agile_plan_command_identity_guard_blocks_builtin_plan_mode():
@@ -91,3 +105,54 @@ def test_agile_plan_existing_happy_path_objective_flow_is_preserved():
     assert "Step 1A: JTBD + 프로젝트 DoD Q&A 생성 모드" in content
     assert "Observable-by-Sprint 사고 프롬프트" in content
     assert "objective 생성 결과를 안내하고 종료한다" in content
+
+
+def test_gemini_command_identity_guard_preserves_impl_edit_plan_requests():
+    content = (REPO_ROOT / "skills" / "gemini" / "SKILL.md").read_text(encoding="utf-8")
+    identity_section = _section_between(
+        content,
+        "## DOD-004 Gemini Identity Protection Contract",
+        "## DOD-004 Gemini Delegation Failure and Fallback Contract",
+    )
+
+    assert "/mst:gemini 구현" in identity_section
+    assert "/mst:gemini 수정" in identity_section
+    assert "/mst:gemini 계획" in identity_section
+    assert "다른 스킬로 재분류하지 않는다" in identity_section
+    assert "/mst:codex" in identity_section
+    assert "보호 수준" in identity_section
+
+
+def test_gemini_identity_contract_evidence_rejects_reclassification_signals():
+    content = (REPO_ROOT / "skills" / "gemini" / "SKILL.md").read_text(encoding="utf-8")
+    identity_section = _section_between(
+        content,
+        "## DOD-004 Gemini Identity Protection Contract",
+        "## DOD-004 Gemini Delegation Failure and Fallback Contract",
+    )
+    fixtures = [
+        "/mst:gemini 구현",
+        "/mst:gemini 수정",
+        "/mst:gemini 계획",
+    ]
+    shared_evidence = {
+        "command_identity": _line_containing(identity_section, "command_identity: `mst:gemini`"),
+        "path_rules": _line_containing(identity_section, "path rules"),
+        "rewrite_guard": _line_containing(identity_section, "rewrite하지 않는다"),
+    }
+
+    for fixture_input in fixtures:
+        fixture_evidence = {
+            "fixture_identity": _line_containing(identity_section, fixture_input),
+            **shared_evidence,
+        }
+
+        assert fixture_input.startswith("/mst:gemini")
+        assert "`mst:gemini`" in fixture_evidence["command_identity"]
+        assert "`mst:gemini` command identity를 유지" in fixture_evidence["fixture_identity"]
+        assert "다른 스킬로 재분류하지 않는다" in fixture_evidence["fixture_identity"]
+        for channel_name, channel_content in fixture_evidence.items():
+            for signal in FORBIDDEN_GEMINI_RECLASSIFICATION_SIGNALS:
+                assert signal not in channel_content, (
+                    f"{channel_name} unexpectedly contained gemini reclassification signal {signal!r}"
+                )

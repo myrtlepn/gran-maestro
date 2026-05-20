@@ -1,5 +1,6 @@
-from pathlib import Path
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,15 @@ DISPOSITION_SKIP_REASON = (
     "requires local workflow evidence: "
     ".gran-maestro/agile/AGI-040/sprints/S02/dod-002-disposition.json "
     "is ignored and may be absent in clean checkouts"
+)
+ALLOWED_CLAUDE_PRINT_MODE_PATHS = {
+    "tests/test_dod005_agent_dispatch_replacement_contract.py": "negative_fixture_allowlist",
+}
+CLAUDE_PRINT_MODE_SCAN_ROOTS = ("skills", "scripts", "hooks", "docs", "tests")
+CLAUDE_PRINT_MODE_DIRECT_RE = re.compile(r"claude\s+(-p|--print)\b")
+CLAUDE_PRINT_MODE_ARGV_RE = re.compile(
+    r"[\[\(]\s*['\"]claude['\"]\s*,\s*['\"](-p|--print)['\"]",
+    re.DOTALL,
 )
 
 
@@ -25,9 +35,58 @@ def _disposition_rows() -> dict[str, dict]:
     return {row["stable_id"]: row for row in data["rows"]}
 
 
+def _line_number_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def _line_at(text: str, line_number: int) -> str:
+    lines = text.splitlines()
+    if 1 <= line_number <= len(lines):
+        return lines[line_number - 1].strip()
+    return ""
+
+
+def _claude_print_mode_hits_in_text(relative_path: str, text: str) -> list[tuple[str, int, str]]:
+    hits: list[tuple[str, int, str]] = []
+    seen: set[tuple[int, str]] = set()
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if CLAUDE_PRINT_MODE_DIRECT_RE.search(line):
+            stripped = line.strip()
+            hits.append((relative_path, line_number, stripped))
+            seen.add((line_number, stripped))
+
+    for match in CLAUDE_PRINT_MODE_ARGV_RE.finditer(text):
+        line_number = _line_number_for_offset(text, match.start())
+        stripped = _line_at(text, line_number)
+        if (line_number, stripped) not in seen:
+            hits.append((relative_path, line_number, stripped))
+            seen.add((line_number, stripped))
+
+    return hits
+
+
+def _claude_print_mode_hits() -> list[tuple[str, int, str]]:
+    hits: list[tuple[str, int, str]] = []
+    for root_name in CLAUDE_PRINT_MODE_SCAN_ROOTS:
+        root = PROJECT_ROOT / root_name
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+            hits.extend(_claude_print_mode_hits_in_text(relative_path, text))
+    return hits
+
+
 def test_dispatch_d_uses_managed_claude_delegation():
     text = _skill_text()
-    forbidden_print_mode = " ".join(("claude", "-p"))
+    forbidden_print_mode = "claude" + " " + "-p"
 
     assert "MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default" in text
     assert 'Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")' in text
@@ -117,3 +176,39 @@ def test_dod002_continuation_and_agile_rows_use_expected_contracts():
     assert agile_row["disposition"] == "rewrite_guidance_to_new_contract"
     assert "mst:claude" in agile_row["replacement_contract"]
     assert "lifecycle contract preserved" in agile_row["verification_status"]
+
+
+def test_dod006_claude_print_mode_hits_are_allowlisted_nonruntime_only():
+    assert "hooks" in CLAUDE_PRINT_MODE_SCAN_ROOTS
+
+    hits = _claude_print_mode_hits()
+
+    unexpected: list[str] = []
+    seen_allowlist: set[str] = set()
+
+    for relative_path, line_number, line in hits:
+        if relative_path in ALLOWED_CLAUDE_PRINT_MODE_PATHS:
+            seen_allowlist.add(relative_path)
+            assert relative_path.startswith("tests/")
+            assert "DIRECT_CLI_TOKENS" in line
+            continue
+        unexpected.append(f"{relative_path}:{line_number}: {line}")
+
+    assert seen_allowlist == set(ALLOWED_CLAUDE_PRINT_MODE_PATHS)
+    assert not unexpected, "unexpected direct Claude print-mode hits:\n" + "\n".join(unexpected)
+
+
+def test_dod006_claude_print_mode_scanner_detects_argv_style_invocations():
+    cli = "claude"
+    short_print = "-p"
+    long_print = "--print"
+    fixtures = [
+        f"cmd = [{cli!r}, {short_print!r}, 'prompt']",
+        f"cmd = [{cli!r}, {long_print!r}, 'prompt']",
+        f"subprocess.run(({cli!r}, {short_print!r}, 'prompt'))",
+        f"const cmd = [{cli!r}, {long_print!r}, prompt];",
+    ]
+
+    for index, fixture in enumerate(fixtures, start=1):
+        hits = _claude_print_mode_hits_in_text(f"source/runtime/fixture-{index}", fixture)
+        assert hits, fixture

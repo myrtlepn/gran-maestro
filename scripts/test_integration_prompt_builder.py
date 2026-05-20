@@ -152,6 +152,25 @@ def test_integration_hybrid_to_split_end_to_end(tmp_path):
     assert metrics[-1]["fallback_reason"] is None
 
 
+def test_integration_combined_prompt_carries_context_path_and_work_contract(tmp_path):
+    workspace = _workspace(tmp_path)
+    input_path = _write_dispatch_input(workspace)
+    out_dir = workspace / "prompts"
+
+    build = _run_prompt_build(workspace, input_path, out_dir)
+    assert build.returncode == 0, build.stderr
+
+    combined_prompt = (out_dir / "combined-prompts.txt").read_text(encoding="utf-8")
+
+    assert "## Reference Context Path" in combined_prompt
+    assert ".gran-maestro/tmp/ctx-IDN-TEST.md" in combined_prompt
+    assert "## Work Contract" in combined_prompt
+    assert "read_requirements: inspect `common.reference_context_file` before answering." in combined_prompt
+    assert "output_contract: return findings with explicit evidence and cite the inspected context path." in combined_prompt
+    assert "verification_contract: include verification/evidence notes or a structured `missing_context` reason." in combined_prompt
+    assert "failure_contract: if the context file cannot be read, respond with `missing_context`." in combined_prompt
+
+
 def test_integration_metrics_accumulation_and_summary(tmp_path):
     workspace = _workspace(tmp_path)
 

@@ -13,6 +13,8 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
 
 - command_identity: `mst:gemini`
 - `/mst:gemini` 호출은 path rules상 `/mst:plan`, `/mst:request`, built-in plan mode 후보로 재분류하지 않는다.
+- `/mst:gemini 구현`, `/mst:gemini 수정`, `/mst:gemini 계획` 같은 구현/수정/계획형 입력도 `mst:gemini` command identity를 유지하며 다른 스킬로 재분류하지 않는다.
+- 위 fixture 입력은 `/mst:codex` 보호 수준과 동등하게 유지하며 `/mst:plan`, `/mst:request`, built-in plan mode, `/mst:codex`로 rewrite하지 않는다.
 - model resolve는 provider `gemini`의 configured default tier를 사용하고 실패 시 `gemini-3.1-pro-preview`로만 fallback한다.
 - trace label은 호출자가 전달한 `--trace {REQ-ID}/{TASK-NUM}/{label}` 값을 유지하며 다른 MST skill identity로 rewrite하지 않는다.
 - Codex parity baseline: DOD-003 context contract, forbidden marker contract, exit-code behavior, prompt-file path handling을 `/mst:codex`와 동등하게 유지한다.

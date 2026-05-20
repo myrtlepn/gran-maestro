@@ -238,7 +238,25 @@ def _assemble(doc: dict):
         else:
             lines.append("- none")
 
-        lines.extend(["", "## Reference Context", reference_context or "none", "", "## Role", role])
+        lines.extend(
+            [
+                "",
+                "## Reference Context Path",
+                ref_file or "none",
+                "",
+                "## Reference Context",
+                reference_context or "none",
+                "",
+                "## Work Contract",
+                "- read_requirements: inspect `common.reference_context_file` before answering.",
+                "- output_contract: return findings with explicit evidence and cite the inspected context path.",
+                "- verification_contract: include verification/evidence notes or a structured `missing_context` reason.",
+                "- failure_contract: if the context file cannot be read, respond with `missing_context`.",
+                "",
+                "## Role",
+                role,
+            ]
+        )
         if angle:
             lines.extend(["", "## Angle", angle])
         lines.extend(["", "## Ask", ask or ""])

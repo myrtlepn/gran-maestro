@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
@@ -445,3 +447,82 @@ def test_dispatch_build_timeout_output_records_failure_evidence(tmp_path):
     assert state["exit_code"] == 124
     assert state["failure_kind"] == "timeout"
     assert "failure_kind=timeout" in running_log
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "stub_output", "exit_code"),
+    [
+        ("rate_limit", "429 rate limit exceeded\n", 1),
+        ("timeout", "deadline exceeded while waiting\n", 124),
+        ("empty_result", "", 0),
+        ("nonzero_exit", "provider exited unexpectedly\n", 9),
+    ],
+)
+def test_dispatch_build_gemini_execution_records_failure_evidence_and_fallback(
+    tmp_path,
+    failure_kind: str,
+    stub_output: str,
+    exit_code: int,
+):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub_lines = ["#!/bin/sh"]
+    if stub_output:
+        stub_lines.append(f"printf '%s' {stub_output!r}")
+    stub_lines.append(f"exit {exit_code}")
+    _write_stub_cli(bin_dir, "gemini", "\n".join(stub_lines) + "\n")
+
+    prompt_file = workspace / "prompt-gemini.md"
+    prompt_file.write_text("hello gemini", encoding="utf-8")
+    log_file = workspace / f"gemini-{failure_kind}.log"
+    task_id = f"task-gemini-{failure_kind}"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "gemini",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        task_id,
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gemini-test-model",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    executed = subprocess.run(
+        ["bash", "-c", proc.stdout.strip()],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "MST_SESSION_ID": SESSION_ID,
+        },
+    )
+
+    assert executed.returncode == exit_code
+    state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    running_log = log_file.read_text(encoding="utf-8")
+
+    assert state["phase"] == "done"
+    assert state["exit_code"] == exit_code
+    assert state["failure_kind"] == failure_kind
+    assert state["fallback_condition"] == "codex_fallback_required"
+    assert f"GEMINI_FAILURE_KIND:{failure_kind}" in running_log
+    assert "GEMINI_CODEX_FALLBACK_CONDITION:codex_fallback_required" in running_log
+    assert f"GEMINI_EVIDENCE_ID:{task_id}:gemini-failure" in running_log
+    assert f"failure_kind={failure_kind}" in running_log
+    assert "fallback=codex_fallback_required" in running_log
