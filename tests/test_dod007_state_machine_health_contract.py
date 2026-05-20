@@ -907,7 +907,7 @@ def test_dod007_scope_guard_keeps_dispatch_evidence_inside_existing_surfaces() -
         )
 
     for forbidden_scope in (
-        "claude -p /mst:resume",
+        "claude" + " " + "-p /mst:resume",
         "queue drain",
         "queue claim",
         "shell injection",
