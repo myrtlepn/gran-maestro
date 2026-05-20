@@ -1,0 +1,38 @@
+[
+  {
+    "id": "PAC-1",
+    "text": "DOD-013 single-source evidence artifact가 Codex-only fork 0개, generated drift 0건, 5-file version sync 유지, canonical source path coverage를 machine-readable 형태로 기록한다.",
+    "grade": "MUST",
+    "tags": ["TIER-A"]
+  },
+  {
+    "id": "PAC-2",
+    "text": "검증은 Claude canonical source와 Codex generated/projected assets의 관계를 확인하되 Codex-only fork를 새로 만들거나 user-home/plugin-cache/external Codex install을 수정하지 않는다.",
+    "grade": "MUST",
+    "tags": ["TIER-A"]
+  },
+  {
+    "id": "PAC-3",
+    "text": "shared DOD evidence registry가 DOD-013 entry를 DOD-009/DOD-010/DOD-011/DOD-012와 함께 validator-linked 형태로 보존한다.",
+    "grade": "MUST",
+    "tags": ["TIER-A"]
+  },
+  {
+    "id": "PAC-4",
+    "text": "README/docs/RELEASE 또는 기존 문서가 single-source 유지 원칙과 5-file version sync gate를 DOD-013 release boundary로 설명한다.",
+    "grade": "MUST",
+    "tags": ["TIER-B"]
+  },
+  {
+    "id": "PAC-5",
+    "text": "DOD-013 완료 후 AGI-039 objective의 모든 DOD가 done 상태가 되고 DOD-012 evidence linkage regression이 발생하지 않는다.",
+    "grade": "MUST",
+    "tags": ["TIER-A"]
+  },
+  {
+    "id": "PAC-6",
+    "text": "기존 smoke suite와 DOD-009/DOD-010/DOD-011/DOD-012 registry linkage regression이 발생하지 않는다.",
+    "grade": "SHOULD",
+    "tags": ["IMPACT", "TIER-B"]
+  }
+]

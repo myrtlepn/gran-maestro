@@ -66,6 +66,7 @@ Gran Maestro는 Claude Code plugin이 canonical 배포 경로이며, Codex plugi
 - 업데이트: 릴리스 전 `npm test`와 DOD-012 evidence로 docs/release coverage를 확인한 다음 사용자 환경에서 별도 업데이트합니다.
 - 삭제: 사용자 소유 Codex plugin 등록과 캐시를 사용자가 직접 제거합니다. Gran Maestro 검증은 삭제 명령을 자동 실행하지 않습니다.
 - 검증: `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json` 및 `npm test`처럼 repository-local fixture/evidence만 사용합니다.
+- 단일 source 유지: DOD-013 이후 Codex migration 검증은 Codex-only fork 0개와 generated drift 0건을 요구하며, `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, package/version files를 canonical source로 유지합니다. `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json`와 5-file version sync gate로 `.codex-plugin/plugin.json` 및 `.agents/plugins/marketplace.json` projection을 repository-local로 확인합니다.
 
 ## What's New
 

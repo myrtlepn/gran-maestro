@@ -66,6 +66,7 @@ Gran Maestro's canonical distribution path is the Claude Code plugin. Codex plug
 - Update: run `npm test` and the DOD-012 evidence generator before updating the user environment separately.
 - Uninstall: remove user-owned Codex plugin registrations/caches manually. Gran Maestro validation does not execute uninstall commands.
 - Validate: use repository-local commands such as `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json` and `npm test`.
+- Single-source maintenance: after DOD-013, Codex migration validation requires zero Codex-only forks and zero generated drift. `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, and package/version files remain the canonical source, while `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json` and the 5-file version sync gate validate `.codex-plugin/plugin.json` plus `.agents/plugins/marketplace.json` as repository-local projections.
 
 ## What's New
 

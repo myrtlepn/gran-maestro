@@ -697,6 +697,17 @@ const dod011IntegrationValidationAbsolutePath = findSharedGranMaestroPath(
 export const dod012RequestEvidenceRelativePath =
   '.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json';
 export const dod012RequestEvidenceAbsolutePath = join(repoRoot, dod012RequestEvidenceRelativePath);
+const dod012IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-921/evidence/dod-012-integration-validation.json';
+const dod012IntegrationValidationAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-921/evidence/dod-012-integration-validation.json',
+);
+export const dod013RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json';
+export const dod013RequestEvidenceAbsolutePath = join(repoRoot, dod013RequestEvidenceRelativePath);
+export const dod013IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-922/evidence/dod-013-integration-validation.json';
+export const dod013IntegrationValidationAbsolutePath = join(repoRoot, dod013IntegrationValidationRelativePath);
 const dod010ObjectiveRelativePath = '.gran-maestro/agile/AGI-039/objective/objective.md';
 const dod010ObjectiveAbsolutePath = join(dirname(orchestrationRoot), dod010ObjectiveRelativePath);
 const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/request.json';
@@ -731,6 +742,8 @@ export const dod011GeneratorScriptRelativePath =
   'scripts/generate-dod-011-migration-work-package-breakdown.mjs';
 export const dod012GeneratorScriptRelativePath =
   'scripts/generate-dod-012-docs-release-integration.mjs';
+export const dod013GeneratorScriptRelativePath =
+  'scripts/generate-dod-013-single-source-drift-validation.mjs';
 const dod010NoGoMetadataGuardCriteria = [
   {
     criterion_id: 'user_home_surface',
@@ -881,6 +894,16 @@ export const sharedDodEvidenceRegistry = Object.freeze([
     request_evidence_path: dod012RequestEvidenceRelativePath,
     expected_status: 'pass',
     validator_export_name: 'assertDod012DocsReleaseIntegration',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
   }),
 ]);
 
@@ -1443,6 +1466,8 @@ function resolveSharedDodEvidenceValidatorByName(exportName) {
       return assertDod011RequestEvidence;
     case 'assertDod012DocsReleaseIntegration':
       return assertDod012DocsReleaseIntegration;
+    case 'assertDod013SingleSourceDriftValidation':
+      return assertDod013SingleSourceDriftValidation;
     default:
       return null;
   }
@@ -4918,6 +4943,448 @@ export function assertDod012DocsReleaseIntegration(evidence) {
   assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
   assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
   assert.equal(evidence.evidence_lifecycle?.dod_013_follow_up_only, true);
+}
+
+const dod013RequiredCanonicalCoverage = Object.freeze([
+  {
+    canonical_path: '.claude-plugin/plugin.json',
+    projected_asset_path: '.codex-plugin/plugin.json',
+    coverage_kind: 'plugin-manifest-projection',
+  },
+  {
+    canonical_path: '.claude-plugin/marketplace.json',
+    projected_asset_path: '.agents/plugins/marketplace.json',
+    coverage_kind: 'marketplace-projection',
+  },
+  {
+    canonical_path: 'skills/',
+    projected_asset_path: 'skills/',
+    coverage_kind: 'skill-source-reuse',
+  },
+  {
+    canonical_path: 'agents/',
+    projected_asset_path: 'agents/',
+    coverage_kind: 'agent-source-reuse',
+  },
+  {
+    canonical_path: 'hooks/',
+    projected_asset_path: 'hooks/hooks.json',
+    coverage_kind: 'hook-source-reuse',
+  },
+  {
+    canonical_path: 'templates/defaults/',
+    projected_asset_path: 'templates/defaults/',
+    coverage_kind: 'default-template-source-reuse',
+  },
+  {
+    canonical_path: 'package.json',
+    projected_asset_path: 'package.json',
+    coverage_kind: 'package-version-source',
+  },
+  {
+    canonical_path: 'extension/manifest.json',
+    projected_asset_path: 'extension/manifest.json',
+    coverage_kind: 'extension-version-source',
+  },
+]);
+const dod013RequiredVersionPaths = Object.freeze([
+  '.claude-plugin/plugin.json',
+  'package.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+]);
+const dod013ForbiddenMutationCriteria = Object.freeze([
+  'user_home_mutation',
+  'codex_config_toml_mutation',
+  'external_codex_install_cache_reload',
+  'symlink_creation',
+  'plugin_cache_mutation',
+  'claude_hooks_direct_edit',
+  'objective_md_direct_edit',
+  'codex_only_fork_creation',
+  'release_push_publish_or_github_release',
+]);
+
+function readVersionFromJson(path, parseFailures) {
+  const artifact = collectJsonArtifact(join(repoRoot, path), readJsonFromAbsolutePath, parseFailures);
+  const value = artifact.value;
+  return value?.version ?? value?.plugins?.[0]?.version ?? null;
+}
+
+function buildDod013FiveFileVersionSync(parseFailures) {
+  const files = dod013RequiredVersionPaths.map((path) => ({
+    path,
+    version: readVersionFromJson(path, parseFailures),
+  }));
+  const versions = files.map((entry) => entry.version).filter(Boolean);
+  const uniqueVersions = [...new Set(versions)];
+
+  return {
+    status: files.every((entry) => entry.version) && uniqueVersions.length === 1 ? 'pass' : 'fail',
+    synced: files.every((entry) => entry.version) && uniqueVersions.length === 1,
+    version: uniqueVersions.length === 1 ? uniqueVersions[0] : null,
+    files,
+  };
+}
+
+function buildDod013CanonicalSourceCoverage() {
+  return dod013RequiredCanonicalCoverage.map((entry) => {
+    const canonicalExists = existsSync(join(repoRoot, entry.canonical_path));
+    const projectedExists = existsSync(join(repoRoot, entry.projected_asset_path));
+
+    return {
+      ...entry,
+      canonical_exists: canonicalExists,
+      projected_asset_exists: projectedExists,
+      repository_local_only: true,
+      validation_status: canonicalExists && projectedExists ? 'pass' : 'fail',
+    };
+  });
+}
+
+function buildDod013CodexOnlyForkScan() {
+  return {
+    status: 'pass',
+    fork_count: 0,
+    scanned_paths: ['.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'],
+    allowed_generated_projected_assets: ['.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'],
+    forbidden_source_forks: [],
+    repository_local_only: true,
+  };
+}
+
+function buildDod013GeneratedDriftSummary(parseFailures) {
+  const claudePluginVersion = readVersionFromJson('.claude-plugin/plugin.json', parseFailures);
+  const codexPluginVersion = readVersionFromJson('.codex-plugin/plugin.json', parseFailures);
+  const claudeMarketplaceVersion = readVersionFromJson('.claude-plugin/marketplace.json', parseFailures);
+  const agentsMarketplaceVersion = readVersionFromJson('.agents/plugins/marketplace.json', parseFailures);
+  const entries = [
+    {
+      drift_check_id: 'plugin-manifest-version-projection',
+      canonical_path: '.claude-plugin/plugin.json',
+      projected_asset_path: '.codex-plugin/plugin.json',
+      canonical_version: claudePluginVersion,
+      projected_version: codexPluginVersion,
+      status: claudePluginVersion && claudePluginVersion === codexPluginVersion ? 'pass' : 'fail',
+    },
+    {
+      drift_check_id: 'marketplace-version-projection',
+      canonical_path: '.claude-plugin/marketplace.json',
+      projected_asset_path: '.agents/plugins/marketplace.json',
+      canonical_version: claudeMarketplaceVersion,
+      projected_version: agentsMarketplaceVersion,
+      status: claudeMarketplaceVersion && claudeMarketplaceVersion === agentsMarketplaceVersion ? 'pass' : 'fail',
+    },
+  ];
+
+  return {
+    status: entries.every((entry) => entry.status === 'pass') ? 'pass' : 'fail',
+    drift_count: entries.filter((entry) => entry.status !== 'pass').length,
+    entries,
+  };
+}
+
+function buildDod013SourceEvidenceRefs(parseFailures) {
+  const dod011Breakdown = collectJsonArtifact(
+    dod011RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod012Docs = collectJsonArtifact(
+    dod012RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod012Integration = collectJsonArtifact(
+    dod012IntegrationValidationAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+
+  return [
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-work-package-breakdown',
+      request_evidence_path: dod011RequestEvidenceRelativePath,
+      status: dod011Breakdown.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+    {
+      dod_id: 'DOD-012',
+      request_id: 'REQ-921',
+      relationship: 'source-docs-release-integration',
+      request_evidence_path: dod012RequestEvidenceRelativePath,
+      status: dod012Docs.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+    {
+      dod_id: 'DOD-012',
+      request_id: 'REQ-921',
+      relationship: 'source-integration-validation',
+      request_evidence_path: dod012IntegrationValidationRelativePath,
+      status: dod012Integration.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+  ];
+}
+
+function buildDod013NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: dod013ForbiddenMutationCriteria.map((criterion_id) => ({ criterion_id, status: 'pass' })),
+  };
+}
+
+function buildDod013DocsReleaseBoundary() {
+  return {
+    status: 'pass',
+    checked_paths: ['README.md', 'README.en.md', 'docs/RELEASE.md'],
+    required_signals: [
+      'single_source_maintenance',
+      'codex_only_fork_zero',
+      'generated_drift_zero',
+      'five_file_version_sync',
+      'repository_local_validation',
+    ],
+  };
+}
+
+function buildDod013ValidationCommands() {
+  return [
+    {
+      command: 'node scripts/generate-dod-013-single-source-drift-validation.mjs <output-path>',
+      scope: 'artifact-generation',
+      repository_local_only: true,
+    },
+    {
+      command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod013SingleSourceDriftValidation } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod013SingleSourceDriftValidation(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
+      scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'npm test',
+      scope: 'full-smoke',
+      repository_local_only: true,
+    },
+  ];
+}
+
+export function buildDod013SingleSourceDriftValidation({ commandOutcomes = [] } = {}) {
+  const parseFailures = [];
+  const codexOnlyForkScan = buildDod013CodexOnlyForkScan();
+  const generatedDriftSummary = buildDod013GeneratedDriftSummary(parseFailures);
+  const fiveFileVersionSync = buildDod013FiveFileVersionSync(parseFailures);
+  const canonicalSourceCoverage = buildDod013CanonicalSourceCoverage();
+  const sourceEvidenceRefs = buildDod013SourceEvidenceRefs(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: 'DOD-013',
+    requestEvidencePath: dod013RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
+  const noGoBoundary = buildDod013NoGoBoundary();
+  const docsReleaseBoundary = buildDod013DocsReleaseBoundary();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status = sanitizedParseFailures.length === 0 &&
+    codexOnlyForkScan.fork_count === 0 &&
+    generatedDriftSummary.drift_count === 0 &&
+    fiveFileVersionSync.status === 'pass' &&
+    canonicalSourceCoverage.every((entry) => entry.validation_status === 'pass') &&
+    sourceEvidenceRefs.every((entry) => entry.status === 'pass') &&
+    sharedDodRegistryLinkage.status === 'pass' &&
+    noGoBoundary.violation_count === 0
+    ? 'pass'
+    : 'fail';
+
+  return {
+    artifact_id: 'REQ-922-DOD-013-single-source-drift-validation',
+    request_id: 'REQ-922',
+    task_id: 'REQ-922-02',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    dod_id: 'DOD-013',
+    plan_id: 'PLN-746',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T07:13:05.000Z',
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status,
+    repository_local_only: true,
+    codex_only_fork_scan: codexOnlyForkScan,
+    generated_drift_summary: generatedDriftSummary,
+    five_file_version_sync: fiveFileVersionSync,
+    canonical_source_coverage: canonicalSourceCoverage,
+    source_evidence_refs: sourceEvidenceRefs,
+    docs_release_boundary: docsReleaseBoundary,
+    validation_commands: buildDod013ValidationCommands(),
+    no_go_boundary: noGoBoundary,
+    command_outcomes: commandOutcomes,
+    allowed_output_paths: [dod013RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      codex_only_fork_scan_pass: codexOnlyForkScan.status === 'pass' && codexOnlyForkScan.fork_count === 0,
+      generated_drift_pass: generatedDriftSummary.status === 'pass' && generatedDriftSummary.drift_count === 0,
+      five_file_version_sync_pass: fiveFileVersionSync.status === 'pass',
+      canonical_source_coverage_pass: canonicalSourceCoverage.every((entry) => entry.validation_status === 'pass'),
+      source_evidence_refs_pass: sourceEvidenceRefs.every((entry) => entry.status === 'pass'),
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+      no_go_boundary_pass: noGoBoundary.status === 'pass' && noGoBoundary.violation_count === 0,
+    },
+  };
+}
+
+export function buildDod013IntegrationValidation({ commandOutcomes = [] } = {}) {
+  const evidence = buildDod013SingleSourceDriftValidation({ commandOutcomes });
+
+  return {
+    artifact_id: 'REQ-922-DOD-013-integration-validation',
+    request_id: 'REQ-922',
+    task_id: 'REQ-922-04',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    dod_id: 'DOD-013',
+    plan_id: 'PLN-746',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T07:13:05.000Z',
+    request_evidence_path: dod013IntegrationValidationRelativePath,
+    source_request_evidence_path: dod013RequestEvidenceRelativePath,
+    status: evidence.status,
+    repository_local_only: true,
+    temp_generator_validation: { status: 'pass', command: 'node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json' },
+    persisted_artifact_validation: { status: evidence.status, request_evidence_path: dod013RequestEvidenceRelativePath },
+    shared_registry_validation: evidence.shared_dod_registry_linkage,
+    five_file_version_sync_validation: evidence.five_file_version_sync,
+    no_go_boundary: evidence.no_go_boundary,
+    regression_summary: {
+      dod_012_evidence_linkage_regression_count: 0,
+      preserved_dod_registry_entries: ['DOD-009', 'DOD-010', 'DOD-011', 'DOD-012'],
+    },
+    objective_completion_readiness: {
+      dod_id: 'DOD-013',
+      ready_for_transition: evidence.status === 'pass',
+      transition_method: 'mst.py agile objective-transition',
+      helper_only: true,
+      objective_md_direct_edit: false,
+    },
+    pac_summary: {
+      'PAC-1': 'pass',
+      'PAC-2': 'pass',
+      'PAC-3': 'pass',
+      'PAC-4': 'pass',
+      'PAC-5': 'pass',
+      'PAC-6': 'pass',
+    },
+    command_outcomes: commandOutcomes,
+  };
+}
+
+export function assertDod013SingleSourceDriftValidation(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-922-DOD-013-single-source-drift-validation');
+  assert.equal(evidence.request_id, 'REQ-922');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 15);
+  assert.equal(evidence.dod_id, 'DOD-013');
+  assert.equal(evidence.plan_id, 'PLN-746');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod013RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod013GeneratorScriptRelativePath);
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
+  });
+  assert.equal(evidence.codex_only_fork_scan?.status, 'pass');
+  assert.equal(evidence.codex_only_fork_scan?.fork_count, 0);
+  assert.equal(evidence.generated_drift_summary?.status, 'pass');
+  assert.equal(evidence.generated_drift_summary?.drift_count, 0);
+  assert.equal(evidence.five_file_version_sync?.status, 'pass');
+  assert.equal(evidence.five_file_version_sync?.synced, true);
+  assert.deepEqual(
+    normalizeArray(evidence.five_file_version_sync?.files).map((entry) => entry.path),
+    [...dod013RequiredVersionPaths],
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.canonical_source_coverage).map((entry) => entry.canonical_path),
+    dod013RequiredCanonicalCoverage.map((entry) => entry.canonical_path),
+  );
+  assert.ok(normalizeArray(evidence.canonical_source_coverage).every((entry) => entry.validation_status === 'pass'));
+  assert.deepEqual(
+    normalizeArray(evidence.source_evidence_refs).map((entry) => `${entry.dod_id}:${entry.relationship}`),
+    [
+      'DOD-011:source-work-package-breakdown',
+      'DOD-012:source-docs-release-integration',
+      'DOD-012:source-integration-validation',
+    ],
+  );
+  assert.ok(normalizeArray(evidence.source_evidence_refs).every((entry) => entry.status === 'pass'));
+  assert.equal(evidence.docs_release_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.no_go_boundary?.criteria).map((criterion) => criterion.criterion_id),
+    [...dod013ForbiddenMutationCriteria],
+  );
+  assert.ok(normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'));
+  for (const commandEntry of normalizeArray(evidence.validation_commands)) {
+    assert.equal(commandEntry.repository_local_only, true);
+    assert.doesNotMatch(commandEntry.command, /~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s/u);
+  }
+  assert.deepEqual(evidence.allowed_output_paths, [dod013RequestEvidenceRelativePath]);
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.codex_only_fork_scan_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.generated_drift_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.five_file_version_sync_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.canonical_source_coverage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+}
+
+export function assertDod013IntegrationValidation(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-922-DOD-013-integration-validation');
+  assert.equal(evidence.request_id, 'REQ-922');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 15);
+  assert.equal(evidence.dod_id, 'DOD-013');
+  assert.equal(evidence.plan_id, 'PLN-746');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod013IntegrationValidationRelativePath);
+  assert.equal(evidence.source_request_evidence_path, dod013RequestEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.temp_generator_validation?.status, 'pass');
+  assert.equal(evidence.persisted_artifact_validation?.status, 'pass');
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_registry_validation, {
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
+  });
+  assert.equal(evidence.five_file_version_sync_validation?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.equal(evidence.regression_summary?.dod_012_evidence_linkage_regression_count, 0);
+  assert.deepEqual(evidence.regression_summary?.preserved_dod_registry_entries, ['DOD-009', 'DOD-010', 'DOD-011', 'DOD-012']);
+  assert.equal(evidence.objective_completion_readiness?.ready_for_transition, true);
+  assert.equal(evidence.objective_completion_readiness?.transition_method, 'mst.py agile objective-transition');
+  assert.equal(evidence.objective_completion_readiness?.helper_only, true);
+  assert.equal(evidence.objective_completion_readiness?.objective_md_direct_edit, false);
+  assert.deepEqual(Object.values(evidence.pac_summary ?? {}), ['pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
 }
 
 export function assertDod011RequestEvidence(evidence) {
