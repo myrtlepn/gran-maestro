@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import subprocess
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 
@@ -61,6 +64,23 @@ FORBIDDEN_PAYLOAD_KEYS = {
     "llm_summary",
     "semantic_summary",
 }
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+HOOK_PLUGIN_PATH = REPO_ROOT / ".claude-plugin" / "plugin.json"
+HOOK_CONFIG_PATH = REPO_ROOT / "hooks" / "hooks.json"
+DISPATCH_RESULT_KEYS = {
+    "agi_id",
+    "sprint",
+    "status",
+    "pln_id",
+    "req_id",
+    "commit_sha",
+    "sprint_kind",
+    "exit_code",
+    "failure_reason",
+    "result_recorded",
+    "retrospective_recorded",
+}
 
 
 def _health_module() -> object:
@@ -83,6 +103,65 @@ def _validate(fixture: dict[str, Any]) -> dict[str, Any]:
     payload = fn(fixture)
     assert isinstance(payload, dict), "state-machine health validator must return a JSON object"
     return payload
+
+
+def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(MST_SCRIPT), *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _seed_request_fixture(workspace: Path, *, req_id: str, task_num: str) -> Path:
+    request_dir = workspace / ".gran-maestro" / "requests" / req_id
+    request_dir.mkdir(parents=True, exist_ok=True)
+    request_path = request_dir / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "id": req_id,
+                "status": "phase2_execution",
+                "current_phase": 2,
+                "tasks": [
+                    {
+                        "id": f"{req_id}-{task_num}",
+                        "task_num": task_num,
+                        "status": "pending",
+                    }
+                ],
+                "background_task_ids": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return request_path
+
+
+def _seed_agile_session(workspace: Path, *, agi_id: str) -> Path:
+    session_dir = workspace / ".gran-maestro" / "agile" / agi_id
+    (session_dir / "sprints").mkdir(parents=True, exist_ok=True)
+    (session_dir / "index").mkdir(parents=True, exist_ok=True)
+    (session_dir / "session.json").write_text(
+        json.dumps({"id": agi_id}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return session_dir
+
+
+def _single_trace_file(traces_dir: Path) -> Path:
+    traces = sorted(traces_dir.glob("*.md"))
+    assert len(traces) == 1, traces
+    return traces[0]
 
 
 def _walk_json(value: Any, path: str = "$") -> Iterator[tuple[str, Any]]:
@@ -658,3 +737,185 @@ def test_fixture_catalog_keeps_pac15_final_evidence_hooks_verifiable_later() -> 
         assert isinstance(item, dict), item
         assert item.get("pac") in {f"PAC-{index}" for index in range(1, 16)}, item
         assert isinstance(item.get("evidence_path"), str) and item["evidence_path"].startswith(".gran-maestro/"), item
+
+
+def test_dod007_hook_canonical_source_uses_plugin_registration_and_repo_hooks_only() -> None:
+    plugin_manifest = _read_json(HOOK_PLUGIN_PATH)
+    hook_config = _read_json(HOOK_CONFIG_PATH)
+
+    assert plugin_manifest.get("hooks") == "./hooks/hooks.json"
+
+    commands: list[str] = []
+    for entries in hook_config.get("hooks", {}).values():
+        assert isinstance(entries, list), entries
+        for entry in entries:
+            hooks = entry.get("hooks")
+            assert isinstance(hooks, list), entry
+            for hook in hooks:
+                command = hook.get("command")
+                assert isinstance(command, str) and command.startswith("${CLAUDE_PLUGIN_ROOT}/hooks/"), hook
+                commands.append(command)
+
+    assert commands, hook_config
+    assert ".claude/hooks/" not in json.dumps(
+        {"plugin_manifest": plugin_manifest, "hook_config": hook_config},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    for command in commands:
+        relative = command.split("${CLAUDE_PLUGIN_ROOT}/", 1)[1]
+        assert (REPO_ROOT / relative).exists(), command
+
+
+def test_dod007_dispatch_compatibility_preserves_completion_log_trace_and_metadata(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    req_id = "REQ-913"
+    agi_id = "AGI-040"
+    pln_id = "PLN-737"
+    task_num = "02"
+    task_id = "REQ-913-T02"
+    attempt_id = "REQ-913-02-A1"
+
+    _seed_request_fixture(workspace, req_id=req_id, task_num=task_num)
+    _seed_agile_session(workspace, agi_id=agi_id)
+
+    log_dir = workspace / ".gran-maestro" / "agile" / agi_id / "sprints" / "S07"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    run_result = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        task_id,
+        "--provider",
+        "claude",
+        "--model",
+        "sonnet",
+        "--log-dir",
+        str(log_dir),
+        "--trace",
+        f"{req_id}/{task_id}",
+        "--",
+        sys.executable,
+        "-c",
+        "print('status=completed')",
+    )
+    assert run_result.returncode == 0, run_result.stderr
+
+    state_path = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
+    state_payload = _read_json(state_path)
+    assert state_payload["phase"] == "done"
+    assert state_payload["task_id"] == task_id
+
+    running_log_path = log_dir / "running.log"
+    assert running_log_path.exists(), running_log_path
+    running_log = running_log_path.read_text(encoding="utf-8")
+    assert any(token in running_log for token in ("status=completed", "phase", "done", "failure")), running_log
+
+    trace_path = _single_trace_file(log_dir / "traces")
+    trace_text = trace_path.read_text(encoding="utf-8")
+    assert task_id in trace_path.name
+    assert f"task_id: {task_id}" in trace_text
+    assert f"trace_label: {req_id}/{task_id}" in trace_text
+    assert f"running_log_path: {running_log_path}" in trace_text
+
+    record_result = _run_mst(
+        workspace,
+        "request",
+        "record-phase2-dispatch-attempt",
+        req_id,
+        "--task-num",
+        task_num,
+        "--task-id",
+        task_id,
+        "--attempt-id",
+        attempt_id,
+        "--dispatched-at",
+        "2026-05-20T02:16:10Z",
+        "--agent",
+        "codex-dev",
+        "--worktree-path",
+        str(workspace),
+        "--log-path",
+        str(running_log_path),
+        "--expected-task-status-before",
+        "pending",
+        "--status",
+        "done",
+        "--run-state-path",
+        str(state_path),
+        "--json",
+    )
+    assert record_result.returncode == 0, record_result.stderr
+
+    request_payload = _read_json(workspace / ".gran-maestro" / "requests" / req_id / "request.json")
+    background_attempt = request_payload["background_task_ids"][0]
+    task_attempt = request_payload["tasks"][0]["attempts"][0]
+    assert background_attempt["task_id"] == task_id
+    assert task_attempt["task_id"] == task_id
+    assert task_attempt["task_num"] == task_num
+    assert task_attempt["log_path"] == str(running_log_path)
+    assert task_attempt["run_state_path"] == str(state_path)
+
+    dispatch_result = _run_mst(
+        workspace,
+        "agile",
+        "dispatch-result",
+        agi_id,
+        "--sprint",
+        "7",
+        "--status",
+        "success",
+        "--exit-code",
+        "0",
+        "--pln",
+        pln_id,
+        "--req",
+        req_id,
+        "--json",
+    )
+    assert dispatch_result.returncode == 0, dispatch_result.stderr
+
+    dispatch_result_path = log_dir / "dispatch-result.json"
+    dispatch_payload = _read_json(dispatch_result_path)
+    assert set(dispatch_payload) == DISPATCH_RESULT_KEYS
+    assert dispatch_payload["status"] == "success"
+    assert dispatch_payload["req_id"] == req_id
+    assert dispatch_payload["pln_id"] == pln_id
+
+
+def test_dod007_scope_guard_keeps_dispatch_evidence_inside_existing_surfaces() -> None:
+    request_source = (REPO_ROOT / "scripts" / "mst_cmds" / "request.py").read_text(encoding="utf-8")
+    request_writer_source = (
+        REPO_ROOT / "scripts" / "mst_cmds" / "_common_shards" / "part_001.py"
+    ).read_text(encoding="utf-8")
+    agile_dispatch_source = (
+        REPO_ROOT / "scripts" / "mst_cmds" / "agile_shards" / "part_003.py"
+    ).read_text(encoding="utf-8")
+
+    for required_surface in (
+        "record-phase2-dispatch-attempt",
+        "background_task_ids",
+        "attempt_id",
+        "dispatch-result.json",
+    ):
+        assert (
+            required_surface in request_source
+            or required_surface in request_writer_source
+            or required_surface in agile_dispatch_source
+        )
+
+    for forbidden_scope in (
+        "claude -p /mst:resume",
+        "queue drain",
+        "queue claim",
+        "shell injection",
+        "malicious path fixture",
+        "parallel worktree isolation",
+        "--trace-path",
+        "--evidence-id",
+    ):
+        assert forbidden_scope not in request_source
+        assert forbidden_scope not in request_writer_source
+        assert forbidden_scope not in agile_dispatch_source
