@@ -22,6 +22,21 @@ extension/package.json           → "version": "X.Y.Z"
 
 ## 3. 매니페스트 정합성 확인
 
+### Codex migration docs/release gate (DOD-012)
+
+Codex plugin migration을 포함한 릴리스는 Claude Code plugin canonical release와 Codex generated asset 검증을 분리해서 확인합니다.
+
+- generated Codex assets: `.codex-plugin/`, `.agents/plugins/`, `skills/`, `agents/`, `hooks/hooks.json`가 repository-local 산출물로 존재하는지 확인합니다.
+- repository-local validation: 실제 Codex install/cache refresh/reload 없이 아래 명령을 실행합니다.
+  ```bash
+  node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
+  npm test
+  ```
+- DOD evidence linkage: `.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json`가 shared DOD registry의 DOD-012 entry와 일치하고 DOD-011 source evidence를 참조해야 합니다.
+- no-go boundary: user-home mutation, `~/.codex/config.toml` mutation, external Codex install/cache refresh/reload, symlink creation, plugin cache mutation, `.claude/hooks` direct edit, `objective.md` direct edit가 없어야 합니다.
+- 5-file version sync: 기존 5파일 버전 동기화 gate를 Codex docs/release gate와 함께 확인합니다.
+- DOD-013 follow-up boundary: single-source drift validation은 supporting/follow-up only로 남기고 done/accepted/completed로 승격하지 않습니다.
+
 ### agents 배열 검증
 
 `plugin.json`의 `agents` 배열이 `agents/` 디렉토리의 모든 `.md` 파일과 일치하는지 확인합니다.

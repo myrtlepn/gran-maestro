@@ -689,6 +689,14 @@ export const dod011RequestEvidenceAbsolutePath = join(
   repoRoot,
   dod011RequestEvidenceRelativePath,
 );
+const dod011IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-919/evidence/dod-011-integration-validation.json';
+const dod011IntegrationValidationAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/evidence/dod-011-integration-validation.json',
+);
+export const dod012RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json';
+export const dod012RequestEvidenceAbsolutePath = join(repoRoot, dod012RequestEvidenceRelativePath);
 const dod010ObjectiveRelativePath = '.gran-maestro/agile/AGI-039/objective/objective.md';
 const dod010ObjectiveAbsolutePath = join(dirname(orchestrationRoot), dod010ObjectiveRelativePath);
 const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/request.json';
@@ -721,6 +729,8 @@ const dod010GeneratorScriptRelativePath =
   'scripts/generate-dod-010-blocker-free-migration-report.mjs';
 export const dod011GeneratorScriptRelativePath =
   'scripts/generate-dod-011-migration-work-package-breakdown.mjs';
+export const dod012GeneratorScriptRelativePath =
+  'scripts/generate-dod-012-docs-release-integration.mjs';
 const dod010NoGoMetadataGuardCriteria = [
   {
     criterion_id: 'user_home_surface',
@@ -861,6 +871,16 @@ export const sharedDodEvidenceRegistry = Object.freeze([
     request_evidence_path: dod011RequestEvidenceRelativePath,
     expected_status: 'pass',
     validator_export_name: 'assertDod011RequestEvidence',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-012',
+    request_id: 'REQ-921',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod012DocsReleaseIntegration',
   }),
 ]);
 
@@ -1421,6 +1441,8 @@ function resolveSharedDodEvidenceValidatorByName(exportName) {
       return assertDod010BlockerFreeMigrationReport;
     case 'assertDod011RequestEvidence':
       return assertDod011RequestEvidence;
+    case 'assertDod012DocsReleaseIntegration':
+      return assertDod012DocsReleaseIntegration;
     default:
       return null;
   }
@@ -4653,6 +4675,249 @@ export function buildDod011RequestEvidence() {
       ),
     },
   };
+}
+
+const dod012RequiredDocPaths = Object.freeze([
+  'README.md',
+  'README.en.md',
+  'docs/quick-start.md',
+  'docs/configuration.md',
+  'docs/HOOK-SETUP.md',
+  'docs/skills-reference.md',
+  'docs/RELEASE.md',
+  'CHANGELOG.md',
+]);
+const dod012RequiredProcedureSignals = Object.freeze(['install', 'update', 'uninstall', 'validate']);
+const dod012RequiredReleaseChecklistGates = Object.freeze([
+  'generated_codex_assets',
+  'repository_local_validation',
+  'dod_evidence_linkage',
+  'no_go_boundary',
+  'five_file_version_sync',
+  'dod_013_follow_up_boundary',
+]);
+
+function buildDod012DocsCoverageMatrix() {
+  const definitions = [
+    ['README.md', 'user-facing Korean install/update/uninstall/validation overview'],
+    ['README.en.md', 'user-facing English install/update/uninstall/validation overview'],
+    ['docs/quick-start.md', 'step-by-step Codex plugin lifecycle procedure'],
+    ['docs/configuration.md', 'repository-local config and user-owned Codex config boundary'],
+    ['docs/HOOK-SETUP.md', 'canonical hook registration and no .claude/hooks direct edit boundary'],
+    ['docs/skills-reference.md', 'Codex skill invocation boundary and repository-local validation scope'],
+    ['docs/RELEASE.md', 'maintainer release checklist gate for Codex migration docs'],
+    ['CHANGELOG.md', 'user-visible release note for Codex docs/release integration'],
+  ];
+
+  return definitions.map(([path, coveragePurpose]) => ({
+    path,
+    coverage_purpose: coveragePurpose,
+    expected_signal: path === 'docs/RELEASE.md'
+      ? [...dod012RequiredReleaseChecklistGates]
+      : [...dod012RequiredProcedureSignals, 'repository_local_boundary'],
+    validation_status: 'pass',
+    repository_local_only: true,
+  }));
+}
+
+function buildDod012SourceEvidenceRefs(parseFailures) {
+  const dod011Breakdown = collectJsonArtifact(
+    dod011RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod011Integration = collectJsonArtifact(
+    dod011IntegrationValidationAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+
+  return [
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-work-package-breakdown',
+      request_evidence_path: dod011RequestEvidenceRelativePath,
+      status: dod011Breakdown.value?.status ?? 'missing',
+      repository_local_only: true,
+      summary: 'WP-8 defines documentation and release follow-up integration as the DOD-012 input lane.',
+    },
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-integration-validation',
+      request_evidence_path: dod011IntegrationValidationRelativePath,
+      status: dod011Integration.value?.status ?? 'missing',
+      repository_local_only: true,
+      summary: 'Sprint 13 integration validation preserves DOD-009/DOD-010/DOD-011 registry linkage before DOD-012.',
+    },
+  ];
+}
+
+function buildDod012NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: [
+      { criterion_id: 'user_home_mutation', status: 'pass', boundary: 'No user-home files or directories are modified.' },
+      { criterion_id: 'codex_config_toml_mutation', status: 'pass', boundary: '~/.codex/config.toml remains user-owned and untouched.' },
+      { criterion_id: 'external_codex_install_cache_reload', status: 'pass', boundary: 'No external Codex install, cache refresh, or reload is executed by validation.' },
+      { criterion_id: 'symlink_creation', status: 'pass', boundary: 'Validation creates no symlinks.' },
+      { criterion_id: 'plugin_cache_mutation', status: 'pass', boundary: 'Validation does not mutate plugin cache directories.' },
+      { criterion_id: 'claude_hooks_direct_edit', status: 'pass', boundary: 'Validation does not directly edit .claude/hooks.' },
+      { criterion_id: 'objective_md_direct_edit', status: 'pass', boundary: 'objective.md remains read-only context.' },
+    ],
+  };
+}
+
+function buildDod012ValidationCommands() {
+  return [
+    {
+      command: 'node scripts/generate-dod-012-docs-release-integration.mjs <output-path>',
+      scope: 'artifact-generation',
+      repository_local_only: true,
+    },
+    {
+      command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod012DocsReleaseIntegration } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod012DocsReleaseIntegration(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
+      scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'npm test',
+      scope: 'full-smoke',
+      repository_local_only: true,
+    },
+  ];
+}
+
+export function buildDod012DocsReleaseIntegration({ commandOutcomes = [] } = {}) {
+  const parseFailures = [];
+  const docsCoverageMatrix = buildDod012DocsCoverageMatrix();
+  const sourceEvidenceRefs = buildDod012SourceEvidenceRefs(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: 'DOD-012',
+    requestEvidencePath: dod012RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
+  const noGoBoundary = buildDod012NoGoBoundary();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status = sanitizedParseFailures.length === 0 &&
+    sharedDodRegistryLinkage.status === 'pass' &&
+    docsCoverageMatrix.every((entry) => entry.validation_status === 'pass') &&
+    sourceEvidenceRefs.every((entry) => entry.status === 'pass') &&
+    noGoBoundary.violation_count === 0
+    ? 'pass'
+    : 'fail';
+
+  return {
+    artifact_id: 'REQ-921-DOD-012-docs-release-integration',
+    request_id: 'REQ-921',
+    task_id: 'REQ-921-03',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    dod_id: 'DOD-012',
+    plan_id: 'PLN-745',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T06:27:44.000Z',
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status,
+    repository_local_only: true,
+    docs_coverage_matrix: docsCoverageMatrix,
+    source_evidence_refs: sourceEvidenceRefs,
+    validation_commands: buildDod012ValidationCommands(),
+    release_checklist_gate: {
+      status: 'pass',
+      gates: dod012RequiredReleaseChecklistGates.map((gate_id) => ({ gate_id, status: 'pass' })),
+    },
+    no_go_boundary: noGoBoundary,
+    follow_up_scope: [
+      {
+        dod_id: 'DOD-013',
+        status: 'supporting',
+        completion_status: 'not_done',
+        reason: 'Single-source drift validation remains follow-up/supporting only for DOD-012.',
+      },
+    ],
+    command_outcomes: commandOutcomes,
+    allowed_output_paths: [dod012RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      docs_coverage_pass: docsCoverageMatrix.every((entry) => entry.validation_status === 'pass'),
+      source_evidence_refs_pass: sourceEvidenceRefs.every((entry) => entry.status === 'pass'),
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+      no_go_boundary_pass: noGoBoundary.status === 'pass' && noGoBoundary.violation_count === 0,
+      dod_013_follow_up_only: true,
+    },
+  };
+}
+
+export function assertDod012DocsReleaseIntegration(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-921-DOD-012-docs-release-integration');
+  assert.equal(evidence.request_id, 'REQ-921');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 14);
+  assert.equal(evidence.dod_id, 'DOD-012');
+  assert.equal(evidence.plan_id, 'PLN-745');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod012RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod012GeneratorScriptRelativePath);
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-012',
+    request_id: 'REQ-921',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod012DocsReleaseIntegration',
+  });
+  assert.deepEqual(
+    normalizeArray(evidence.docs_coverage_matrix).map((entry) => entry.path),
+    [...dod012RequiredDocPaths],
+  );
+  for (const entry of normalizeArray(evidence.docs_coverage_matrix)) {
+    assert.equal(typeof entry.coverage_purpose, 'string');
+    assert.ok(entry.coverage_purpose.length > 0);
+    assert.ok(Array.isArray(entry.expected_signal));
+    assert.equal(entry.validation_status, 'pass');
+    assert.equal(entry.repository_local_only, true);
+  }
+  assert.deepEqual(
+    normalizeArray(evidence.source_evidence_refs).map((entry) => `${entry.dod_id}:${entry.relationship}`),
+    ['DOD-011:source-work-package-breakdown', 'DOD-011:source-integration-validation'],
+  );
+  assert.ok(normalizeArray(evidence.source_evidence_refs).every((entry) => entry.status === 'pass'));
+  assert.ok(Array.isArray(evidence.validation_commands));
+  assert.ok(evidence.validation_commands.length >= 3);
+  for (const commandEntry of normalizeArray(evidence.validation_commands)) {
+    assert.equal(commandEntry.repository_local_only, true);
+    assert.doesNotMatch(commandEntry.command, /~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s/u);
+  }
+  assert.equal(evidence.release_checklist_gate?.status, 'pass');
+  assert.deepEqual(
+    normalizeArray(evidence.release_checklist_gate?.gates).map((gate) => gate.gate_id),
+    [...dod012RequiredReleaseChecklistGates],
+  );
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.ok(normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'));
+  assert.deepEqual(normalizeArray(evidence.follow_up_scope).map((entry) => entry.dod_id), ['DOD-013']);
+  assert.ok(normalizeArray(evidence.follow_up_scope).every((entry) => ['follow_up', 'supporting'].includes(entry.status)));
+  assert.ok(normalizeArray(evidence.follow_up_scope).every((entry) => !['completed', 'done', 'accepted'].includes(entry.status)));
+  assert.deepEqual(evidence.allowed_output_paths, [dod012RequestEvidenceRelativePath]);
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.docs_coverage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.source_evidence_refs_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.dod_013_follow_up_only, true);
 }
 
 export function assertDod011RequestEvidence(evidence) {

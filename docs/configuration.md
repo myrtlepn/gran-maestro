@@ -13,6 +13,15 @@
 
 대시보드의 **Settings** 탭에서도 웹 UI로 변경할 수 있습니다.
 
+## Codex migration config boundary
+
+Gran Maestro 설정의 source of truth는 프로젝트 내부 `.gran-maestro/config.json`과 template defaults입니다. Codex plugin migration 문서·릴리스 검증은 repository-local fixture/evidence만 사용하며 실제 사용자 소유 설정을 변경하지 않습니다.
+
+- 수정 가능 범위: repository-local `.gran-maestro/config.json`, `templates/defaults/config.json`, generated evidence.
+- 사용자 소유 범위: `~/.codex/config.toml`, `~/.agents`, `~/.claude`, user-global config는 설치자가 직접 관리합니다.
+- DOD-012 검증: `node scripts/generate-dod-012-docs-release-integration.mjs <output>`와 `npm test`로 coverage를 확인하며 user-home mutation, external Codex install/cache refresh/reload, symlink creation, plugin cache mutation을 수행하지 않습니다.
+- DOD-013 single-source drift validation은 follow-up/supporting boundary로만 기록하며 DOD-012에서 완료로 승격하지 않습니다.
+
 ---
 
 ## 목차

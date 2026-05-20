@@ -16,6 +16,7 @@ import {
   assertDod009ClaudePluginRegressionMatrix,
   assertDod010BlockerFreeMigrationReport,
   assertDod011RequestEvidence,
+  assertDod012DocsReleaseIntegration,
   assertDod009RequestEvidence,
   assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
@@ -31,6 +32,7 @@ import {
   buildDod009ClaudePluginRegressionMatrix,
   buildDod010BlockerFreeMigrationReport,
   buildDod011RequestEvidence,
+  buildDod012DocsReleaseIntegration,
   buildDod009RequestEvidence,
   scanDod008ScenarioSchemaMetadata,
   scanDod008RequestEvidenceMetadata,
@@ -49,6 +51,8 @@ import {
   dod010BlockerFreeMigrationReportRelativePath,
   dod011GeneratorScriptRelativePath,
   dod011RequestEvidenceRelativePath,
+  dod012GeneratorScriptRelativePath,
+  dod012RequestEvidenceRelativePath,
   dod010EvidenceByDodIds,
   dod010NormalizedBlockerTypes,
   dod008CoreWorkflowSmokeArtifactTypes,
@@ -305,6 +309,16 @@ const sprint12ForcedWireRegistryExpectedEntries = {
     expected_status: 'pass',
     validator_export_name: 'assertDod011RequestEvidence',
   },
+  'DOD-012': {
+    dod_id: 'DOD-012',
+    request_id: 'REQ-921',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod012DocsReleaseIntegration',
+  },
 };
 
 const dod011RequiredPhaseOrder = [
@@ -343,6 +357,10 @@ function readRepoFile(path) {
 
 function readDod011RequestEvidenceArtifact() {
   return JSON.parse(readRepoFile(dod011RequestEvidenceRelativePath));
+}
+
+function readDod012RequestEvidenceArtifact() {
+  return JSON.parse(readRepoFile(dod012RequestEvidenceRelativePath));
 }
 
 function extractDod011ValidationCommand(commandEntry) {
@@ -2628,7 +2646,51 @@ test('DOD-011 persisted request evidence preserves predecessor linkage and follo
   );
 });
 
-test('shared DOD evidence registry requires DOD-009, DOD-010, and DOD-011 linkage metadata', () => {
+test('DOD-012 smoke surface exports the docs release integration helper contract', () => {
+  assert.equal(dod012RequestEvidenceRelativePath, '.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json');
+  assert.equal(dod012GeneratorScriptRelativePath, 'scripts/generate-dod-012-docs-release-integration.mjs');
+  assert.equal(typeof buildDod012DocsReleaseIntegration, 'function');
+  assert.equal(typeof assertDod012DocsReleaseIntegration, 'function');
+});
+
+test('DOD-012 persisted request evidence records docs coverage and source linkage', () => {
+  const evidence = readDod012RequestEvidenceArtifact();
+
+  assertDod012DocsReleaseIntegration(evidence);
+  assert.deepEqual(
+    evidence.docs_coverage_matrix.map((entry) => entry.path),
+    [
+      'README.md',
+      'README.en.md',
+      'docs/quick-start.md',
+      'docs/configuration.md',
+      'docs/HOOK-SETUP.md',
+      'docs/skills-reference.md',
+      'docs/RELEASE.md',
+      'CHANGELOG.md',
+    ],
+  );
+  assert.deepEqual(
+    evidence.source_evidence_refs.map((entry) => `${entry.dod_id}:${entry.relationship}:${entry.status}`),
+    ['DOD-011:source-work-package-breakdown:pass', 'DOD-011:source-integration-validation:pass'],
+  );
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, sprint12ForcedWireRegistryExpectedEntries['DOD-012']);
+});
+
+test('DOD-012 persisted request evidence keeps validation repository-local and DOD-013 follow-up only', () => {
+  const evidence = readDod012RequestEvidenceArtifact();
+
+  assertDod012DocsReleaseIntegration(evidence);
+  assert.equal(evidence.no_go_boundary.status, 'pass');
+  assert.equal(evidence.no_go_boundary.violation_count, 0);
+  assert.ok(evidence.validation_commands.every((entry) => entry.repository_local_only === true));
+  assert.ok(evidence.validation_commands.every((entry) => !/~\/|\/Users\/|\.claude\/hooks|objective\.md|plugin cache|ln -s/u.test(entry.command)));
+  assert.deepEqual(evidence.follow_up_scope.map((entry) => entry.dod_id), ['DOD-013']);
+  assert.ok(evidence.follow_up_scope.every((entry) => ['follow_up', 'supporting'].includes(entry.status)));
+  assert.ok(evidence.follow_up_scope.every((entry) => !['completed', 'done', 'accepted'].includes(entry.status)));
+});
+
+test('shared DOD evidence registry requires DOD-009, DOD-010, DOD-011, and DOD-012 linkage metadata', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
     const validation = validateSharedDodEvidenceRegistryEntry(entry);
@@ -2637,7 +2699,7 @@ test('shared DOD evidence registry requires DOD-009, DOD-010, and DOD-011 linkag
   }
 });
 
-test('shared DOD evidence registry keeps DOD-009, DOD-010, and DOD-011 artifacts repo-scoped and validator-linked', () => {
+test('shared DOD evidence registry keeps DOD-009, DOD-010, DOD-011, and DOD-012 artifacts repo-scoped and validator-linked', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
     const validation = validateSharedDodEvidenceRegistryEntry(entry);
@@ -2665,6 +2727,11 @@ test('shared DOD evidence registry keeps DOD-009, DOD-010, and DOD-011 artifacts
 
     if (expected.dod_id === 'DOD-011') {
       assertDod011RequestEvidence(artifact);
+      continue;
+    }
+
+    if (expected.dod_id === 'DOD-012') {
+      assertDod012DocsReleaseIntegration(artifact);
       continue;
     }
 

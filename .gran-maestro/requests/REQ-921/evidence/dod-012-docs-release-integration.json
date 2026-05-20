@@ -1,0 +1,273 @@
+{
+  "artifact_id": "REQ-921-DOD-012-docs-release-integration",
+  "request_id": "REQ-921",
+  "task_id": "REQ-921-03",
+  "agi_id": "AGI-039",
+  "sprint": 14,
+  "dod_id": "DOD-012",
+  "plan_id": "PLN-745",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T06:27:44.000Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json",
+  "generator_script_path": "scripts/generate-dod-012-docs-release-integration.mjs",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-012",
+      "request_id": "REQ-921",
+      "agi_id": "AGI-039",
+      "sprint": 14,
+      "generator_script_path": "scripts/generate-dod-012-docs-release-integration.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod012DocsReleaseIntegration",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
+  "status": "pass",
+  "repository_local_only": true,
+  "docs_coverage_matrix": [
+    {
+      "path": "README.md",
+      "coverage_purpose": "user-facing Korean install/update/uninstall/validation overview",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "README.en.md",
+      "coverage_purpose": "user-facing English install/update/uninstall/validation overview",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "docs/quick-start.md",
+      "coverage_purpose": "step-by-step Codex plugin lifecycle procedure",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "docs/configuration.md",
+      "coverage_purpose": "repository-local config and user-owned Codex config boundary",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "docs/HOOK-SETUP.md",
+      "coverage_purpose": "canonical hook registration and no .claude/hooks direct edit boundary",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "docs/skills-reference.md",
+      "coverage_purpose": "Codex skill invocation boundary and repository-local validation scope",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "docs/RELEASE.md",
+      "coverage_purpose": "maintainer release checklist gate for Codex migration docs",
+      "expected_signal": [
+        "generated_codex_assets",
+        "repository_local_validation",
+        "dod_evidence_linkage",
+        "no_go_boundary",
+        "five_file_version_sync",
+        "dod_013_follow_up_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "path": "CHANGELOG.md",
+      "coverage_purpose": "user-visible release note for Codex docs/release integration",
+      "expected_signal": [
+        "install",
+        "update",
+        "uninstall",
+        "validate",
+        "repository_local_boundary"
+      ],
+      "validation_status": "pass",
+      "repository_local_only": true
+    }
+  ],
+  "source_evidence_refs": [
+    {
+      "dod_id": "DOD-011",
+      "request_id": "REQ-919",
+      "relationship": "source-work-package-breakdown",
+      "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+      "status": "pass",
+      "repository_local_only": true,
+      "summary": "WP-8 defines documentation and release follow-up integration as the DOD-012 input lane."
+    },
+    {
+      "dod_id": "DOD-011",
+      "request_id": "REQ-919",
+      "relationship": "source-integration-validation",
+      "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-integration-validation.json",
+      "status": "pass",
+      "repository_local_only": true,
+      "summary": "Sprint 13 integration validation preserves DOD-009/DOD-010/DOD-011 registry linkage before DOD-012."
+    }
+  ],
+  "validation_commands": [
+    {
+      "command": "node scripts/generate-dod-012-docs-release-integration.mjs <output-path>",
+      "scope": "artifact-generation",
+      "repository_local_only": true
+    },
+    {
+      "command": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; import { assertDod012DocsReleaseIntegration } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod012DocsReleaseIntegration(JSON.parse(readFileSync('<output-path>','utf8')));\"",
+      "scope": "artifact-assertion",
+      "repository_local_only": true
+    },
+    {
+      "command": "npm test",
+      "scope": "full-smoke",
+      "repository_local_only": true
+    }
+  ],
+  "release_checklist_gate": {
+    "status": "pass",
+    "gates": [
+      {
+        "gate_id": "generated_codex_assets",
+        "status": "pass"
+      },
+      {
+        "gate_id": "repository_local_validation",
+        "status": "pass"
+      },
+      {
+        "gate_id": "dod_evidence_linkage",
+        "status": "pass"
+      },
+      {
+        "gate_id": "no_go_boundary",
+        "status": "pass"
+      },
+      {
+        "gate_id": "five_file_version_sync",
+        "status": "pass"
+      },
+      {
+        "gate_id": "dod_013_follow_up_boundary",
+        "status": "pass"
+      }
+    ]
+  },
+  "no_go_boundary": {
+    "status": "pass",
+    "violation_count": 0,
+    "criteria": [
+      {
+        "criterion_id": "user_home_mutation",
+        "status": "pass",
+        "boundary": "No user-home files or directories are modified."
+      },
+      {
+        "criterion_id": "codex_config_toml_mutation",
+        "status": "pass",
+        "boundary": "~/.codex/config.toml remains user-owned and untouched."
+      },
+      {
+        "criterion_id": "external_codex_install_cache_reload",
+        "status": "pass",
+        "boundary": "No external Codex install, cache refresh, or reload is executed by validation."
+      },
+      {
+        "criterion_id": "symlink_creation",
+        "status": "pass",
+        "boundary": "Validation creates no symlinks."
+      },
+      {
+        "criterion_id": "plugin_cache_mutation",
+        "status": "pass",
+        "boundary": "Validation does not mutate plugin cache directories."
+      },
+      {
+        "criterion_id": "claude_hooks_direct_edit",
+        "status": "pass",
+        "boundary": "Validation does not directly edit .claude/hooks."
+      },
+      {
+        "criterion_id": "objective_md_direct_edit",
+        "status": "pass",
+        "boundary": "objective.md remains read-only context."
+      }
+    ]
+  },
+  "follow_up_scope": [
+    {
+      "dod_id": "DOD-013",
+      "status": "supporting",
+      "completion_status": "not_done",
+      "reason": "Single-source drift validation remains follow-up/supporting only for DOD-012."
+    }
+  ],
+  "command_outcomes": [],
+  "allowed_output_paths": [
+    ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "evidence_lifecycle": {
+    "status": "pass",
+    "docs_coverage_pass": true,
+    "source_evidence_refs_pass": true,
+    "shared_dod_registry_linkage_pass": true,
+    "no_go_boundary_pass": true,
+    "dod_013_follow_up_only": true
+  }
+}

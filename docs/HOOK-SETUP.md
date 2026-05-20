@@ -1,5 +1,18 @@
 # Hook 설정 가이드
 
+## Codex migration hook boundary
+
+MST core hook의 canonical registration은 `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command입니다. 프로젝트의 `.claude/hooks` 사본은 source-dev/legacy helper일 뿐 일반 프로젝트의 canonical runtime이 아닙니다.
+
+Codex plugin migration docs/release validation은 hook boundary를 문서와 evidence로 검증하지만 `.claude/hooks`를 직접 편집하지 않습니다. 실제 사용자 홈 hook(`~/.claude/settings.json`)과 Codex 사용자 설정(`~/.codex/config.toml`)도 user-owned 영역이므로 DOD-012 검증 대상 명령은 repository-local fixture/evidence만 사용합니다.
+
+검증 명령:
+
+```bash
+node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
+npm test
+```
+
 ## PreToolUse Hook으로 config resolve 자동 실행
 
 Claude Code의 PreToolUse hook을 사용하면 매 Skill 실행 전 자동으로 `config resolve`를 수행하여

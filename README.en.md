@@ -58,6 +58,15 @@ Single-request mode is also available: `/mst:request`
 
 Detailed installation guide: [docs/quick-start.en.md](docs/quick-start.en.md)
 
+### Codex plugin migration boundary
+
+Gran Maestro's canonical distribution path is the Claude Code plugin. Codex plugin assets are validated as repository-local generated migration artifacts. If you need to install, update, or remove them in a real Codex environment, run the Codex/user-owned plugin workflow explicitly; DOD-012 validation never mutates `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
+
+- Install: inspect the repository-local generated Codex plugin assets, then explicitly load them through the user-owned Codex plugin workflow.
+- Update: run `npm test` and the DOD-012 evidence generator before updating the user environment separately.
+- Uninstall: remove user-owned Codex plugin registrations/caches manually. Gran Maestro validation does not execute uninstall commands.
+- Validate: use repository-local commands such as `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json` and `npm test`.
+
 ## What's New
 
 **0.54.x** highlights:

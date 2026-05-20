@@ -71,6 +71,22 @@ Claude Code에서 (v1.0.33 이상 필요):
 /plugin uninstall mst@gran-maestro
 ```
 
+### Codex plugin migration 설치·업데이트·삭제·검증
+
+Claude Code plugin 설치가 canonical 경로입니다. Codex plugin migration 산출물은 repository-local parity 검증 대상이며, 실제 Codex 사용자 환경은 사용자가 명시적으로 관리합니다.
+
+1. **설치 준비**: `.codex-plugin/`, `.agents/plugins/`, `skills/`, `agents/`, `hooks/hooks.json` 같은 repository-local 산출물을 검토합니다.
+2. **설치**: Codex 또는 사용자 소유 plugin manager에서 명시적으로 로드합니다. Gran Maestro 검증은 외부 Codex install/cache refresh/reload를 실행하지 않습니다.
+3. **업데이트**: 릴리스 전 `npm test`와 아래 DOD-012 generator를 실행해 docs/release coverage를 확인한 뒤 사용자 환경 업데이트는 별도로 수행합니다.
+4. **삭제**: 사용자 소유 Codex plugin 등록과 캐시를 사용자가 직접 제거합니다. repository validation은 uninstall/cache 삭제 명령을 자동 실행하지 않습니다.
+5. **검증**:
+   ```bash
+   node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
+   npm test
+   ```
+
+DOD-012 검증 중에는 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`, `objective.md`를 수정하지 않습니다.
+
 ## Stitch MCP 설정 (선택)
 
 `/mst:stitch`로 UI 목업을 생성하려면 Claude Code에 Stitch MCP를 먼저 추가해야 합니다.

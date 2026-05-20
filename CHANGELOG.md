@@ -4,6 +4,14 @@
 
 ---
 
+## [Unreleased]
+
+### 개선
+
+- **Codex plugin migration 문서·릴리스 검증 통합**: README, Quick Start, configuration, hook setup, skills reference, release checklist가 Codex plugin 설치·업데이트·삭제·검증 절차와 repository-local validation boundary를 함께 안내합니다. DOD-012 evidence와 smoke validation으로 사용자 홈 설정, Codex cache, `.claude/hooks`를 건드리지 않고 릴리스 준비 상태를 확인할 수 있습니다.
+
+---
+
 ## [0.59.8] — 2026-04-30
 
 ### 버그 수정
