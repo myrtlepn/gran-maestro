@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -8,7 +9,9 @@ import shlex
 import shutil
 import signal
 import stat
+import subprocess
 import sys
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -123,7 +126,20 @@ _LIFECYCLE_ATTEMPT_FIELDS = (
     "fallback_from",
     "fallback_to",
     "context_files_read",
+    "label_evidence",
+    "trace_label_evidence",
+    "attempt_sequence",
+    "current_attempt",
+    "security_evidence",
 )
+
+_LIFECYCLE_TERMINAL_STATUSES = {
+    "completed",
+    "failed",
+    "empty_result",
+    "fallback_completed",
+    "blocked",
+}
 
 
 def _json_object_or_empty(raw: str) -> dict:
@@ -136,6 +152,97 @@ def _json_object_or_empty(raw: str) -> dict:
 
 def _safe_text(value) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _json_safe_original_evidence(value) -> str:
+    raw = value if isinstance(value, str) else str(value or "")
+    normalized_newlines = raw.replace("\r\n", "\n").replace("\r", "\n")
+    return json.dumps(normalized_newlines, ensure_ascii=False)[1:-1]
+
+
+def _normalize_security_token(value, *, default: str) -> str:
+    raw = value if isinstance(value, str) else str(value or "")
+    normalized = unicodedata.normalize("NFKC", raw.replace("\r\n", "\n").replace("\r", "\n"))
+    safe = "".join(ch if ch.isascii() and (ch.isalnum() or ch in {"-", "_", "."}) else "-" for ch in normalized)
+    safe = re.sub(r"-{2,}", "-", safe).strip("-._")
+    return safe or default
+
+
+def _label_source_value(task_id: str, skill: str = "", explicit_label: str | None = None) -> str:
+    label = _safe_text(explicit_label)
+    if label:
+        return label
+    label = _safe_text(skill)
+    if label:
+        return label
+    return _safe_text(task_id) or "dispatch"
+
+
+def _trace_label_evidence(trace: str) -> dict:
+    parts = [part.strip() for part in str(trace).split("/") if part.strip()]
+    raw_label = parts[-1] if parts else "trace"
+    normalized = _normalize_security_token(raw_label, default="trace")
+    return {
+        "field": "trace_label",
+        "normalized": normalized,
+        "original_redacted": _json_safe_original_evidence(str(trace)),
+        "changed": normalized != _safe_text(raw_label),
+    }
+
+
+def _provider_network_guard_evidence(env: dict[str, str] | None = None) -> dict | None:
+    source = os.environ if env is None else env
+    mode = _safe_text(source.get("MST_PROVIDER_NETWORK_GUARD")).lower()
+    if mode not in {"deny", "disabled", "local-only"}:
+        return None
+    return {
+        "provider_network_guard": {
+            "mode": mode,
+            "actual_provider_network_call": False,
+            "evidence_source": "local_fixture_guard",
+        }
+    }
+
+
+def _label_evidence(
+    task_id: str,
+    skill: str = "",
+    explicit_label: str | None = None,
+    *,
+    attempt_id: str = "",
+    existing_payload: dict | None = None,
+) -> dict:
+    raw_label = _label_source_value(task_id, skill, explicit_label)
+    normalized = _normalize_security_token(raw_label, default="dispatch")
+    evidence = {
+        "field": "label",
+        "normalized": normalized,
+        "original_redacted": _json_safe_original_evidence(raw_label),
+        "changed": normalized != _safe_text(raw_label),
+    }
+    attempts = _ensure_attempts(existing_payload) if isinstance(existing_payload, dict) else []
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        other_attempt_id = _safe_text(attempt.get("attempt_id"))
+        if other_attempt_id and other_attempt_id == _safe_text(attempt_id):
+            continue
+        other_evidence = attempt.get("label_evidence") if isinstance(attempt.get("label_evidence"), dict) else {}
+        other_normalized = _safe_text(other_evidence.get("normalized")) or _normalize_security_token(
+            str(attempt.get("label") or ""),
+            default="dispatch",
+        )
+        other_original = _safe_text(other_evidence.get("original_redacted")) or _json_safe_original_evidence(
+            str(attempt.get("label") or "")
+        )
+        if other_normalized == normalized and other_original != evidence["original_redacted"]:
+            evidence["collision"] = {
+                "attempt_id": other_attempt_id or None,
+                "normalized": normalized,
+                "other_original_redacted": other_original,
+            }
+            break
+    return evidence
 
 
 def _lifecycle_attempt_id(task_id: str, explicit_attempt_id: str | None = None, existing_payload: dict | None = None) -> str:
@@ -151,13 +258,7 @@ def _lifecycle_attempt_id(task_id: str, explicit_attempt_id: str | None = None, 
 
 
 def _lifecycle_label(task_id: str, skill: str = "", explicit_label: str | None = None) -> str:
-    label = _safe_text(explicit_label)
-    if label:
-        return label
-    label = _safe_text(skill)
-    if label:
-        return label
-    return _safe_text(task_id) or "dispatch"
+    return _normalize_security_token(_label_source_value(task_id, skill, explicit_label), default="dispatch")
 
 
 def _parent_session_id(raw_context: str, session_id: str, explicit_parent_session_id: str | None = None) -> str:
@@ -326,22 +427,191 @@ def _ensure_attempts(payload: dict) -> list[dict]:
     return normalized
 
 
+def _attempt_sequence_value(attempt: dict) -> int | None:
+    try:
+        sequence = int(attempt.get("attempt_sequence"))
+    except (TypeError, ValueError):
+        return None
+    return sequence if sequence > 0 else None
+
+
+def _next_attempt_sequence(attempts: list[dict]) -> int:
+    sequences = [sequence for sequence in (_attempt_sequence_value(attempt) for attempt in attempts) if sequence]
+    return (max(sequences) + 1) if sequences else 1
+
+
 def _sync_attempt_payload(payload: dict) -> dict:
     attempt_id = _safe_text(payload.get("attempt_id"))
     if not attempt_id:
         return payload
     attempts = _ensure_attempts(payload)
-    current = _attempt_snapshot(payload)
     replaced = False
     for index, attempt in enumerate(attempts):
         if _safe_text(attempt.get("attempt_id")) == attempt_id:
+            sequence = _attempt_sequence_value(attempt) or _attempt_sequence_value(payload) or index + 1
+            payload["attempt_sequence"] = sequence
+            current = _attempt_snapshot(payload)
+            current["attempt_sequence"] = sequence
+            current["current_attempt"] = True
             attempts[index] = current
             replaced = True
             break
     if not replaced:
+        sequence = _next_attempt_sequence(attempts)
+        payload["attempt_sequence"] = sequence
+        current = _attempt_snapshot(payload)
+        current["attempt_sequence"] = sequence
+        current["current_attempt"] = True
         attempts.append(current)
+    for attempt in attempts:
+        attempt["current_attempt"] = _safe_text(attempt.get("attempt_id")) == attempt_id
+    payload["current_attempt"] = True
     payload["attempts"] = attempts
     return payload
+
+
+def _attempt_by_id(payload: dict, attempt_id: str) -> dict | None:
+    target = _safe_text(attempt_id)
+    if not target:
+        return None
+    for attempt in _ensure_attempts(payload):
+        if _safe_text(attempt.get("attempt_id")) == target:
+            return attempt
+    return None
+
+
+def _restore_attempt_as_current(payload: dict, attempt_id: str) -> dict:
+    attempt = _attempt_by_id(payload, attempt_id)
+    if not attempt:
+        return payload
+    attempts = _ensure_attempts(payload)
+    preserved = {
+        "attempts": attempts,
+        "finalization_evidence": payload.get("finalization_evidence"),
+        "next_execution": payload.get("next_execution"),
+        "continuation": payload.get("continuation"),
+        "auto": payload.get("auto"),
+    }
+    for field in _LIFECYCLE_ATTEMPT_FIELDS:
+        if field in attempt:
+            payload[field] = attempt[field]
+    payload["attempts"] = preserved["attempts"]
+    for key in ("finalization_evidence", "next_execution", "continuation", "auto"):
+        if preserved.get(key) is not None:
+            payload[key] = preserved[key]
+    return payload
+
+
+def _is_terminal_lifecycle(payload: dict) -> bool:
+    phase = _safe_text(payload.get("phase")).lower()
+    status = _safe_text(payload.get("status")).lower()
+    return phase in _TERMINAL_PHASES or status in _LIFECYCLE_TERMINAL_STATUSES
+
+
+def _incoming_final_status(args, payload: dict) -> tuple[str, int | None, dict | None]:
+    exit_code: int | None = None
+    if getattr(args, "exit_code", None) is not None:
+        exit_code = int(getattr(args, "exit_code"))
+    status = _status_from_final_state(
+        exit_code=exit_code,
+        explicit_status=getattr(args, "status", None),
+        output_path=str(getattr(args, "output_path", None) or payload.get("output_path") or ""),
+        fallback_from=str(getattr(args, "fallback_from", None) or payload.get("fallback_from") or ""),
+    )
+    structured_error = _structured_error_payload(
+        explicit_structured_error_json=getattr(args, "structured_error_json", None),
+        explicit_structured_error_message=getattr(args, "structured_error_message", None),
+        exit_code=exit_code,
+        status=status,
+    )
+    return status, exit_code, structured_error
+
+
+def _same_finalization(payload: dict, status: str, exit_code: int | None, structured_error: dict | None) -> bool:
+    return (
+        _safe_text(payload.get("status")).lower() == status
+        and payload.get("exit_code") == exit_code
+        and (payload.get("structured_error") if payload.get("structured_error") is not None else None) == structured_error
+    )
+
+
+def _record_finalization_evidence(
+    payload: dict,
+    *,
+    reason: str,
+    incoming_attempt_id: str,
+    current_attempt_id: str,
+    incoming_status: str | None = None,
+    incoming_exit_code: int | None = None,
+) -> dict:
+    evidence = payload.get("finalization_evidence")
+    if not isinstance(evidence, list):
+        evidence = []
+    entry = {
+        "reason": reason,
+        "incoming_attempt_id": incoming_attempt_id,
+        "current_attempt_id": current_attempt_id,
+        "current_status": _safe_text(payload.get("status")) or "unknown",
+        "current_phase": _safe_text(payload.get("phase")) or "unknown",
+    }
+    if incoming_status is not None:
+        entry["incoming_status"] = incoming_status
+    if incoming_exit_code is not None:
+        entry["incoming_exit_code"] = incoming_exit_code
+    evidence.append(entry)
+    payload["finalization_evidence"] = evidence
+    return payload
+
+
+def _guard_idempotent_heartbeat(payload: dict, args) -> tuple[bool, dict]:
+    incoming_attempt_id = _safe_text(getattr(args, "attempt_id", None))
+    current_attempt_id = _safe_text(payload.get("attempt_id"))
+    if not incoming_attempt_id or not current_attempt_id:
+        return False, payload
+
+    current_is_terminal = _is_terminal_lifecycle(payload)
+    if getattr(args, "final", False):
+        incoming_status, incoming_exit_code, incoming_error = _incoming_final_status(args, payload)
+        if current_is_terminal and incoming_attempt_id == current_attempt_id:
+            reason = (
+                "identical_duplicate_finalization"
+                if _same_finalization(payload, incoming_status, incoming_exit_code, incoming_error)
+                else "conflicting_duplicate_finalization"
+            )
+            return True, _record_finalization_evidence(
+                payload,
+                reason=reason,
+                incoming_attempt_id=incoming_attempt_id,
+                current_attempt_id=current_attempt_id,
+                incoming_status=incoming_status,
+                incoming_exit_code=incoming_exit_code,
+            )
+        if current_is_terminal and incoming_attempt_id != current_attempt_id:
+            if _safe_text(getattr(args, "fallback_from", None)) == current_attempt_id:
+                return False, payload
+            return True, _record_finalization_evidence(
+                payload,
+                reason="stale_finalization_for_non_current_attempt",
+                incoming_attempt_id=incoming_attempt_id,
+                current_attempt_id=current_attempt_id,
+                incoming_status=incoming_status,
+                incoming_exit_code=incoming_exit_code,
+            )
+        return False, payload
+
+    if current_is_terminal:
+        reason = (
+            "late_heartbeat_for_terminal_attempt"
+            if incoming_attempt_id == current_attempt_id
+            else "out_of_order_heartbeat_for_terminal_task"
+        )
+        return True, _record_finalization_evidence(
+            payload,
+            reason=reason,
+            incoming_attempt_id=incoming_attempt_id,
+            current_attempt_id=current_attempt_id,
+        )
+    return False, payload
 
 
 def _set_attempt_fallback_to(payload: dict, from_attempt_id: str, to_attempt_id: str) -> dict:
@@ -870,7 +1140,7 @@ def _append_dispatch_history_event(session_id: str, payload: dict, event_type: s
         "ppid": os.getppid(),
         "started_by_pid": payload.get("started_by_pid"),
         "phase": payload.get("phase"),
-        "status": payload.get("phase") or "running",
+        "status": payload.get("status") or payload.get("phase") or "running",
         "idempotency_key": idempotency_key,
         "event_id": "evt-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24],
         "created_at": _now_iso(),
@@ -997,6 +1267,374 @@ def _collect_dispatch_rows(stale_threshold: int) -> list[dict]:
             rows.append(row)
     rows.sort(key=lambda item: item.get("task_id", ""))
     return rows
+
+
+def _posix_path(value) -> str:
+    text = Path(str(value)).as_posix()
+    while text.startswith("./"):
+        text = text[2:]
+    return text.lstrip("/")
+
+
+def _matches_any_glob(path: str, patterns: list[str] | tuple[str, ...]) -> bool:
+    normalized = _posix_path(path)
+    return any(fnmatch.fnmatch(normalized, _posix_path(pattern)) for pattern in patterns)
+
+
+def _git_output(worktree_dir: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(worktree_dir), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _git_status_entries(worktree_dir: Path) -> tuple[list[dict], str]:
+    inside = _git_output(worktree_dir, ["rev-parse", "--is-inside-work-tree"])
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return [], "not_git_worktree"
+
+    result = _git_output(worktree_dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+    if result.returncode != 0:
+        return [], "git_status_failed"
+
+    raw_entries = result.stdout.split("\0")
+    entries: list[dict] = []
+    index = 0
+    while index < len(raw_entries):
+        raw = raw_entries[index]
+        if not raw:
+            index += 1
+            continue
+        status = raw[:2]
+        path_text = raw[3:] if len(raw) > 3 else ""
+        if path_text:
+            entries.append({"status": status, "path": _posix_path(path_text)})
+        index += 2 if status[:1] in {"R", "C"} else 1
+    return entries, ""
+
+
+def _dirty_entry_category(status: str, path: str, generated_allowlist: list[str] | tuple[str, ...]) -> str:
+    if _matches_any_glob(path, generated_allowlist):
+        return "generated_allowlisted"
+    if status == "??":
+        return "untracked"
+    if len(status) >= 1 and status[0] not in {" ", "?"}:
+        return "staged"
+    if len(status) >= 2 and status[1] != " ":
+        return "unstaged"
+    return "dirty"
+
+
+def _isolation_metadata(mst_session_id: str = "", task_id: str = "", attempt_id: str = "") -> dict:
+    metadata = {}
+    if _safe_text(mst_session_id):
+        metadata["mst_session_id"] = _safe_text(mst_session_id)
+    if _safe_text(task_id):
+        metadata["task_id"] = _safe_text(task_id)
+    if _safe_text(attempt_id):
+        metadata["attempt_id"] = _safe_text(attempt_id)
+    return metadata
+
+
+def _write_isolation_diagnostic(path: Path | str | None, payload: dict) -> None:
+    if path is None:
+        return
+    diagnostic_path = Path(path)
+    diagnostic_path.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def classify_dirty_tree(worktree_dir: Path | str, *, generated_allowlist: list[str] | tuple[str, ...] = ()) -> dict:
+    worktree = Path(worktree_dir).resolve()
+    raw_entries, status_error = _git_status_entries(worktree)
+    dirty_entries = []
+    for entry in raw_entries:
+        path = str(entry.get("path") or "")
+        status = str(entry.get("status") or "")
+        category = _dirty_entry_category(status, path, generated_allowlist)
+        dirty_entries.append(
+            {
+                "path": path,
+                "status": status,
+                "category": category,
+                "allowlisted": category == "generated_allowlisted",
+            }
+        )
+    return {
+        "worktree_dir": str(worktree),
+        "status": "dirty" if dirty_entries else "clean",
+        "git_status_error": status_error or None,
+        "dirty_entries": dirty_entries,
+        "generated_allowlist": list(generated_allowlist),
+    }
+
+
+def dispatch_dirty_tree_precheck(
+    worktree_dir: Path | str,
+    *,
+    diagnostic_path: Path | str | None = None,
+    generated_allowlist: list[str] | tuple[str, ...] = (),
+    mst_session_id: str = "",
+    task_id: str = "",
+    attempt_id: str = "",
+) -> dict:
+    classification = classify_dirty_tree(worktree_dir, generated_allowlist=generated_allowlist)
+    evidence = {
+        **_isolation_metadata(mst_session_id, task_id, attempt_id),
+        "kind": "dirty_tree_precheck",
+        "status": "clean",
+        "mutation_allowed": True,
+        **classification,
+    }
+    if classification["dirty_entries"]:
+        evidence["status"] = "non_success"
+        evidence["mutation_allowed"] = False
+        evidence["structured_error"] = {
+            "kind": "dirty_tree_precheck",
+            "message": "dirty tree blocks implementation dispatch mutation",
+        }
+        _write_isolation_diagnostic(diagnostic_path, evidence)
+    return evidence
+
+
+def _clean_tree_fingerprint(worktree_dir: Path) -> dict:
+    head = _git_output(worktree_dir, ["rev-parse", "HEAD"])
+    status = _git_output(worktree_dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+    return {
+        "head": head.stdout.strip() if head.returncode == 0 else "",
+        "status_sha256": hashlib.sha256(status.stdout.encode("utf-8")).hexdigest() if status.returncode == 0 else "",
+    }
+
+
+def guarded_dispatch_mutation(
+    worktree_dir: Path | str,
+    mutation,
+    *,
+    diagnostic_path: Path | str | None = None,
+    generated_allowlist: list[str] | tuple[str, ...] = (),
+    before_mutation=None,
+    mst_session_id: str = "",
+    task_id: str = "",
+    attempt_id: str = "",
+) -> dict:
+    worktree = Path(worktree_dir).resolve()
+    precheck = dispatch_dirty_tree_precheck(
+        worktree,
+        generated_allowlist=generated_allowlist,
+        mst_session_id=mst_session_id,
+        task_id=task_id,
+        attempt_id=attempt_id,
+    )
+    if not precheck.get("mutation_allowed"):
+        _write_isolation_diagnostic(diagnostic_path, precheck)
+        return {**precheck, "mutation_executed": False}
+
+    fingerprint = _clean_tree_fingerprint(worktree)
+    if callable(before_mutation):
+        before_mutation()
+
+    revalidation = dispatch_dirty_tree_precheck(
+        worktree,
+        generated_allowlist=generated_allowlist,
+        mst_session_id=mst_session_id,
+        task_id=task_id,
+        attempt_id=attempt_id,
+    )
+    if not revalidation.get("mutation_allowed"):
+        evidence = {
+            **_isolation_metadata(mst_session_id, task_id, attempt_id),
+            "kind": "toctou_revalidation",
+            "status": "non_success",
+            "mutation_allowed": False,
+            "mutation_executed": False,
+            "precheck": precheck,
+            "pre_mutation_fingerprint": fingerprint,
+            "revalidation": revalidation,
+            "structured_error": {
+                "kind": "toctou_dirty_tree_change",
+                "message": "worktree changed after precheck and before mutation",
+            },
+        }
+        _write_isolation_diagnostic(diagnostic_path, evidence)
+        return evidence
+
+    mutation()
+    return {
+        **_isolation_metadata(mst_session_id, task_id, attempt_id),
+        "kind": "toctou_revalidation",
+        "status": "completed",
+        "mutation_allowed": True,
+        "mutation_executed": True,
+        "precheck": precheck,
+        "pre_mutation_fingerprint": fingerprint,
+        "revalidation": revalidation,
+    }
+
+
+def _resource_values(scope: dict, key: str) -> list[str]:
+    value = scope.get(key)
+    if not isinstance(value, list):
+        return []
+    return [_posix_path(item) for item in value if _safe_text(item)]
+
+
+def _logical_resource_group(value: str) -> str:
+    normalized = _posix_path(value).lower()
+    if normalized.startswith(".claude/hooks") or normalized.startswith("hooks/") or normalized == "hooks":
+        return "hook canonical/copy set"
+    if "manifest-agent" in normalized or normalized == "manifest":
+        return "manifest-agent list"
+    if "version" in normalized:
+        return "version set"
+    if any(token in normalized for token in ("config", "dashboard", "defaults")):
+        return "config/dashboard/defaults"
+    return normalized
+
+
+def evaluate_parallel_scope_conflicts(task_scopes: list[dict]) -> dict:
+    conflicts: list[dict] = []
+    normalized_scopes = []
+    for index, scope in enumerate(task_scopes):
+        normalized_scopes.append(
+            {
+                "task_id": _safe_text(scope.get("task_id")) or f"task-{index + 1}",
+                "exact_files": _resource_values(scope, "exact_files"),
+                "globs": _resource_values(scope, "globs"),
+                "generated_outputs": _resource_values(scope, "generated_outputs"),
+                "logical_resources": [
+                    _logical_resource_group(item)
+                    for item in _resource_values(scope, "logical_resources")
+                ],
+            }
+        )
+
+    for left_index, left in enumerate(normalized_scopes):
+        for right in normalized_scopes[left_index + 1 :]:
+            left_exact = set(left["exact_files"])
+            right_exact = set(right["exact_files"])
+            for path in sorted(left_exact & right_exact):
+                conflicts.append({"type": "exact_file", "path": path, "tasks": [left["task_id"], right["task_id"]]})
+
+            for path in sorted((left_exact | set(left["generated_outputs"])) & set(right["generated_outputs"])):
+                conflicts.append({"type": "generated_output", "path": path, "tasks": [left["task_id"], right["task_id"]]})
+            for path in sorted(set(left["generated_outputs"]) & (right_exact | set(right["generated_outputs"]))):
+                if not any(
+                    conflict.get("type") == "generated_output" and conflict.get("path") == path
+                    for conflict in conflicts
+                ):
+                    conflicts.append({"type": "generated_output", "path": path, "tasks": [left["task_id"], right["task_id"]]})
+
+            for path in sorted(left_exact):
+                for pattern in right["globs"]:
+                    if fnmatch.fnmatch(path, pattern):
+                        conflicts.append(
+                            {"type": "glob_overlap", "path": path, "glob": pattern, "tasks": [left["task_id"], right["task_id"]]}
+                        )
+            for path in sorted(right_exact):
+                for pattern in left["globs"]:
+                    if fnmatch.fnmatch(path, pattern):
+                        conflicts.append(
+                            {"type": "glob_overlap", "path": path, "glob": pattern, "tasks": [left["task_id"], right["task_id"]]}
+                        )
+
+            for resource in sorted(set(left["logical_resources"]) & set(right["logical_resources"])):
+                conflicts.append(
+                    {
+                        "type": "logical_resource",
+                        "resource_group": resource,
+                        "tasks": [left["task_id"], right["task_id"]],
+                    }
+                )
+
+    return {
+        "kind": "parallel_scope_conflict",
+        "status": "non_success" if conflicts else "clean",
+        "mutation_allowed": not conflicts,
+        "conflicts": conflicts,
+        "task_scopes": normalized_scopes,
+    }
+
+
+def _path_boundary(
+    path: Path,
+    *,
+    repo_root: Path,
+    worktree_root: Path,
+    home_root: Path,
+    plugin_cache_root: Path,
+    temp_root: Path,
+) -> str:
+    resolved = path.resolve(strict=False)
+    roots = [
+        ("worktree-local", worktree_root.resolve(strict=False)),
+        ("repo-local", repo_root.resolve(strict=False)),
+        ("user-global", home_root.resolve(strict=False)),
+        ("plugin-cache", plugin_cache_root.resolve(strict=False)),
+        ("temp-dir", temp_root.resolve(strict=False)),
+    ]
+    for name, root in roots:
+        try:
+            resolved.relative_to(root)
+            return name
+        except ValueError:
+            continue
+    return "external"
+
+
+def evaluate_shared_state_boundaries(
+    writes: list[dict],
+    *,
+    repo_root: Path | str,
+    worktree_root: Path | str,
+    home_root: Path | str,
+    plugin_cache_root: Path | str,
+    temp_root: Path | str,
+) -> dict:
+    entries: list[dict] = []
+    metadata_by_path: dict[str, set[tuple[str, str, str]]] = {}
+    for write in writes:
+        path = Path(str(write.get("path") or "")).resolve(strict=False)
+        metadata = (
+            _safe_text(write.get("mst_session_id")),
+            _safe_text(write.get("task_id")),
+            _safe_text(write.get("attempt_id")),
+        )
+        entry = {
+            "path": str(path),
+            "boundary": _path_boundary(
+                path,
+                repo_root=Path(repo_root),
+                worktree_root=Path(worktree_root),
+                home_root=Path(home_root),
+                plugin_cache_root=Path(plugin_cache_root),
+                temp_root=Path(temp_root),
+            ),
+            "mst_session_id": metadata[0],
+            "task_id": metadata[1],
+            "attempt_id": metadata[2],
+            "metadata_complete": all(metadata),
+        }
+        entries.append(entry)
+        metadata_by_path.setdefault(str(path), set()).add(metadata)
+
+    mixed_paths = [
+        {"path": path, "metadata_count": len(metadata)}
+        for path, metadata in sorted(metadata_by_path.items())
+        if len(metadata) > 1
+    ]
+    metadata_mixed = bool(mixed_paths) or any(not entry["metadata_complete"] for entry in entries)
+    return {
+        "kind": "shared_state_boundary",
+        "status": "non_success" if metadata_mixed else "clean",
+        "mutation_allowed": not metadata_mixed,
+        "metadata_mixed": metadata_mixed,
+        "mixed_paths": mixed_paths,
+        "writes": entries,
+    }
+
+
 def cmd_dispatch_build(args):
     provider = str(args.provider).strip().lower()
     if provider == "claude":

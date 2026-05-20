@@ -78,6 +78,16 @@ def cmd_dispatch_register(args):
         child_env.get("MST_CONTEXT_JSON", ""),
         getattr(args, "context_file", None),
     )
+    payload["label_evidence"] = _label_evidence(
+        task_id,
+        str(getattr(args, "skill", "")).strip(),
+        getattr(args, "label", None),
+        attempt_id=attempt_id,
+        existing_payload=existing_payload if isinstance(existing_payload, dict) else None,
+    )
+    security_evidence = _provider_network_guard_evidence()
+    if security_evidence is not None:
+        payload["security_evidence"] = security_evidence
     payload = _apply_lifecycle_paths(
         payload,
         running_log_path=getattr(args, "running_log_path", None),
@@ -136,6 +146,16 @@ def cmd_dispatch_heartbeat(args):
     payload_error = _dispatch_payload_error(payload, session_id)
     if payload_error is not None:
         return _emit_dispatch_payload_mismatch(payload_error)
+    guarded, payload = _guard_idempotent_heartbeat(payload, args)
+    if guarded:
+        save_json(state_path, payload)
+        _append_dispatch_history_event(session_id, payload, "dispatch.heartbeat.ignored")
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    incoming_attempt_id = _safe_text(getattr(args, "attempt_id", None))
+    if incoming_attempt_id and incoming_attempt_id != _safe_text(payload.get("attempt_id")):
+        payload = _restore_attempt_as_current(payload, incoming_attempt_id)
 
     payload.update(_canonical_dispatch_fields(session_id))
     payload.update(_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")))
@@ -172,6 +192,17 @@ def cmd_dispatch_heartbeat(args):
         child_env.get("MST_CONTEXT_JSON", ""),
         getattr(args, "context_file", None),
     ) or payload.get("context_files_read") or []
+    existing_label_evidence = payload.get("label_evidence") if isinstance(payload.get("label_evidence"), dict) else None
+    if getattr(args, "label", None) or existing_label_evidence is None:
+        payload["label_evidence"] = _label_evidence(
+            task_id,
+            str(payload.get("skill") or ""),
+            getattr(args, "label", None) or str(payload.get("label") or ""),
+            attempt_id=str(payload.get("attempt_id") or ""),
+            existing_payload=payload,
+        )
+    else:
+        payload["label_evidence"] = existing_label_evidence
     payload = _apply_lifecycle_paths(
         payload,
         running_log_path=getattr(args, "running_log_path", None) or getattr(args, "log_file", None),

@@ -20,12 +20,15 @@ from scripts.mst_cmds.dispatch import _process_start_time, record_delegate_io_at
 from scripts.mst_cmds.dispatch import (
     _apply_lifecycle_paths,
     _collect_context_files_read,
+    _label_evidence,
     _lifecycle_attempt_id,
     _lifecycle_label,
     _parent_session_id,
+    _provider_network_guard_evidence,
     _status_from_final_state,
     _structured_error_payload,
     _sync_attempt_payload,
+    _trace_label_evidence,
 )
 
 
@@ -99,9 +102,10 @@ def _register_state(
     pid = os.getpid()
     pid_start_time = _process_start_time(pid) or f"pid:{pid}:started_at:{now}"
     task_id = str(args.task_id).strip()
+    attempt_id = _lifecycle_attempt_id(task_id, getattr(args, "attempt_id", None), None)
     payload = {
         "task_id": task_id,
-        "attempt_id": _lifecycle_attempt_id(task_id, getattr(args, "attempt_id", None), None),
+        "attempt_id": attempt_id,
         "pid": pid,
         "pid_start_time": pid_start_time,
         "started_by_pid": _started_by_pid(),
@@ -126,7 +130,18 @@ def _register_state(
         "provider_task_id": str(getattr(args, "provider_task_id", "") or os.environ.get("MST_PROVIDER_TASK_ID", "")).strip(),
         "fallback_from": str(getattr(args, "fallback_from", "") or "").strip() or None,
         "context_files_read": _collect_context_files_read(raw_context, getattr(args, "context_file", None)),
+        "label_evidence": _label_evidence(
+            task_id,
+            str(getattr(args, "skill", "")).strip(),
+            getattr(args, "label", None),
+            attempt_id=attempt_id,
+        ),
     }
+    security_evidence = _provider_network_guard_evidence()
+    if security_evidence is not None:
+        payload["security_evidence"] = security_evidence
+    if getattr(args, "trace", None):
+        payload["trace_label_evidence"] = _trace_label_evidence(str(args.trace))
     payload = _apply_lifecycle_paths(
         payload,
         running_log_path=str(running_log_path),
@@ -153,6 +168,7 @@ def _write_heartbeat(
     final: bool = False,
     exit_code: int | None = None,
     trace_path: Path | None = None,
+    trace_label_evidence: dict | None = None,
 ) -> None:
     now = _now_iso()
     payload = _load_state(task_id)
@@ -161,12 +177,21 @@ def _write_heartbeat(
     payload["last_heartbeat"] = now
     payload["attempt_id"] = _lifecycle_attempt_id(task_id, payload.get("attempt_id"), payload)
     payload["label"] = _lifecycle_label(task_id, str(payload.get("skill") or ""), payload.get("label"))
+    payload["label_evidence"] = _label_evidence(
+        task_id,
+        str(payload.get("skill") or ""),
+        str(payload.get("label") or ""),
+        attempt_id=str(payload.get("attempt_id") or ""),
+        existing_payload=payload,
+    )
     payload["parent_session_id"] = _parent_session_id(
         raw_context,
         session_id,
         payload.get("parent_session_id"),
     )
     payload["context_files_read"] = _collect_context_files_read(raw_context, None) or payload.get("context_files_read") or []
+    if trace_label_evidence is not None:
+        payload["trace_label_evidence"] = trace_label_evidence
     if trace_path is not None:
         payload = _apply_lifecycle_paths(payload, trace_path=str(trace_path))
     if phase:
@@ -194,12 +219,7 @@ def _write_heartbeat(
 
 
 def _parse_trace_label(trace: str) -> str:
-    parts = [part.strip() for part in str(trace).split("/") if part.strip()]
-    if not parts:
-        return "trace"
-    label = parts[-1]
-    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in label)
-    return safe or "trace"
+    return _trace_label_evidence(trace)["normalized"]
 
 
 def _write_trace_file(
@@ -214,12 +234,20 @@ def _write_trace_file(
     exit_code: int,
     running_log_path: Path,
     session_id: str,
-) -> Path:
+) -> tuple[Path, dict]:
     traces_dir = log_dir / "traces"
     traces_dir.mkdir(parents=True, exist_ok=True)
-    label = _parse_trace_label(trace)
+    trace_evidence = _trace_label_evidence(trace)
+    label = trace_evidence["normalized"]
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     trace_path = traces_dir / f"{provider}-{label}-{ts}.md"
+    if trace_path.exists():
+        stem = trace_path.stem
+        for index in range(2, 1000):
+            candidate = traces_dir / f"{stem}-{index}.md"
+            if not candidate.exists():
+                trace_path = candidate
+                break
 
     content = [
         "---",
@@ -227,7 +255,9 @@ def _write_trace_file(
         f"provider: {provider}",
         f"model: {model}",
         f"mst_session_id: {session_id}",
-        f"trace_label: {trace}",
+        f"trace_label: {label}",
+        f"trace_label_original_redacted: {trace_evidence['original_redacted']}",
+        f"trace_label_changed: {str(trace_evidence['changed']).lower()}",
         f"started_at: {started_at}",
         f"terminated_at: {terminated_at}",
         f"duration_ms: {duration_ms}",
@@ -241,7 +271,7 @@ def _write_trace_file(
     if isinstance(root_mst_id, str) and root_mst_id:
         content.insert(5, f"root_mst_id: {root_mst_id}")
     trace_path.write_text("\n".join(content), encoding="utf-8")
-    return trace_path
+    return trace_path, trace_evidence
 
 
 def _ensure_context_session_id(context_payload: dict, session_id: str, root_mst_id: str) -> None:
@@ -495,8 +525,9 @@ def cmd_run(args):
         terminated_at = _now_iso()
         duration_ms = max(0, (time.time_ns() - started_mono) // 1_000_000)
         trace_path: Path | None = None
+        trace_label_evidence: dict | None = None
         if args.trace:
-            trace_path = _write_trace_file(
+            trace_path, trace_label_evidence = _write_trace_file(
                 log_dir=log_dir,
                 task_id=task_id,
                 provider=provider,
@@ -517,6 +548,7 @@ def cmd_run(args):
                 final=True,
                 exit_code=exit_code,
                 trace_path=trace_path,
+                trace_label_evidence=trace_label_evidence,
             )
 
         signal.signal(signal.SIGTERM, previous_term)
