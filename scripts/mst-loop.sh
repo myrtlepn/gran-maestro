@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # mst-loop.sh — Gran Maestro external re-entry wrapper
 #
-# Historically used a Claude print-mode wrapper to drain `/mst:resume`.
-# This script keeps the continuation path alive until a lifecycle-safe runner replaces it.
+# Repository-local headless queue drain wrapper.
+# This script keeps the continuation path alive by calling `mst.py queue drain-headless`
+# until the queue is empty, max iterations is reached, or the runner fails.
 # Exits when the queue is empty, max iterations reached, or the configured runner fails.
 #
 # Usage: bash scripts/mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
@@ -20,17 +21,17 @@ Usage: mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
 Options:
   --max-iterations N   Maximum loop iterations (default: 100)
   --sleep S            Seconds to sleep between iterations (default: 3)
-  --dry-run            Print actions without calling claude
+  --dry-run            Print actions without calling the headless runner
   --help, -h           Show this help
 
 Description:
   Gran Maestro external re-entry wrapper. Each iteration calls
-  the configured legacy headless continuation runner, which pops one action
+  the repository-local headless continuation runner, which pops one action
   from .gran-maestro/pending.ndjson and executes it.
   Loop exits when:
     - mst.py queue count returns 0
     - max iterations reached
-    - claude CLI fails (non-zero exit)
+    - headless runner fails (non-zero exit)
     - user interrupts (SIGINT)
 
 Environment:
@@ -63,7 +64,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-PLUGIN_ROOT="${PLUGIN_ROOT:-$HOME/.claude/plugins/marketplaces/gran-maestro}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 MST_PY="$PLUGIN_ROOT/scripts/mst.py"
 PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
 
@@ -132,10 +134,10 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
     echo "[mst-loop] iteration $i/$MAX_ITERATIONS — queued=$COUNT"
 
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[mst-loop] would run: legacy headless continuation runner for /mst:resume"
+        echo "[mst-loop] would run: python3 $MST_PY queue drain-headless --json"
     else
-        if ! claude --dangerously-skip-permissions -p "/mst:resume"; then
-            echo "[mst-loop] claude failed at iteration $i — exiting" >&2
+        if ! python3 "$MST_PY" queue drain-headless --json; then
+            echo "[mst-loop] headless runner failed at iteration $i — exiting" >&2
             exit 1
         fi
     fi

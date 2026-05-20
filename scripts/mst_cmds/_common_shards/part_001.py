@@ -1133,8 +1133,117 @@ def _queue_lock_path() -> Path:
     return _skill_state_base_dir() / "pending.ndjson.lock"
 def _queue_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+QUEUE_TERMINAL_STATUSES = {"done", "failed", "blocked", "empty_result", "consumed"}
+QUEUE_NON_SUCCESS_TERMINAL_STATUSES = {"failed", "blocked", "empty_result"}
+QUEUE_LEGACY_DIAGNOSTIC_FIELDS = (
+    "owner_session_id",
+    "owner_pid",
+    "owner_ppid",
+    "session_id",
+    "sessionId",
+    "MST_STATE_PPID",
+    "MST_SNAPSHOT_SESSION_ID",
+    "hook_session_id",
+    "transcript_uuid",
+)
 def _is_workflow_queue_entry(entry: object) -> bool:
     return isinstance(entry, dict) and bool(str(entry.get("skill") or "").strip())
+def _queue_nonempty_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+def _queue_safe_explicit_session_id(value: object) -> str | None:
+    text = _queue_nonempty_string(value)
+    if not text:
+        return None
+    return text if is_path_safe_mst_session_id(text) else None
+def _queue_explicit_mst_session_id(entry: dict) -> str | None:
+    value = _queue_nonempty_string(entry.get("mst_session_id"))
+    if not value:
+        return None
+    from scripts.mst_cmds.session import validate_mst_session_id
+
+    return validate_mst_session_id(value).mst_session_id
+def _queue_identity_fields(entry: dict) -> dict[str, str | None]:
+    explicit_mst_session_id = _queue_explicit_mst_session_id(entry)
+    env_mst_session_id = canonical_mst_session_id_from_env_or_context()
+    if explicit_mst_session_id and env_mst_session_id and explicit_mst_session_id != env_mst_session_id:
+        raise ValueError("MST_SESSION_ID and queued mst_session_id mismatch")
+    queue_session_id = _queue_safe_explicit_session_id(entry.get("queue_session_id"))
+    canonical_session_id = explicit_mst_session_id or env_mst_session_id or queue_session_id
+    return {
+        "mst_session_id": explicit_mst_session_id or env_mst_session_id,
+        "queue_session_id": queue_session_id,
+        "canonical_session_id": canonical_session_id,
+    }
+def _queue_legacy_diagnostics_from_entry(entry: dict) -> dict[str, object]:
+    diagnostics: dict[str, object] = {}
+    for field in QUEUE_LEGACY_DIAGNOSTIC_FIELDS:
+        value = entry.get(field)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        diagnostics[field] = value
+    legacy_payload = entry.get("legacy_diagnostics")
+    if isinstance(legacy_payload, dict):
+        for key, value in legacy_payload.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            diagnostics.setdefault(str(key), value)
+    return diagnostics
+def _queue_default_idempotency_key(entry: dict) -> str:
+    material = {
+        "skill": str(entry.get("skill") or "").strip(),
+        "args": str(entry.get("args") or "").strip(),
+        "source_skill": str(entry.get("source_skill") or "").strip(),
+        "source_id": str(entry.get("source_id") or "").strip(),
+        "resource_id": str(entry.get("resource_id") or "").strip(),
+        "mst_session_id": _queue_nonempty_string(entry.get("mst_session_id")) or "",
+        "queue_session_id": _queue_nonempty_string(entry.get("queue_session_id")) or "",
+    }
+    digest = hashlib.sha256(
+        json.dumps(material, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"queue:{digest[:32]}"
+def _queue_default_next_action_idempotency_key(entry: dict) -> str:
+    digest = hashlib.sha256(str(entry["idempotency_key"]).encode("utf-8")).hexdigest()
+    return f"next:{digest[:24]}"
+def _queue_default_completion_evidence_path(entry: dict) -> str:
+    return str(_skill_state_base_dir() / "queue" / "completion" / f"{entry['entry_id']}.json")
+def _queue_default_failure_metadata_path(entry: dict) -> str:
+    return str(_skill_state_base_dir() / "queue" / "failures" / f"{entry['entry_id']}.json")
+def _queue_enrich_entry(entry: dict) -> dict:
+    normalized = copy.deepcopy(entry)
+    entry_id = _queue_nonempty_string(normalized.get("entry_id"))
+    if not entry_id:
+        entry_id = uuid.uuid4().hex
+    normalized["entry_id"] = entry_id
+
+    identity_fields = _queue_identity_fields(normalized)
+    normalized.update(identity_fields)
+
+    idempotency_key = _queue_nonempty_string(normalized.get("idempotency_key"))
+    normalized["idempotency_key"] = idempotency_key or _queue_default_idempotency_key(normalized)
+
+    next_action_key = _queue_nonempty_string(normalized.get("next_action_idempotency_key"))
+    normalized["next_action_idempotency_key"] = next_action_key or _queue_default_next_action_idempotency_key(normalized)
+
+    completion_evidence_path = _queue_nonempty_string(normalized.get("completion_evidence_path"))
+    normalized["completion_evidence_path"] = completion_evidence_path or _queue_default_completion_evidence_path(normalized)
+
+    failure_metadata_path = _queue_nonempty_string(normalized.get("failure_metadata_path"))
+    normalized["failure_metadata_path"] = failure_metadata_path or _queue_default_failure_metadata_path(normalized)
+
+    diagnostics = _queue_legacy_diagnostics_from_entry(normalized)
+    if diagnostics:
+        normalized["legacy_diagnostics"] = diagnostics
+    else:
+        normalized.pop("legacy_diagnostics", None)
+    return normalized
 def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
     entries: list[dict] = []
     for line in raw_lines:
@@ -1147,13 +1256,11 @@ def _queue_parse_entries(raw_lines: list[str]) -> list[dict]:
             continue
         if isinstance(value, dict):
             if _is_workflow_queue_entry(value):
-                entry_id = value.get("entry_id")
-                if not isinstance(entry_id, str) or not entry_id.strip():
-                    value["entry_id"] = uuid.uuid4().hex
+                value = _queue_enrich_entry(value)
             entries.append(value)
     return entries
 def _queue_build_entry(data: dict) -> dict:
-    return {
+    return _queue_enrich_entry({
         "id": uuid.uuid4().hex,
         "entry_id": uuid.uuid4().hex,
         "skill": str(data.get("skill", "")),
@@ -1168,4 +1275,15 @@ def _queue_build_entry(data: dict) -> dict:
         "completed_at": None,
         "error": None,
         "result": None,
-    }
+        "mst_session_id": data.get("mst_session_id"),
+        "queue_session_id": data.get("queue_session_id"),
+        "idempotency_key": data.get("idempotency_key"),
+        "completion_evidence_path": data.get("completion_evidence_path"),
+        "next_action_idempotency_key": data.get("next_action_idempotency_key"),
+        "failure_metadata_path": data.get("failure_metadata_path"),
+        "headless_terminal_status": data.get("headless_terminal_status"),
+        "headless_terminal_reason": data.get("headless_terminal_reason"),
+        "headless_next_action": copy.deepcopy(data.get("headless_next_action"))
+        if isinstance(data.get("headless_next_action"), dict)
+        else data.get("headless_next_action"),
+    })

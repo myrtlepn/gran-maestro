@@ -92,13 +92,6 @@ def cmd_state_recover(args):
             file=sys.stderr,
         )
 
-    _append_cross_session_recover_event(
-        session_id,
-        agi_id,
-        previous_owner,
-        takeover=bool(getattr(args, "takeover", False)),
-    )
-
     state_base_dir = _skill_state_base_dir()
     history_result, history_error = _load_recover_history(_common.BASE_DIR, session_id)
     if history_error is not None:
@@ -155,6 +148,13 @@ def cmd_state_recover(args):
             return _emit_recover_non_success(
                 _recover_non_success("recover_takeover_failed", f"failed to takeover owner: {exc}", session_id=session_id, root_mst_id=parsed.root_mst_id)
             )
+
+    _append_cross_session_recover_event(
+        session_id,
+        agi_id,
+        previous_owner,
+        takeover=bool(getattr(args, "takeover", False)),
+    )
 
     previous_history_head = history_result.tail_hash
     recovery_fingerprint = _recovery_fingerprint(agi_id, session_id)

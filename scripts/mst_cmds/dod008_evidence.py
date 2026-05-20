@@ -130,6 +130,59 @@ def _result(
     return result
 
 
+def _continuation_guard(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]:
+    completion = context.get("dispatch_completion") if isinstance(context.get("dispatch_completion"), dict) else {}
+    next_action = context.get("next_action_source") if isinstance(context.get("next_action_source"), dict) else {}
+    consumed_raw = context.get("consumed_idempotency_keys")
+    consumed_items = consumed_raw if isinstance(consumed_raw, list) else []
+    consumed_keys = {_text(item) for item in consumed_items if isinstance(item, str) and _text(item)}
+    completion_status = _text(completion.get("status")) or "unknown"
+    action_key = _text(completion.get("next_action_idempotency_key")) or _text(next_action.get("idempotency_key"))
+    evidence_path = _evidence_path(completion.get("completion_evidence_path") or next_action.get("evidence_path"), mst_session_id)
+    parent_session_id = _safe_session_id(completion.get("parent_mst_session_id")) or mst_session_id
+    task_id = _text(completion.get("task_id"))
+
+    if action_key and action_key in consumed_keys:
+        return {
+            "status": "pass",
+            "code": "continuation_already_consumed",
+            "reason": "next action idempotency key was already consumed and will not be executed again",
+            "evidence_path": evidence_path,
+            "parent_mst_session_id": parent_session_id,
+            "task_id": task_id,
+            "next_action_idempotency_key": action_key,
+        }
+    if completion_status == "completed":
+        return {
+            "status": "pass",
+            "code": "parent_continuation_ready",
+            "reason": "completed child dispatch preserved parent continuation evidence and next action idempotency key",
+            "evidence_path": evidence_path,
+            "parent_mst_session_id": parent_session_id,
+            "task_id": task_id,
+            "next_action_idempotency_key": action_key,
+        }
+    if completion_status in {"failed", "empty_result", "blocked"}:
+        return {
+            "status": "pass",
+            "code": "recovery_ready",
+            "reason": "non-success child dispatch preserved bounded recovery evidence without duplicate execution",
+            "evidence_path": evidence_path,
+            "parent_mst_session_id": parent_session_id,
+            "task_id": task_id,
+            "next_action_idempotency_key": action_key,
+        }
+    return {
+        "status": "unknown",
+        "code": "continuation_guard_unknown",
+        "reason": "bounded dispatch completion evidence was not available",
+        "evidence_path": evidence_path,
+        "parent_mst_session_id": parent_session_id,
+        "task_id": task_id,
+        "next_action_idempotency_key": action_key,
+    }
+
+
 def _legacy_snapshot_only(context: dict[str, Any]) -> bool:
     snapshot = context.get("snapshot")
     if not isinstance(snapshot, dict):
@@ -439,6 +492,7 @@ def project_dod008_evidence(
         "history_integrity": integrity,
         "projection_freshness": freshness,
         "identity_boundary": identity,
+        "continuation_guard": _continuation_guard(context, canonical_id),
         "source_history_head": source_head,
         "current_history_head": current_head,
         "verified_history_head": verified_head,

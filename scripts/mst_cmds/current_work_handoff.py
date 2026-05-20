@@ -42,6 +42,19 @@ ALLOWED_BLOCKER_TYPE = (
     "unknown",
 )
 DEFAULT_EVIDENCE_PATH = ".gran-maestro/sessions/{mst_session_id}/history.head"
+ALLOWED_COMPLETION_STATUS = (
+    "completed",
+    "failed",
+    "empty_result",
+    "blocked",
+    "unknown",
+)
+ALLOWED_CONTINUATION_STATE = (
+    "parent_continuation_ready",
+    "recovery_ready",
+    "already_consumed",
+    "no_completion_evidence",
+)
 
 
 class _HashableDict(dict):
@@ -78,6 +91,13 @@ def _load_context(fixture_or_context: Any) -> dict[str, Any]:
 
 def _safe_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _safe_idempotency_key(value: Any) -> str:
+    text = _safe_text(value)
+    if not text or "/" in text or ".." in text:
+        return ""
+    return text if all(31 < ord(char) < 127 for char in text) else ""
 
 
 def _safe_mst_session_id(value: Any) -> str:
@@ -217,6 +237,12 @@ def _default_next_action(context: dict[str, Any], mst_session_id: str) -> dict[s
     }
 
 
+def _consumed_idempotency_keys(context: dict[str, Any]) -> set[str]:
+    raw = context.get("consumed_idempotency_keys")
+    keys = [item for item in raw if isinstance(item, str)] if isinstance(raw, list) else []
+    return {key for key in (_safe_idempotency_key(item) for item in keys) if key}
+
+
 def _next_action(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]:
     source = context.get("next_action_source")
     raw = source if isinstance(source, dict) else _default_next_action(context, mst_session_id)
@@ -236,6 +262,79 @@ def _next_action(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]
         "reason": _safe_text(raw.get("reason")) or "next action was derived from bounded current-work sources",
         "confidence": confidence,
         "evidence_path": _evidence_path(raw.get("evidence_path"), mst_session_id),
+    }
+
+
+def _dispatch_completion(context: dict[str, Any], mst_session_id: str, next_action: dict[str, Any]) -> dict[str, Any]:
+    raw = context.get("dispatch_completion") if isinstance(context.get("dispatch_completion"), dict) else {}
+    completion_status = _safe_text(raw.get("status"))
+    if completion_status not in ALLOWED_COMPLETION_STATUS:
+        completion_status = "unknown"
+    parent_session_id = _safe_mst_session_id(raw.get("parent_mst_session_id")) or mst_session_id
+    task_id = _safe_text(raw.get("task_id"))
+    completion_evidence_path = _evidence_path(raw.get("completion_evidence_path"), mst_session_id)
+    action_idempotency_key = (
+        _safe_idempotency_key(raw.get("next_action_idempotency_key"))
+        or _safe_idempotency_key(next_action.get("idempotency_key"))
+    )
+    consumed_keys = _consumed_idempotency_keys(context)
+    already_consumed = bool(action_idempotency_key and action_idempotency_key in consumed_keys)
+
+    continuation_state = "no_completion_evidence"
+    status_code = "completion_evidence_missing"
+    result_class = "pending"
+    if already_consumed:
+        continuation_state = "already_consumed"
+        status_code = "continuation_already_consumed"
+        result_class = "duplicate"
+    elif completion_status == "completed":
+        continuation_state = "parent_continuation_ready"
+        status_code = "dispatch_completed"
+        result_class = "success"
+    elif completion_status == "failed":
+        continuation_state = "recovery_ready"
+        status_code = "dispatch_failed"
+        result_class = "non_success"
+    elif completion_status == "empty_result":
+        continuation_state = "recovery_ready"
+        status_code = "dispatch_empty_result"
+        result_class = "non_success"
+    elif completion_status == "blocked":
+        continuation_state = "recovery_ready"
+        status_code = "dispatch_blocked"
+        result_class = "non_success"
+    elif raw:
+        status_code = "dispatch_unknown"
+        result_class = "non_success"
+
+    return {
+        "parent_mst_session_id": parent_session_id,
+        "task_id": task_id,
+        "completion_status": completion_status,
+        "allowed_completion_status": list(ALLOWED_COMPLETION_STATUS),
+        "continuation_state": continuation_state,
+        "allowed_continuation_state": list(ALLOWED_CONTINUATION_STATE),
+        "status_code": status_code,
+        "result_class": result_class,
+        "completion_evidence_path": completion_evidence_path,
+        "evidence_path": completion_evidence_path,
+        "next_action_idempotency_key": action_idempotency_key,
+        "consumption_status": "already_consumed" if already_consumed else "ready",
+        "consumable": continuation_state in {"parent_continuation_ready", "recovery_ready"},
+        "duplicate_prevented": already_consumed,
+        "completed_at": _safe_text(raw.get("completed_at")),
+    }
+
+
+def _continuation_projection(next_action: dict[str, Any], handoff: dict[str, Any]) -> dict[str, Any]:
+    state = _safe_text(handoff.get("continuation_state"))
+    action = dict(next_action) if state in {"parent_continuation_ready", "recovery_ready"} else None
+    return {
+        "state": state or "no_completion_evidence",
+        "queued_action": action,
+        "idempotency_key": _safe_idempotency_key(handoff.get("next_action_idempotency_key")),
+        "completion_evidence_path": _safe_text(handoff.get("completion_evidence_path")),
+        "evidence_path": _safe_text(handoff.get("completion_evidence_path")),
     }
 
 
@@ -413,6 +512,30 @@ def _evidence_paths(*sections: Any) -> list[str]:
     return paths
 
 
+def resolve_continuation_guard(fixture_or_context: Any, *, hook_event: str) -> dict[str, Any]:
+    hook_name = "Stop" if hook_event == "Stop" else "SessionStart"
+    hook_source = "hooks/mst-stop-hook.sh" if hook_name == "Stop" else "hooks/mst-session-init.sh"
+    handoff = project_current_work_handoff(fixture_or_context)
+    continuation = handoff.get("continuation_handoff") if isinstance(handoff.get("continuation_handoff"), dict) else {}
+    state = _safe_text(continuation.get("continuation_state"))
+    action = handoff.get("continue") if isinstance(handoff.get("continue"), dict) else {}
+    queued_action = action.get("queued_action") if isinstance(action.get("queued_action"), dict) else None
+    decision = state or "no_completion_evidence"
+    return _hashable_json(
+        {
+            "hook_event": hook_name,
+            "hook_source": hook_source,
+            "decision": decision,
+            "execution_allowed": state in {"parent_continuation_ready", "recovery_ready"},
+            "duplicate_prevented": continuation.get("duplicate_prevented") is True,
+            "consumed_idempotency_key": _safe_idempotency_key(continuation.get("next_action_idempotency_key")),
+            "next_action": queued_action,
+            "completion_evidence_path": _safe_text(continuation.get("completion_evidence_path")),
+            "parent_mst_session_id": _safe_mst_session_id(continuation.get("parent_mst_session_id")),
+        }
+    )
+
+
 def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
     """Return a bounded, read-only current-work handoff projection.
 
@@ -427,6 +550,8 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
     stack = _bounded_stack(context, mst_session_id)
     workflow = _active_workflow(context, mst_session_id)
     action = _next_action(context, mst_session_id)
+    handoff = _dispatch_completion(context, mst_session_id, action)
+    continuation = _continuation_projection(action, handoff)
     freshness = _projection_freshness(context, mst_session_id, generated_at)
     blockers = _unique_blockers(
         _source_blockers(context, mst_session_id)
@@ -437,7 +562,7 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
             stack=stack,
         )
     )
-    evidence_paths = _evidence_paths(workflow, stack, action, blockers, freshness)
+    evidence_paths = _evidence_paths(workflow, stack, action, blockers, freshness, handoff, continuation)
     if not evidence_paths:
         evidence_paths = [DEFAULT_EVIDENCE_PATH.format(mst_session_id=mst_session_id or "unknown")]
 
@@ -455,6 +580,8 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
             "active_workflow": workflow,
             "current_task_stack": stack,
             "next_action": action,
+            "continuation_handoff": handoff,
+            "continue": continuation,
             "blockers": blockers,
             "legacy_diagnostics": _legacy_diagnostics(context),
             "evidence_paths": evidence_paths,

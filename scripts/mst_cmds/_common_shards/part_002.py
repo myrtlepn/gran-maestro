@@ -73,6 +73,21 @@ def _queue_read_entries() -> list[dict]:
                 return _queue_parse_entries(f.read().splitlines())
         finally:
             _unlock(lock_f)
+def _queue_terminal_duplicate(entries: list[dict], current_entry: dict) -> dict | None:
+    current_entry_id = str(current_entry.get("entry_id") or "")
+    idempotency_key = str(current_entry.get("idempotency_key") or "").strip()
+    if not current_entry_id or not idempotency_key:
+        return None
+    for entry in entries:
+        if not _is_workflow_queue_entry(entry):
+            continue
+        if str(entry.get("entry_id") or "") == current_entry_id:
+            continue
+        if str(entry.get("idempotency_key") or "").strip() != idempotency_key:
+            continue
+        if str(entry.get("status") or "").strip() in QUEUE_TERMINAL_STATUSES - {"consumed"}:
+            return copy.deepcopy(entry)
+    return None
 def _queue_compact(mutator):
     path = _queue_path()
     lock_path = _queue_lock_path()
@@ -399,10 +414,56 @@ def queue_mark_running(entry_id: str) -> dict | None:
         return entries, None
 
     return _queue_compact(_mutator)
+def queue_finalize(
+    action_id: str,
+    *,
+    terminal_status: str,
+    result: str | None = None,
+    error: str | None = None,
+    extra_fields: dict | None = None,
+) -> dict | None:
+    if terminal_status not in QUEUE_TERMINAL_STATUSES:
+        raise ValueError(f"unsupported queue terminal status: {terminal_status}")
+    now = _queue_timestamp()
+    warn = None
+
+    def _mutator(entries):
+        nonlocal warn
+        for entry in entries:
+            if not _is_workflow_queue_entry(entry):
+                continue
+            matches_entry_id = entry.get("entry_id") == action_id
+            matches_id = entry.get("id") == action_id
+            if not (matches_entry_id or matches_id):
+                continue
+            status = str(entry.get("status", ""))
+            if status in QUEUE_TERMINAL_STATUSES:
+                warn = f"already terminal: {action_id}"
+                return entries, copy.deepcopy(entry)
+            entry["status"] = terminal_status
+            if entry.get("consumed_at") is None:
+                entry["consumed_at"] = now
+            entry["completed_at"] = now
+            if result is not None:
+                entry["result"] = result
+            if error is not None:
+                entry["error"] = error
+            if isinstance(extra_fields, dict):
+                for key, value in extra_fields.items():
+                    entry[key] = copy.deepcopy(value)
+            return entries, copy.deepcopy(entry)
+        warn = f"action not found: {action_id}"
+        return entries, None
+
+    output = _queue_compact(_mutator)
+    if warn:
+        print(f"[mst] warning: {warn}", file=sys.stderr)
+    return output
 def queue_pop() -> dict | None:
     while True:
+        entries = _queue_read_entries()
         peeked = None
-        for entry in _queue_read_entries():
+        for entry in entries:
             if not _is_workflow_queue_entry(entry):
                 continue
             if entry.get("status") == "queued":
@@ -410,6 +471,19 @@ def queue_pop() -> dict | None:
                 break
         if peeked is None:
             return None
+        duplicate_terminal = _queue_terminal_duplicate(entries, peeked)
+        if duplicate_terminal is not None:
+            return queue_finalize(
+                str(peeked.get("entry_id") or ""),
+                terminal_status="consumed",
+                result="duplicate_terminal_idempotency_key",
+                extra_fields={
+                    "duplicate_of_entry_id": duplicate_terminal.get("entry_id"),
+                    "duplicate_of_status": duplicate_terminal.get("status"),
+                    "canonical_session_id": duplicate_terminal.get("canonical_session_id")
+                    or peeked.get("canonical_session_id"),
+                },
+            )
         entry_id = peeked.get("entry_id")
         if not isinstance(entry_id, str) or not entry_id.strip():
             continue
@@ -423,64 +497,10 @@ def queue_list(status: str | None) -> list[dict]:
     return [entry for entry in entries if entry.get("status") == status]
 def queue_complete(action_id: str, result: str | None = None) -> dict | None:
     """Mark queue entry complete by `entry_id` (preferred) or legacy `id`."""
-    now = _queue_timestamp()
-    warn = None
-
-    def _mutator(entries):
-        nonlocal warn
-        for entry in entries:
-            if not _is_workflow_queue_entry(entry):
-                continue
-            matches_entry_id = entry.get("entry_id") == action_id
-            matches_id = entry.get("id") == action_id
-            if not (matches_entry_id or matches_id):
-                continue
-            status = str(entry.get("status", ""))
-            if status in ("done", "failed"):
-                warn = f"already terminal: {action_id}"
-                return entries, copy.deepcopy(entry)
-            entry["status"] = "done"
-            entry["completed_at"] = now
-            if result is not None:
-                entry["result"] = result
-            return entries, copy.deepcopy(entry)
-        warn = f"action not found: {action_id}"
-        return entries, None
-
-    output = _queue_compact(_mutator)
-    if warn:
-        print(f"[mst] warning: {warn}", file=sys.stderr)
-    return output
+    return queue_finalize(action_id, terminal_status="done", result=result)
 def queue_fail(action_id: str, error: str | None = None) -> dict | None:
     """Mark queue entry failed by `entry_id` (preferred) or legacy `id`."""
-    now = _queue_timestamp()
-    warn = None
-
-    def _mutator(entries):
-        nonlocal warn
-        for entry in entries:
-            if not _is_workflow_queue_entry(entry):
-                continue
-            matches_entry_id = entry.get("entry_id") == action_id
-            matches_id = entry.get("id") == action_id
-            if not (matches_entry_id or matches_id):
-                continue
-            status = str(entry.get("status", ""))
-            if status in ("done", "failed"):
-                warn = f"already terminal: {action_id}"
-                return entries, copy.deepcopy(entry)
-            entry["status"] = "failed"
-            entry["completed_at"] = now
-            if error is not None:
-                entry["error"] = error
-            return entries, copy.deepcopy(entry)
-        warn = f"action not found: {action_id}"
-        return entries, None
-
-    output = _queue_compact(_mutator)
-    if warn:
-        print(f"[mst] warning: {warn}", file=sys.stderr)
-    return output
+    return queue_finalize(action_id, terminal_status="failed", error=error)
 def queue_count(status: str = "queued") -> int:
     return len(queue_list(status))
 def _create_intent_store():

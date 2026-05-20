@@ -86,6 +86,22 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
                 field="auto",
                 reason="dispatch context auto policy mismatch",
             )
+def _normalize_context_identity_from_core(payload: dict) -> dict:
+    normalized = dict(payload)
+    core = normalized.get("core_rehydration")
+    if not isinstance(core, dict):
+        return normalized
+    if "schema_version" not in normalized and core.get("schema_version") is not None:
+        normalized["schema_version"] = core.get("schema_version")
+    if not isinstance(normalized.get("mst_session_id"), str) or not normalized.get("mst_session_id", "").strip():
+        core_session_id = core.get("mst_session_id")
+        if isinstance(core_session_id, str) and core_session_id.strip():
+            normalized["mst_session_id"] = core_session_id.strip()
+    if not isinstance(normalized.get("root_mst_id"), str) or not normalized.get("root_mst_id", "").strip():
+        core_root_mst_id = core.get("root_mst_id")
+        if isinstance(core_root_mst_id, str) and core_root_mst_id.strip():
+            normalized["root_mst_id"] = core_root_mst_id.strip()
+    return normalized
 def _normalized_child_context_payload(raw_context: str, session_id: str) -> dict:
     context_payload: dict = {}
     if raw_context:
@@ -95,6 +111,7 @@ def _normalized_child_context_payload(raw_context: str, session_id: str) -> dict
             raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+        parsed = _normalize_context_identity_from_core(parsed)
         _validate_context_identity(parsed, session_id)
         context_payload = dict(parsed)
 

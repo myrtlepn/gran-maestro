@@ -166,6 +166,7 @@ DISPATCH = {
     ("queue", "complete"): queue.cmd_queue_complete,
     ("queue", "fail"): queue.cmd_queue_fail,
     ("queue", "count"): queue.cmd_queue_count,
+    ("queue", "drain-headless"): queue.cmd_queue_drain_headless,
     ("measure", "stop-rate"): measure.cmd_measure_stop_rate,
     ("plan", "list"): plan.cmd_plan_list,
     ("plan", "count"): plan.cmd_plan_count,
