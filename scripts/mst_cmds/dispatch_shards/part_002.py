@@ -8,6 +8,26 @@ def cmd_dispatch_register(args):
         if validation_result is not None:
             return validation_result
         if _common.is_missing_canonical_session_error(exc):
+            if (
+                not os.environ.get("MST_CONTEXT_JSON", "").strip()
+                and not os.environ.get("MST_HOOK_STDIN_RAW", "").strip()
+            ):
+                started_by_pid = resolve_started_by_pid()
+                if started_by_pid > 0:
+                    print(
+                        json.dumps(
+                            {
+                                "status": "skipped",
+                                "reason": "missing_canonical_mst_session_id",
+                                "created_new_session": False,
+                                "prompt_summary_used_as_source": False,
+                                "task_id": str(args.task_id).strip(),
+                                "started_by_pid": started_by_pid,
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    return 0
             return _common.emit_session_identity_non_success("dispatch register")
         print(f"Error: {exc}", file=sys.stderr)
         return 1

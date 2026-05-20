@@ -22,6 +22,36 @@ extension/package.json           → "version": "X.Y.Z"
 
 ## 3. 매니페스트 정합성 확인
 
+### Codex migration docs/release gate (DOD-012)
+
+Codex plugin migration을 포함한 릴리스는 Claude Code plugin canonical release와 Codex generated asset 검증을 분리해서 확인합니다.
+
+- generated Codex assets: `.codex-plugin/`, `.agents/plugins/`, `skills/`, `agents/`, `hooks/hooks.json`가 repository-local 산출물로 존재하는지 확인합니다.
+- repository-local validation: 실제 Codex install/cache refresh/reload 없이 아래 명령을 실행합니다.
+  ```bash
+  node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
+  npm test
+  ```
+- DOD evidence linkage: `.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json`가 shared DOD registry의 DOD-012 entry와 일치하고 DOD-011 source evidence를 참조해야 합니다.
+- no-go boundary: user-home mutation, `~/.codex/config.toml` mutation, external Codex install/cache refresh/reload, symlink creation, plugin cache mutation, `.claude/hooks` direct edit, `objective.md` direct edit가 없어야 합니다.
+- 5-file version sync: 기존 5파일 버전 동기화 gate를 Codex docs/release gate와 함께 확인합니다.
+- DOD-013 follow-up boundary: single-source drift validation은 별도 Sprint에서 완료되기 전까지 supporting/follow-up only로 남기고 done/accepted/completed로 승격하지 않습니다.
+
+### Codex migration single-source gate (DOD-013)
+
+DOD-013 이후 Codex migration 릴리스는 Codex-only fork 없이 단일 Gran Maestro source를 유지해야 합니다. Claude Code plugin canonical source는 `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, package/version files이며, Codex 산출물은 `.codex-plugin/plugin.json`과 `.agents/plugins/marketplace.json` 같은 generated/projected asset으로만 검증합니다.
+
+- Codex-only fork: 0개여야 하며, 새 Codex 전용 source tree를 만들지 않습니다.
+- generated drift: 0건이어야 하며, canonical source와 projected asset의 version/linkage가 일치해야 합니다.
+- 5-file version sync: `.claude-plugin/plugin.json`, `package.json`, `.claude-plugin/marketplace.json`, `extension/manifest.json`, `extension/package.json` version이 모두 같아야 합니다.
+- repository-local validation: 실제 Codex install/cache refresh/reload 없이 아래 명령을 실행합니다.
+  ```bash
+  node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json
+  npm test
+  ```
+- DOD evidence linkage: `.gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json`가 shared DOD registry의 DOD-013 entry와 일치하고 DOD-011/DOD-012 source evidence를 참조해야 합니다.
+- no-go boundary: user-home mutation, `~/.codex/config.toml` mutation, external Codex install/cache refresh/reload, symlink creation, plugin cache mutation, `.claude/hooks` direct edit, `objective.md` direct edit, release push/publish가 없어야 합니다.
+
 ### agents 배열 검증
 
 `plugin.json`의 `agents` 배열이 `agents/` 디렉토리의 모든 `.md` 파일과 일치하는지 확인합니다.

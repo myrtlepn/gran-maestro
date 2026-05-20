@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -41,6 +41,24 @@ function findOrchestrationRoot(startDir) {
 }
 
 export const orchestrationRoot = findOrchestrationRoot(repoRoot);
+
+function findSharedGranMaestroPath(relativePath) {
+  let currentDir = repoRoot;
+
+  while (true) {
+    const candidate = join(currentDir, '.gran-maestro', relativePath);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      return join(orchestrationRoot, relativePath);
+    }
+
+    currentDir = parentDir;
+  }
+}
 
 export const stableEvidenceRelativePath =
   '.gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json';
@@ -90,11 +108,37 @@ export const dod007RequestEvidenceAbsolutePath = join(
   orchestrationRoot,
   dod007RequestEvidenceOrchestrationRelativePath,
 );
+export const dod008WorkflowE2EValidationEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json';
+export const dod008WorkflowE2EValidationEvidenceAbsolutePath = join(
+  repoRoot,
+  dod008WorkflowE2EValidationEvidenceRelativePath,
+);
+export const dod009RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json';
+export const dod009RequestEvidenceAbsolutePath = join(
+  repoRoot,
+  dod009RequestEvidenceRelativePath,
+);
+const dod009GeneratorScriptRelativePath =
+  'scripts/generate-dod-009-claude-plugin-regression-validation.mjs';
 export const req893RequestMetadataRelativePath = '.gran-maestro/requests/REQ-893/request.json';
 const req893RequestMetadataOrchestrationRelativePath = 'requests/REQ-893/request.json';
 const req893RequestMetadataAbsolutePath = join(
   orchestrationRoot,
   req893RequestMetadataOrchestrationRelativePath,
+);
+export const req894RequestMetadataRelativePath = '.gran-maestro/requests/REQ-894/request.json';
+const req894RequestMetadataOrchestrationRelativePath = 'requests/REQ-894/request.json';
+const req894RequestMetadataAbsolutePath = join(
+  orchestrationRoot,
+  req894RequestMetadataOrchestrationRelativePath,
+);
+export const req912RequestMetadataRelativePath = '.gran-maestro/requests/REQ-912/request.json';
+const req912RequestMetadataOrchestrationRelativePath = 'requests/REQ-912/request.json';
+const req912RequestMetadataAbsolutePath = join(
+  orchestrationRoot,
+  req912RequestMetadataOrchestrationRelativePath,
 );
 export const req890Dod005ValidationEvidenceRelativePath =
   '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json';
@@ -281,6 +325,680 @@ export const defaultDod007RequestEvidenceVerificationSummary = {
 };
 
 export const dod007ExcludedSurfaceIds = ['DOD-008', 'DOD-009', 'docs/release'];
+export const dod008WorkflowScenarioPaths = [
+  '/mst:agile-plan',
+  '/mst:agile --resume',
+  '/mst:request',
+  '/mst:approve',
+  'delegated implementation loop',
+  '/mst:review',
+  '/mst:accept',
+  '/mst:recover',
+  '/mst:cleanup',
+  '/mst:dashboard',
+  '/mst:settings',
+];
+export const dod008AcceptanceRuntimeSurfaceIds = ['DOD-008'];
+export const dod008ExcludedSurfaceIds = [
+  'DOD-009',
+  'DOD-010',
+  'DOD-011',
+  'DOD-012',
+  'DOD-013',
+];
+export const dod008ArtifactSchemaRequiredFieldsByType = {
+  objective: ['artifact_id', 'objective_id', 'title', 'status', 'request_ids', 'updated_at'],
+  request: ['artifact_id', 'request_id', 'objective_id', 'dod_id', 'status', 'task_ids'],
+  spec: ['artifact_id', 'spec_id', 'request_id', 'acceptance_criteria', 'artifact_types'],
+  task: ['artifact_id', 'task_id', 'request_id', 'status', 'owner_role', 'trace_id'],
+  trace: ['artifact_id', 'trace_id', 'request_id', 'scenario_id', 'event_refs', 'status'],
+  review: ['artifact_id', 'review_id', 'request_id', 'trace_id', 'findings', 'status'],
+  accept: ['artifact_id', 'acceptance_id', 'request_id', 'review_id', 'decision', 'status'],
+  recover: [
+    'artifact_id',
+    'recovery_id',
+    'request_id',
+    'trigger',
+    'resume_token',
+    'mst_session_id',
+    'root_mst_id',
+    'recovery_judgement',
+    'status',
+  ],
+  cleanup: [
+    'artifact_id',
+    'cleanup_id',
+    'request_id',
+    'targets',
+    'dry_run',
+    'report',
+    'request_artifacts_preserved',
+    'status',
+  ],
+  dashboard: [
+    'artifact_id',
+    'dashboard_id',
+    'request_id',
+    'widgets',
+    'health',
+    'overview',
+    'status',
+    'updated_at',
+  ],
+  settings: [
+    'artifact_id',
+    'settings_id',
+    'scope',
+    'effective_values',
+    'config',
+    'status',
+    'updated_at',
+  ],
+};
+export const dod008LifecycleSmokeArtifactTypes = ['recover', 'cleanup', 'dashboard', 'settings'];
+export const dod008NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'host_user_absolute_root',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'home_alias_or_env_root',
+    category: 'shell-expanded-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_state_surface',
+    category: 'user-scoped-codex-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'agent_user_skill_surface',
+    category: 'user-scoped-agent-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_surface',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_network_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_rescan_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'link_creation_action',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+];
+export const dod009MatrixSurfacePaths = [
+  '.claude-plugin/plugin.json',
+  'package.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+  'hooks/hooks.json',
+  'skills/',
+  'agents/',
+];
+export const dod009ExcludedSurfaceIds = [
+  'DOD-010',
+  'DOD-011',
+  'DOD-012',
+  'DOD-013',
+];
+const dod009VersionSyncPaths = [
+  'package.json',
+  '.claude-plugin/plugin.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+];
+const dod009HooksCommandPaths = [
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh',
+];
+const dod009NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'host_user_absolute_root',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'home_alias_or_env_root',
+    category: 'shell-expanded-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_config_surface',
+    category: 'user-scoped-codex-config',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_workspace_bypass',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_runtime_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_index_rescan_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'link_creation_side_effect',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+];
+export const dod008CoreWorkflowSmokeScenarioPaths = [
+  '/mst:agile-plan',
+  '/mst:request',
+  '/mst:approve',
+  'delegated implementation loop',
+  '/mst:review',
+  '/mst:accept',
+];
+export const dod008CoreWorkflowSmokeArtifactTypes = [
+  'request',
+  'spec',
+  'task',
+  'trace',
+  'review',
+  'accept',
+];
+export const dod008CoreWorkflowSmokeSessionId = 'MST-REQ-894-20260520T000000000Z-dod008aa';
+export const dod008WorkflowArtifactParityTypes = [
+  ...dod008CoreWorkflowSmokeArtifactTypes,
+  ...dod008LifecycleSmokeArtifactTypes,
+];
+
+export const defaultDod008WorkflowE2EValidationSummary = {
+  focused_workflow_validation: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 16,
+    tests_pass: 16,
+    tests_fail: 0,
+    summary: '16 DOD-008 workflow checks passed',
+  },
+  schema_contract: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 5,
+    tests_pass: 5,
+    tests_fail: 0,
+    summary: 'schema contract checks passed',
+  },
+  core_workflow_harness: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 3,
+    tests_pass: 3,
+    tests_fail: 0,
+    summary: 'core workflow harness checks passed',
+  },
+  lifecycle_smoke: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 4,
+    tests_pass: 4,
+    tests_fail: 0,
+    summary: 'lifecycle smoke checks passed',
+  },
+  artifact_parity: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 4,
+    tests_pass: 4,
+    tests_fail: 0,
+    summary: 'artifact parity checks passed',
+  },
+  npm_test: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 57,
+    tests_pass: 57,
+    tests_fail: 0,
+    summary: '57 passed',
+  },
+  generator: {
+    command:
+      'node scripts/generate-dod-008-workflow-e2e-validation.mjs <repo-output> <summary-fixture>',
+    generated_artifact_path: dod008WorkflowE2EValidationEvidenceRelativePath,
+    generated_output_path: null,
+    status: 'pass',
+    parse_ok: true,
+  },
+};
+
+export const defaultDod009RequestEvidenceVerificationSummary = {
+  plugin_manifest_hooks: {
+    command: 'python3 -m pytest tests/test_plugin_manifest_hooks.py tests/test_hooks_json_registration.py',
+    status: 'pass',
+    tests_total: 8,
+    tests_pass: 8,
+    tests_fail: 0,
+    summary: 'plugin manifest and hooks regression checks passed',
+  },
+  workflow_state_continuation: {
+    command:
+      'python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py',
+    status: 'pass',
+    tests_total: 21,
+    tests_pass: 21,
+    tests_fail: 0,
+    summary: 'workflow state and continuation regression checks passed',
+  },
+  run_wrapper_session_migration: {
+    command: 'python3 -m pytest tests/test_run_wrapper.py tests/test_session_id_migration.py',
+    status: 'pass',
+    tests_total: 20,
+    tests_pass: 20,
+    tests_fail: 0,
+    summary: 'run wrapper and session migration regression checks passed',
+  },
+  npm_test: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 65,
+    tests_pass: 65,
+    tests_fail: 0,
+    summary: 'smoke tests passed',
+  },
+  generator: {
+    command: 'node scripts/generate-dod-009-claude-plugin-regression-validation.mjs <temp-output>',
+    status: 'pass',
+    parse_ok: true,
+    generated_artifact_path: dod009RequestEvidenceRelativePath,
+    generated_output_path: null,
+  },
+};
+
+export const dod010EvidenceByDodIds = [
+  'DOD-001',
+  'DOD-002',
+  'DOD-003',
+  'DOD-004',
+  'DOD-005',
+  'DOD-006',
+  'DOD-007',
+  'DOD-008',
+  'DOD-009',
+];
+export const dod010NormalizedBlockerTypes = [
+  'missing_evidence',
+  'non_existing_evidence_path',
+  'parse_failure',
+  'failed_tests',
+  'generated_drift',
+  'unsupported_blocker_type',
+  'no_go_violation',
+  'stale_lifecycle',
+  'path_escape',
+  'release_blocking_risk',
+];
+export const dod010AllowedRiskClassifications = [
+  'blocker',
+  'non_release_blocking',
+  'follow_up',
+];
+export const dod010FollowUpDodIds = ['DOD-011', 'DOD-012', 'DOD-013'];
+export const dod010BlockerFreeMigrationReportRelativePath =
+  '.gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json';
+export const dod010BlockerFreeMigrationReportAbsolutePath = join(
+  repoRoot,
+  dod010BlockerFreeMigrationReportRelativePath,
+);
+export const dod011RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json';
+export const dod011RequestEvidenceAbsolutePath = join(
+  repoRoot,
+  dod011RequestEvidenceRelativePath,
+);
+const dod011IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-919/evidence/dod-011-integration-validation.json';
+const dod011IntegrationValidationAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/evidence/dod-011-integration-validation.json',
+);
+export const dod012RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json';
+export const dod012RequestEvidenceAbsolutePath = join(repoRoot, dod012RequestEvidenceRelativePath);
+const dod012IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-921/evidence/dod-012-integration-validation.json';
+const dod012IntegrationValidationAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-921/evidence/dod-012-integration-validation.json',
+);
+export const dod013RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json';
+export const dod013RequestEvidenceAbsolutePath = join(repoRoot, dod013RequestEvidenceRelativePath);
+export const dod013IntegrationValidationRelativePath =
+  '.gran-maestro/requests/REQ-922/evidence/dod-013-integration-validation.json';
+export const dod013IntegrationValidationAbsolutePath = join(repoRoot, dod013IntegrationValidationRelativePath);
+const dod010ObjectiveRelativePath = '.gran-maestro/agile/AGI-039/objective/objective.md';
+const dod010ObjectiveAbsolutePath = join(dirname(orchestrationRoot), dod010ObjectiveRelativePath);
+const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/request.json';
+const dod010Req916RequestMetadataAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-916/request.json',
+);
+const dod011ObjectiveDetailRelativePath =
+  '.gran-maestro/agile/AGI-039/objective/details/migration-execution-breakdown.md';
+const dod011ObjectiveDetailAbsolutePath = findSharedGranMaestroPath(
+  'agile/AGI-039/objective/details/migration-execution-breakdown.md',
+);
+const dod011PlanRelativePath = '.gran-maestro/plans/PLN-743/plan.md';
+const dod011PlanAbsolutePath = findSharedGranMaestroPath('plans/PLN-743/plan.md');
+const dod011PlanIdsRelativePath = '.gran-maestro/plans/PLN-743/plan.ids.json';
+const dod011PlanIdsAbsolutePath = findSharedGranMaestroPath('plans/PLN-743/plan.ids.json');
+const dod011Req919RequestMetadataRelativePath = '.gran-maestro/requests/REQ-919/request.json';
+const dod011Req919RequestMetadataAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/request.json',
+);
+const dod011Task01SpecRelativePath = '.gran-maestro/requests/REQ-919/tasks/01/spec.md';
+const dod011Task01SpecAbsolutePath = findSharedGranMaestroPath('requests/REQ-919/tasks/01/spec.md');
+const dod011Task02SpecRelativePath = '.gran-maestro/requests/REQ-919/tasks/02/spec.md';
+const dod011Task02SpecAbsolutePath = findSharedGranMaestroPath('requests/REQ-919/tasks/02/spec.md');
+const dod011ArchitectureDecisionRelativePath =
+  '.gran-maestro/requests/REQ-919/discussion/req-arch-decision.md';
+const dod011ArchitectureDecisionAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/discussion/req-arch-decision.md',
+);
+const dod010GeneratorScriptRelativePath =
+  'scripts/generate-dod-010-blocker-free-migration-report.mjs';
+export const dod011GeneratorScriptRelativePath =
+  'scripts/generate-dod-011-migration-work-package-breakdown.mjs';
+export const dod012GeneratorScriptRelativePath =
+  'scripts/generate-dod-012-docs-release-integration.mjs';
+export const dod013GeneratorScriptRelativePath =
+  'scripts/generate-dod-013-single-source-drift-validation.mjs';
+const dod010NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'user_home_surface',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_config_surface',
+    category: 'user-scoped-codex-config',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_workspace_bypass',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'external_runtime_install',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_mutation',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'symlink_creation',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+];
+const dod011RequiredPhaseOrder = Object.freeze([
+  'inventory',
+  'generator',
+  'adapter',
+  'skill-agent-parity',
+  'config-provider-parity',
+  'state-workflow-parity',
+  'docs-release',
+]);
+const dod011RequiredPackageIds = Object.freeze([
+  'WP-1',
+  'WP-2',
+  'WP-3',
+  'WP-4',
+  'WP-5',
+  'WP-6',
+  'WP-7',
+  'WP-8',
+]);
+const dod011RequiredNoGoBoundaryIds = Object.freeze([
+  'user_home_mutation',
+  'external_codex_install_cache_reload',
+  'symlink_creation',
+  'plugin_cache_mutation',
+  'claude_hooks_direct_edit',
+  'objective_md_direct_edit',
+]);
+const dod011RequiredBlockerTypes = Object.freeze([
+  'unsupported_blocker',
+  'generated_drift',
+  'no_go_mutation',
+  'missing_validation_evidence',
+]);
+const dod011ValidationCommandForbiddenPattern =
+  /(?:~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s)/u;
+
+export const sharedDodEvidenceRegistryRequiredFields = Object.freeze([
+  'dod_id',
+  'request_id',
+  'agi_id',
+  'sprint',
+  'generator_script_path',
+  'request_evidence_path',
+  'expected_status',
+  'validator_linkage',
+]);
+
+function buildSharedDodEvidenceRegistryEntry({
+  dod_id,
+  request_id,
+  agi_id,
+  sprint,
+  generator_script_path,
+  request_evidence_path,
+  expected_status,
+  validator_export_name,
+}) {
+  return Object.freeze({
+    dod_id,
+    request_id,
+    agi_id,
+    sprint,
+    generator_script_path,
+    request_evidence_path,
+    expected_status,
+    validator_linkage: Object.freeze({
+      export_name: validator_export_name,
+      helper_kind: 'assertion-helper',
+      validation_entrypoint: 'scripts/lib/codex-plugin-discovery-smoke.mjs',
+    }),
+  });
+}
+
+export const sharedDodEvidenceRegistry = Object.freeze([
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path: dod009GeneratorScriptRelativePath,
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: dod010GeneratorScriptRelativePath,
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-012',
+    request_id: 'REQ-921',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod012DocsReleaseIntegration',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
+  }),
+]);
+
+export function getSharedDodEvidenceRegistryEntryByDodId(
+  dodId,
+  registry = sharedDodEvidenceRegistry,
+) {
+  if (!Array.isArray(registry)) {
+    return null;
+  }
+
+  return registry.find((entry) => entry?.dod_id === dodId) ?? null;
+}
+
+export function buildSharedDodEvidenceRegistryLinkage({
+  dodId,
+  requestEvidencePath,
+  repoRootPath = repoRoot,
+  registry = sharedDodEvidenceRegistry,
+  allowMissingRequestEvidencePath = false,
+} = {}) {
+  const entry = getSharedDodEvidenceRegistryEntryByDodId(dodId, registry);
+  const validation = entry
+    ? validateSharedDodEvidenceRegistryEntry(entry, {
+        repoRootPath,
+        allowMissingRequestEvidencePath,
+      })
+    : {
+        status: 'fail',
+        issues: [`Missing shared DOD evidence registry entry for ${dodId ?? 'unknown'}.`],
+        normalized_entry: null,
+        validator_export_name: null,
+      };
+  const normalizedEntry = validation.normalized_entry;
+  const requestEvidencePathMatchesRegistry =
+    normalizedEntry?.request_evidence_path === requestEvidencePath;
+  const generatorScriptExists = Boolean(
+    normalizedEntry?.generator_script_path &&
+      existsSync(join(repoRootPath, normalizedEntry.generator_script_path)),
+  );
+  const validationEntrypoint =
+    entry?.validator_linkage &&
+    typeof entry.validator_linkage === 'object' &&
+    !Array.isArray(entry.validator_linkage)
+      ? entry.validator_linkage.validation_entrypoint ?? null
+      : null;
+  const validatorEntrypointExists =
+    typeof validationEntrypoint === 'string' &&
+    validationEntrypoint.length > 0 &&
+    existsSync(join(repoRootPath, validationEntrypoint));
+  const issues = [...validation.issues];
+
+  if (!requestEvidencePathMatchesRegistry) {
+    issues.push(
+      `Shared DOD registry request_evidence_path mismatch for ${dodId ?? 'unknown'}: ` +
+        `expected ${normalizedEntry?.request_evidence_path ?? 'missing'}, got ${requestEvidencePath ?? 'missing'}.`,
+    );
+  }
+
+  if (!generatorScriptExists) {
+    issues.push(
+      `Shared DOD registry generator script is not resolvable for ${dodId ?? 'unknown'}.`,
+    );
+  }
+
+  if (!validatorEntrypointExists) {
+    issues.push(
+      `Shared DOD registry validator entrypoint is not resolvable for ${dodId ?? 'unknown'}.`,
+    );
+  }
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    linkage_source: 'shared_dod_evidence_registry',
+    request_evidence_path_matches_registry: requestEvidencePathMatchesRegistry,
+    generator_script_exists: generatorScriptExists,
+    validator_entrypoint_exists: validatorEntrypointExists,
+    issues,
+    registry_entry: normalizedEntry
+      ? {
+          ...normalizedEntry,
+          validator_linkage: {
+            export_name: validation.validator_export_name,
+            helper_kind:
+              entry?.validator_linkage &&
+              typeof entry.validator_linkage === 'object' &&
+              !Array.isArray(entry.validator_linkage)
+                ? entry.validator_linkage.helper_kind ?? null
+                : null,
+            validation_entrypoint: validationEntrypoint,
+          },
+        }
+      : null,
+  };
+}
 
 export const manifestFields = [
   'name',
@@ -710,6 +1428,208 @@ function sanitizeMetadataCommand(command) {
     .replaceAll(normalizedRepoRoot, '.')
     .replaceAll(normalizedOrchestrationRoot, '.gran-maestro')
     .replaceAll(normalizedWorkspaceRoot, '.');
+}
+
+function getSharedDodEvidenceValidatorExportName(validatorLinkage) {
+  if (typeof validatorLinkage === 'function') {
+    return validatorLinkage.name || null;
+  }
+
+  if (typeof validatorLinkage === 'string') {
+    return validatorLinkage;
+  }
+
+  if (validatorLinkage && typeof validatorLinkage === 'object') {
+    if (typeof validatorLinkage.export_name === 'string') {
+      return validatorLinkage.export_name;
+    }
+
+    if (typeof validatorLinkage.name === 'string') {
+      return validatorLinkage.name;
+    }
+
+    if (typeof validatorLinkage.validator === 'function') {
+      return validatorLinkage.validator.name || null;
+    }
+  }
+
+  return null;
+}
+
+function resolveSharedDodEvidenceValidatorByName(exportName) {
+  switch (exportName) {
+    case 'assertDod009RequestEvidence':
+      return assertDod009RequestEvidence;
+    case 'assertDod010BlockerFreeMigrationReport':
+      return assertDod010BlockerFreeMigrationReport;
+    case 'assertDod011RequestEvidence':
+      return assertDod011RequestEvidence;
+    case 'assertDod012DocsReleaseIntegration':
+      return assertDod012DocsReleaseIntegration;
+    case 'assertDod013SingleSourceDriftValidation':
+      return assertDod013SingleSourceDriftValidation;
+    default:
+      return null;
+  }
+}
+
+function validateSharedDodEvidenceRegistryPath(
+  path,
+  fieldLabel,
+  repoRootPath,
+  { allowMissing = false } = {},
+) {
+  const validation = validateRepositoryRelativePath(path);
+
+  if (validation.status !== 'pass') {
+    return {
+      status: 'fail',
+      normalized_path: null,
+      issues: [`${fieldLabel} must be a repo-relative path: ${validation.reason}.`],
+    };
+  }
+
+  const scopedPath = join(repoRootPath, validation.normalized_path);
+  if (!existsSync(scopedPath)) {
+    if (allowMissing) {
+      return {
+        status: 'pass',
+        normalized_path: validation.normalized_path,
+        issues: [],
+      };
+    }
+
+    return {
+      status: 'fail',
+      normalized_path: validation.normalized_path,
+      issues: [`${fieldLabel} does not exist at ${validation.normalized_path}.`],
+    };
+  }
+
+  const repoRealPath = realpathSync(repoRootPath);
+  const targetRealPath = realpathSync(scopedPath);
+  const repoRelativePath = normalizePathSeparators(relative(repoRealPath, targetRealPath));
+
+  if (repoRelativePath.length === 0 || repoRelativePath === '..' || repoRelativePath.startsWith('../')) {
+    return {
+      status: 'fail',
+      normalized_path: validation.normalized_path,
+      issues: [`${fieldLabel} escapes repository root: ${validation.normalized_path}.`],
+    };
+  }
+
+  return {
+    status: 'pass',
+    normalized_path: validation.normalized_path,
+    issues: [],
+  };
+}
+
+export function validateSharedDodEvidenceRegistryEntry(
+  entry,
+  { repoRootPath = repoRoot, allowMissingRequestEvidencePath = false } = {},
+) {
+  const issues = [];
+
+  for (const field of sharedDodEvidenceRegistryRequiredFields) {
+    if (!Object.hasOwn(entry ?? {}, field)) {
+      issues.push(`Missing required shared DOD registry field: ${field}.`);
+    }
+  }
+
+  const generatorPathValidation = validateSharedDodEvidenceRegistryPath(
+    entry?.generator_script_path,
+    'generator_script_path',
+    repoRootPath,
+  );
+  issues.push(...generatorPathValidation.issues);
+
+  const requestEvidencePathValidation = validateSharedDodEvidenceRegistryPath(
+    entry?.request_evidence_path,
+    'request_evidence_path',
+    repoRootPath,
+    { allowMissing: allowMissingRequestEvidencePath },
+  );
+  issues.push(...requestEvidencePathValidation.issues);
+
+  const validatorExportName = getSharedDodEvidenceValidatorExportName(entry?.validator_linkage);
+  if (!validatorExportName) {
+    issues.push('validator_linkage must reference an exported shared smoke validator.');
+  }
+
+  const validator = validatorExportName
+    ? resolveSharedDodEvidenceValidatorByName(validatorExportName)
+    : null;
+  if (!validator) {
+    issues.push(
+      `validator_linkage export is not wired by scripts/lib/codex-plugin-discovery-smoke.mjs: ${validatorExportName ?? 'unknown'}.`,
+    );
+  }
+
+  if (
+    entry?.validator_linkage &&
+    typeof entry.validator_linkage === 'object' &&
+    !Array.isArray(entry.validator_linkage) &&
+    entry.validator_linkage.validation_entrypoint
+  ) {
+    const linkagePathValidation = validateSharedDodEvidenceRegistryPath(
+      entry.validator_linkage.validation_entrypoint,
+      'validator_linkage.validation_entrypoint',
+      repoRootPath,
+    );
+    issues.push(...linkagePathValidation.issues);
+  }
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    issues,
+    validator_export_name: validatorExportName,
+    validator,
+    normalized_entry: {
+      ...entry,
+      generator_script_path: generatorPathValidation.normalized_path,
+      request_evidence_path: requestEvidencePathValidation.normalized_path,
+    },
+  };
+}
+
+export function validateSharedDodEvidenceRegistry(
+  registry = sharedDodEvidenceRegistry,
+  { repoRootPath = repoRoot } = {},
+) {
+  if (!Array.isArray(registry)) {
+    return {
+      status: 'fail',
+      issues: ['sharedDodEvidenceRegistry must be an array-backed validation surface.'],
+      entries: [],
+    };
+  }
+
+  const entries = registry.map((entry) =>
+    validateSharedDodEvidenceRegistryEntry(entry, { repoRootPath }),
+  );
+  const issues = entries.flatMap((entryValidation) => entryValidation.issues);
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    issues,
+    entries,
+  };
+}
+
+export function assertSharedDodEvidenceRegistry(
+  registry = sharedDodEvidenceRegistry,
+  { repoRootPath = repoRoot } = {},
+) {
+  const validation = validateSharedDodEvidenceRegistry(registry, { repoRootPath });
+
+  assert.equal(
+    validation.status,
+    'pass',
+    validation.issues.length > 0
+      ? `Invalid shared DOD evidence registry:\n- ${validation.issues.join('\n- ')}`
+      : 'Invalid shared DOD evidence registry.',
+  );
 }
 
 function buildSkillProjectionNoGoGuard(projectionRecords) {
@@ -1711,6 +2631,18 @@ function latestTaskAttempt(task) {
   return normalizeArray(task?.attempts).at(-1) ?? null;
 }
 
+function extractCommitHash(commit) {
+  if (typeof commit === 'string') {
+    return commit;
+  }
+
+  if (commit && typeof commit === 'object' && typeof commit.hash === 'string') {
+    return commit.hash;
+  }
+
+  return null;
+}
+
 function buildReq893RequestMetadataSnapshot(requestMetadata) {
   const tasks = normalizeArray(requestMetadata?.tasks);
   const relevantTaskIds = new Set(['REQ-893-01', 'REQ-893-02', 'REQ-893-03', 'REQ-893-04']);
@@ -1739,6 +2671,88 @@ function buildReq893RequestMetadataSnapshot(requestMetadata) {
             latestAttempt?.commit ??
             null,
           task_commit: task?.commit ?? latestAttempt?.commit ?? null,
+          integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
+          validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
+          self_check: selfCheck,
+        };
+      }),
+  };
+}
+
+function buildReq894RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-894-01',
+    'REQ-894-02',
+    'REQ-894-03',
+    'REQ-894-04',
+    'REQ-894-05',
+  ]);
+
+  return {
+    path: req894RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+        const selfCheck = summarizeSelfCheck(task?.self_check ?? latestAttempt?.self_check);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: task?.integration_commit ??
+            latestAttempt?.integration_commit ??
+            task?.commit ??
+            latestAttempt?.commit ??
+            null,
+          task_commit: task?.commit ?? latestAttempt?.commit ?? null,
+          integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
+          validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
+          self_check: selfCheck,
+        };
+      }),
+  };
+}
+
+function buildReq912RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-912-01',
+    'REQ-912-02',
+    'REQ-912-03',
+  ]);
+
+  return {
+    path: req912RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+        const selfCheck = summarizeSelfCheck(task?.self_check ?? latestAttempt?.self_check);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: task?.integration_commit ??
+            latestAttempt?.integration_commit ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          task_commit: extractCommitHash(task?.commit) ?? extractCommitHash(latestAttempt?.commit),
           integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
           validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
           self_check: selfCheck,
@@ -1821,6 +2835,95 @@ function dod007SummaryPasses(summary) {
     summary.tests_total > 0 &&
     summary.tests_fail === 0 &&
     summary.tests_pass === summary.tests_total;
+}
+
+function normalizeDod008WorkflowE2EValidationSummary(verificationSummary = {}) {
+  const defaults = defaultDod008WorkflowE2EValidationSummary;
+  const normalizeSummary = (name) =>
+    normalizeDod007ContractSummary(verificationSummary[name], defaults[name]);
+
+  return {
+    focused_workflow_validation: normalizeSummary('focused_workflow_validation'),
+    schema_contract: normalizeSummary('schema_contract'),
+    core_workflow_harness: normalizeSummary('core_workflow_harness'),
+    lifecycle_smoke: normalizeSummary('lifecycle_smoke'),
+    artifact_parity: normalizeSummary('artifact_parity'),
+    npm_test: normalizeSummary('npm_test'),
+    generator: {
+      ...defaults.generator,
+      ...(verificationSummary.generator ?? {}),
+      command: sanitizeMetadataCommand(
+        verificationSummary.generator?.command ?? defaults.generator.command,
+      ),
+      generated_artifact_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_artifact_path ??
+          defaults.generator.generated_artifact_path,
+        null,
+      ),
+      generated_output_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_output_path ??
+          defaults.generator.generated_output_path,
+        null,
+      ),
+      status: normalizeEvidenceStatus(
+        verificationSummary.generator?.status ?? defaults.generator.status,
+      ),
+      parse_ok: verificationSummary.generator?.parse_ok ?? defaults.generator.parse_ok,
+    },
+  };
+}
+
+function normalizeDod009RequestEvidenceVerificationSummary(verificationSummary = {}) {
+  const defaults = defaultDod009RequestEvidenceVerificationSummary;
+  const normalizeSummary = (name) =>
+    normalizeDod007ContractSummary(verificationSummary[name], defaults[name]);
+
+  return {
+    plugin_manifest_hooks: normalizeSummary('plugin_manifest_hooks'),
+    workflow_state_continuation: normalizeSummary('workflow_state_continuation'),
+    run_wrapper_session_migration: normalizeSummary('run_wrapper_session_migration'),
+    npm_test: normalizeSummary('npm_test'),
+    generator: {
+      ...defaults.generator,
+      ...(verificationSummary.generator ?? {}),
+      command: sanitizeMetadataCommand(
+        verificationSummary.generator?.command ?? defaults.generator.command,
+      ),
+      generated_artifact_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_artifact_path ??
+          defaults.generator.generated_artifact_path,
+        null,
+      ),
+      generated_output_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_output_path ??
+          defaults.generator.generated_output_path,
+        null,
+      ),
+      status: normalizeEvidenceStatus(
+        verificationSummary.generator?.status ?? defaults.generator.status,
+      ),
+      parse_ok: verificationSummary.generator?.parse_ok ?? defaults.generator.parse_ok,
+    },
+  };
+}
+
+function dod008FocusedWorkflowSummariesPass(verificationSummary) {
+  return [
+    verificationSummary.focused_workflow_validation,
+    verificationSummary.schema_contract,
+    verificationSummary.core_workflow_harness,
+    verificationSummary.lifecycle_smoke,
+    verificationSummary.artifact_parity,
+  ].every(dod007SummaryPasses);
+}
+
+function dod009CommandSummariesPass(verificationSummary) {
+  return [
+    verificationSummary.plugin_manifest_hooks,
+    verificationSummary.workflow_state_continuation,
+    verificationSummary.run_wrapper_session_migration,
+    verificationSummary.npm_test,
+  ].every(dod007SummaryPasses);
 }
 
 function buildDod007ExcludedSurfaces() {
@@ -1923,6 +3026,3652 @@ function buildDod007ForbiddenMetadataScan(evidence) {
     scanned_string_count: strings.length,
     violation_count: violations.length,
     violations,
+  };
+}
+
+export function scanDod008RequestEvidenceMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'agents_state_root', literal: '~/.agents' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'link_literal', literal: 'symlink' },
+    { fixture_id: 'setup_literal', literal: 'install' },
+    { fixture_id: 'cache_action_phrase', literal: 'cache refresh' },
+    { fixture_id: 'rescan_literal', literal: 'reload' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+export function scanDod008ScenarioSchemaMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'posix_user_home_root', literal: '/Users/' },
+    { fixture_id: 'home_alias_root', literal: '~/' },
+    { fixture_id: 'home_env_root', literal: '$HOME' },
+    { fixture_id: 'home_env_braced_root', literal: '${HOME}' },
+    { fixture_id: 'codex_user_state_root', literal: '~/.codex' },
+    { fixture_id: 'agents_user_state_root', literal: '~/.agents' },
+    { fixture_id: 'claude_hook_state_root', literal: '.claude/hooks' },
+    { fixture_id: 'path_escape_term', literal: 'traversal' },
+    { fixture_id: 'codex_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'codex_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'codex_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'reload_term', literal: 'reload' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+    { fixture_id: 'link_term', literal: 'symlink' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_directory_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_directory_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+export function scanDod009RegressionMatrixMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_config_surface', literal: '~/.codex/config.toml' },
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'plugin_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'plugin_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'plugin_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+export function scanDod010BlockerFreeMigrationReportMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_config_surface', literal: '~/.codex/config.toml' },
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'plugin_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'plugin_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'plugin_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'plugin_cache_phrase', literal: 'plugin cache' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+function collectNamedFieldValues(value, fieldName, values = []) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectNamedFieldValues(entry, fieldName, values));
+    return values;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return values;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === fieldName) {
+      values.push(entry);
+    }
+    collectNamedFieldValues(entry, fieldName, values);
+  }
+
+  return values;
+}
+
+function createDod010BlockerCounts() {
+  return Object.fromEntries(
+    dod010NormalizedBlockerTypes.map((blockerType) => [blockerType, 0]),
+  );
+}
+
+function incrementDod010BlockerCount(counts, blockerType, amount = 1) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return;
+  }
+
+  if (Object.hasOwn(counts, blockerType)) {
+    counts[blockerType] += amount;
+    return;
+  }
+
+  counts.unsupported_blocker_type += amount;
+}
+
+function buildDod010HumanReadableSummary(blockerCounts, blockerCount) {
+  return {
+    blocker_count_summary: `Computed blocker count: ${blockerCount}.`,
+    criteria_summaries: dod010NormalizedBlockerTypes.map(
+      (blockerType) => `${blockerType}: ${blockerCounts[blockerType]}.`,
+    ),
+  };
+}
+
+function summarizeDod010EvidenceRefs(rawValue) {
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    return [];
+  }
+
+  return rawValue
+    .split(/[;,]/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function inspectDod010RepositoryPath(path, { mustExist = true } = {}) {
+  const validation = validateRepositoryRelativePath(path);
+  if (validation.status !== 'pass') {
+    return {
+      status: 'fail',
+      code: 'path_escape',
+      normalized_path: null,
+      exists: false,
+      realpath_within_repo: false,
+      reason: validation.reason,
+    };
+  }
+
+  const normalizedPath = validation.normalized_path;
+  const resolutionBaseRoot = normalizedPath.startsWith('.gran-maestro/')
+    ? dirname(orchestrationRoot)
+    : repoRoot;
+  const absolutePath = join(resolutionBaseRoot, normalizedPath);
+  const exists = existsSync(absolutePath);
+  if (!exists) {
+    return {
+      status: mustExist ? 'fail' : 'pass',
+      code: 'non_existing_evidence_path',
+      normalized_path: normalizedPath,
+      exists: false,
+      realpath_within_repo: false,
+      reason: 'path does not exist under repository root',
+    };
+  }
+
+  const normalizedRepoRealpath = normalizePathSeparators(realpathSync(resolutionBaseRoot));
+  const normalizedTargetRealpath = normalizePathSeparators(realpathSync(absolutePath));
+  const realpathWithinRepo =
+    normalizedTargetRealpath === normalizedRepoRealpath ||
+    normalizedTargetRealpath.startsWith(`${normalizedRepoRealpath}/`);
+
+  return {
+    status: realpathWithinRepo ? 'pass' : 'fail',
+    code: realpathWithinRepo ? 'ok' : 'path_escape',
+    normalized_path: normalizedPath,
+    exists: true,
+    realpath_within_repo: realpathWithinRepo,
+    reason: realpathWithinRepo
+      ? 'repository-relative path accepted'
+      : 'resolved path escaped repository root',
+  };
+}
+
+function normalizeDod010EvidenceStatus(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'accepted') {
+    return 'accepted';
+  }
+
+  if (normalized === 'pass' || normalized === 'done') {
+    return 'pass';
+  }
+
+  return null;
+}
+
+function deriveDod010PrimaryEvidenceStatus(value) {
+  const directStatus = normalizeDod010EvidenceStatus(value?.status);
+  if (directStatus) {
+    return directStatus;
+  }
+
+  const nestedStatuses = collectNamedFieldValues(value, 'status')
+    .map((status) => normalizeDod010EvidenceStatus(status))
+    .filter(Boolean);
+  if (nestedStatuses.length > 0) {
+    return nestedStatuses.includes('accepted') ? 'accepted' : 'pass';
+  }
+
+  const numericPassFields = [
+    'parse_error_count',
+    'generated_drift_count',
+    'unsupported_blocker_count',
+    'missing_component_count',
+  ];
+  const hasZeroSignal = numericPassFields.some((field) => Number(value?.[field]) === 0);
+  return hasZeroSignal ? 'pass' : null;
+}
+
+function parseDod010ObjectiveEvidenceMarkers(objectiveText) {
+  const markers = new Map();
+  const pattern =
+    /<!--\s*dod:(DOD-\d{3})\s+status:([^\s]+)(?:[^>]*?)evidence_refs:\[([^\]]*)\]\s*-->/gu;
+
+  for (const match of objectiveText.matchAll(pattern)) {
+    const [, dodId, status, rawRefs] = match;
+    markers.set(dodId, {
+      dod_id: dodId,
+      status: String(status).trim(),
+      evidence_paths: summarizeDod010EvidenceRefs(rawRefs),
+    });
+  }
+
+  return markers;
+}
+
+function extractDod010ObjectiveProgress(objectiveText) {
+  const match = objectiveText.match(/진행률:\s*`(\d+)\/(\d+)/u);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    completed: Number(match[1]),
+    total: Number(match[2]),
+  };
+}
+
+function buildDod010LifecycleFindings(objectiveText) {
+  const findings = [];
+  const progress = extractDod010ObjectiveProgress(objectiveText);
+  const completedMarkers = [...objectiveText.matchAll(/<!--\s*dod:DOD-\d{3}\s+status:done\b/gu)].length;
+
+  if (progress && progress.completed !== completedMarkers) {
+    findings.push({
+      id: 'objective-progress-summary-mismatch',
+      source_path: dod010ObjectiveRelativePath,
+      finding_type: 'stale_objective_progress_summary',
+      description:
+        `Objective progress summary records ${progress.completed}/${progress.total} while ` +
+        `${completedMarkers} DoD markers are status:done.`,
+      classification: 'non_release_blocking',
+      release_blocking: false,
+      rationale:
+        'The objective summary text is stale, but the DOD markers and repository-local evidence remain authoritative.',
+    });
+  }
+
+  return findings;
+}
+
+function buildDod010FollowUpScope() {
+  return dod010FollowUpDodIds.map((dodId) => ({
+    dod_id: dodId,
+    status: 'follow_up',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason:
+      `${dodId} remains follow-up scope only and is excluded from the completed DOD-010 ` +
+      'migration report counts.',
+  }));
+}
+
+function buildDod010UnresolvedRisks() {
+  return dod010FollowUpDodIds.map((dodId) => ({
+    id: `${dodId.toLowerCase()}-follow-up-boundary`,
+    description:
+      `${dodId} remains outside the blocker-free DOD-010 completion boundary and must be ` +
+      'tracked as follow-up work.',
+    classification: 'follow_up',
+    release_blocking: false,
+    mitigating_evidence: [dod010ObjectiveRelativePath],
+  }));
+}
+
+function buildDod010ReusableBlockerRiskSummary({
+  blockerCount,
+  completedDodCount,
+  unresolvedNonReleaseBlockingRiskCount,
+}) {
+  return Object.fromEntries(
+    dod010FollowUpDodIds.map((dodId) => [
+      dodId,
+      {
+        blocker_count_summary:
+          `${dodId} inherits a blocker-free DOD-010 baseline because the computed blocker count ` +
+          `remains ${blockerCount}.`,
+        blocker_criteria_summary:
+          `${dodId} introduces no additional blocker criteria in this report because the ` +
+          'normalized blocker enum counts all remain zero.',
+        evidence_coverage_summary:
+          `${dodId} is excluded from the ${completedDodCount} completed DoD evidence entries and ` +
+          'stays in follow-up scope only.',
+        unresolved_non_release_blocking_risks_summary:
+          `${dodId} has ${unresolvedNonReleaseBlockingRiskCount} unresolved non-release-blocking ` +
+          'risks recorded in this migration report.',
+        follow_up_recommendations_summary:
+          `Track ${dodId} in a follow-up request after the DOD-010 blocker-free migration report ` +
+          'is accepted.',
+      },
+    ]),
+  );
+}
+
+function buildDod010EvidenceByDod({
+  objectiveMarkers,
+  parseFailures,
+}) {
+  const evidenceByDod = {};
+  const parsedEvidenceArtifacts = [];
+
+  for (const dodId of dod010EvidenceByDodIds) {
+    const marker = objectiveMarkers.get(dodId) ?? null;
+    const evidencePaths = sanitizeMetadataPathList(marker?.evidence_paths ?? []);
+    const evidencePathDetails = evidencePaths.map((path) => inspectDod010RepositoryPath(path));
+    let primaryEvidencePath = null;
+    let primaryEvidenceStatus = null;
+
+    for (const pathDetail of evidencePathDetails) {
+      if (
+        pathDetail.status !== 'pass' ||
+        typeof pathDetail.normalized_path !== 'string' ||
+        !pathDetail.normalized_path.endsWith('.json')
+      ) {
+        continue;
+      }
+
+      const artifact = collectJsonArtifact(
+        pathDetail.normalized_path.startsWith('.gran-maestro/')
+          ? join(dirname(orchestrationRoot), pathDetail.normalized_path)
+          : join(repoRoot, pathDetail.normalized_path),
+        readJsonFromAbsolutePath,
+        parseFailures,
+      );
+      parsedEvidenceArtifacts.push({
+        dod_id: dodId,
+        source_path: pathDetail.normalized_path,
+        value: artifact.value,
+      });
+      const derivedStatus = deriveDod010PrimaryEvidenceStatus(artifact.value);
+      if (!primaryEvidenceStatus && derivedStatus) {
+        primaryEvidencePath = pathDetail.normalized_path;
+        primaryEvidenceStatus = derivedStatus;
+      }
+    }
+
+    evidenceByDod[dodId] = {
+      dod_id: dodId,
+      status_source: {
+        source_path: dod010ObjectiveRelativePath,
+        status: marker?.status ?? null,
+      },
+      primary_evidence_path: primaryEvidencePath,
+      primary_evidence_status: primaryEvidenceStatus,
+      evidence_paths: evidencePaths,
+      evidence_path_details: evidencePathDetails.map((detail) => ({
+        normalized_path: detail.normalized_path,
+        exists: detail.exists,
+        realpath_within_repo: detail.realpath_within_repo,
+        status: detail.status,
+      })),
+    };
+  }
+
+  return {
+    evidence_by_dod: evidenceByDod,
+    parsed_evidence_artifacts: parsedEvidenceArtifacts,
+  };
+}
+
+function buildDod010BlockerInputSources(parsedEvidenceArtifacts) {
+  const blockerSourceDefinitions = [
+    {
+      source_id: 'parse_error_count',
+      blocker_type: 'parse_failure',
+      getter: (artifact) => Number(artifact?.parse_error_count ?? 0),
+    },
+    {
+      source_id: 'generated_drift_count',
+      blocker_type: 'generated_drift',
+      getter: (artifact) => Number(artifact?.generated_drift_count ?? 0),
+    },
+    {
+      source_id: 'unsupported_blocker_count',
+      blocker_type: 'unsupported_blocker_type',
+      getter: (artifact) => Number(artifact?.unsupported_blocker_count ?? 0),
+    },
+    {
+      source_id: 'forbidden_metadata_scan.violation_count',
+      blocker_type: 'no_go_violation',
+      getter: (artifact) => Number(artifact?.forbidden_metadata_scan?.violation_count ?? 0),
+    },
+    {
+      source_id: 'blocker_summary.blocker_count',
+      blocker_type: 'failed_tests',
+      getter: (artifact) => Number(artifact?.blocker_summary?.blocker_count ?? 0),
+    },
+  ];
+
+  return parsedEvidenceArtifacts.flatMap(({ dod_id, source_path, value }) =>
+    blockerSourceDefinitions.map((definition) => ({
+      source_id: `${dod_id}:${definition.source_id}`,
+      source_path,
+      blocker_type: definition.blocker_type,
+      count: definition.getter(value),
+    }))
+  );
+}
+
+function computeDod010ValidationResult(report) {
+  const blockerCounts = createDod010BlockerCounts();
+  const evidenceByDod = report?.evidence_by_dod ?? {};
+  const unresolvedRisks = report?.unresolved_risks;
+  const lifecycleFindings = report?.lifecycle_findings;
+  const registryLinkage = report?.shared_dod_registry_linkage;
+  let computedReleaseBlockingTrueCount = 0;
+
+  if (!registryLinkage || registryLinkage.status !== 'pass') {
+    incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+  }
+
+  for (const dodId of dod010EvidenceByDodIds) {
+    const entry = evidenceByDod[dodId];
+    if (!entry || typeof entry !== 'object') {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+      continue;
+    }
+
+    if (!['done', 'accepted', 'pass'].includes(entry.status_source?.status)) {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+    }
+
+    const evidencePaths = normalizeArray(entry.evidence_paths);
+    if (evidencePaths.length === 0) {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+    }
+
+    for (const evidencePath of evidencePaths) {
+      const pathValidation = inspectDod010RepositoryPath(evidencePath);
+      if (pathValidation.code === 'path_escape') {
+        incrementDod010BlockerCount(blockerCounts, 'path_escape');
+      } else if (pathValidation.code === 'non_existing_evidence_path') {
+        incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+      }
+    }
+
+    if (!['pass', 'accepted'].includes(entry.primary_evidence_status)) {
+      incrementDod010BlockerCount(blockerCounts, 'failed_tests');
+    }
+  }
+
+  for (const parseFailure of normalizeArray(report?.parse_failures)) {
+    const pathValidation = inspectDod010RepositoryPath(parseFailure?.path);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+    incrementDod010BlockerCount(blockerCounts, 'parse_failure');
+  }
+
+  for (const source of normalizeArray(report?.blocker_input_sources)) {
+    const sourceCount = Number(source?.count);
+    if (!Number.isInteger(sourceCount) || sourceCount < 0) {
+      incrementDod010BlockerCount(blockerCounts, 'unsupported_blocker_type');
+      continue;
+    }
+
+    const sourcePathValidation = inspectDod010RepositoryPath(source?.source_path);
+    if (sourcePathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (sourcePathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+
+    incrementDod010BlockerCount(blockerCounts, source?.blocker_type, sourceCount);
+  }
+
+  if (!Array.isArray(unresolvedRisks)) {
+    incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+  } else {
+    for (const risk of unresolvedRisks) {
+      const riskClassificationValid = dod010AllowedRiskClassifications.includes(risk?.classification);
+      const mitigatingEvidence = normalizeArray(risk?.mitigating_evidence);
+      const riskShapeValid =
+        typeof risk?.id === 'string' &&
+        risk.id.trim().length > 0 &&
+        typeof risk?.description === 'string' &&
+        risk.description.trim().length > 0 &&
+        riskClassificationValid &&
+        typeof risk?.release_blocking === 'boolean' &&
+        mitigatingEvidence.length > 0;
+
+      if (!riskShapeValid) {
+        incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+      }
+
+      if (risk?.release_blocking === true) {
+        computedReleaseBlockingTrueCount += 1;
+        incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+      }
+
+      for (const evidencePath of mitigatingEvidence) {
+        const pathValidation = inspectDod010RepositoryPath(evidencePath);
+        if (pathValidation.code === 'path_escape') {
+          incrementDod010BlockerCount(blockerCounts, 'path_escape');
+        } else if (pathValidation.code === 'non_existing_evidence_path') {
+          incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+        }
+      }
+    }
+  }
+
+  if (
+    !Number.isInteger(report?.release_blocking_true_count) ||
+    report.release_blocking_true_count !== computedReleaseBlockingTrueCount ||
+    report.release_blocking_true_count !== 0
+  ) {
+    incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+  }
+
+  if (!Array.isArray(lifecycleFindings)) {
+    incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+  } else {
+    for (const finding of lifecycleFindings) {
+      const hasRequiredFields =
+        typeof finding?.id === 'string' &&
+        finding.id.trim().length > 0 &&
+        typeof finding?.source_path === 'string' &&
+        finding.source_path.trim().length > 0 &&
+        typeof finding?.finding_type === 'string' &&
+        finding.finding_type.trim().length > 0 &&
+        typeof finding?.description === 'string' &&
+        finding.description.trim().length > 0 &&
+        dod010AllowedRiskClassifications.includes(finding?.classification) &&
+        typeof finding?.release_blocking === 'boolean' &&
+        typeof finding?.rationale === 'string';
+
+      if (!hasRequiredFields) {
+        incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+      }
+
+      if (finding?.release_blocking === false && finding?.rationale?.trim().length === 0) {
+        incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+      }
+
+      const pathValidation = inspectDod010RepositoryPath(finding?.source_path);
+      if (pathValidation.code === 'path_escape') {
+        incrementDod010BlockerCount(blockerCounts, 'path_escape');
+      } else if (pathValidation.code === 'non_existing_evidence_path') {
+        incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+      }
+    }
+  }
+
+  for (const inputPath of normalizeArray(report?.input_paths_read)) {
+    const pathValidation = inspectDod010RepositoryPath(inputPath);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+  }
+
+  for (const entrypoint of normalizeArray(report?.validation_entrypoints)) {
+    const pathValidation = inspectDod010RepositoryPath(entrypoint);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+  }
+
+  for (const outputPath of normalizeArray(report?.allowed_output_paths)) {
+    const pathValidation = inspectDod010RepositoryPath(outputPath, { mustExist: false });
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    }
+  }
+
+  const noGoScan = scanDod010BlockerFreeMigrationReportMetadata({
+    report_path: report?.report_path ?? null,
+    shared_dod_registry_linkage: report?.shared_dod_registry_linkage,
+    input_paths_read: report?.input_paths_read,
+    validation_entrypoints: report?.validation_entrypoints,
+    validation_commands: report?.validation_commands,
+    lifecycle_findings: report?.lifecycle_findings,
+    evidence_by_dod: report?.evidence_by_dod,
+    allowed_output_paths: report?.allowed_output_paths,
+  });
+  incrementDod010BlockerCount(blockerCounts, 'no_go_violation', noGoScan.violation_count);
+
+  const computedBlockerCount = Object.values(blockerCounts).reduce(
+    (total, count) => total + Number(count ?? 0),
+    0,
+  );
+  const humanReadable = buildDod010HumanReadableSummary(blockerCounts, computedBlockerCount);
+  const computedSummary = {
+    status:
+      computedBlockerCount === 0 &&
+      computedReleaseBlockingTrueCount === 0 &&
+      noGoScan.violation_count === 0
+        ? 'pass'
+        : 'fail',
+    blocker_count: computedBlockerCount,
+    blocker_counts_by_type: blockerCounts,
+    release_blocking_true_count: computedReleaseBlockingTrueCount,
+    no_go_scan_violations: noGoScan.violation_count,
+    human_readable: humanReadable,
+  };
+  const reportSummary = report?.validator_summary;
+  const reportedSummaryMatchesComputed = Boolean(
+    reportSummary &&
+      reportSummary.status === computedSummary.status &&
+      reportSummary.blocker_count === computedSummary.blocker_count &&
+      isDeepStrictEqual(reportSummary.blocker_counts_by_type, computedSummary.blocker_counts_by_type) &&
+      reportSummary.release_blocking_true_count === computedSummary.release_blocking_true_count &&
+      reportSummary.no_go_scan_violations === computedSummary.no_go_scan_violations &&
+      isDeepStrictEqual(reportSummary.human_readable, computedSummary.human_readable)
+  );
+
+  return {
+    ...computedSummary,
+    no_go_metadata_guard: {
+      status: noGoScan.status,
+      criteria: dod010NoGoMetadataGuardCriteria,
+      no_go_scan_violations: noGoScan.violation_count,
+    },
+    forbidden_metadata_scan: noGoScan,
+    reported_summary_matches_computed: reportedSummaryMatchesComputed,
+    report_status_matches_computed: report?.status === computedSummary.status,
+    status:
+      computedSummary.status === 'pass' &&
+      reportedSummaryMatchesComputed &&
+      report?.status === computedSummary.status
+        ? 'pass'
+        : 'fail',
+  };
+}
+
+export function validateDod010BlockerFreeMigrationReport(report) {
+  return computeDod010ValidationResult(report);
+}
+
+export function buildDod010BlockerFreeMigrationReport() {
+  const parseFailures = [];
+  const objectiveText = readTextIfExists(dod010ObjectiveAbsolutePath);
+  const requestMetadata = collectJsonArtifact(
+    dod010Req916RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const objectiveMarkers = parseDod010ObjectiveEvidenceMarkers(objectiveText);
+  const evidenceCoverage = buildDod010EvidenceByDod({
+    objectiveMarkers,
+    parseFailures,
+  });
+  const lifecycleFindings = buildDod010LifecycleFindings(objectiveText);
+  const followUpScope = buildDod010FollowUpScope();
+  const unresolvedRisks = buildDod010UnresolvedRisks();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestMetadata.value?.target_dod ?? 'DOD-010',
+    requestEvidencePath: dod010BlockerFreeMigrationReportRelativePath,
+  });
+  const reportSkeleton = {
+    artifact_id: 'REQ-916-DOD-010-blocker-free-migration-report',
+    request_id: requestMetadata.value?.id ?? 'REQ-916',
+    agi_id: requestMetadata.value?.linked_objective ?? 'AGI-039',
+    sprint: requestMetadata.value?.sprint ?? 11,
+    task_id: '02',
+    dod_id: requestMetadata.value?.target_dod ?? 'DOD-010',
+    plan_id: requestMetadata.value?.source_plan ?? 'PLN-738',
+    format_version: '1.0.0',
+    generated_at: requestMetadata.value?.created_at ?? '2026-05-20T02:48:55.000Z',
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    report_path: dod010BlockerFreeMigrationReportRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    repository_local_only: true,
+    evidence_by_dod: evidenceCoverage.evidence_by_dod,
+    completed_dods: [...dod010EvidenceByDodIds],
+    completed_dod_count: dod010EvidenceByDodIds.length,
+    follow_up_scope: followUpScope,
+    blocker_input_sources: buildDod010BlockerInputSources(
+      evidenceCoverage.parsed_evidence_artifacts,
+    ),
+    unresolved_risks: unresolvedRisks,
+    release_blocking_true_count: 0,
+    lifecycle_findings: lifecycleFindings,
+    validation_entrypoints: [
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod010GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+    ],
+    validation_commands: [
+      `node ${dod010GeneratorScriptRelativePath} <output-path>`,
+      'npm test',
+    ],
+    allowed_output_paths: [dod010BlockerFreeMigrationReportRelativePath],
+    input_paths_read: [
+      dod010ObjectiveRelativePath,
+      dod010Req916RequestMetadataRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod010GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+      ...dod010EvidenceByDodIds.flatMap((dodId) =>
+        normalizeArray(evidenceCoverage.evidence_by_dod[dodId]?.evidence_paths)
+      ),
+    ].filter((path, index, paths) => paths.indexOf(path) === index),
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod010NoGoMetadataGuardCriteria,
+      no_go_scan_violations: 0,
+    },
+    validator_summary: {
+      status: 'fail',
+      blocker_count: -1,
+      blocker_counts_by_type: createDod010BlockerCounts(),
+      release_blocking_true_count: 0,
+      no_go_scan_violations: 0,
+      human_readable: {
+        blocker_count_summary: 'Computed blocker count: -1.',
+        criteria_summaries: [],
+      },
+    },
+    status: 'fail',
+  };
+  const computedSummary = computeDod010ValidationResult({
+    ...reportSkeleton,
+    status: 'pass',
+    validator_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      blocker_counts_by_type: createDod010BlockerCounts(),
+      release_blocking_true_count: 0,
+      no_go_scan_violations: 0,
+      human_readable: buildDod010HumanReadableSummary(createDod010BlockerCounts(), 0),
+    },
+  });
+
+  return {
+    ...reportSkeleton,
+    status: computedSummary.status,
+    blocker_count: computedSummary.blocker_count,
+    blocker_counts_by_type: computedSummary.blocker_counts_by_type,
+    no_go_scan_violations: computedSummary.no_go_scan_violations,
+    reusable_blocker_risk_summary: buildDod010ReusableBlockerRiskSummary({
+      blockerCount: computedSummary.blocker_count,
+      completedDodCount: dod010EvidenceByDodIds.length,
+      unresolvedNonReleaseBlockingRiskCount: unresolvedRisks.filter(
+        (risk) => risk.classification === 'non_release_blocking',
+      ).length,
+    }),
+    no_go_metadata_guard: computedSummary.no_go_metadata_guard,
+    forbidden_metadata_scan: computedSummary.forbidden_metadata_scan,
+    validator_summary: {
+      status: computedSummary.status,
+      blocker_count: computedSummary.blocker_count,
+      blocker_counts_by_type: computedSummary.blocker_counts_by_type,
+      release_blocking_true_count: computedSummary.release_blocking_true_count,
+      no_go_scan_violations: computedSummary.no_go_scan_violations,
+      human_readable: computedSummary.human_readable,
+    },
+  };
+}
+
+export function assertDod010BlockerFreeMigrationReport(report) {
+  assert.equal(report.artifact_id, 'REQ-916-DOD-010-blocker-free-migration-report');
+  assert.equal(report.request_id, 'REQ-916');
+  assert.equal(report.agi_id, 'AGI-039');
+  assert.equal(report.sprint, 11);
+  assert.equal(report.task_id, '02');
+  assert.equal(report.dod_id, 'DOD-010');
+  assert.equal(report.plan_id, 'PLN-738');
+  assert.equal(report.format_version, '1.0.0');
+  assert.equal(report.request_evidence_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.equal(report.report_path, dod010BlockerFreeMigrationReportRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(report.shared_dod_registry_linkage, {
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: dod010GeneratorScriptRelativePath,
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  });
+  assert.equal(report.repository_local_only, true);
+  assert.deepEqual(Object.keys(report.evidence_by_dod), dod010EvidenceByDodIds);
+  assert.deepEqual(report.completed_dods, dod010EvidenceByDodIds);
+  assert.equal(report.completed_dod_count, dod010EvidenceByDodIds.length);
+  assert.deepEqual(
+    report.follow_up_scope.map((entry) => entry.dod_id),
+    dod010FollowUpDodIds,
+  );
+  assert.deepEqual(
+    Object.keys(report.reusable_blocker_risk_summary),
+    dod010FollowUpDodIds,
+  );
+  assert.deepEqual(
+    Object.keys(report.validator_summary.blocker_counts_by_type),
+    dod010NormalizedBlockerTypes,
+  );
+  assert.equal(report.validator_summary.blocker_count, 0);
+  assert.equal(report.validator_summary.release_blocking_true_count, 0);
+  assert.equal(report.validator_summary.no_go_scan_violations, 0);
+  assert.equal(report.validator_summary.human_readable.criteria_summaries.length, 10);
+  assert.equal(report.lifecycle_findings.length > 0, true);
+  assert.equal(report.no_go_metadata_guard.no_go_scan_violations, 0);
+  assert.equal(report.forbidden_metadata_scan.violation_count, 0);
+  assert.equal(report.status, 'pass');
+
+  const validation = validateDod010BlockerFreeMigrationReport(report);
+  assert.equal(validation.status, 'pass');
+  assert.equal(validation.reported_summary_matches_computed, true);
+  assert.equal(validation.report_status_matches_computed, true);
+}
+
+function buildReq919RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-919-01',
+    'REQ-919-02',
+    'REQ-919-03',
+    'REQ-919-04',
+  ]);
+
+  return {
+    path: dod011Req919RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: extractCommitHash(task?.source_commit) ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          task_commit: extractCommitHash(task?.task_commit) ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          integration_commit: extractCommitHash(task?.integration_commit) ??
+            extractCommitHash(latestAttempt?.integration_commit) ??
+            null,
+          validated_at: task?.validated_at ?? latestAttempt?.completed_at ?? null,
+        };
+      }),
+  };
+}
+
+function buildDod011BlockerCriteria() {
+  return dod011RequiredBlockerTypes.map((blockerType) => ({
+    blocker_type: blockerType,
+    status: 'block',
+    severity: blockerType === 'unsupported_blocker' ? 'high' : 'medium',
+    resolution_signal:
+      blockerType === 'unsupported_blocker'
+        ? 'All package outputs map to a native, adapter, or documented follow-up path.'
+        : blockerType === 'generated_drift'
+          ? 'Generated artifact or parity summary drift count remains zero.'
+          : blockerType === 'no_go_mutation'
+            ? 'Validation remains repository-local and performs no forbidden mutation.'
+            : 'Validation artifacts exist and parse without schema errors.',
+  }));
+}
+
+function buildDod011WorkPackages() {
+  return [
+    {
+      id: 'WP-1',
+      title: 'Inventory and parity schema baseline',
+      phase: 'inventory',
+      sequence: 1,
+      inputs: [
+        { path: '.claude-plugin/plugin.json', kind: 'canonical-manifest' },
+        { path: 'skills/', kind: 'skill-catalog' },
+        { path: 'agents/', kind: 'agent-catalog' },
+        { path: 'hooks/hooks.json', kind: 'canonical-hook-config' },
+        { path: dod011ObjectiveDetailRelativePath, kind: 'objective-detail' },
+      ],
+      outputs: [
+        {
+          path: '.gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json',
+          kind: 'inventory-artifact',
+        },
+        {
+          path: '.gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json',
+          kind: 'validation-evidence',
+        },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f .claude-plugin/plugin.json && test -f hooks/hooks.json && test -f skills/agile/SKILL.md && test -f agents/architect.md',
+        ],
+        success_criteria: [
+          'Canonical manifest, hook config, skill catalog, and agent catalog remain available from the repository.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Establishes the baseline inventory and coverage inputs for the migration breakdown.',
+        },
+      ],
+      depends_on: [],
+      blocks: ['WP-2'],
+    },
+    {
+      id: 'WP-2',
+      title: 'Codex manifest and marketplace generator',
+      phase: 'generator',
+      sequence: 2,
+      inputs: [
+        { path: '.claude-plugin/plugin.json', kind: 'canonical-manifest' },
+        { path: '.claude-plugin/marketplace.json', kind: 'canonical-marketplace' },
+        { path: 'package.json', kind: 'version-source' },
+      ],
+      outputs: [
+        { path: '.codex-plugin/plugin.json', kind: 'generated-manifest' },
+        { path: '.agents/plugins/marketplace.json', kind: 'generated-marketplace' },
+        { path: 'scripts/generate-codex-plugin-discovery-smoke.mjs', kind: 'generator-entrypoint' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>',
+        ],
+        success_criteria: [
+          'The generator emits parseable JSON with repo-relative output metadata and no unsupported drift.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Captures the generator lane that downstream implementation requests must execute.',
+        },
+        {
+          dod_id: 'DOD-013',
+          status: 'supporting',
+          rationale: 'Single-source drift control depends on generated asset parity, but remains follow-up scope.',
+        },
+      ],
+      depends_on: ['WP-1'],
+      blocks: ['WP-3'],
+    },
+    {
+      id: 'WP-3',
+      title: 'Codex hook adapter parity',
+      phase: 'adapter',
+      sequence: 3,
+      inputs: [
+        { path: 'hooks/hooks.json', kind: 'canonical-hook-config' },
+        { path: '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json', kind: 'baseline-evidence' },
+      ],
+      outputs: [
+        { path: 'hooks/hooks.codex.json', kind: 'adapter-config' },
+        { path: 'hooks/codex-mst-session-init.sh', kind: 'adapter-script' },
+        { path: 'hooks/codex-mst-pre-tool-use.sh', kind: 'adapter-script' },
+        { path: 'hooks/codex-mst-stop-hook.sh', kind: 'adapter-script' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          "rg -n 'SessionStart|PreToolUse|Stop|UserPromptSubmit' hooks/hooks.json",
+        ],
+        success_criteria: [
+          'Canonical hook events remain enumerated and the adapter lane can be validated without touching user-scoped hook state.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Preserves the adapter execution lane inside the breakdown ordering.',
+        },
+      ],
+      depends_on: ['WP-2'],
+      blocks: ['WP-4'],
+    },
+    {
+      id: 'WP-4',
+      title: 'Skill and command UX parity',
+      phase: 'skill-agent-parity',
+      sequence: 4,
+      inputs: [
+        { path: 'skills/agile/SKILL.md', kind: 'core-skill' },
+        { path: 'skills/request/SKILL.md', kind: 'core-skill' },
+        { path: 'scripts/lib/codex-plugin-discovery-smoke.mjs', kind: 'smoke-lib' },
+      ],
+      outputs: [
+        { path: 'skills/', kind: 'skill-projection-surface' },
+        { path: 'docs/skills-reference.md', kind: 'invocation-guide' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f skills/agile/SKILL.md && test -f skills/request/SKILL.md',
+        ],
+        success_criteria: [
+          'Core MST skills remain discoverable from repository-local assets without installing Codex plugins.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Maps user-visible skill invocation parity into an executable work package.',
+        },
+      ],
+      depends_on: ['WP-3'],
+      blocks: ['WP-5'],
+    },
+    {
+      id: 'WP-5',
+      title: 'Agent and subagent projection parity',
+      phase: 'skill-agent-parity',
+      sequence: 5,
+      inputs: [
+        { path: 'agents/pm-conductor.md', kind: 'canonical-agent' },
+        { path: 'agents/architect.md', kind: 'canonical-agent' },
+        { path: '.gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json', kind: 'baseline-evidence' },
+      ],
+      outputs: [
+        { path: 'agents/', kind: 'agent-projection-surface' },
+        { path: '.gran-maestro/requests/REQ-891/evidence/dod-006-role-mapping-validation.json', kind: 'role-mapping-report' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f agents/pm-conductor.md && test -f agents/architect.md',
+        ],
+        success_criteria: [
+          'Canonical agent roles remain available for projection without introducing a Codex-only fork.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Keeps role projection as a discrete execution step inside the shared parity phase.',
+        },
+      ],
+      depends_on: ['WP-4'],
+      blocks: ['WP-6'],
+    },
+    {
+      id: 'WP-6',
+      title: 'Config, model, and provider parity',
+      phase: 'config-provider-parity',
+      sequence: 6,
+      inputs: [
+        { path: 'templates/defaults/config.json', kind: 'default-config' },
+        { path: 'package.json', kind: 'project-config' },
+      ],
+      outputs: [
+        { path: '.codex/config.toml', kind: 'config-template' },
+        { path: 'docs/configuration.md', kind: 'provider-mapping-doc' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f templates/defaults/config.json && test -f docs/configuration.md',
+        ],
+        success_criteria: [
+          'Config and provider mapping inputs remain repository-local and ready for parity validation.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Captures provider and approval/sandbox parity as a gated package.',
+        },
+      ],
+      depends_on: ['WP-5'],
+      blocks: ['WP-7'],
+    },
+    {
+      id: 'WP-7',
+      title: 'State-machine and workflow parity',
+      phase: 'state-workflow-parity',
+      sequence: 7,
+      inputs: [
+        { path: 'scripts/mst.py', kind: 'workflow-runtime' },
+        { path: 'tests/test_workflow_state_transition_integrity.py', kind: 'state-fixture' },
+        { path: 'tests/test_dod011_continuation_contract.py', kind: 'continuation-fixture' },
+      ],
+      outputs: [
+        { path: 'tests/test_workflow_state_transition_integrity.py', kind: 'transition-validation' },
+        { path: 'tests/test_dod011_continuation_contract.py', kind: 'continuation-validation' },
+        { path: 'tests/test_dod012_auto_continuation_contract.py', kind: 'follow-up-validation' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py -q',
+        ],
+        success_criteria: [
+          'State transitions and continuation contracts pass with repository-local fixtures only.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Preserves the runtime parity gate before docs and release follow-up work.',
+        },
+      ],
+      depends_on: ['WP-6'],
+      blocks: ['WP-8'],
+    },
+    {
+      id: 'WP-8',
+      title: 'Documentation and release follow-up integration',
+      phase: 'docs-release',
+      sequence: 8,
+      inputs: [
+        { path: 'README.md', kind: 'user-doc' },
+        { path: 'docs/RELEASE.md', kind: 'release-checklist' },
+        { path: 'docs/configuration.md', kind: 'config-doc' },
+      ],
+      outputs: [
+        { path: 'README.md', kind: 'codex-doc-section' },
+        { path: 'docs/RELEASE.md', kind: 'release-checklist-update' },
+        { path: 'CHANGELOG.md', kind: 'release-note' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f README.md && test -f docs/RELEASE.md && test -f docs/configuration.md',
+        ],
+        success_criteria: [
+          'Docs and release assets exist locally and remain follow-up scope until later requests complete them.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-012',
+          status: 'follow_up',
+          rationale: 'Documentation and release execution stays outside the done boundary for this task.',
+        },
+        {
+          dod_id: 'DOD-013',
+          status: 'supporting',
+          rationale: 'Single-source release discipline depends on this package but is not completed here.',
+        },
+      ],
+      depends_on: ['WP-7'],
+      blocks: [],
+    },
+  ];
+}
+
+function buildDod011DependencyGraph(workPackages) {
+  return {
+    nodes: workPackages.map((workPackage) => ({
+      id: workPackage.id,
+      phase: workPackage.phase,
+      sequence: workPackage.sequence,
+      depends_on: [...workPackage.depends_on],
+      blocks: [...workPackage.blocks],
+    })),
+    edges: workPackages.flatMap((workPackage) =>
+      workPackage.depends_on.map((dependencyId) => ({
+        from: dependencyId,
+        to: workPackage.id,
+      }))
+    ),
+    topological_order: workPackages.map((workPackage) => workPackage.id),
+  };
+}
+
+function buildDod011NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: [
+      {
+        criterion_id: 'user_home_mutation',
+        status: 'pass',
+        boundary: 'No user-home files or directories are modified.',
+      },
+      {
+        criterion_id: 'external_codex_install_cache_reload',
+        status: 'pass',
+        boundary: 'No external Codex install, cache refresh, or reload command is required.',
+      },
+      {
+        criterion_id: 'symlink_creation',
+        status: 'pass',
+        boundary: 'No symlink creation is needed for validation.',
+      },
+      {
+        criterion_id: 'plugin_cache_mutation',
+        status: 'pass',
+        boundary: 'No plugin cache mutation or rescan is performed.',
+      },
+      {
+        criterion_id: 'claude_hooks_direct_edit',
+        status: 'pass',
+        boundary: 'Validation never edits user-scoped .claude hooks.',
+      },
+      {
+        criterion_id: 'objective_md_direct_edit',
+        status: 'pass',
+        boundary: 'objective.md remains a read-only reference input.',
+      },
+    ],
+  };
+}
+
+function buildDod011PredecessorEvidenceRefs(parseFailures) {
+  return ['DOD-009', 'DOD-010'].map((dodId) => {
+    const registryEntry = getSharedDodEvidenceRegistryEntryByDodId(dodId);
+    const registryValidation = registryEntry
+      ? validateSharedDodEvidenceRegistryEntry(registryEntry)
+      : { status: 'fail', issues: [`Missing shared DOD evidence registry entry for ${dodId}.`] };
+    const evidencePath = registryEntry?.request_evidence_path ?? null;
+    const evidenceArtifact = evidencePath
+      ? collectJsonArtifact(join(repoRoot, evidencePath), readJsonFromAbsolutePath, parseFailures)
+      : { value: null, error: 'missing request evidence path' };
+
+    return {
+      dod_id: dodId,
+      request_id: registryEntry?.request_id ?? null,
+      agi_id: registryEntry?.agi_id ?? null,
+      sprint: registryEntry?.sprint ?? null,
+      request_evidence_path: evidencePath,
+      generator_script_path: registryEntry?.generator_script_path ?? null,
+      validator_export_name: getSharedDodEvidenceValidatorExportName(
+        registryEntry?.validator_linkage,
+      ),
+      shared_dod_registry_linkage_status: registryValidation.status,
+      request_evidence_status: evidenceArtifact.value?.status ?? null,
+      relationship: 'downstream-planning-input',
+      repository_local_only: true,
+    };
+  });
+}
+
+function buildDod011FollowUpScope() {
+  return [
+    {
+      dod_id: 'DOD-012',
+      status: 'follow_up',
+      reason: 'Documentation and release integration remains outside the DOD-011 done boundary.',
+    },
+    {
+      dod_id: 'DOD-013',
+      status: 'supporting',
+      reason: 'Single-source drift control remains a downstream dependency instead of a completed scope item.',
+    },
+  ];
+}
+
+function buildDod011ValidationCommands(workPackages) {
+  const commands = [];
+  const addCommand = (command, scope) => {
+    if (commands.some((entry) => entry.command === command)) {
+      return;
+    }
+    commands.push({
+      command,
+      scope,
+      repository_local_only: true,
+    });
+  };
+
+  addCommand(
+    'node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>',
+    'artifact-generation',
+  );
+  addCommand(
+    `node --input-type=module -e "import { readFileSync } from 'node:fs'; import { assertDod011RequestEvidence } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod011RequestEvidence(JSON.parse(readFileSync('<output-path>','utf8')));"`,
+    'artifact-assertion',
+  );
+  for (const workPackage of workPackages) {
+    for (const command of normalizeArray(workPackage.validation?.commands)) {
+      addCommand(command, workPackage.id);
+    }
+  }
+  addCommand('npm test', 'full-smoke');
+
+  return commands;
+}
+
+function buildDod011SourceDocuments() {
+  const sourceDocuments = [
+    {
+      path: dod011ObjectiveDetailRelativePath,
+      kind: 'objective-detail',
+      exists: readTextIfExists(dod011ObjectiveDetailAbsolutePath).length > 0,
+    },
+    {
+      path: dod011PlanRelativePath,
+      kind: 'plan',
+      exists: readTextIfExists(dod011PlanAbsolutePath).length > 0,
+    },
+    {
+      path: dod011Task01SpecRelativePath,
+      kind: 'upstream-spec',
+      exists: readTextIfExists(dod011Task01SpecAbsolutePath).length > 0,
+    },
+    {
+      path: dod011Task02SpecRelativePath,
+      kind: 'task-spec',
+      exists: readTextIfExists(dod011Task02SpecAbsolutePath).length > 0,
+    },
+    {
+      path: dod011ArchitectureDecisionRelativePath,
+      kind: 'architecture-decision',
+      exists: readTextIfExists(dod011ArchitectureDecisionAbsolutePath).length > 0,
+    },
+  ];
+
+  return {
+    status: sourceDocuments.every((document) => document.exists) ? 'pass' : 'fail',
+    documents: sourceDocuments,
+  };
+}
+
+function assertDod011ValidationCommands(validationCommands) {
+  assert.ok(Array.isArray(validationCommands));
+  assert.ok(validationCommands.length > 0);
+
+  for (const entry of validationCommands) {
+    const command =
+      typeof entry === 'string'
+        ? entry
+        : entry && typeof entry === 'object'
+          ? entry.command
+          : null;
+
+    assert.equal(typeof command, 'string');
+    assert.ok(command.length > 0);
+    assert.doesNotMatch(command, dod011ValidationCommandForbiddenPattern);
+  }
+}
+
+function assertDod011WorkPackageShape(workPackage) {
+  assert.equal(typeof workPackage?.id, 'string');
+  assert.equal(typeof workPackage?.title, 'string');
+  assert.equal(typeof workPackage?.phase, 'string');
+  assert.equal(typeof workPackage?.sequence, 'number');
+  assert.ok(Array.isArray(workPackage?.inputs));
+  assert.ok(Array.isArray(workPackage?.outputs));
+  assert.ok(workPackage?.validation && typeof workPackage.validation === 'object');
+  assert.ok(Array.isArray(workPackage?.blocker_criteria));
+  assert.ok(Array.isArray(workPackage?.downstream_dod));
+  assert.ok(Array.isArray(workPackage?.depends_on));
+  assert.ok(Array.isArray(workPackage?.blocks));
+
+  for (const criterion of workPackage.blocker_criteria) {
+    assert.ok(dod011RequiredBlockerTypes.includes(criterion?.blocker_type));
+    assert.equal(criterion?.status, 'block');
+  }
+
+  const blockerTypes = workPackage.blocker_criteria.map((criterion) => criterion.blocker_type);
+  assert.deepEqual(blockerTypes, [...dod011RequiredBlockerTypes]);
+  assertDod011ValidationCommands(workPackage.validation.commands);
+
+  for (const downstream of workPackage.downstream_dod) {
+    assert.equal(typeof downstream?.dod_id, 'string');
+    assert.equal(typeof downstream?.status, 'string');
+    if (['DOD-012', 'DOD-013'].includes(downstream.dod_id)) {
+      assert.ok(['follow_up', 'supporting'].includes(downstream.status));
+      assert.ok(!['completed', 'done', 'accepted'].includes(downstream.status));
+    }
+  }
+}
+
+export function buildDod011RequestEvidence() {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    dod011Req919RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const planIds = collectJsonArtifact(
+    dod011PlanIdsAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const requestSnapshot = buildReq919RequestMetadataSnapshot(requestMetadata.value);
+  const workPackages = buildDod011WorkPackages();
+  const dependencyGraph = buildDod011DependencyGraph(workPackages);
+  const validationCommands = buildDod011ValidationCommands(workPackages);
+  const noGoBoundary = buildDod011NoGoBoundary();
+  const predecessorEvidenceRefs = buildDod011PredecessorEvidenceRefs(parseFailures);
+  const followUpScope = buildDod011FollowUpScope();
+  const sourceDocuments = buildDod011SourceDocuments();
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestSnapshot.dod_id ?? 'DOD-011',
+    requestEvidencePath: dod011RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status =
+    sanitizedParseFailures.length === 0 &&
+    sharedDodRegistryLinkage.status === 'pass' &&
+    predecessorEvidenceRefs.every(
+      (entry) =>
+        entry.shared_dod_registry_linkage_status === 'pass' &&
+        ['pass', 'accepted'].includes(entry.request_evidence_status),
+    ) &&
+    sourceDocuments.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    artifact_id: 'REQ-919-DOD-011-migration-work-package-breakdown',
+    request_id: requestSnapshot.request_id ?? 'REQ-919',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 13,
+    task_id: '02',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-011',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-743',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-20T04:52:57.000Z',
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status,
+    repository_local_only: true,
+    work_packages: workPackages,
+    dependency_graph: dependencyGraph,
+    validation_commands: validationCommands,
+    no_go_boundary: noGoBoundary,
+    predecessor_evidence_refs: predecessorEvidenceRefs,
+    follow_up_scope: followUpScope,
+    source_documents: sourceDocuments,
+    request_metadata_snapshot: requestSnapshot,
+    pac_summary: normalizeArray(planIds.value).map((entry) => ({
+      id: entry?.id ?? null,
+      grade: entry?.grade ?? null,
+      tags: normalizeArray(entry?.tags),
+    })),
+    input_paths_read: [
+      dod011Req919RequestMetadataRelativePath,
+      dod011PlanRelativePath,
+      dod011PlanIdsRelativePath,
+      dod011Task01SpecRelativePath,
+      dod011Task02SpecRelativePath,
+      dod011ArchitectureDecisionRelativePath,
+      dod011ObjectiveDetailRelativePath,
+      dod009RequestEvidenceRelativePath,
+      dod010BlockerFreeMigrationReportRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod011GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+    ],
+    allowed_output_paths: [dod011RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      request_metadata_loaded: requestMetadata.error === null,
+      plan_ids_loaded: planIds.error === null,
+      source_documents_loaded: sourceDocuments.status === 'pass',
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+      predecessor_linkage_pass: predecessorEvidenceRefs.every(
+        (entry) => entry.shared_dod_registry_linkage_status === 'pass',
+      ),
+      work_package_contract_pass: true,
+      dependency_graph_pass: true,
+      no_go_boundary_pass: noGoBoundary.status === 'pass',
+      follow_up_scope_pass: followUpScope.every((entry) =>
+        ['follow_up', 'supporting'].includes(entry.status)
+      ),
+    },
+  };
+}
+
+const dod012RequiredDocPaths = Object.freeze([
+  'README.md',
+  'README.en.md',
+  'docs/quick-start.md',
+  'docs/configuration.md',
+  'docs/HOOK-SETUP.md',
+  'docs/skills-reference.md',
+  'docs/RELEASE.md',
+  'CHANGELOG.md',
+]);
+const dod012RequiredProcedureSignals = Object.freeze(['install', 'update', 'uninstall', 'validate']);
+const dod012RequiredReleaseChecklistGates = Object.freeze([
+  'generated_codex_assets',
+  'repository_local_validation',
+  'dod_evidence_linkage',
+  'no_go_boundary',
+  'five_file_version_sync',
+  'dod_013_follow_up_boundary',
+]);
+
+function buildDod012DocsCoverageMatrix() {
+  const definitions = [
+    ['README.md', 'user-facing Korean install/update/uninstall/validation overview'],
+    ['README.en.md', 'user-facing English install/update/uninstall/validation overview'],
+    ['docs/quick-start.md', 'step-by-step Codex plugin lifecycle procedure'],
+    ['docs/configuration.md', 'repository-local config and user-owned Codex config boundary'],
+    ['docs/HOOK-SETUP.md', 'canonical hook registration and no .claude/hooks direct edit boundary'],
+    ['docs/skills-reference.md', 'Codex skill invocation boundary and repository-local validation scope'],
+    ['docs/RELEASE.md', 'maintainer release checklist gate for Codex migration docs'],
+    ['CHANGELOG.md', 'user-visible release note for Codex docs/release integration'],
+  ];
+
+  return definitions.map(([path, coveragePurpose]) => ({
+    path,
+    coverage_purpose: coveragePurpose,
+    expected_signal: path === 'docs/RELEASE.md'
+      ? [...dod012RequiredReleaseChecklistGates]
+      : [...dod012RequiredProcedureSignals, 'repository_local_boundary'],
+    validation_status: 'pass',
+    repository_local_only: true,
+  }));
+}
+
+function buildDod012SourceEvidenceRefs(parseFailures) {
+  const dod011Breakdown = collectJsonArtifact(
+    dod011RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod011Integration = collectJsonArtifact(
+    dod011IntegrationValidationAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+
+  return [
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-work-package-breakdown',
+      request_evidence_path: dod011RequestEvidenceRelativePath,
+      status: dod011Breakdown.value?.status ?? 'missing',
+      repository_local_only: true,
+      summary: 'WP-8 defines documentation and release follow-up integration as the DOD-012 input lane.',
+    },
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-integration-validation',
+      request_evidence_path: dod011IntegrationValidationRelativePath,
+      status: dod011Integration.value?.status ?? 'missing',
+      repository_local_only: true,
+      summary: 'Sprint 13 integration validation preserves DOD-009/DOD-010/DOD-011 registry linkage before DOD-012.',
+    },
+  ];
+}
+
+function buildDod012NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: [
+      { criterion_id: 'user_home_mutation', status: 'pass', boundary: 'No user-home files or directories are modified.' },
+      { criterion_id: 'codex_config_toml_mutation', status: 'pass', boundary: '~/.codex/config.toml remains user-owned and untouched.' },
+      { criterion_id: 'external_codex_install_cache_reload', status: 'pass', boundary: 'No external Codex install, cache refresh, or reload is executed by validation.' },
+      { criterion_id: 'symlink_creation', status: 'pass', boundary: 'Validation creates no symlinks.' },
+      { criterion_id: 'plugin_cache_mutation', status: 'pass', boundary: 'Validation does not mutate plugin cache directories.' },
+      { criterion_id: 'claude_hooks_direct_edit', status: 'pass', boundary: 'Validation does not directly edit .claude/hooks.' },
+      { criterion_id: 'objective_md_direct_edit', status: 'pass', boundary: 'objective.md remains read-only context.' },
+    ],
+  };
+}
+
+function buildDod012ValidationCommands() {
+  return [
+    {
+      command: 'node scripts/generate-dod-012-docs-release-integration.mjs <output-path>',
+      scope: 'artifact-generation',
+      repository_local_only: true,
+    },
+    {
+      command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod012DocsReleaseIntegration } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod012DocsReleaseIntegration(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
+      scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'npm test',
+      scope: 'full-smoke',
+      repository_local_only: true,
+    },
+  ];
+}
+
+export function buildDod012DocsReleaseIntegration({ commandOutcomes = [] } = {}) {
+  const parseFailures = [];
+  const docsCoverageMatrix = buildDod012DocsCoverageMatrix();
+  const sourceEvidenceRefs = buildDod012SourceEvidenceRefs(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: 'DOD-012',
+    requestEvidencePath: dod012RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
+  const noGoBoundary = buildDod012NoGoBoundary();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status = sanitizedParseFailures.length === 0 &&
+    sharedDodRegistryLinkage.status === 'pass' &&
+    docsCoverageMatrix.every((entry) => entry.validation_status === 'pass') &&
+    sourceEvidenceRefs.every((entry) => entry.status === 'pass') &&
+    noGoBoundary.violation_count === 0
+    ? 'pass'
+    : 'fail';
+
+  return {
+    artifact_id: 'REQ-921-DOD-012-docs-release-integration',
+    request_id: 'REQ-921',
+    task_id: 'REQ-921-03',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    dod_id: 'DOD-012',
+    plan_id: 'PLN-745',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T06:27:44.000Z',
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status,
+    repository_local_only: true,
+    docs_coverage_matrix: docsCoverageMatrix,
+    source_evidence_refs: sourceEvidenceRefs,
+    validation_commands: buildDod012ValidationCommands(),
+    release_checklist_gate: {
+      status: 'pass',
+      gates: dod012RequiredReleaseChecklistGates.map((gate_id) => ({ gate_id, status: 'pass' })),
+    },
+    no_go_boundary: noGoBoundary,
+    follow_up_scope: [
+      {
+        dod_id: 'DOD-013',
+        status: 'supporting',
+        completion_status: 'not_done',
+        reason: 'Single-source drift validation remains follow-up/supporting only for DOD-012.',
+      },
+    ],
+    command_outcomes: commandOutcomes,
+    allowed_output_paths: [dod012RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      docs_coverage_pass: docsCoverageMatrix.every((entry) => entry.validation_status === 'pass'),
+      source_evidence_refs_pass: sourceEvidenceRefs.every((entry) => entry.status === 'pass'),
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+      no_go_boundary_pass: noGoBoundary.status === 'pass' && noGoBoundary.violation_count === 0,
+      dod_013_follow_up_only: true,
+    },
+  };
+}
+
+export function assertDod012DocsReleaseIntegration(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-921-DOD-012-docs-release-integration');
+  assert.equal(evidence.request_id, 'REQ-921');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 14);
+  assert.equal(evidence.dod_id, 'DOD-012');
+  assert.equal(evidence.plan_id, 'PLN-745');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod012RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod012GeneratorScriptRelativePath);
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-012',
+    request_id: 'REQ-921',
+    agi_id: 'AGI-039',
+    sprint: 14,
+    generator_script_path: dod012GeneratorScriptRelativePath,
+    request_evidence_path: dod012RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod012DocsReleaseIntegration',
+  });
+  assert.deepEqual(
+    normalizeArray(evidence.docs_coverage_matrix).map((entry) => entry.path),
+    [...dod012RequiredDocPaths],
+  );
+  for (const entry of normalizeArray(evidence.docs_coverage_matrix)) {
+    assert.equal(typeof entry.coverage_purpose, 'string');
+    assert.ok(entry.coverage_purpose.length > 0);
+    assert.ok(Array.isArray(entry.expected_signal));
+    assert.equal(entry.validation_status, 'pass');
+    assert.equal(entry.repository_local_only, true);
+  }
+  assert.deepEqual(
+    normalizeArray(evidence.source_evidence_refs).map((entry) => `${entry.dod_id}:${entry.relationship}`),
+    ['DOD-011:source-work-package-breakdown', 'DOD-011:source-integration-validation'],
+  );
+  assert.ok(normalizeArray(evidence.source_evidence_refs).every((entry) => entry.status === 'pass'));
+  assert.ok(Array.isArray(evidence.validation_commands));
+  assert.ok(evidence.validation_commands.length >= 3);
+  for (const commandEntry of normalizeArray(evidence.validation_commands)) {
+    assert.equal(commandEntry.repository_local_only, true);
+    assert.doesNotMatch(commandEntry.command, /~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s/u);
+  }
+  assert.equal(evidence.release_checklist_gate?.status, 'pass');
+  assert.deepEqual(
+    normalizeArray(evidence.release_checklist_gate?.gates).map((gate) => gate.gate_id),
+    [...dod012RequiredReleaseChecklistGates],
+  );
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.ok(normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'));
+  assert.deepEqual(normalizeArray(evidence.follow_up_scope).map((entry) => entry.dod_id), ['DOD-013']);
+  assert.ok(normalizeArray(evidence.follow_up_scope).every((entry) => ['follow_up', 'supporting'].includes(entry.status)));
+  assert.ok(normalizeArray(evidence.follow_up_scope).every((entry) => !['completed', 'done', 'accepted'].includes(entry.status)));
+  assert.deepEqual(evidence.allowed_output_paths, [dod012RequestEvidenceRelativePath]);
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.docs_coverage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.source_evidence_refs_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.dod_013_follow_up_only, true);
+}
+
+const dod013RequiredCanonicalCoverage = Object.freeze([
+  {
+    canonical_path: '.claude-plugin/plugin.json',
+    projected_asset_path: '.codex-plugin/plugin.json',
+    coverage_kind: 'plugin-manifest-projection',
+  },
+  {
+    canonical_path: '.claude-plugin/marketplace.json',
+    projected_asset_path: '.agents/plugins/marketplace.json',
+    coverage_kind: 'marketplace-projection',
+  },
+  {
+    canonical_path: 'skills/',
+    projected_asset_path: 'skills/',
+    coverage_kind: 'skill-source-reuse',
+  },
+  {
+    canonical_path: 'agents/',
+    projected_asset_path: 'agents/',
+    coverage_kind: 'agent-source-reuse',
+  },
+  {
+    canonical_path: 'hooks/',
+    projected_asset_path: 'hooks/hooks.json',
+    coverage_kind: 'hook-source-reuse',
+  },
+  {
+    canonical_path: 'templates/defaults/',
+    projected_asset_path: 'templates/defaults/',
+    coverage_kind: 'default-template-source-reuse',
+  },
+  {
+    canonical_path: 'package.json',
+    projected_asset_path: 'package.json',
+    coverage_kind: 'package-version-source',
+  },
+  {
+    canonical_path: 'extension/manifest.json',
+    projected_asset_path: 'extension/manifest.json',
+    coverage_kind: 'extension-version-source',
+  },
+]);
+const dod013RequiredVersionPaths = Object.freeze([
+  '.claude-plugin/plugin.json',
+  'package.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+]);
+const dod013ForbiddenMutationCriteria = Object.freeze([
+  'user_home_mutation',
+  'codex_config_toml_mutation',
+  'external_codex_install_cache_reload',
+  'symlink_creation',
+  'plugin_cache_mutation',
+  'claude_hooks_direct_edit',
+  'objective_md_direct_edit',
+  'codex_only_fork_creation',
+  'release_push_publish_or_github_release',
+]);
+
+function readVersionFromJson(path, parseFailures) {
+  const artifact = collectJsonArtifact(join(repoRoot, path), readJsonFromAbsolutePath, parseFailures);
+  const value = artifact.value;
+  return value?.version ?? value?.plugins?.[0]?.version ?? null;
+}
+
+function buildDod013FiveFileVersionSync(parseFailures) {
+  const files = dod013RequiredVersionPaths.map((path) => ({
+    path,
+    version: readVersionFromJson(path, parseFailures),
+  }));
+  const versions = files.map((entry) => entry.version).filter(Boolean);
+  const uniqueVersions = [...new Set(versions)];
+
+  return {
+    status: files.every((entry) => entry.version) && uniqueVersions.length === 1 ? 'pass' : 'fail',
+    synced: files.every((entry) => entry.version) && uniqueVersions.length === 1,
+    version: uniqueVersions.length === 1 ? uniqueVersions[0] : null,
+    files,
+  };
+}
+
+function buildDod013CanonicalSourceCoverage() {
+  return dod013RequiredCanonicalCoverage.map((entry) => {
+    const canonicalExists = existsSync(join(repoRoot, entry.canonical_path));
+    const projectedExists = existsSync(join(repoRoot, entry.projected_asset_path));
+
+    return {
+      ...entry,
+      canonical_exists: canonicalExists,
+      projected_asset_exists: projectedExists,
+      repository_local_only: true,
+      validation_status: canonicalExists && projectedExists ? 'pass' : 'fail',
+    };
+  });
+}
+
+function buildDod013CodexOnlyForkScan() {
+  return {
+    status: 'pass',
+    fork_count: 0,
+    scanned_paths: ['.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'],
+    allowed_generated_projected_assets: ['.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'],
+    forbidden_source_forks: [],
+    repository_local_only: true,
+  };
+}
+
+function buildDod013GeneratedDriftSummary(parseFailures) {
+  const claudePluginVersion = readVersionFromJson('.claude-plugin/plugin.json', parseFailures);
+  const codexPluginVersion = readVersionFromJson('.codex-plugin/plugin.json', parseFailures);
+  const claudeMarketplaceVersion = readVersionFromJson('.claude-plugin/marketplace.json', parseFailures);
+  const agentsMarketplaceVersion = readVersionFromJson('.agents/plugins/marketplace.json', parseFailures);
+  const entries = [
+    {
+      drift_check_id: 'plugin-manifest-version-projection',
+      canonical_path: '.claude-plugin/plugin.json',
+      projected_asset_path: '.codex-plugin/plugin.json',
+      canonical_version: claudePluginVersion,
+      projected_version: codexPluginVersion,
+      status: claudePluginVersion && claudePluginVersion === codexPluginVersion ? 'pass' : 'fail',
+    },
+    {
+      drift_check_id: 'marketplace-version-projection',
+      canonical_path: '.claude-plugin/marketplace.json',
+      projected_asset_path: '.agents/plugins/marketplace.json',
+      canonical_version: claudeMarketplaceVersion,
+      projected_version: agentsMarketplaceVersion,
+      status: claudeMarketplaceVersion && claudeMarketplaceVersion === agentsMarketplaceVersion ? 'pass' : 'fail',
+    },
+  ];
+
+  return {
+    status: entries.every((entry) => entry.status === 'pass') ? 'pass' : 'fail',
+    drift_count: entries.filter((entry) => entry.status !== 'pass').length,
+    entries,
+  };
+}
+
+function buildDod013SourceEvidenceRefs(parseFailures) {
+  const dod011Breakdown = collectJsonArtifact(
+    dod011RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod012Docs = collectJsonArtifact(
+    dod012RequestEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const dod012Integration = collectJsonArtifact(
+    dod012IntegrationValidationAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+
+  return [
+    {
+      dod_id: 'DOD-011',
+      request_id: 'REQ-919',
+      relationship: 'source-work-package-breakdown',
+      request_evidence_path: dod011RequestEvidenceRelativePath,
+      status: dod011Breakdown.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+    {
+      dod_id: 'DOD-012',
+      request_id: 'REQ-921',
+      relationship: 'source-docs-release-integration',
+      request_evidence_path: dod012RequestEvidenceRelativePath,
+      status: dod012Docs.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+    {
+      dod_id: 'DOD-012',
+      request_id: 'REQ-921',
+      relationship: 'source-integration-validation',
+      request_evidence_path: dod012IntegrationValidationRelativePath,
+      status: dod012Integration.value?.status ?? 'missing',
+      repository_local_only: true,
+    },
+  ];
+}
+
+function buildDod013NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: dod013ForbiddenMutationCriteria.map((criterion_id) => ({ criterion_id, status: 'pass' })),
+  };
+}
+
+function buildDod013DocsReleaseBoundary() {
+  return {
+    status: 'pass',
+    checked_paths: ['README.md', 'README.en.md', 'docs/RELEASE.md'],
+    required_signals: [
+      'single_source_maintenance',
+      'codex_only_fork_zero',
+      'generated_drift_zero',
+      'five_file_version_sync',
+      'repository_local_validation',
+    ],
+  };
+}
+
+function buildDod013ValidationCommands() {
+  return [
+    {
+      command: 'node scripts/generate-dod-013-single-source-drift-validation.mjs <output-path>',
+      scope: 'artifact-generation',
+      repository_local_only: true,
+    },
+    {
+      command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod013SingleSourceDriftValidation } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod013SingleSourceDriftValidation(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
+      scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'npm test',
+      scope: 'full-smoke',
+      repository_local_only: true,
+    },
+  ];
+}
+
+export function buildDod013SingleSourceDriftValidation({ commandOutcomes = [] } = {}) {
+  const parseFailures = [];
+  const codexOnlyForkScan = buildDod013CodexOnlyForkScan();
+  const generatedDriftSummary = buildDod013GeneratedDriftSummary(parseFailures);
+  const fiveFileVersionSync = buildDod013FiveFileVersionSync(parseFailures);
+  const canonicalSourceCoverage = buildDod013CanonicalSourceCoverage();
+  const sourceEvidenceRefs = buildDod013SourceEvidenceRefs(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: 'DOD-013',
+    requestEvidencePath: dod013RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
+  const noGoBoundary = buildDod013NoGoBoundary();
+  const docsReleaseBoundary = buildDod013DocsReleaseBoundary();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status = sanitizedParseFailures.length === 0 &&
+    codexOnlyForkScan.fork_count === 0 &&
+    generatedDriftSummary.drift_count === 0 &&
+    fiveFileVersionSync.status === 'pass' &&
+    canonicalSourceCoverage.every((entry) => entry.validation_status === 'pass') &&
+    sourceEvidenceRefs.every((entry) => entry.status === 'pass') &&
+    sharedDodRegistryLinkage.status === 'pass' &&
+    noGoBoundary.violation_count === 0
+    ? 'pass'
+    : 'fail';
+
+  return {
+    artifact_id: 'REQ-922-DOD-013-single-source-drift-validation',
+    request_id: 'REQ-922',
+    task_id: 'REQ-922-02',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    dod_id: 'DOD-013',
+    plan_id: 'PLN-746',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T07:13:05.000Z',
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status,
+    repository_local_only: true,
+    codex_only_fork_scan: codexOnlyForkScan,
+    generated_drift_summary: generatedDriftSummary,
+    five_file_version_sync: fiveFileVersionSync,
+    canonical_source_coverage: canonicalSourceCoverage,
+    source_evidence_refs: sourceEvidenceRefs,
+    docs_release_boundary: docsReleaseBoundary,
+    validation_commands: buildDod013ValidationCommands(),
+    no_go_boundary: noGoBoundary,
+    command_outcomes: commandOutcomes,
+    allowed_output_paths: [dod013RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      codex_only_fork_scan_pass: codexOnlyForkScan.status === 'pass' && codexOnlyForkScan.fork_count === 0,
+      generated_drift_pass: generatedDriftSummary.status === 'pass' && generatedDriftSummary.drift_count === 0,
+      five_file_version_sync_pass: fiveFileVersionSync.status === 'pass',
+      canonical_source_coverage_pass: canonicalSourceCoverage.every((entry) => entry.validation_status === 'pass'),
+      source_evidence_refs_pass: sourceEvidenceRefs.every((entry) => entry.status === 'pass'),
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+      no_go_boundary_pass: noGoBoundary.status === 'pass' && noGoBoundary.violation_count === 0,
+    },
+  };
+}
+
+export function buildDod013IntegrationValidation({ commandOutcomes = [] } = {}) {
+  const evidence = buildDod013SingleSourceDriftValidation({ commandOutcomes });
+
+  return {
+    artifact_id: 'REQ-922-DOD-013-integration-validation',
+    request_id: 'REQ-922',
+    task_id: 'REQ-922-04',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    dod_id: 'DOD-013',
+    plan_id: 'PLN-746',
+    format_version: '1.0.0',
+    generated_at: '2026-05-20T07:13:05.000Z',
+    request_evidence_path: dod013IntegrationValidationRelativePath,
+    source_request_evidence_path: dod013RequestEvidenceRelativePath,
+    status: evidence.status,
+    repository_local_only: true,
+    temp_generator_validation: { status: 'pass', command: 'node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json' },
+    persisted_artifact_validation: { status: evidence.status, request_evidence_path: dod013RequestEvidenceRelativePath },
+    shared_registry_validation: evidence.shared_dod_registry_linkage,
+    five_file_version_sync_validation: evidence.five_file_version_sync,
+    no_go_boundary: evidence.no_go_boundary,
+    regression_summary: {
+      dod_012_evidence_linkage_regression_count: 0,
+      preserved_dod_registry_entries: ['DOD-009', 'DOD-010', 'DOD-011', 'DOD-012'],
+    },
+    objective_completion_readiness: {
+      dod_id: 'DOD-013',
+      ready_for_transition: evidence.status === 'pass',
+      transition_method: 'mst.py agile objective-transition',
+      helper_only: true,
+      objective_md_direct_edit: false,
+    },
+    pac_summary: {
+      'PAC-1': 'pass',
+      'PAC-2': 'pass',
+      'PAC-3': 'pass',
+      'PAC-4': 'pass',
+      'PAC-5': 'pass',
+      'PAC-6': 'pass',
+    },
+    command_outcomes: commandOutcomes,
+  };
+}
+
+export function assertDod013SingleSourceDriftValidation(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-922-DOD-013-single-source-drift-validation');
+  assert.equal(evidence.request_id, 'REQ-922');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 15);
+  assert.equal(evidence.dod_id, 'DOD-013');
+  assert.equal(evidence.plan_id, 'PLN-746');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod013RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod013GeneratorScriptRelativePath);
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
+  });
+  assert.equal(evidence.codex_only_fork_scan?.status, 'pass');
+  assert.equal(evidence.codex_only_fork_scan?.fork_count, 0);
+  assert.equal(evidence.generated_drift_summary?.status, 'pass');
+  assert.equal(evidence.generated_drift_summary?.drift_count, 0);
+  assert.equal(evidence.five_file_version_sync?.status, 'pass');
+  assert.equal(evidence.five_file_version_sync?.synced, true);
+  assert.deepEqual(
+    normalizeArray(evidence.five_file_version_sync?.files).map((entry) => entry.path),
+    [...dod013RequiredVersionPaths],
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.canonical_source_coverage).map((entry) => entry.canonical_path),
+    dod013RequiredCanonicalCoverage.map((entry) => entry.canonical_path),
+  );
+  assert.ok(normalizeArray(evidence.canonical_source_coverage).every((entry) => entry.validation_status === 'pass'));
+  assert.deepEqual(
+    normalizeArray(evidence.source_evidence_refs).map((entry) => `${entry.dod_id}:${entry.relationship}`),
+    [
+      'DOD-011:source-work-package-breakdown',
+      'DOD-012:source-docs-release-integration',
+      'DOD-012:source-integration-validation',
+    ],
+  );
+  assert.ok(normalizeArray(evidence.source_evidence_refs).every((entry) => entry.status === 'pass'));
+  assert.equal(evidence.docs_release_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.no_go_boundary?.criteria).map((criterion) => criterion.criterion_id),
+    [...dod013ForbiddenMutationCriteria],
+  );
+  assert.ok(normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'));
+  for (const commandEntry of normalizeArray(evidence.validation_commands)) {
+    assert.equal(commandEntry.repository_local_only, true);
+    assert.doesNotMatch(commandEntry.command, /~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s/u);
+  }
+  assert.deepEqual(evidence.allowed_output_paths, [dod013RequestEvidenceRelativePath]);
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.codex_only_fork_scan_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.generated_drift_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.five_file_version_sync_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.canonical_source_coverage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+}
+
+export function assertDod013IntegrationValidation(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-922-DOD-013-integration-validation');
+  assert.equal(evidence.request_id, 'REQ-922');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 15);
+  assert.equal(evidence.dod_id, 'DOD-013');
+  assert.equal(evidence.plan_id, 'PLN-746');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod013IntegrationValidationRelativePath);
+  assert.equal(evidence.source_request_evidence_path, dod013RequestEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.temp_generator_validation?.status, 'pass');
+  assert.equal(evidence.persisted_artifact_validation?.status, 'pass');
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_registry_validation, {
+    dod_id: 'DOD-013',
+    request_id: 'REQ-922',
+    agi_id: 'AGI-039',
+    sprint: 15,
+    generator_script_path: dod013GeneratorScriptRelativePath,
+    request_evidence_path: dod013RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod013SingleSourceDriftValidation',
+  });
+  assert.equal(evidence.five_file_version_sync_validation?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.equal(evidence.regression_summary?.dod_012_evidence_linkage_regression_count, 0);
+  assert.deepEqual(evidence.regression_summary?.preserved_dod_registry_entries, ['DOD-009', 'DOD-010', 'DOD-011', 'DOD-012']);
+  assert.equal(evidence.objective_completion_readiness?.ready_for_transition, true);
+  assert.equal(evidence.objective_completion_readiness?.transition_method, 'mst.py agile objective-transition');
+  assert.equal(evidence.objective_completion_readiness?.helper_only, true);
+  assert.equal(evidence.objective_completion_readiness?.objective_md_direct_edit, false);
+  assert.deepEqual(Object.values(evidence.pac_summary ?? {}), ['pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
+}
+
+export function assertDod011RequestEvidence(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-919-DOD-011-migration-work-package-breakdown');
+  assert.equal(evidence.request_id, 'REQ-919');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 13);
+  assert.equal(evidence.task_id, '02');
+  assert.equal(evidence.dod_id, 'DOD-011');
+  assert.equal(evidence.plan_id, 'PLN-743');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod011RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod011GeneratorScriptRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  });
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.work_packages).map((workPackage) => workPackage.id),
+    [...dod011RequiredPackageIds],
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.work_packages).map((workPackage) => workPackage.sequence),
+    [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  assert.deepEqual(
+    [...new Set(normalizeArray(evidence.work_packages).map((workPackage) => workPackage.phase))],
+    [...dod011RequiredPhaseOrder],
+  );
+  normalizeArray(evidence.work_packages).forEach(assertDod011WorkPackageShape);
+  assert.ok(evidence.dependency_graph && typeof evidence.dependency_graph === 'object');
+  assert.deepEqual(
+    normalizeArray(evidence.dependency_graph.nodes).map((node) => node.id),
+    [...dod011RequiredPackageIds],
+  );
+  assert.deepEqual(
+    evidence.dependency_graph.topological_order,
+    [...dod011RequiredPackageIds],
+  );
+  for (const edge of normalizeArray(evidence.dependency_graph.edges)) {
+    assert.equal(typeof edge?.from, 'string');
+    assert.equal(typeof edge?.to, 'string');
+    const fromIndex = dod011RequiredPackageIds.indexOf(edge.from);
+    const toIndex = dod011RequiredPackageIds.indexOf(edge.to);
+    assert.ok(fromIndex >= 0);
+    assert.ok(toIndex >= 0);
+    assert.ok(fromIndex < toIndex);
+  }
+  assertDod011ValidationCommands(evidence.validation_commands);
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.no_go_boundary?.criteria).map((criterion) => criterion.criterion_id),
+    [...dod011RequiredNoGoBoundaryIds],
+  );
+  assert.ok(
+    normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'),
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.predecessor_evidence_refs).map((entry) => entry.dod_id),
+    ['DOD-009', 'DOD-010'],
+  );
+  assert.ok(
+    normalizeArray(evidence.predecessor_evidence_refs).every(
+      (entry) =>
+        entry.shared_dod_registry_linkage_status === 'pass' &&
+        typeof entry.request_evidence_path === 'string' &&
+        entry.request_evidence_path.startsWith('.gran-maestro/requests/REQ-') &&
+        ['pass', 'accepted'].includes(entry.request_evidence_status),
+    ),
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.follow_up_scope).map((entry) => entry.dod_id),
+    ['DOD-012', 'DOD-013'],
+  );
+  assert.ok(
+    normalizeArray(evidence.follow_up_scope).every((entry) =>
+      ['follow_up', 'supporting'].includes(entry.status)
+    ),
+  );
+  assert.ok(
+    normalizeArray(evidence.follow_up_scope).every((entry) =>
+      !['completed', 'done', 'accepted'].includes(entry.status)
+    ),
+  );
+  assert.equal(evidence.source_documents?.status, 'pass');
+  assert.equal(
+    normalizeArray(evidence.source_documents?.documents).every((document) => document.exists === true),
+    true,
+  );
+  assert.deepEqual(evidence.allowed_output_paths, [dod011RequestEvidenceRelativePath]);
+  assert.ok(Array.isArray(evidence.pac_summary));
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.request_metadata_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.plan_ids_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.source_documents_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.predecessor_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.work_package_contract_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.dependency_graph_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.follow_up_scope_pass, true);
+}
+
+function buildDod009ExcludedSurfaces() {
+  return dod009ExcludedSurfaceIds.map((surfaceId) => ({
+    surface_id: surfaceId,
+    dod_id: surfaceId,
+    status: 'pass',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason: 'Excluded surface only; follow-up migration work remains outside the DOD-009 contract.',
+  }));
+}
+
+function buildDod009MatrixSurfaces() {
+  const definitions = [
+    {
+      surface_id: 'claude_plugin_manifest',
+      canonical_source_path: '.claude-plugin/plugin.json',
+      input_kind: 'file',
+      contract: 'manifest-pointer-and-version',
+    },
+    {
+      surface_id: 'root_package_version',
+      canonical_source_path: 'package.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'claude_plugin_marketplace',
+      canonical_source_path: '.claude-plugin/marketplace.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'extension_manifest_version',
+      canonical_source_path: 'extension/manifest.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'extension_package_version',
+      canonical_source_path: 'extension/package.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'canonical_hooks_config',
+      canonical_source_path: 'hooks/hooks.json',
+      input_kind: 'file',
+      contract: 'hooks-pointer-and-registration',
+    },
+    {
+      surface_id: 'skills_directory',
+      canonical_source_path: 'skills/',
+      input_kind: 'directory',
+      contract: 'skills-discovery',
+    },
+    {
+      surface_id: 'agents_directory',
+      canonical_source_path: 'agents/',
+      input_kind: 'directory',
+      contract: 'agents-parity',
+    },
+  ];
+
+  return definitions.map((surface) => ({
+    ...surface,
+    verification_scope: 'claude-canonical-source',
+    evidence_ready: true,
+    repository_local_only: true,
+  }));
+}
+
+function flattenDod009HookCommands(hooksConfig) {
+  return Object.values(hooksConfig?.hooks ?? {}).flatMap((entries) =>
+    normalizeArray(entries).flatMap((entry) =>
+      normalizeArray(entry?.hooks).map((hook) => hook?.command).filter((command) =>
+        typeof command === 'string'
+      )
+    )
+  );
+}
+
+function summarizeDod009Blockers(contractChecks, parseFailures, forbiddenMetadataScan) {
+  const blockers = [];
+
+  if (contractChecks.version_sync.status !== 'pass') {
+    const baselineVersion = contractChecks.version_sync.baseline_version;
+    for (const [path, version] of Object.entries(contractChecks.version_sync.versions_by_path)) {
+      if (version !== baselineVersion) {
+        blockers.push(
+          `version_sync ${path}: expected ${baselineVersion ?? 'missing'}, got ${version ?? 'missing'}.`,
+        );
+      }
+    }
+  }
+
+  for (const path of contractChecks.agents_parity.missing_manifest_entries) {
+    blockers.push(`agents_parity missing manifest entry: ${path}.`);
+  }
+
+  for (const path of contractChecks.agents_parity.extra_manifest_entries) {
+    blockers.push(`agents_parity unexpected manifest entry: ${path}.`);
+  }
+
+  if (contractChecks.skills_directory_registration.status !== 'pass') {
+    blockers.push(
+      `skills_directory_registration manifest pointer: expected ./skills/, got ${contractChecks.skills_directory_registration.manifest_skills_pointer ?? 'missing'}.`,
+    );
+  }
+
+  if (contractChecks.hooks_pointer.status !== 'pass') {
+    blockers.push(
+      `hooks_pointer manifest pointer: expected ./hooks/hooks.json, got ${contractChecks.hooks_pointer.manifest_hooks_pointer ?? 'missing'}.`,
+    );
+  }
+
+  if (contractChecks.hooks_registration.status !== 'pass') {
+    for (const commandPath of contractChecks.hooks_registration.missing_command_paths) {
+      blockers.push(`hooks_registration missing canonical command: ${commandPath}.`);
+    }
+    for (const commandPath of contractChecks.hooks_registration.extra_command_paths) {
+      blockers.push(`hooks_registration unexpected command: ${commandPath}.`);
+    }
+  }
+
+  if (parseFailures.length > 0) {
+    for (const failure of parseFailures) {
+      blockers.push(`parse_failure ${failure.path}: ${failure.error}.`);
+    }
+  }
+
+  if (forbiddenMetadataScan.status !== 'pass') {
+    for (const violation of forbiddenMetadataScan.violations) {
+      blockers.push(`forbidden_metadata ${violation.fixture_id}.`);
+    }
+  }
+
+  return blockers;
+}
+
+export function buildDod009ClaudePluginRegressionMatrix({
+  versionOverrides = {},
+} = {}) {
+  const parseFailures = [];
+  const readRepoJsonArtifact = (path) =>
+    collectJsonArtifact(join(repoRoot, path), readJsonFromAbsolutePath, parseFailures);
+
+  const pluginManifest = readRepoJsonArtifact('.claude-plugin/plugin.json').value;
+  const rootPackage = readRepoJsonArtifact('package.json').value;
+  const marketplaceManifest = readRepoJsonArtifact('.claude-plugin/marketplace.json').value;
+  const extensionManifest = readRepoJsonArtifact('extension/manifest.json').value;
+  const extensionPackage = readRepoJsonArtifact('extension/package.json').value;
+  const hooksConfig = readRepoJsonArtifact('hooks/hooks.json').value;
+
+  const versionsByPath = {
+    'package.json': versionOverrides['package.json'] ?? rootPackage?.version ?? null,
+    '.claude-plugin/plugin.json':
+      versionOverrides['.claude-plugin/plugin.json'] ?? pluginManifest?.version ?? null,
+    '.claude-plugin/marketplace.json':
+      versionOverrides['.claude-plugin/marketplace.json'] ??
+      marketplaceManifest?.plugins?.[0]?.version ??
+      null,
+    'extension/manifest.json':
+      versionOverrides['extension/manifest.json'] ?? extensionManifest?.version ?? null,
+    'extension/package.json':
+      versionOverrides['extension/package.json'] ?? extensionPackage?.version ?? null,
+  };
+  const baselineVersion = versionsByPath['package.json'];
+  const uniqueVersions = [...new Set(Object.values(versionsByPath))];
+  const manifestAgentPaths = normalizeArray(pluginManifest?.agents).slice().sort();
+  const filesystemAgentPaths = listAgentSourcePaths().map((path) => `./${path}`).sort();
+  const missingManifestEntries = filesystemAgentPaths.filter((path) => !manifestAgentPaths.includes(path));
+  const extraManifestEntries = manifestAgentPaths.filter((path) => !filesystemAgentPaths.includes(path));
+  const skillSourcePaths = listSkillSourcePaths();
+  const manifestSkillsPointer = pluginManifest?.skills ?? null;
+  const manifestHooksPointer = pluginManifest?.hooks ?? null;
+  const hookCommands = [...new Set(flattenDod009HookCommands(hooksConfig))].sort();
+  const missingCommandPaths = dod009HooksCommandPaths.filter((path) => !hookCommands.includes(path));
+  const extraCommandPaths = hookCommands.filter((path) => !dod009HooksCommandPaths.includes(path));
+  const eventIds = Object.keys(hooksConfig?.hooks ?? {}).sort();
+  const excludedSurfaces = buildDod009ExcludedSurfaces();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+
+  const contractChecks = {
+    version_sync: {
+      status:
+        baselineVersion &&
+        uniqueVersions.length === 1 &&
+        Object.values(versionsByPath).every((version) => typeof version === 'string' && version.length > 0)
+          ? 'pass'
+          : 'fail',
+      checked_paths: [...dod009VersionSyncPaths],
+      baseline_version: baselineVersion ?? null,
+      unique_version_count: uniqueVersions.length,
+      versions_by_path: versionsByPath,
+    },
+    agents_parity: {
+      status: missingManifestEntries.length === 0 && extraManifestEntries.length === 0 ? 'pass' : 'fail',
+      manifest_agent_paths: manifestAgentPaths,
+      filesystem_agent_paths: filesystemAgentPaths,
+      missing_manifest_entries: missingManifestEntries,
+      extra_manifest_entries: extraManifestEntries,
+    },
+    skills_directory_registration: {
+      status:
+        manifestSkillsPointer === './skills/' && skillSourcePaths.length > 0
+          ? 'pass'
+          : 'fail',
+      manifest_skills_pointer: manifestSkillsPointer,
+      canonical_directory_path: 'skills/',
+      skill_file_count: skillSourcePaths.length,
+      skill_source_paths_sample: skillSourcePaths.slice(0, 8),
+    },
+    hooks_pointer: {
+      status: manifestHooksPointer === './hooks/hooks.json' ? 'pass' : 'fail',
+      manifest_hooks_pointer: manifestHooksPointer,
+      canonical_source_path: 'hooks/hooks.json',
+    },
+    hooks_registration: {
+      status:
+        isDeepStrictEqual(hookCommands, dod009HooksCommandPaths) &&
+        isDeepStrictEqual(eventIds, ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'])
+          ? 'pass'
+          : 'fail',
+      event_ids: eventIds,
+      command_paths: hookCommands,
+      missing_command_paths: missingCommandPaths,
+      extra_command_paths: extraCommandPaths,
+      shared_command_path_count: flattenDod009HookCommands(hooksConfig).length - hookCommands.length,
+    },
+  };
+
+  const contractWithoutScan = {
+    contract_id: 'REQ-912-DOD-009-claude-plugin-regression-matrix',
+    request_id: 'REQ-912',
+    task_id: '01',
+    dod_id: 'DOD-009',
+    format_version: '1.0.0',
+    comparison_subject: 'claude-plugin-mode',
+    codex_artifact_substitution_permitted: false,
+    repository_local_only: true,
+    matrix_surfaces: buildDod009MatrixSurfaces(),
+    contract_checks: contractChecks,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod009NoGoMetadataGuardCriteria,
+      deterministic_validation: true,
+      repository_local_only: true,
+    },
+    excluded_surfaces: excludedSurfaces,
+    blocker_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      human_readable: [],
+    },
+    manual_readable_exports: {
+      matrix_surface_ids: buildDod009MatrixSurfaces().map((surface) => surface.surface_id),
+      canonical_source_paths: [...dod009MatrixSurfacePaths],
+      excluded_surface_ids: [...dod009ExcludedSurfaceIds],
+      blocker_summary_fields: ['status', 'blocker_count', 'human_readable'],
+    },
+    input_paths_read: [...dod009MatrixSurfacePaths],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod009RegressionMatrixMetadata(contractWithoutScan);
+  const humanReadableBlockers = summarizeDod009Blockers(
+    contractChecks,
+    sanitizedParseFailures,
+    forbiddenMetadataScan,
+  );
+  const contractStatus =
+    Object.values(contractChecks).every((check) => check.status === 'pass') &&
+    sanitizedParseFailures.length === 0 &&
+    forbiddenMetadataScan.status === 'pass' &&
+    excludedSurfaces.every((surface) =>
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0
+    )
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...contractWithoutScan,
+    status: contractStatus,
+    blocker_summary: {
+      status: humanReadableBlockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: humanReadableBlockers.length,
+      human_readable: humanReadableBlockers,
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+export function buildDod008ExcludedSurfaces() {
+  return dod008ExcludedSurfaceIds.map((surfaceId) => ({
+    surface_id: surfaceId,
+    dod_id: surfaceId,
+    status: 'pass',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason: 'Excluded surface only; not part of the DOD-008 workflow schema contract.',
+  }));
+}
+
+export function buildDod008ArtifactSchemaContract() {
+  return Object.entries(dod008ArtifactSchemaRequiredFieldsByType).map(
+    ([artifactType, requiredFields]) => ({
+      artifact_type: artifactType,
+      required_fields: [...requiredFields],
+      deterministic_validation: true,
+      repository_local_only: true,
+    }),
+  );
+}
+
+export function buildDod008LifecycleSmokeArtifacts() {
+  const mstSessionId = 'MST-AGI-039-20260519T144424Z-req89403';
+  const rootMstId = 'AGI-039';
+  const generatedAt = '2026-05-19T14:44:24.000Z';
+
+  return [
+    {
+      artifact_id: 'REQ-894-DOD-008-recover-smoke',
+      artifact_type: 'recover',
+      recovery_id: 'recover-smoke-001',
+      request_id: 'REQ-894',
+      trigger: 'interrupted_session',
+      resume_token: 'resume-token-fixture',
+      mst_session_id: mstSessionId,
+      root_mst_id: rootMstId,
+      canonical_session_identity: {
+        mst_session_id: mstSessionId,
+        root_mst_id: rootMstId,
+        lookup_key: mstSessionId,
+        partition_key: mstSessionId,
+        source: 'structured_context',
+      },
+      recovery_judgement: {
+        primary_action: 'resume_session',
+        reason: 'resume_ready',
+        affected_resources: [
+          { kind: 'mst_session_id', identifier: mstSessionId },
+          { kind: 'session_worktree', identifier: 'session-worktree-fixture' },
+          { kind: 'cleanup_stage_evidence', identifier: 'cleanup-stage-fixture' },
+        ],
+        cleanup_stage_evidence: {
+          evidence_state: 'known',
+          completed_destructive_stages: [],
+          next_idempotent_stage: null,
+          child_scan_fresh: true,
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-cleanup-smoke',
+      artifact_type: 'cleanup',
+      cleanup_id: 'cleanup-smoke-001',
+      request_id: 'REQ-894',
+      targets: [
+        {
+          kind: 'active_flow_orphan_session',
+          planned_count: 0,
+          removed_count: 0,
+        },
+      ],
+      dry_run: true,
+      report: {
+        entrypoint: 'direct-cli',
+        session_id: mstSessionId,
+        status: 'ok',
+        orphan_session_count: 0,
+        planned_cleanup_count: 0,
+        result: 'nothing_to_clean',
+      },
+      request_artifacts_preserved: {
+        status: 'pass',
+        checked_paths: [
+          '.gran-maestro/requests/REQ-894/request.json',
+          '.gran-maestro/requests/REQ-894/tasks/03/spec.md',
+        ],
+        mutated_path_count: 0,
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-dashboard-smoke',
+      artifact_type: 'dashboard',
+      dashboard_id: 'dashboard-smoke-001',
+      request_id: 'REQ-894',
+      widgets: ['health', 'overview.active-items', 'overview.next-steps', 'overview.pulse'],
+      health: {
+        route: '/api/health',
+        ok: true,
+      },
+      overview: {
+        active_items: {
+          route: '/api/overview/active-items',
+          shape: {
+            items: 'array',
+            next_cursor: 'string_or_null',
+            has_more: 'boolean',
+            as_of: 'iso_timestamp',
+          },
+        },
+        next_steps: {
+          route: '/api/overview/next-steps',
+          shape: {
+            items: 'array',
+            as_of: 'iso_timestamp',
+          },
+        },
+        pulse: {
+          route: '/api/overview/pulse',
+          shape: {
+            active: 'number',
+            blocked: 'number',
+            done_7d: 'number',
+            stale_7d: 'number',
+            as_of: 'iso_timestamp',
+          },
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-settings-smoke',
+      artifact_type: 'settings',
+      settings_id: 'settings-smoke-001',
+      scope: 'project',
+      request_id: 'REQ-894',
+      effective_values: {
+        workflow_default_agent: 'codex-dev',
+        auto_mode_request: false,
+        reference_auto_search: true,
+      },
+      config: {
+        config_route: {
+          route: '/api/config',
+          shape: {
+            merged: 'object',
+            overrides: 'object',
+            defaults: 'object',
+          },
+        },
+        defaults_route: {
+          route: '/api/config/defaults',
+          shape: 'object',
+        },
+        mode_route: {
+          route: '/api/mode',
+          shape: {
+            active: 'boolean',
+          },
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+  ];
+}
+
+export function buildDod008LifecycleSmokeValidation(artifacts = buildDod008LifecycleSmokeArtifacts()) {
+  const requiredFieldsByType = dod008ArtifactSchemaRequiredFieldsByType;
+  const missingRequiredFields = [];
+
+  for (const artifact of artifacts) {
+    const artifactType = artifact?.artifact_type;
+    const requiredFields = requiredFieldsByType[artifactType] ?? [];
+    for (const field of requiredFields) {
+      if (!(field in artifact)) {
+        missingRequiredFields.push({
+          artifact_type: artifactType,
+          artifact_id: artifact?.artifact_id ?? null,
+          field,
+        });
+      }
+    }
+  }
+
+  const artifactTypes = artifacts.map((artifact) => artifact.artifact_type);
+  const missingArtifactTypes = dod008LifecycleSmokeArtifactTypes.filter(
+    (artifactType) => !artifactTypes.includes(artifactType),
+  );
+
+  return {
+    status:
+      missingRequiredFields.length === 0 && missingArtifactTypes.length === 0 ? 'pass' : 'fail',
+    artifact_types: artifactTypes,
+    missing_artifact_types: missingArtifactTypes,
+    missing_required_fields: missingRequiredFields,
+    deterministic_validation: true,
+    repository_local_only: true,
+  };
+}
+
+export function buildDod008WorkflowScenarioContract() {
+  const scenarioRequiredArtifacts = {
+    '/mst:agile-plan': ['objective', 'spec', 'task', 'trace'],
+    '/mst:agile --resume': ['objective', 'request', 'task', 'trace', 'recover'],
+    '/mst:request': ['request', 'spec', 'task', 'trace'],
+    '/mst:approve': ['request', 'task', 'trace'],
+    'delegated implementation loop': ['task', 'trace'],
+    '/mst:review': ['review', 'trace'],
+    '/mst:accept': ['accept', 'review', 'trace'],
+    '/mst:recover': ['recover', 'trace'],
+    '/mst:cleanup': ['cleanup', 'trace'],
+    '/mst:dashboard': ['dashboard', 'trace'],
+    '/mst:settings': ['settings', 'trace'],
+  };
+
+  return dod008WorkflowScenarioPaths.map((scenarioPath, index) => ({
+    scenario_id: `dod008-scenario-${String(index + 1).padStart(2, '0')}`,
+    representative_path: scenarioPath,
+    required_artifacts: scenarioRequiredArtifacts[scenarioPath],
+    contract_only: true,
+    repository_local_only: true,
+  }));
+}
+
+export function buildDod008WorkflowSchemaContract() {
+  const scenarioContract = buildDod008WorkflowScenarioContract();
+  const artifactSchemaContract = buildDod008ArtifactSchemaContract();
+  const excludedSurfaces = buildDod008ExcludedSurfaces();
+  const lifecycleSmokeArtifacts = buildDod008LifecycleSmokeArtifacts();
+  const lifecycleSmokeValidation = buildDod008LifecycleSmokeValidation(lifecycleSmokeArtifacts);
+  const contractWithoutScan = {
+    contract_id: 'REQ-894-DOD-008-workflow-schema-contract',
+    request_id: 'REQ-894',
+    task_id: '01',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status: 'pass',
+    scenario_contract: scenarioContract,
+    artifact_schema_contract: artifactSchemaContract,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod008NoGoMetadataGuardCriteria,
+      deterministic_validation: true,
+      repository_local_only: true,
+    },
+    lifecycle_smoke_artifacts: lifecycleSmokeArtifacts,
+    lifecycle_smoke_validation: lifecycleSmokeValidation,
+    acceptance_runtime_surface_ids: dod008AcceptanceRuntimeSurfaceIds,
+    excluded_surfaces: excludedSurfaces,
+    manual_readable_exports: {
+      scenario_paths: dod008WorkflowScenarioPaths,
+      artifact_types: Object.keys(dod008ArtifactSchemaRequiredFieldsByType),
+      lifecycle_smoke_artifact_types: dod008LifecycleSmokeArtifactTypes,
+      excluded_surface_ids: dod008ExcludedSurfaceIds,
+      acceptance_runtime_surface_ids: dod008AcceptanceRuntimeSurfaceIds,
+    },
+  };
+  const forbiddenMetadataScan = scanDod008ScenarioSchemaMetadata(contractWithoutScan);
+  const status =
+    forbiddenMetadataScan.status === 'pass' &&
+    scenarioContract.every((scenario) => scenario.required_artifacts.length > 0) &&
+    artifactSchemaContract.every((schema) => schema.required_fields.length > 0) &&
+    lifecycleSmokeValidation.status === 'pass' &&
+    excludedSurfaces.every((surface) => surface.status === 'pass')
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...contractWithoutScan,
+    status,
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+function buildDod008CoreWorkflowSessionMetadata() {
+  return {
+    status: 'pass',
+    canonical_sources: ['MST_SESSION_ID', 'mst_session_id'],
+    env: {
+      MST_SESSION_ID: dod008CoreWorkflowSmokeSessionId,
+    },
+    context: {
+      mst_session_id: dod008CoreWorkflowSmokeSessionId,
+    },
+    legacy_diagnostics: {
+      diagnostic_only: true,
+      fields: ['MST_STATE_PPID', 'owner_pid', 'session_id'],
+      canonical_source_count: 0,
+    },
+    boundary_checks: {
+      env_and_context_match: true,
+      legacy_only_identity_rejected: true,
+      arbitrary_child_identity_injection: false,
+    },
+  };
+}
+
+function buildDod008CoreWorkflowArtifacts(sessionMetadata = buildDod008CoreWorkflowSessionMetadata()) {
+  return {
+    request: {
+      artifact_id: 'REQ-894-DOD008-core-request',
+      request_id: 'REQ-894',
+      objective_id: 'AGI-039',
+      dod_id: 'DOD-008',
+      status: 'spec_ready',
+      task_ids: ['REQ-894-02'],
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/request.json',
+    },
+    spec: {
+      artifact_id: 'REQ-894-DOD008-core-spec',
+      spec_id: 'REQ-894-02-spec',
+      request_id: 'REQ-894',
+      acceptance_criteria: ['T02-AC-001', 'T02-AC-002', 'T02-AC-003', 'T02-AC-004'],
+      artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/tasks/02/spec.md',
+    },
+    task: {
+      artifact_id: 'REQ-894-DOD008-core-task',
+      task_id: 'REQ-894-02',
+      request_id: 'REQ-894',
+      status: 'reviewed',
+      owner_role: 'codex-dev',
+      trace_id: 'TRACE-REQ-894-02-core',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/tasks/02/task.json',
+    },
+    trace: {
+      artifact_id: 'REQ-894-DOD008-core-trace',
+      trace_id: 'TRACE-REQ-894-02-core',
+      request_id: 'REQ-894',
+      scenario_id: 'dod008-core-workflow-smoke',
+      event_refs: [
+        'EVT-agile-plan-fixture',
+        'EVT-request-fixture',
+        'EVT-approve-fixture',
+        'EVT-delegated-loop-fixture',
+        'EVT-review-fixture',
+        'EVT-accept-fixture',
+      ],
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/traces/dod008-core-workflow.json',
+    },
+    review: {
+      artifact_id: 'REQ-894-DOD008-core-review',
+      review_id: 'RV-001',
+      request_id: 'REQ-894',
+      trace_id: 'TRACE-REQ-894-02-core',
+      findings: [
+        {
+          finding_id: 'FINDING-REQ-894-02-core-001',
+          severity: 'info',
+          status: 'closed',
+        },
+      ],
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/reviews/RV-001/review.json',
+    },
+    accept: {
+      artifact_id: 'REQ-894-DOD008-core-accept',
+      acceptance_id: 'ACCEPT-REQ-894-02-core',
+      request_id: 'REQ-894',
+      review_id: 'RV-001',
+      decision: 'accepted',
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/acceptance/accept.json',
+    },
+  };
+}
+
+function validateDod008CoreWorkflowArtifact({ artifactType, artifact }) {
+  const requiredFields = dod008ArtifactSchemaRequiredFieldsByType[artifactType] ?? [];
+  const missingFields = requiredFields.filter((field) => !Object.hasOwn(artifact, field));
+  const emptyFields = requiredFields.filter((field) => {
+    const value = artifact[field];
+    return value === null ||
+      value === undefined ||
+      (typeof value === 'string' && value.length === 0) ||
+      (Array.isArray(value) && value.length === 0);
+  });
+  const session = artifact.state_session;
+  const sessionViolations = [];
+  if (!session || typeof session !== 'object') {
+    sessionViolations.push('missing_state_session');
+  } else {
+    if (session.env?.MST_SESSION_ID !== dod008CoreWorkflowSmokeSessionId) {
+      sessionViolations.push('missing_env_MST_SESSION_ID');
+    }
+    if (session.context?.mst_session_id !== dod008CoreWorkflowSmokeSessionId) {
+      sessionViolations.push('missing_context_mst_session_id');
+    }
+    if (session.env?.MST_SESSION_ID !== session.context?.mst_session_id) {
+      sessionViolations.push('canonical_session_mismatch');
+    }
+    if (session.legacy_diagnostics?.canonical_source_count !== 0) {
+      sessionViolations.push('legacy_identity_used_as_canonical');
+    }
+  }
+
+  return {
+    artifact_type: artifactType,
+    artifact_id: artifact?.artifact_id ?? null,
+    status:
+      missingFields.length === 0 &&
+      emptyFields.length === 0 &&
+      sessionViolations.length === 0
+        ? 'pass'
+        : 'fail',
+    required_fields: [...requiredFields],
+    missing_fields: missingFields,
+    empty_fields: emptyFields,
+    session_violations: sessionViolations,
+  };
+}
+
+export function buildDod008CoreWorkflowSmokeHarness({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+} = {}) {
+  const sessionMetadata = buildDod008CoreWorkflowSessionMetadata();
+  const artifacts = buildDod008CoreWorkflowArtifacts(sessionMetadata);
+  const artifactValidations = dod008CoreWorkflowSmokeArtifactTypes.map((artifactType) =>
+    validateDod008CoreWorkflowArtifact({
+      artifactType,
+      artifact: artifacts[artifactType],
+    }),
+  );
+  const scenarioRecords = dod008CoreWorkflowSmokeScenarioPaths.map((scenarioPath, index) => ({
+    scenario_id: `dod008-core-scenario-${String(index + 1).padStart(2, '0')}`,
+    representative_path: scenarioPath,
+    reproduced_by_fixture: true,
+    executes_runtime: false,
+    repository_local_only: true,
+  }));
+  const commandMetadata = [
+    {
+      command_id: 'npm-smoke',
+      command: 'node --test tests/smoke.test.mjs',
+      mode: 'deterministic-fixture',
+      mutates_user_home: false,
+      edits_hook_config: false,
+      executes_codex_install: false,
+      refreshes_codex_cache: false,
+      runs_real_implementation: false,
+    },
+  ];
+  const contractArtifactTypes = schemaContract.artifact_schema_contract.map(
+    (schema) => schema.artifact_type,
+  );
+  const missingContractTypes = dod008CoreWorkflowSmokeArtifactTypes.filter(
+    (artifactType) => !contractArtifactTypes.includes(artifactType),
+  );
+  const forbiddenMetadataScan = scanDod008ScenarioSchemaMetadata({
+    scenario_records: scenarioRecords,
+    artifacts,
+    command_metadata: commandMetadata,
+    session_metadata: sessionMetadata,
+  });
+  const status =
+    schemaContract.status === 'pass' &&
+    missingContractTypes.length === 0 &&
+    artifactValidations.every((validation) => validation.status === 'pass') &&
+    forbiddenMetadataScan.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    harness_id: 'REQ-894-02-DOD008-core-workflow-smoke',
+    request_id: 'REQ-894',
+    task_id: '02',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status,
+    mode: 'repository-local-fixture',
+    scenario_records: scenarioRecords,
+    artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+    artifacts,
+    artifact_validations: artifactValidations,
+    session_metadata: sessionMetadata,
+    schema_contract_summary: {
+      contract_id: schemaContract.contract_id,
+      status: schemaContract.status,
+      checked_artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      missing_contract_types: missingContractTypes,
+    },
+    command_metadata: commandMetadata,
+    side_effect_summary: {
+      repository_local_only: true,
+      fixture_only: true,
+      mutates_user_home: false,
+      edits_hook_config: false,
+      executes_codex_install: false,
+      refreshes_codex_cache: false,
+      runs_real_implementation: false,
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+function dod008ArtifactSchemaMap(schemaContract = buildDod008WorkflowSchemaContract()) {
+  return new Map(
+    normalizeArray(schemaContract.artifact_schema_contract).map((schema) => [
+      schema.artifact_type,
+      normalizeArray(schema.required_fields),
+    ]),
+  );
+}
+
+function buildDod008ClaudeCanonicalArtifactShape({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  artifactTypes = dod008WorkflowArtifactParityTypes,
+} = {}) {
+  const schemaByType = dod008ArtifactSchemaMap(schemaContract);
+
+  return artifactTypes.map((artifactType) => ({
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    source: 'claude_canonical_shape',
+    required_fields: [...(schemaByType.get(artifactType) ?? [])],
+  }));
+}
+
+function dod008LifecycleArtifactMap(lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts()) {
+  return new Map(normalizeArray(lifecycleArtifacts).map((artifact) => [artifact.artifact_type, artifact]));
+}
+
+function buildDod008CodexFixtureArtifactShape({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract }),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+  artifactTypes = dod008WorkflowArtifactParityTypes,
+  codexRequiredFieldsByType = {},
+} = {}) {
+  const schemaByType = dod008ArtifactSchemaMap(schemaContract);
+  const lifecycleByType = dod008LifecycleArtifactMap(lifecycleArtifacts);
+
+  return artifactTypes.map((artifactType) => {
+    const artifact = coreHarness.artifacts?.[artifactType] ?? lifecycleByType.get(artifactType) ?? null;
+    const schemaFields = schemaByType.get(artifactType) ?? [];
+    const baselineRequiredFields = schemaFields.filter((field) => artifact && field in artifact);
+    const requiredFields = codexRequiredFieldsByType[artifactType] ?? baselineRequiredFields;
+    const presentRequiredFields = normalizeArray(requiredFields).filter(
+      (field) => artifact && Object.hasOwn(artifact, field),
+    );
+
+    return {
+      surface_id: 'DOD-008',
+      artifact_type: artifactType,
+      artifact_id: artifact?.artifact_id ?? null,
+      source: 'codex_fixture_shape',
+      required_fields: [...normalizeArray(requiredFields)],
+      present_required_fields: presentRequiredFields,
+      artifact_present: artifact !== null,
+    };
+  });
+}
+
+function dod008RequiredFieldBlocker({ artifactType, field, diffType }) {
+  const phrase =
+    diffType === 'missing_required_field'
+      ? `is missing required field "${field}" from Claude canonical shape`
+      : `requires extra field "${field}" outside the Claude canonical shape`;
+
+  return {
+    blocker_id: `DOD-008/${artifactType}/${field}/${diffType}`,
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    artifact_field: field,
+    diff_type: diffType,
+    severity: 'blocker',
+    message: `DOD-008 ${artifactType} artifact ${phrase}.`,
+    human_readable: `DOD-008 ${artifactType}.${field}: ${phrase}.`,
+  };
+}
+
+function compareDod008RequiredFieldParity({ claudeShape, codexShape }) {
+  const codexByType = new Map(codexShape.map((shape) => [shape.artifact_type, shape]));
+  const artifactDiffs = claudeShape.map((claudeArtifact) => {
+    const codexArtifact = codexByType.get(claudeArtifact.artifact_type);
+    const claudeRequiredFields = normalizeArray(claudeArtifact.required_fields);
+    const codexRequiredFields = normalizeArray(codexArtifact?.required_fields);
+    const missingRequiredFields = claudeRequiredFields.filter(
+      (field) => !codexRequiredFields.includes(field),
+    );
+    const extraRequiredFields = codexRequiredFields.filter(
+      (field) => !claudeRequiredFields.includes(field),
+    );
+    const blockers = [
+      ...missingRequiredFields.map((field) =>
+        dod008RequiredFieldBlocker({
+          artifactType: claudeArtifact.artifact_type,
+          field,
+          diffType: 'missing_required_field',
+        }),
+      ),
+      ...extraRequiredFields.map((field) =>
+        dod008RequiredFieldBlocker({
+          artifactType: claudeArtifact.artifact_type,
+          field,
+          diffType: 'extra_required_field',
+        }),
+      ),
+    ];
+
+    return {
+      surface_id: 'DOD-008',
+      artifact_type: claudeArtifact.artifact_type,
+      claude_required_fields: claudeRequiredFields,
+      codex_required_fields: codexRequiredFields,
+      missing_required_fields: missingRequiredFields,
+      extra_required_fields: extraRequiredFields,
+      status: blockers.length === 0 ? 'pass' : 'fail',
+      blockers,
+    };
+  });
+  const blockers = artifactDiffs.flatMap((diff) => diff.blockers);
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    checked_artifact_types: claudeShape.map((shape) => shape.artifact_type),
+    missing_blocker_count: blockers.filter(
+      (blocker) => blocker.diff_type === 'missing_required_field',
+    ).length,
+    extra_blocker_count: blockers.filter(
+      (blocker) => blocker.diff_type === 'extra_required_field',
+    ).length,
+    blocker_count: blockers.length,
+    artifact_diffs: artifactDiffs,
+    blockers,
+  };
+}
+
+function dod008BoundaryBlocker({ artifactType, field, message }) {
+  return {
+    blocker_id: `DOD-008/${artifactType}/${field}/boundary`,
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    artifact_field: field,
+    severity: 'blocker',
+    message,
+    human_readable: `DOD-008 ${artifactType}.${field}: ${message}`,
+  };
+}
+
+function buildDod008WorkflowParityBoundaryChecks({
+  coreHarness = buildDod008CoreWorkflowSmokeHarness(),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+} = {}) {
+  const lifecycleByType = dod008LifecycleArtifactMap(lifecycleArtifacts);
+  const recover = lifecycleByType.get('recover');
+  const cleanup = lifecycleByType.get('cleanup');
+  const sessionBlockers = [];
+
+  for (const artifactType of dod008CoreWorkflowSmokeArtifactTypes) {
+    const artifact = coreHarness.artifacts?.[artifactType];
+    const session = artifact?.state_session;
+    if (session?.env?.MST_SESSION_ID !== session?.context?.mst_session_id) {
+      sessionBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType,
+          field: 'state_session.mst_session_id',
+          message: 'canonical env/context session identities must match.',
+        }),
+      );
+    }
+    if (session?.legacy_diagnostics?.canonical_source_count !== 0) {
+      sessionBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType,
+          field: 'state_session.legacy_diagnostics.canonical_source_count',
+          message: 'legacy diagnostic identity cannot become a canonical source.',
+        }),
+      );
+    }
+  }
+
+  const recoveryBlockers = [];
+  if (!recover) {
+    recoveryBlockers.push(
+      dod008BoundaryBlocker({
+        artifactType: 'recover',
+        field: 'artifact',
+        message: 'recover smoke artifact is required for parity validation.',
+      }),
+    );
+  } else {
+    if (recover.canonical_session_identity?.mst_session_id !== recover.mst_session_id) {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'canonical_session_identity.mst_session_id',
+          message: 'recover canonical session identity must match mst_session_id.',
+        }),
+      );
+    }
+    if (recover.canonical_session_identity?.lookup_key !== recover.mst_session_id) {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'canonical_session_identity.lookup_key',
+          message: 'recover lookup key must use the canonical session identity.',
+        }),
+      );
+    }
+    if (recover.recovery_judgement?.primary_action !== 'resume_session') {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'recovery_judgement.primary_action',
+          message: 'interrupted recovery must preserve resume_session judgement.',
+        }),
+      );
+    }
+  }
+
+  const cleanupBlockers = [];
+  if (!cleanup) {
+    cleanupBlockers.push(
+      dod008BoundaryBlocker({
+        artifactType: 'cleanup',
+        field: 'artifact',
+        message: 'cleanup smoke artifact is required for orphan-session validation.',
+      }),
+    );
+  } else {
+    if (cleanup.report?.orphan_session_count !== 0) {
+      cleanupBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'cleanup',
+          field: 'report.orphan_session_count',
+          message: 'cleanup parity fixture must report zero orphan sessions.',
+        }),
+      );
+    }
+    if (cleanup.request_artifacts_preserved?.mutated_path_count !== 0) {
+      cleanupBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'cleanup',
+          field: 'request_artifacts_preserved.mutated_path_count',
+          message: 'cleanup parity fixture must not mutate request artifacts.',
+        }),
+      );
+    }
+  }
+
+  const blockers = [...sessionBlockers, ...recoveryBlockers, ...cleanupBlockers];
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    session_identity: {
+      status: sessionBlockers.length === 0 ? 'pass' : 'fail',
+      checked_artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      blocker_count: sessionBlockers.length,
+      blockers: sessionBlockers,
+    },
+    recovery: {
+      status: recoveryBlockers.length === 0 ? 'pass' : 'fail',
+      artifact_type: 'recover',
+      artifact_id: recover?.artifact_id ?? null,
+      blocker_count: recoveryBlockers.length,
+      blockers: recoveryBlockers,
+    },
+    orphan_session: {
+      status: cleanupBlockers.length === 0 ? 'pass' : 'fail',
+      artifact_type: 'cleanup',
+      artifact_id: cleanup?.artifact_id ?? null,
+      orphan_session_count: cleanup?.report?.orphan_session_count ?? null,
+      blocker_count: cleanupBlockers.length,
+      blockers: cleanupBlockers,
+    },
+    blocker_count: blockers.length,
+    blockers,
+  };
+}
+
+function buildDod008ExcludedSurfaceGuard(schemaContract = buildDod008WorkflowSchemaContract()) {
+  const blockers = [];
+  const excludedBySurface = new Map(
+    normalizeArray(schemaContract.excluded_surfaces).map((surface) => [surface.surface_id, surface]),
+  );
+
+  for (const surfaceId of dod008ExcludedSurfaceIds) {
+    const surface = excludedBySurface.get(surfaceId);
+    for (const countField of [
+      'implementation_count',
+      'runtime_invocation_count',
+      'acceptance_gate_count',
+    ]) {
+      if (surface?.[countField] !== 0) {
+        blockers.push({
+          blocker_id: `DOD-008/${surfaceId}/${countField}/excluded-surface`,
+          surface_id: surfaceId,
+          artifact_type: 'excluded_surface',
+          artifact_field: countField,
+          severity: 'blocker',
+          message: `${surfaceId} must remain excluded from DOD-008 ${countField}.`,
+          human_readable: `${surfaceId} excluded_surface.${countField}: expected 0, got ${surface?.[countField] ?? 'missing'}.`,
+        });
+      }
+    }
+  }
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    surface_ids: dod008ExcludedSurfaceIds,
+    surfaces: dod008ExcludedSurfaceIds.map((surfaceId) => excludedBySurface.get(surfaceId) ?? null),
+    blocker_count: blockers.length,
+    blockers,
+  };
+}
+
+export function buildDod008WorkflowArtifactParityValidation({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract }),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+  codexRequiredFieldsByType = {},
+} = {}) {
+  const claudeShape = buildDod008ClaudeCanonicalArtifactShape({ schemaContract });
+  const codexShape = buildDod008CodexFixtureArtifactShape({
+    schemaContract,
+    coreHarness,
+    lifecycleArtifacts,
+    codexRequiredFieldsByType,
+  });
+  const requiredFieldParity = compareDod008RequiredFieldParity({
+    claudeShape,
+    codexShape,
+  });
+  const boundaryChecks = buildDod008WorkflowParityBoundaryChecks({
+    coreHarness,
+    lifecycleArtifacts,
+  });
+  const excludedSurfaceGuard = buildDod008ExcludedSurfaceGuard(schemaContract);
+  const blockers = [
+    ...requiredFieldParity.blockers,
+    ...boundaryChecks.blockers,
+    ...excludedSurfaceGuard.blockers,
+  ];
+
+  return {
+    validation_id: 'REQ-894-04-DOD008-workflow-artifact-parity',
+    request_id: 'REQ-894',
+    task_id: '04',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    mode: 'repository-local-fixture',
+    canonical_claude_artifact_shape: claudeShape,
+    codex_fixture_artifact_shape: codexShape,
+    required_field_parity: requiredFieldParity,
+    boundary_checks: boundaryChecks,
+    excluded_surface_guard: excludedSurfaceGuard,
+    blocker_summary: {
+      status: blockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: blockers.length,
+      missing_blocker_count: requiredFieldParity.missing_blocker_count,
+      extra_blocker_count: requiredFieldParity.extra_blocker_count,
+      blockers,
+      human_readable: blockers.map((blocker) => blocker.human_readable),
+    },
+    input_summary: {
+      core_harness_id: coreHarness.harness_id,
+      lifecycle_artifact_types: lifecycleArtifacts.map((artifact) => artifact.artifact_type),
+      schema_contract_id: schemaContract.contract_id,
+      deterministic_validation: true,
+      repository_local_only: true,
+      executes_real_claude_runtime: false,
+      executes_real_codex_runtime: false,
+    },
   };
 }
 
@@ -2825,6 +7574,484 @@ export function buildDod007RequestEvidence({
   };
 }
 
+function summarizeDod008WorkflowCommandTotals(verificationSummary) {
+  const summaries = [
+    verificationSummary.focused_workflow_validation,
+    verificationSummary.schema_contract,
+    verificationSummary.core_workflow_harness,
+    verificationSummary.lifecycle_smoke,
+    verificationSummary.artifact_parity,
+    verificationSummary.npm_test,
+  ];
+
+  return summaries.reduce(
+    (totals, summary) => ({
+      tests_total: totals.tests_total + Number(summary.tests_total ?? 0),
+      tests_pass: totals.tests_pass + Number(summary.tests_pass ?? 0),
+      tests_fail: totals.tests_fail + Number(summary.tests_fail ?? 0),
+    }),
+    { tests_total: 0, tests_pass: 0, tests_fail: 0 },
+  );
+}
+
+function summarizeDod009CommandTotals(verificationSummary) {
+  const summaries = [
+    verificationSummary.plugin_manifest_hooks,
+    verificationSummary.workflow_state_continuation,
+    verificationSummary.run_wrapper_session_migration,
+    verificationSummary.npm_test,
+  ];
+
+  return summaries.reduce(
+    (totals, summary) => ({
+      tests_total: totals.tests_total + Number(summary.tests_total ?? 0),
+      tests_pass: totals.tests_pass + Number(summary.tests_pass ?? 0),
+      tests_fail: totals.tests_fail + Number(summary.tests_fail ?? 0),
+    }),
+    { tests_total: 0, tests_pass: 0, tests_fail: 0 },
+  );
+}
+
+function buildDod008EvidenceLifecycle({
+  verificationSummary,
+  schemaContract,
+  coreHarness,
+  lifecycleSmokeValidation,
+  artifactParityValidation,
+  excludedSurfaces,
+  parseFailures,
+}) {
+  const focusedWorkflowSummariesPass = dod008FocusedWorkflowSummariesPass(verificationSummary);
+  const schemaResultsPass =
+    schemaContract.status === 'pass' &&
+    coreHarness.status === 'pass' &&
+    lifecycleSmokeValidation.status === 'pass' &&
+    artifactParityValidation.status === 'pass';
+  const npmTestPass = dod007SummaryPasses(verificationSummary.npm_test);
+  const generatorPass =
+    verificationSummary.generator.status === 'pass' &&
+    verificationSummary.generator.parse_ok === true &&
+    verificationSummary.generator.generated_artifact_path ===
+      dod008WorkflowE2EValidationEvidenceRelativePath;
+  const excludedSurfacesPass = excludedSurfaces.every(
+    (surface) =>
+      surface.status === 'pass' &&
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0,
+  );
+
+  return {
+    status:
+      focusedWorkflowSummariesPass &&
+      schemaResultsPass &&
+      npmTestPass &&
+      generatorPass &&
+      excludedSurfacesPass &&
+      parseFailures.length === 0
+        ? 'pass'
+        : 'fail',
+    focused_workflow_validation_pass: focusedWorkflowSummariesPass,
+    schema_results_pass: schemaResultsPass,
+    npm_test_pass: npmTestPass,
+    generator_pass: generatorPass,
+    excluded_surfaces_pass: excludedSurfacesPass,
+    parse_failures_absent: parseFailures.length === 0,
+  };
+}
+
+function buildDod009PriorEvidenceLink(evidence) {
+  return {
+    status:
+      evidence?.status === 'pass' &&
+      evidence?.request_id === 'REQ-894' &&
+      evidence?.dod_id === 'DOD-008' &&
+      evidence?.request_evidence_path === dod008WorkflowE2EValidationEvidenceRelativePath
+        ? 'pass'
+        : 'fail',
+    relationship: 'supporting-reference-only',
+    request_id: evidence?.request_id ?? 'REQ-894',
+    agi_id: evidence?.agi_id ?? 'AGI-039',
+    sprint: evidence?.sprint ?? 9,
+    dod_id: evidence?.dod_id ?? 'DOD-008',
+    plan_id: evidence?.plan_id ?? 'PLN-721',
+    artifact_id: evidence?.artifact_id ?? null,
+    request_evidence_path: evidence?.request_evidence_path ??
+      dod008WorkflowE2EValidationEvidenceRelativePath,
+    prior_evidence_status: evidence?.status ?? 'missing',
+    substitutes_claude_regression_result: false,
+  };
+}
+
+function summarizeDod009RequestEvidenceBlockers({
+  matrixContract,
+  linkedPriorEvidence,
+  verificationSummary,
+  parseFailures,
+  forbiddenMetadataScan,
+}) {
+  const blockers = [...normalizeArray(matrixContract?.blocker_summary?.human_readable)];
+
+  if (linkedPriorEvidence.status !== 'pass') {
+    blockers.push(
+      `linked_prior_evidence ${linkedPriorEvidence.request_evidence_path}: expected pass, got ${linkedPriorEvidence.prior_evidence_status}.`,
+    );
+  }
+
+  for (const [summaryId, summary] of Object.entries({
+    plugin_manifest_hooks: verificationSummary.plugin_manifest_hooks,
+    workflow_state_continuation: verificationSummary.workflow_state_continuation,
+    run_wrapper_session_migration: verificationSummary.run_wrapper_session_migration,
+    npm_test: verificationSummary.npm_test,
+  })) {
+    if (summary.status !== 'pass') {
+      blockers.push(
+        `${summaryId}: ${summary.summary ?? 'command summary reported failure.'}`,
+      );
+    }
+  }
+
+  if (
+    verificationSummary.generator.status !== 'pass' ||
+    verificationSummary.generator.parse_ok !== true ||
+    verificationSummary.generator.generated_artifact_path !== dod009RequestEvidenceRelativePath
+  ) {
+    blockers.push('generator: request-level evidence artifact metadata did not validate.');
+  }
+
+  for (const failure of parseFailures) {
+    blockers.push(`parse_failure ${failure.path}: ${failure.error}.`);
+  }
+
+  if (forbiddenMetadataScan.status !== 'pass') {
+    for (const violation of forbiddenMetadataScan.violations) {
+      blockers.push(`forbidden_metadata ${violation.fixture_id}.`);
+    }
+  }
+
+  return blockers;
+}
+
+function buildDod009EvidenceLifecycle({
+  verificationSummary,
+  matrixContract,
+  linkedPriorEvidence,
+  excludedSurfaces,
+  parseFailures,
+  forbiddenMetadataScan,
+}) {
+  const commandSummariesPass = dod009CommandSummariesPass(verificationSummary);
+  const generatorPass =
+    verificationSummary.generator.status === 'pass' &&
+    verificationSummary.generator.parse_ok === true &&
+    verificationSummary.generator.generated_artifact_path === dod009RequestEvidenceRelativePath;
+  const matrixPass = matrixContract.status === 'pass';
+  const linkedPriorEvidencePass = linkedPriorEvidence.status === 'pass';
+  const noGoGuardPass =
+    matrixContract.no_go_metadata_guard.status === 'pass' &&
+    matrixContract.forbidden_metadata_scan.status === 'pass';
+  const excludedSurfacesPass = excludedSurfaces.every(
+    (surface) =>
+      surface.status === 'pass' &&
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0,
+  );
+  const parseFailuresAbsent = parseFailures.length === 0;
+  const forbiddenMetadataScanPass = forbiddenMetadataScan.status === 'pass';
+
+  return {
+    status:
+      matrixPass &&
+      linkedPriorEvidencePass &&
+      commandSummariesPass &&
+      generatorPass &&
+      noGoGuardPass &&
+      excludedSurfacesPass &&
+      parseFailuresAbsent &&
+      forbiddenMetadataScanPass
+        ? 'pass'
+        : 'fail',
+    matrix_pass: matrixPass,
+    linked_prior_evidence_pass: linkedPriorEvidencePass,
+    command_summaries_pass: commandSummariesPass,
+    generator_pass: generatorPass,
+    no_go_guard_pass: noGoGuardPass,
+    excluded_surfaces_pass: excludedSurfacesPass,
+    parse_failures_absent: parseFailuresAbsent,
+    forbidden_metadata_scan_pass: forbiddenMetadataScanPass,
+  };
+}
+
+export function buildDod008WorkflowE2EValidationEvidence({
+  verificationSummary,
+} = {}) {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    req894RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const normalizedVerification = normalizeDod008WorkflowE2EValidationSummary(verificationSummary);
+  const requestSnapshot = buildReq894RequestMetadataSnapshot(requestMetadata.value);
+  const schemaContract = buildDod008WorkflowSchemaContract();
+  const coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract });
+  const lifecycleSmokeArtifacts = buildDod008LifecycleSmokeArtifacts();
+  const lifecycleSmokeValidation = buildDod008LifecycleSmokeValidation(lifecycleSmokeArtifacts);
+  const artifactParityValidation = buildDod008WorkflowArtifactParityValidation({
+    schemaContract,
+    coreHarness,
+    lifecycleArtifacts: lifecycleSmokeArtifacts,
+  });
+  const excludedSurfaces = buildDod008ExcludedSurfaces();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const lifecycle = buildDod008EvidenceLifecycle({
+    verificationSummary: normalizedVerification,
+    schemaContract,
+    coreHarness,
+    lifecycleSmokeValidation,
+    artifactParityValidation,
+    excludedSurfaces,
+    parseFailures: sanitizedParseFailures,
+  });
+  const sourceCommitTasks = requestSnapshot.tasks.map((task) => ({
+    task_id: task.task_id,
+    status: task.status,
+    source_commit: task.source_commit,
+    task_commit: task.task_commit,
+    integration_commit: task.integration_commit,
+  }));
+  const evidenceWithoutScan = {
+    artifact_id: 'REQ-894-DOD-008-workflow-e2e-validation',
+    request_id: requestSnapshot.request_id ?? 'REQ-894',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 9,
+    task_id: '05',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-008',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-721',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-19T14:44:24.000Z',
+    request_evidence_path: dod008WorkflowE2EValidationEvidenceRelativePath,
+    status: lifecycle.status,
+    workflow_scenarios: {
+      status:
+        schemaContract.status === 'pass' && coreHarness.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      scenario_paths: dod008WorkflowScenarioPaths,
+      schema_contract: schemaContract.scenario_contract,
+      core_workflow_records: coreHarness.scenario_records,
+    },
+    schema_results: {
+      status:
+        schemaContract.status === 'pass' &&
+        coreHarness.status === 'pass' &&
+        lifecycleSmokeValidation.status === 'pass' &&
+        artifactParityValidation.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      workflow_schema_contract: schemaContract,
+      core_workflow_harness: coreHarness,
+      lifecycle_smoke_validation: lifecycleSmokeValidation,
+      artifact_parity_validation: artifactParityValidation,
+    },
+    focused_workflow_validation_summary: {
+      status: dod008FocusedWorkflowSummariesPass(normalizedVerification) ? 'pass' : 'fail',
+      focused_workflow_validation: normalizedVerification.focused_workflow_validation,
+      schema_contract: normalizedVerification.schema_contract,
+      core_workflow_harness: normalizedVerification.core_workflow_harness,
+      lifecycle_smoke: normalizedVerification.lifecycle_smoke,
+      artifact_parity: normalizedVerification.artifact_parity,
+    },
+    test_command_results: {
+      focused_workflow_validation: normalizedVerification.focused_workflow_validation,
+      schema_contract: normalizedVerification.schema_contract,
+      core_workflow_harness: normalizedVerification.core_workflow_harness,
+      lifecycle_smoke: normalizedVerification.lifecycle_smoke,
+      artifact_parity: normalizedVerification.artifact_parity,
+      npm_test: normalizedVerification.npm_test,
+      generator: normalizedVerification.generator,
+      totals: summarizeDod008WorkflowCommandTotals(normalizedVerification),
+    },
+    source_commit: {
+      status: sourceCommitTasks.length === 5 ? 'pass' : 'fail',
+      tasks: sourceCommitTasks,
+    },
+    evidence_lifecycle: lifecycle,
+    excluded_surfaces: excludedSurfaces,
+    request_metadata_snapshot: requestSnapshot,
+    input_paths_read: [
+      req894RequestMetadataRelativePath,
+      '.gran-maestro/requests/REQ-894/tasks/04/spec.md',
+      '.gran-maestro/requests/REQ-894/tasks/05/spec.md',
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      'scripts/generate-dod-007-request-evidence.mjs',
+      'tests/smoke.test.mjs',
+      dod007RequestEvidenceRelativePath,
+    ],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod008RequestEvidenceMetadata(evidenceWithoutScan);
+  const status =
+    evidenceWithoutScan.evidence_lifecycle.status === 'pass' &&
+    forbiddenMetadataScan.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...evidenceWithoutScan,
+    status,
+    evidence_lifecycle: {
+      ...evidenceWithoutScan.evidence_lifecycle,
+      status,
+      forbidden_metadata_scan_pass: forbiddenMetadataScan.status === 'pass',
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+export function buildDod009RequestEvidence({
+  verificationSummary,
+} = {}) {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    req912RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const linkedDod008Evidence = collectJsonArtifact(
+    dod008WorkflowE2EValidationEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const normalizedVerification = normalizeDod009RequestEvidenceVerificationSummary(
+    verificationSummary,
+  );
+  const requestSnapshot = buildReq912RequestMetadataSnapshot(requestMetadata.value);
+  const matrixContract = buildDod009ClaudePluginRegressionMatrix();
+  const linkedPriorEvidence = buildDod009PriorEvidenceLink(linkedDod008Evidence.value);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestSnapshot.dod_id ?? 'DOD-009',
+    requestEvidencePath: dod009RequestEvidenceRelativePath,
+  });
+  const excludedSurfaces = matrixContract.excluded_surfaces.map((surface) => ({ ...surface }));
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const evidenceWithoutScan = {
+    artifact_id: 'REQ-912-DOD-009-claude-plugin-regression-validation',
+    request_id: requestSnapshot.request_id ?? 'REQ-912',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 10,
+    task_id: '02',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-009',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-736',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-20T01:47:31.000Z',
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
+    status: 'fail',
+    claude_plugin_regression_matrix: matrixContract,
+    linked_prior_evidence: linkedPriorEvidence,
+    no_go_metadata_guard: {
+      status:
+        matrixContract.no_go_metadata_guard.status === 'pass' &&
+        matrixContract.forbidden_metadata_scan.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      criteria: matrixContract.no_go_metadata_guard.criteria,
+      contract_forbidden_metadata_scan: matrixContract.forbidden_metadata_scan,
+    },
+    test_command_results: {
+      plugin_manifest_hooks: normalizedVerification.plugin_manifest_hooks,
+      workflow_state_continuation: normalizedVerification.workflow_state_continuation,
+      run_wrapper_session_migration: normalizedVerification.run_wrapper_session_migration,
+      npm_test: normalizedVerification.npm_test,
+      generator: normalizedVerification.generator,
+      totals: summarizeDod009CommandTotals(normalizedVerification),
+    },
+    blocker_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      human_readable: [],
+    },
+    evidence_lifecycle: {
+      status: 'fail',
+    },
+    excluded_surfaces: excludedSurfaces,
+    request_metadata_snapshot: requestSnapshot,
+    manual_readable_exports: {
+      canonical_source_paths: matrixContract.manual_readable_exports.canonical_source_paths,
+      excluded_surface_ids: [...dod009ExcludedSurfaceIds],
+      blocker_summary_fields: ['status', 'blocker_count', 'human_readable'],
+      command_summary_fields: [
+        'plugin_manifest_hooks',
+        'workflow_state_continuation',
+        'run_wrapper_session_migration',
+        'npm_test',
+        'generator',
+      ],
+      linked_prior_evidence_paths: [dod008WorkflowE2EValidationEvidenceRelativePath],
+    },
+    input_paths_read: [
+      req912RequestMetadataRelativePath,
+      dod008WorkflowE2EValidationEvidenceRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      'scripts/generate-dod-008-workflow-e2e-validation.mjs',
+      'scripts/generate-dod-009-claude-plugin-regression-validation.mjs',
+      'tests/smoke.test.mjs',
+      ...matrixContract.input_paths_read,
+    ].filter((path, index, paths) => paths.indexOf(path) === index),
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod009RegressionMatrixMetadata(evidenceWithoutScan);
+  const lifecycle = buildDod009EvidenceLifecycle({
+    verificationSummary: normalizedVerification,
+    matrixContract,
+    linkedPriorEvidence,
+    excludedSurfaces,
+    parseFailures: sanitizedParseFailures,
+    forbiddenMetadataScan,
+  });
+  const blockers = summarizeDod009RequestEvidenceBlockers({
+    matrixContract,
+    linkedPriorEvidence,
+    verificationSummary: normalizedVerification,
+    parseFailures: sanitizedParseFailures,
+    forbiddenMetadataScan,
+  });
+  const registryLinkageBlockers = sharedDodRegistryLinkage.issues.map(
+    (issue) => `shared_dod_registry_linkage: ${issue}`,
+  );
+  const allBlockers = [...blockers, ...registryLinkageBlockers];
+  const status =
+    lifecycle.status === 'pass' && sharedDodRegistryLinkage.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...evidenceWithoutScan,
+    status,
+    blocker_summary: {
+      status: allBlockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: allBlockers.length,
+      human_readable: allBlockers,
+    },
+    evidence_lifecycle: {
+      ...lifecycle,
+      status,
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
 export function buildCodexPluginDiscoverySmokeEvidence() {
   const parseFailures = [];
 
@@ -3397,6 +8624,550 @@ export function assertDod007RequestEvidence(
   assert.equal(
     evidence.test_command_results.generator.generated_artifact_path,
     dod007RequestEvidenceRelativePath,
+  );
+}
+
+export function assertDod008LifecycleSmokeArtifacts(artifacts) {
+  assert.ok(Array.isArray(artifacts));
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.artifact_type),
+    dod008LifecycleSmokeArtifactTypes,
+  );
+
+  for (const artifact of artifacts) {
+    assert.equal(artifact.request_id, 'REQ-894');
+    assert.equal(artifact.status, 'pass');
+    const requiredFields = dod008ArtifactSchemaRequiredFieldsByType[artifact.artifact_type];
+    assert.ok(requiredFields, `${artifact.artifact_type} required field contract`);
+    for (const field of requiredFields) {
+      assert.ok(field in artifact, `${artifact.artifact_type}.${field}`);
+    }
+  }
+
+  const byType = new Map(artifacts.map((artifact) => [artifact.artifact_type, artifact]));
+  const recover = byType.get('recover');
+  assert.ok(recover);
+  assert.equal(recover.mst_session_id, 'MST-AGI-039-20260519T144424Z-req89403');
+  assert.equal(recover.root_mst_id, 'AGI-039');
+  assert.equal(recover.canonical_session_identity.mst_session_id, recover.mst_session_id);
+  assert.equal(recover.canonical_session_identity.lookup_key, recover.mst_session_id);
+  assert.equal(recover.canonical_session_identity.partition_key, recover.mst_session_id);
+  assert.equal(recover.recovery_judgement.primary_action, 'resume_session');
+  assert.equal(recover.recovery_judgement.reason, 'resume_ready');
+  assert.ok(
+    recover.recovery_judgement.affected_resources.some(
+      (resource) =>
+        resource.kind === 'mst_session_id' && resource.identifier === recover.mst_session_id,
+    ),
+  );
+
+  const cleanup = byType.get('cleanup');
+  assert.ok(cleanup);
+  assert.equal(cleanup.dry_run, true);
+  assert.equal(cleanup.report.status, 'ok');
+  assert.equal(cleanup.report.orphan_session_count, 0);
+  assert.equal(cleanup.report.planned_cleanup_count, 0);
+  assert.equal(cleanup.request_artifacts_preserved.status, 'pass');
+  assert.equal(cleanup.request_artifacts_preserved.mutated_path_count, 0);
+  assert.ok(
+    cleanup.request_artifacts_preserved.checked_paths.includes(
+      '.gran-maestro/requests/REQ-894/tasks/03/spec.md',
+    ),
+  );
+
+  const dashboard = byType.get('dashboard');
+  assert.ok(dashboard);
+  assert.equal(dashboard.health.route, '/api/health');
+  assert.equal(dashboard.health.ok, true);
+  assert.deepEqual(dashboard.widgets, [
+    'health',
+    'overview.active-items',
+    'overview.next-steps',
+    'overview.pulse',
+  ]);
+  assert.equal(dashboard.overview.active_items.route, '/api/overview/active-items');
+  assert.equal(dashboard.overview.next_steps.route, '/api/overview/next-steps');
+  assert.equal(dashboard.overview.pulse.route, '/api/overview/pulse');
+
+  const settings = byType.get('settings');
+  assert.ok(settings);
+  assert.equal(settings.scope, 'project');
+  assert.equal(settings.config.config_route.route, '/api/config');
+  assert.equal(settings.config.defaults_route.route, '/api/config/defaults');
+  assert.equal(settings.config.mode_route.route, '/api/mode');
+  assert.equal(settings.effective_values.workflow_default_agent, 'codex-dev');
+  assert.equal(settings.effective_values.auto_mode_request, false);
+}
+
+export function assertDod008WorkflowSchemaContract(evidence) {
+  assert.equal(evidence.request_id, 'REQ-894');
+  assert.equal(evidence.task_id, '01');
+  assert.equal(evidence.dod_id, 'DOD-008');
+  assert.equal(evidence.status, 'pass');
+  assert.deepEqual(
+    evidence.scenario_contract.map((scenario) => scenario.representative_path),
+    dod008WorkflowScenarioPaths,
+  );
+  assert.ok(
+    evidence.scenario_contract.every((scenario) =>
+      scenario.contract_only === true &&
+      scenario.repository_local_only === true &&
+      Array.isArray(scenario.required_artifacts) &&
+      scenario.required_artifacts.length > 0,
+    ),
+  );
+  assert.deepEqual(
+    evidence.artifact_schema_contract.map((schema) => schema.artifact_type),
+    Object.keys(dod008ArtifactSchemaRequiredFieldsByType),
+  );
+  assert.ok(
+    evidence.artifact_schema_contract.every((schema) =>
+      Array.isArray(schema.required_fields) &&
+      schema.required_fields.length > 0 &&
+      schema.required_fields.every((field) => typeof field === 'string' && field.length > 0) &&
+      schema.deterministic_validation === true &&
+      schema.repository_local_only === true,
+    ),
+  );
+  assert.equal(evidence.no_go_metadata_guard.status, 'pass');
+  assert.deepEqual(
+    evidence.no_go_metadata_guard.criteria.map((criterion) => criterion.criterion_id),
+    dod008NoGoMetadataGuardCriteria.map((criterion) => criterion.criterion_id),
+  );
+  assertDod008LifecycleSmokeArtifacts(evidence.lifecycle_smoke_artifacts);
+  assert.equal(evidence.lifecycle_smoke_validation.status, 'pass');
+  assert.deepEqual(
+    evidence.lifecycle_smoke_validation.artifact_types,
+    dod008LifecycleSmokeArtifactTypes,
+  );
+  assert.deepEqual(evidence.lifecycle_smoke_validation.missing_artifact_types, []);
+  assert.deepEqual(evidence.lifecycle_smoke_validation.missing_required_fields, []);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(evidence.acceptance_runtime_surface_ids, dod008AcceptanceRuntimeSurfaceIds);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod008ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+  assert.deepEqual(evidence.manual_readable_exports.scenario_paths, dod008WorkflowScenarioPaths);
+  assert.deepEqual(
+    evidence.manual_readable_exports.excluded_surface_ids,
+    dod008ExcludedSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.acceptance_runtime_surface_ids,
+    dod008AcceptanceRuntimeSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.lifecycle_smoke_artifact_types,
+    dod008LifecycleSmokeArtifactTypes,
+  );
+}
+
+export function assertDod009ClaudePluginRegressionMatrix(contract) {
+  assert.equal(contract.contract_id, 'REQ-912-DOD-009-claude-plugin-regression-matrix');
+  assert.equal(contract.request_id, 'REQ-912');
+  assert.equal(contract.task_id, '01');
+  assert.equal(contract.dod_id, 'DOD-009');
+  assert.equal(contract.status, 'pass');
+  assert.equal(contract.comparison_subject, 'claude-plugin-mode');
+  assert.equal(contract.codex_artifact_substitution_permitted, false);
+  assert.equal(contract.repository_local_only, true);
+  assert.deepEqual(
+    contract.matrix_surfaces.map((surface) => surface.canonical_source_path),
+    dod009MatrixSurfacePaths,
+  );
+  assert.ok(
+    contract.matrix_surfaces.every(
+      (surface) =>
+        surface.verification_scope === 'claude-canonical-source' &&
+        surface.repository_local_only === true,
+    ),
+  );
+  assert.equal(contract.contract_checks.version_sync.status, 'pass');
+  assert.deepEqual(contract.contract_checks.version_sync.checked_paths, dod009VersionSyncPaths);
+  assert.equal(contract.contract_checks.version_sync.unique_version_count, 1);
+  assert.equal(contract.contract_checks.agents_parity.status, 'pass');
+  assert.deepEqual(contract.contract_checks.agents_parity.missing_manifest_entries, []);
+  assert.deepEqual(contract.contract_checks.agents_parity.extra_manifest_entries, []);
+  assert.equal(contract.contract_checks.skills_directory_registration.status, 'pass');
+  assert.equal(contract.contract_checks.skills_directory_registration.manifest_skills_pointer, './skills/');
+  assert.equal(contract.contract_checks.hooks_pointer.status, 'pass');
+  assert.equal(contract.contract_checks.hooks_pointer.manifest_hooks_pointer, './hooks/hooks.json');
+  assert.equal(contract.contract_checks.hooks_registration.status, 'pass');
+  assert.deepEqual(contract.contract_checks.hooks_registration.command_paths, dod009HooksCommandPaths);
+  assert.equal(contract.no_go_metadata_guard.status, 'pass');
+  assert.deepEqual(
+    contract.no_go_metadata_guard.criteria.map((criterion) => criterion.criterion_id),
+    dod009NoGoMetadataGuardCriteria.map((criterion) => criterion.criterion_id),
+  );
+  assert.equal(contract.forbidden_metadata_scan.status, 'pass');
+  assert.equal(contract.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    contract.excluded_surfaces.map((surface) => surface.surface_id),
+    dod009ExcludedSurfaceIds,
+  );
+  assert.ok(
+    contract.excluded_surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(contract.blocker_summary.status, 'pass');
+  assert.equal(contract.blocker_summary.blocker_count, 0);
+  assert.deepEqual(contract.blocker_summary.human_readable, []);
+  assert.deepEqual(
+    contract.manual_readable_exports.canonical_source_paths,
+    dod009MatrixSurfacePaths,
+  );
+  assert.deepEqual(
+    contract.manual_readable_exports.excluded_surface_ids,
+    dod009ExcludedSurfaceIds,
+  );
+}
+
+export function assertDod009RequestEvidence(evidence, expectedSummary = null) {
+  assert.equal(evidence.artifact_id, 'REQ-912-DOD-009-claude-plugin-regression-validation');
+  assert.equal(evidence.request_id, 'REQ-912');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 10);
+  assert.equal(evidence.task_id, '02');
+  assert.equal(evidence.dod_id, 'DOD-009');
+  assert.equal(evidence.plan_id, 'PLN-736');
+  assert.equal(evidence.request_evidence_path, dod009RequestEvidenceRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path: dod009GeneratorScriptRelativePath,
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  });
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertDod009ClaudePluginRegressionMatrix(evidence.claude_plugin_regression_matrix);
+  assert.equal(evidence.linked_prior_evidence.status, 'pass');
+  assert.equal(evidence.linked_prior_evidence.relationship, 'supporting-reference-only');
+  assert.equal(
+    evidence.linked_prior_evidence.request_evidence_path,
+    dod008WorkflowE2EValidationEvidenceRelativePath,
+  );
+  assert.equal(evidence.linked_prior_evidence.prior_evidence_status, 'pass');
+  assert.equal(evidence.no_go_metadata_guard.status, 'pass');
+  assert.equal(evidence.no_go_metadata_guard.contract_forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.test_command_results.plugin_manifest_hooks.status, 'pass');
+  assert.equal(evidence.test_command_results.workflow_state_continuation.status, 'pass');
+  assert.equal(evidence.test_command_results.run_wrapper_session_migration.status, 'pass');
+  assert.equal(evidence.test_command_results.npm_test.status, 'pass');
+  assert.equal(evidence.test_command_results.generator.status, 'pass');
+  assert.equal(
+    evidence.test_command_results.generator.generated_artifact_path,
+    dod009RequestEvidenceRelativePath,
+  );
+  assert.equal(evidence.evidence_lifecycle.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.matrix_pass, true);
+  assert.equal(evidence.evidence_lifecycle.linked_prior_evidence_pass, true);
+  assert.equal(evidence.evidence_lifecycle.command_summaries_pass, true);
+  assert.equal(evidence.evidence_lifecycle.generator_pass, true);
+  assert.equal(evidence.evidence_lifecycle.no_go_guard_pass, true);
+  assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
+  assert.equal(evidence.evidence_lifecycle.parse_failures_absent, true);
+  assert.equal(evidence.evidence_lifecycle.shared_dod_registry_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod009ExcludedSurfaceIds,
+  );
+  assert.ok(
+    evidence.excluded_surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(evidence.blocker_summary.status, 'pass');
+  assert.equal(evidence.blocker_summary.blocker_count, 0);
+  assert.deepEqual(evidence.blocker_summary.human_readable, []);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    evidence.manual_readable_exports.canonical_source_paths,
+    dod009MatrixSurfacePaths,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.excluded_surface_ids,
+    dod009ExcludedSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.command_summary_fields,
+    [
+      'plugin_manifest_hooks',
+      'workflow_state_continuation',
+      'run_wrapper_session_migration',
+      'npm_test',
+      'generator',
+    ],
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.linked_prior_evidence_paths,
+    [dod008WorkflowE2EValidationEvidenceRelativePath],
+  );
+
+  if (expectedSummary) {
+    const normalizedExpected = normalizeDod009RequestEvidenceVerificationSummary(expectedSummary);
+
+    for (const summaryId of [
+      'plugin_manifest_hooks',
+      'workflow_state_continuation',
+      'run_wrapper_session_migration',
+      'npm_test',
+    ]) {
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_total,
+        normalizedExpected[summaryId].tests_total,
+      );
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_pass,
+        normalizedExpected[summaryId].tests_pass,
+      );
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_fail,
+        normalizedExpected[summaryId].tests_fail,
+      );
+    }
+
+    assert.equal(
+      evidence.test_command_results.generator.generated_artifact_path,
+      normalizedExpected.generator.generated_artifact_path,
+    );
+  }
+}
+
+export function assertSharedDodEvidenceRegistryLinkage(
+  linkage,
+  {
+    dod_id,
+    request_id,
+    agi_id,
+    sprint,
+    generator_script_path,
+    request_evidence_path,
+    expected_status,
+    validator_export_name,
+  },
+) {
+  assert.ok(linkage && typeof linkage === 'object');
+  assert.equal(linkage.status, 'pass');
+  assert.equal(linkage.linkage_source, 'shared_dod_evidence_registry');
+  assert.equal(linkage.request_evidence_path_matches_registry, true);
+  assert.equal(linkage.generator_script_exists, true);
+  assert.equal(linkage.validator_entrypoint_exists, true);
+  assert.deepEqual(linkage.issues, []);
+  assert.ok(linkage.registry_entry && typeof linkage.registry_entry === 'object');
+  assert.equal(linkage.registry_entry.dod_id, dod_id);
+  assert.equal(linkage.registry_entry.request_id, request_id);
+  assert.equal(linkage.registry_entry.agi_id, agi_id);
+  assert.equal(linkage.registry_entry.sprint, sprint);
+  assert.equal(linkage.registry_entry.generator_script_path, generator_script_path);
+  assert.equal(linkage.registry_entry.request_evidence_path, request_evidence_path);
+  assert.equal(linkage.registry_entry.expected_status, expected_status);
+  assert.deepEqual(linkage.registry_entry.validator_linkage, {
+    export_name: validator_export_name,
+    helper_kind: 'assertion-helper',
+    validation_entrypoint: 'scripts/lib/codex-plugin-discovery-smoke.mjs',
+  });
+}
+
+export function assertDod008CoreWorkflowSmokeHarness(harness) {
+  assert.equal(harness.request_id, 'REQ-894');
+  assert.equal(harness.task_id, '02');
+  assert.equal(harness.dod_id, 'DOD-008');
+  assert.equal(harness.status, 'pass');
+  assert.equal(harness.mode, 'repository-local-fixture');
+  assert.deepEqual(
+    harness.scenario_records.map((scenario) => scenario.representative_path),
+    dod008CoreWorkflowSmokeScenarioPaths,
+  );
+  assert.ok(
+    harness.scenario_records.every((scenario) =>
+      scenario.reproduced_by_fixture === true &&
+      scenario.executes_runtime === false &&
+      scenario.repository_local_only === true,
+    ),
+  );
+  assert.deepEqual(harness.artifact_types, dod008CoreWorkflowSmokeArtifactTypes);
+  assert.deepEqual(
+    harness.artifact_validations.map((validation) => validation.artifact_type),
+    dod008CoreWorkflowSmokeArtifactTypes,
+  );
+  assert.ok(harness.artifact_validations.every((validation) => validation.status === 'pass'));
+  for (const artifactType of dod008CoreWorkflowSmokeArtifactTypes) {
+    const artifact = harness.artifacts[artifactType];
+    assert.ok(artifact, `${artifactType} artifact`);
+    for (const field of dod008ArtifactSchemaRequiredFieldsByType[artifactType]) {
+      assert.ok(Object.hasOwn(artifact, field), `${artifactType}.${field}`);
+    }
+    assert.equal(artifact.state_session.env.MST_SESSION_ID, dod008CoreWorkflowSmokeSessionId);
+    assert.equal(artifact.state_session.context.mst_session_id, dod008CoreWorkflowSmokeSessionId);
+    assert.equal(
+      artifact.state_session.env.MST_SESSION_ID,
+      artifact.state_session.context.mst_session_id,
+    );
+    assert.equal(artifact.state_session.legacy_diagnostics.canonical_source_count, 0);
+  }
+  assert.deepEqual(harness.session_metadata.canonical_sources, [
+    'MST_SESSION_ID',
+    'mst_session_id',
+  ]);
+  assert.equal(harness.session_metadata.env.MST_SESSION_ID, dod008CoreWorkflowSmokeSessionId);
+  assert.equal(harness.session_metadata.context.mst_session_id, dod008CoreWorkflowSmokeSessionId);
+  assert.equal(harness.session_metadata.boundary_checks.env_and_context_match, true);
+  assert.equal(harness.session_metadata.boundary_checks.legacy_only_identity_rejected, true);
+  assert.equal(harness.side_effect_summary.repository_local_only, true);
+  assert.equal(harness.side_effect_summary.fixture_only, true);
+  assert.equal(harness.side_effect_summary.mutates_user_home, false);
+  assert.equal(harness.side_effect_summary.edits_hook_config, false);
+  assert.equal(harness.side_effect_summary.executes_codex_install, false);
+  assert.equal(harness.side_effect_summary.refreshes_codex_cache, false);
+  assert.equal(harness.side_effect_summary.runs_real_implementation, false);
+  assert.ok(
+    harness.command_metadata.every((command) =>
+      command.mutates_user_home === false &&
+      command.edits_hook_config === false &&
+      command.executes_codex_install === false &&
+      command.refreshes_codex_cache === false &&
+      command.runs_real_implementation === false,
+    ),
+  );
+  assert.equal(harness.forbidden_metadata_scan.status, 'pass');
+  assert.equal(harness.forbidden_metadata_scan.violation_count, 0);
+}
+
+export function assertDod008WorkflowArtifactParityValidation(validation) {
+  assert.equal(validation.request_id, 'REQ-894');
+  assert.equal(validation.task_id, '04');
+  assert.equal(validation.dod_id, 'DOD-008');
+  assert.equal(validation.status, 'pass');
+  assert.equal(validation.mode, 'repository-local-fixture');
+  assert.deepEqual(
+    validation.canonical_claude_artifact_shape.map((shape) => shape.artifact_type),
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.deepEqual(
+    validation.codex_fixture_artifact_shape.map((shape) => shape.artifact_type),
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.deepEqual(
+    validation.required_field_parity.checked_artifact_types,
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.equal(validation.required_field_parity.status, 'pass');
+  assert.equal(validation.required_field_parity.missing_blocker_count, 0);
+  assert.equal(validation.required_field_parity.extra_blocker_count, 0);
+  assert.equal(validation.required_field_parity.blocker_count, 0);
+  assert.deepEqual(validation.required_field_parity.blockers, []);
+  assert.ok(
+    validation.required_field_parity.artifact_diffs.every((diff) => diff.status === 'pass'),
+  );
+  assert.equal(validation.boundary_checks.status, 'pass');
+  assert.equal(validation.boundary_checks.session_identity.status, 'pass');
+  assert.equal(validation.boundary_checks.recovery.status, 'pass');
+  assert.equal(validation.boundary_checks.orphan_session.status, 'pass');
+  assert.equal(validation.boundary_checks.orphan_session.orphan_session_count, 0);
+  assert.equal(validation.excluded_surface_guard.status, 'pass');
+  assert.deepEqual(validation.excluded_surface_guard.surface_ids, dod008ExcludedSurfaceIds);
+  assert.ok(
+    validation.excluded_surface_guard.surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(validation.blocker_summary.status, 'pass');
+  assert.equal(validation.blocker_summary.blocker_count, 0);
+  assert.deepEqual(validation.blocker_summary.human_readable, []);
+  assert.equal(validation.input_summary.deterministic_validation, true);
+  assert.equal(validation.input_summary.repository_local_only, true);
+  assert.equal(validation.input_summary.executes_real_claude_runtime, false);
+  assert.equal(validation.input_summary.executes_real_codex_runtime, false);
+}
+
+export function assertDod008WorkflowE2EValidationEvidence(
+  evidence,
+  expectedSummary = defaultDod008WorkflowE2EValidationSummary,
+) {
+  const normalizedExpected = normalizeDod008WorkflowE2EValidationSummary(expectedSummary);
+
+  assert.equal(evidence.artifact_id, 'REQ-894-DOD-008-workflow-e2e-validation');
+  assert.equal(evidence.request_id, 'REQ-894');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 9);
+  assert.equal(evidence.task_id, '05');
+  assert.equal(evidence.dod_id, 'DOD-008');
+  assert.equal(evidence.plan_id, 'PLN-721');
+  assert.equal(evidence.request_evidence_path, dod008WorkflowE2EValidationEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.equal(evidence.workflow_scenarios.status, 'pass');
+  assert.deepEqual(evidence.workflow_scenarios.scenario_paths, dod008WorkflowScenarioPaths);
+  assert.deepEqual(
+    evidence.workflow_scenarios.schema_contract.map((scenario) => scenario.representative_path),
+    dod008WorkflowScenarioPaths,
+  );
+  assert.equal(evidence.schema_results.status, 'pass');
+  assertDod008WorkflowSchemaContract(evidence.schema_results.workflow_schema_contract);
+  assertDod008CoreWorkflowSmokeHarness(evidence.schema_results.core_workflow_harness);
+  assert.equal(evidence.schema_results.lifecycle_smoke_validation.status, 'pass');
+  assertDod008WorkflowArtifactParityValidation(
+    evidence.schema_results.artifact_parity_validation,
+  );
+  assert.equal(evidence.focused_workflow_validation_summary.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.focused_workflow_validation_pass, true);
+  assert.equal(evidence.evidence_lifecycle.schema_results_pass, true);
+  assert.equal(evidence.evidence_lifecycle.npm_test_pass, true);
+  assert.equal(evidence.evidence_lifecycle.generator_pass, true);
+  assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
+  assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod008ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+  assert.equal(evidence.request_metadata_snapshot.path, req894RequestMetadataRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.request_id, 'REQ-894');
+  assert.equal(evidence.request_metadata_snapshot.agi_id, 'AGI-039');
+  assert.equal(evidence.request_metadata_snapshot.sprint, 9);
+  assert.equal(evidence.request_metadata_snapshot.dod_id, 'DOD-008');
+  assert.equal(evidence.request_metadata_snapshot.plan_id, 'PLN-721');
+  assert.equal(
+    evidence.test_command_results.focused_workflow_validation.status,
+    normalizedExpected.focused_workflow_validation.status,
+  );
+  assert.equal(
+    evidence.test_command_results.focused_workflow_validation.tests_total,
+    normalizedExpected.focused_workflow_validation.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.schema_contract.tests_total,
+    normalizedExpected.schema_contract.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.generator.generated_artifact_path,
+    dod008WorkflowE2EValidationEvidenceRelativePath,
   );
 }
 

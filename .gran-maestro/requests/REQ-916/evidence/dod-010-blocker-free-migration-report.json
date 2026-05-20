@@ -1,0 +1,831 @@
+{
+  "artifact_id": "REQ-916-DOD-010-blocker-free-migration-report",
+  "request_id": "REQ-916",
+  "agi_id": "AGI-039",
+  "sprint": 11,
+  "task_id": "02",
+  "dod_id": "DOD-010",
+  "plan_id": "PLN-738",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T02:48:55.000Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+  "report_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-010",
+      "request_id": "REQ-916",
+      "agi_id": "AGI-039",
+      "sprint": 11,
+      "generator_script_path": "scripts/generate-dod-010-blocker-free-migration-report.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod010BlockerFreeMigrationReport",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
+  "repository_local_only": true,
+  "evidence_by_dod": {
+    "DOD-001": {
+      "dod_id": "DOD-001",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+        ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        },
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-002": {
+      "dod_id": "DOD-002",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+        ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        },
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-003": {
+      "dod_id": "DOD-003",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+        ".gran-maestro/requests/REQ-886/request.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        },
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-886/request.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-004": {
+      "dod_id": "DOD-004",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-005": {
+      "dod_id": "DOD-005",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-006": {
+      "dod_id": "DOD-006",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-007": {
+      "dod_id": "DOD-007",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-008": {
+      "dod_id": "DOD-008",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    },
+    "DOD-009": {
+      "dod_id": "DOD-009",
+      "status_source": {
+        "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+        "status": "done"
+      },
+      "primary_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "primary_evidence_status": "pass",
+      "evidence_paths": [
+        ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json"
+      ],
+      "evidence_path_details": [
+        {
+          "normalized_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+          "exists": true,
+          "realpath_within_repo": true,
+          "status": "pass"
+        }
+      ]
+    }
+  },
+  "completed_dods": [
+    "DOD-001",
+    "DOD-002",
+    "DOD-003",
+    "DOD-004",
+    "DOD-005",
+    "DOD-006",
+    "DOD-007",
+    "DOD-008",
+    "DOD-009"
+  ],
+  "completed_dod_count": 9,
+  "follow_up_scope": [
+    {
+      "dod_id": "DOD-011",
+      "status": "follow_up",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "DOD-011 remains follow-up scope only and is excluded from the completed DOD-010 migration report counts."
+    },
+    {
+      "dod_id": "DOD-012",
+      "status": "follow_up",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "DOD-012 remains follow-up scope only and is excluded from the completed DOD-010 migration report counts."
+    },
+    {
+      "dod_id": "DOD-013",
+      "status": "follow_up",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "DOD-013 remains follow-up scope only and is excluded from the completed DOD-010 migration report counts."
+    }
+  ],
+  "blocker_input_sources": [
+    {
+      "source_id": "DOD-001:parse_error_count",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:generated_drift_count",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:unsupported_blocker_count",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-001:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-002:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-886/request.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-886/request.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-886/request.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-886/request.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-003:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-886/request.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-004:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-004:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-004:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-004:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-004:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-005:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-005:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-005:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-005:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-005:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-006:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-006:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-006:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-006:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-006:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-007:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-007:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-007:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-007:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-007:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-008:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-008:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-008:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-008:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-008:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-009:parse_error_count",
+      "source_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "blocker_type": "parse_failure",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-009:generated_drift_count",
+      "source_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "blocker_type": "generated_drift",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-009:unsupported_blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "blocker_type": "unsupported_blocker_type",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-009:forbidden_metadata_scan.violation_count",
+      "source_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "blocker_type": "no_go_violation",
+      "count": 0
+    },
+    {
+      "source_id": "DOD-009:blocker_summary.blocker_count",
+      "source_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "blocker_type": "failed_tests",
+      "count": 0
+    }
+  ],
+  "unresolved_risks": [
+    {
+      "id": "dod-011-follow-up-boundary",
+      "description": "DOD-011 remains outside the blocker-free DOD-010 completion boundary and must be tracked as follow-up work.",
+      "classification": "follow_up",
+      "release_blocking": false,
+      "mitigating_evidence": [
+        ".gran-maestro/agile/AGI-039/objective/objective.md"
+      ]
+    },
+    {
+      "id": "dod-012-follow-up-boundary",
+      "description": "DOD-012 remains outside the blocker-free DOD-010 completion boundary and must be tracked as follow-up work.",
+      "classification": "follow_up",
+      "release_blocking": false,
+      "mitigating_evidence": [
+        ".gran-maestro/agile/AGI-039/objective/objective.md"
+      ]
+    },
+    {
+      "id": "dod-013-follow-up-boundary",
+      "description": "DOD-013 remains outside the blocker-free DOD-010 completion boundary and must be tracked as follow-up work.",
+      "classification": "follow_up",
+      "release_blocking": false,
+      "mitigating_evidence": [
+        ".gran-maestro/agile/AGI-039/objective/objective.md"
+      ]
+    }
+  ],
+  "release_blocking_true_count": 0,
+  "lifecycle_findings": [
+    {
+      "id": "objective-progress-summary-mismatch",
+      "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
+      "finding_type": "stale_objective_progress_summary",
+      "description": "Objective progress summary records 0/13 while 10 DoD markers are status:done.",
+      "classification": "non_release_blocking",
+      "release_blocking": false,
+      "rationale": "The objective summary text is stale, but the DOD markers and repository-local evidence remain authoritative."
+    }
+  ],
+  "validation_entrypoints": [
+    "scripts/lib/codex-plugin-discovery-smoke.mjs",
+    "scripts/generate-dod-010-blocker-free-migration-report.mjs",
+    "tests/smoke.test.mjs"
+  ],
+  "validation_commands": [
+    "node scripts/generate-dod-010-blocker-free-migration-report.mjs <output-path>",
+    "npm test"
+  ],
+  "allowed_output_paths": [
+    ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json"
+  ],
+  "input_paths_read": [
+    ".gran-maestro/agile/AGI-039/objective/objective.md",
+    ".gran-maestro/requests/REQ-916/request.json",
+    "scripts/lib/codex-plugin-discovery-smoke.mjs",
+    "scripts/generate-dod-010-blocker-free-migration-report.mjs",
+    "tests/smoke.test.mjs",
+    ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+    ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+    ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-validation.json",
+    ".gran-maestro/requests/REQ-885/evidence/codex-plugin-parity-integration-validation.json",
+    ".gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json",
+    ".gran-maestro/requests/REQ-886/request.json",
+    ".gran-maestro/requests/REQ-888/evidence/dod-004-install-fallback-validation.json",
+    ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+    ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+    ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json",
+    ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+    ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "no_go_metadata_guard": {
+    "status": "pass",
+    "criteria": [
+      {
+        "criterion_id": "user_home_surface",
+        "category": "host-specific-root",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "codex_user_config_surface",
+        "category": "user-scoped-codex-config",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "claude_hook_workspace_bypass",
+        "category": "user-scoped-claude-hook-state",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "external_runtime_install",
+        "category": "plugin-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "plugin_cache_mutation",
+        "category": "plugin-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "symlink_creation",
+        "category": "filesystem-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "parent_directory_escape",
+        "category": "path-escape",
+        "required_result": "reject"
+      }
+    ],
+    "no_go_scan_violations": 0
+  },
+  "validator_summary": {
+    "status": "pass",
+    "blocker_count": 0,
+    "blocker_counts_by_type": {
+      "missing_evidence": 0,
+      "non_existing_evidence_path": 0,
+      "parse_failure": 0,
+      "failed_tests": 0,
+      "generated_drift": 0,
+      "unsupported_blocker_type": 0,
+      "no_go_violation": 0,
+      "stale_lifecycle": 0,
+      "path_escape": 0,
+      "release_blocking_risk": 0
+    },
+    "release_blocking_true_count": 0,
+    "no_go_scan_violations": 0,
+    "human_readable": {
+      "blocker_count_summary": "Computed blocker count: 0.",
+      "criteria_summaries": [
+        "missing_evidence: 0.",
+        "non_existing_evidence_path: 0.",
+        "parse_failure: 0.",
+        "failed_tests: 0.",
+        "generated_drift: 0.",
+        "unsupported_blocker_type: 0.",
+        "no_go_violation: 0.",
+        "stale_lifecycle: 0.",
+        "path_escape: 0.",
+        "release_blocking_risk: 0."
+      ]
+    }
+  },
+  "status": "pass",
+  "blocker_count": 0,
+  "blocker_counts_by_type": {
+    "missing_evidence": 0,
+    "non_existing_evidence_path": 0,
+    "parse_failure": 0,
+    "failed_tests": 0,
+    "generated_drift": 0,
+    "unsupported_blocker_type": 0,
+    "no_go_violation": 0,
+    "stale_lifecycle": 0,
+    "path_escape": 0,
+    "release_blocking_risk": 0
+  },
+  "no_go_scan_violations": 0,
+  "reusable_blocker_risk_summary": {
+    "DOD-011": {
+      "blocker_count_summary": "DOD-011 inherits a blocker-free DOD-010 baseline because the computed blocker count remains 0.",
+      "blocker_criteria_summary": "DOD-011 introduces no additional blocker criteria in this report because the normalized blocker enum counts all remain zero.",
+      "evidence_coverage_summary": "DOD-011 is excluded from the 9 completed DoD evidence entries and stays in follow-up scope only.",
+      "unresolved_non_release_blocking_risks_summary": "DOD-011 has 0 unresolved non-release-blocking risks recorded in this migration report.",
+      "follow_up_recommendations_summary": "Track DOD-011 in a follow-up request after the DOD-010 blocker-free migration report is accepted."
+    },
+    "DOD-012": {
+      "blocker_count_summary": "DOD-012 inherits a blocker-free DOD-010 baseline because the computed blocker count remains 0.",
+      "blocker_criteria_summary": "DOD-012 introduces no additional blocker criteria in this report because the normalized blocker enum counts all remain zero.",
+      "evidence_coverage_summary": "DOD-012 is excluded from the 9 completed DoD evidence entries and stays in follow-up scope only.",
+      "unresolved_non_release_blocking_risks_summary": "DOD-012 has 0 unresolved non-release-blocking risks recorded in this migration report.",
+      "follow_up_recommendations_summary": "Track DOD-012 in a follow-up request after the DOD-010 blocker-free migration report is accepted."
+    },
+    "DOD-013": {
+      "blocker_count_summary": "DOD-013 inherits a blocker-free DOD-010 baseline because the computed blocker count remains 0.",
+      "blocker_criteria_summary": "DOD-013 introduces no additional blocker criteria in this report because the normalized blocker enum counts all remain zero.",
+      "evidence_coverage_summary": "DOD-013 is excluded from the 9 completed DoD evidence entries and stays in follow-up scope only.",
+      "unresolved_non_release_blocking_risks_summary": "DOD-013 has 0 unresolved non-release-blocking risks recorded in this migration report.",
+      "follow_up_recommendations_summary": "Track DOD-013 in a follow-up request after the DOD-010 blocker-free migration report is accepted."
+    }
+  },
+  "forbidden_metadata_scan": {
+    "status": "pass",
+    "scanned_string_count": 122,
+    "violation_count": 0,
+    "violations": []
+  }
+}

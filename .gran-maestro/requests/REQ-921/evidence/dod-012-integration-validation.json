@@ -1,0 +1,121 @@
+{
+  "artifact_id": "REQ-921-DOD-012-integration-validation",
+  "request_id": "REQ-921",
+  "task_id": "REQ-921-04",
+  "agi_id": "AGI-039",
+  "sprint": 14,
+  "dod_id": "DOD-012",
+  "plan_id": "PLN-745",
+  "status": "pass",
+  "repository_local_only": true,
+  "command_outcomes": [
+    {
+      "command": "npm --prefix /Users/brandev/mygit/gran-maestro/.gran-maestro/worktrees/AGI-039/REQ-921/integration test",
+      "status": "pass",
+      "tests_total": 80,
+      "tests_pass": 80,
+      "tests_fail": 0,
+      "summary": "Full smoke suite passed with DOD-012 docs coverage, registry, no-go, and DOD-009/DOD-010/DOD-011 linkage coverage."
+    },
+    {
+      "command": "node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json",
+      "status": "pass",
+      "output_path": "/tmp/dod-012-docs-release-integration-check.json",
+      "summary": "Generator wrote parseable temp DOD-012 request evidence."
+    },
+    {
+      "command": "assertDod012DocsReleaseIntegration(/tmp/dod-012-docs-release-integration-check.json)",
+      "status": "pass",
+      "summary": "Temp output passed assertDod012DocsReleaseIntegration."
+    }
+  ],
+  "docs_coverage_matrix": [
+    {
+      "path": "README.md",
+      "status": "pass"
+    },
+    {
+      "path": "README.en.md",
+      "status": "pass"
+    },
+    {
+      "path": "docs/quick-start.md",
+      "status": "pass"
+    },
+    {
+      "path": "docs/configuration.md",
+      "status": "pass"
+    },
+    {
+      "path": "docs/HOOK-SETUP.md",
+      "status": "pass"
+    },
+    {
+      "path": "docs/skills-reference.md",
+      "status": "pass"
+    },
+    {
+      "path": "docs/RELEASE.md",
+      "status": "pass"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "status": "pass"
+    }
+  ],
+  "dod011_refs": [
+    ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+    ".gran-maestro/requests/REQ-919/evidence/dod-011-integration-validation.json"
+  ],
+  "dod_registry_linkage": [
+    {
+      "dod_id": "DOD-009",
+      "status": "pass",
+      "relationship": "predecessor"
+    },
+    {
+      "dod_id": "DOD-010",
+      "status": "pass",
+      "relationship": "predecessor"
+    },
+    {
+      "dod_id": "DOD-011",
+      "status": "pass",
+      "relationship": "source"
+    },
+    {
+      "dod_id": "DOD-012",
+      "status": "pass",
+      "relationship": "target"
+    }
+  ],
+  "no_go_boundary": {
+    "status": "pass",
+    "violation_count": 0,
+    "criteria": [
+      "user_home_mutation",
+      "codex_config_toml_mutation",
+      "external_codex_install_cache_reload",
+      "symlink_creation",
+      "plugin_cache_mutation",
+      "claude_hooks_direct_edit",
+      "objective_md_direct_edit"
+    ]
+  },
+  "follow_up_scope": [
+    {
+      "dod_id": "DOD-013",
+      "status": "supporting",
+      "completion_status": "not_done"
+    }
+  ],
+  "acceptance_bar": {
+    "full_smoke_80_with_zero_failures": true,
+    "temp_artifact_assertion_pass": true,
+    "persisted_dod012_artifact_assertion_pass": true,
+    "docs_coverage_matrix_pass": true,
+    "shared_registry_linkage_dod_009_010_011_012_pass": true,
+    "no_go_boundary_violation_count_zero": true,
+    "dod_013_follow_up_only": true
+  }
+}

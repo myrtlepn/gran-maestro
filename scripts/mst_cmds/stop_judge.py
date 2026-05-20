@@ -129,11 +129,11 @@ def _valid_structured_session_id(value: Any) -> tuple[str | None, str | None]:
         return None, str(exc)
 
 
-def _normalize_canonical_session_id(payload: Mapping[str, Any]) -> tuple[str | None, str | None]:
-    env_id, env_error = _valid_structured_session_id(os.environ.get("MST_SESSION_ID"))
+def _normalize_canonical_session_id(payload: Mapping[str, Any], *, include_env: bool) -> tuple[str | None, str | None]:
+    env_id, env_error = _valid_structured_session_id(os.environ.get("MST_SESSION_ID") if include_env else None)
     stdin_id, stdin_error = _valid_structured_session_id(payload.get("mst_session_id"))
     if env_id and stdin_id and env_id != stdin_id:
-        return None, f"mst_session_id mismatch: env:MST_SESSION_ID={env_id} stdin:mst_session_id={stdin_id}"
+        return None, f"canonical mst_session_id mismatch: env:MST_SESSION_ID={env_id} stdin:mst_session_id={stdin_id}"
     if env_error:
         return None, env_error
     if stdin_error:
@@ -527,13 +527,14 @@ def collect_stop_judge_context(
         "diagnostics": dict(diagnostics or {}),
         "side_effects": [],
     }
-    context["diagnostics"]["wrapper_mode"] = os.environ.get("MST_STOP_HOOK_WRAPPER") == "1"
+    wrapper_mode = os.environ.get("MST_STOP_HOOK_WRAPPER") == "1"
+    context["diagnostics"]["wrapper_mode"] = wrapper_mode
     if failsafe:
         context["failsafe"] = failsafe
         return context
 
     context["diagnostics"]["legacy_identity_present"] = _legacy_identity_present(payload_dict)
-    canonical_session_id, canonical_error = _normalize_canonical_session_id(payload_dict)
+    canonical_session_id, canonical_error = _normalize_canonical_session_id(payload_dict, include_env=wrapper_mode)
     context["diagnostics"]["canonical_mst_session_id"] = canonical_session_id
     if canonical_error:
         if "mismatch" in canonical_error:
@@ -859,13 +860,14 @@ def reduce_stop_judge_decision(context: Mapping[str, Any]) -> dict[str, Any]:
     current_skill = _safe_text(diagnostics.get("current_skill"))
     payload = context.get("payload") if isinstance(context.get("payload"), Mapping) else {}
 
-    _append_continuation_history_side_effects(
-        side_effects,
-        diagnostics=diagnostics,
-        signals=signals,
-        payload=payload,
-        message=message,
-    )
+    if wrapper_mode:
+        _append_continuation_history_side_effects(
+            side_effects,
+            diagnostics=diagnostics,
+            signals=signals,
+            payload=payload,
+            message=message,
+        )
 
     if failsafe == "invalid_stdin":
         diagnostics["failsafe"] = failsafe

@@ -9,7 +9,16 @@
     "classifier_failure_kind": [
       "hook_boundary_classifier"
     ],
+    "confirmed_action_scope": [
+      "confirmation_command"
+    ],
+    "failed_guard": [
+      "transition_validator"
+    ],
     "history_head": [
+      "history_ledger"
+    ],
+    "history_head_verified": [
       "history_ledger"
     ],
     "history_last_event_id": [
@@ -41,6 +50,15 @@
     ],
     "root_mst_id": [
       "session_metadata"
+    ],
+    "cancel_scope": [
+      "cancel_command"
+    ],
+    "user_cancel_request": [
+      "cancel_command"
+    ],
+    "user_confirmation": [
+      "confirmation_command"
     ]
   },
   "guards": {
@@ -57,6 +75,13 @@
     "classifier_failed_or_permission_unknown": {
       "evidence": [
         "classifier_failure_kind"
+      ]
+    },
+    "completion_reject_reason_classified": {
+      "evidence": [
+        "failed_guard",
+        "objective_check_result",
+        "history_head"
       ]
     },
     "core_rehydration_available": {
@@ -109,10 +134,102 @@
       "evidence": [
         "mismatch_subject"
       ]
+    },
+    "user_cancel_requested": {
+      "evidence": [
+        "user_cancel_request",
+        "cancel_scope"
+      ]
+    },
+    "user_confirmation_verified": {
+      "evidence": [
+        "user_confirmation",
+        "confirmed_action_scope",
+        "history_head_verified"
+      ]
     }
   },
-  "hash": "8bfe2272e05f4ddd8113f64d02778edf0eab7189ff0b480bf6a916a407a25e79",
+  "hash": "ba8a9e4bc917a95570929c61d759b5250f225d5d51502cd80b412247ab657ea9",
   "id": "mst-transition-graph",
+  "lifecycle_mappings": {
+    "blocked.resume_confirmed": {
+      "auto_allowed": true,
+      "from": [
+        "blocked"
+      ],
+      "guards": [
+        "user_confirmation_verified",
+        "history_verified",
+        "next_action_present"
+      ],
+      "id": "blocked.resume_confirmed",
+      "ledger_event_family": "external_lifecycle",
+      "on_reject": "guard.inspect_only_verification",
+      "projection_rule": "display blocked node to active continuation edge after confirmed evidence",
+      "reject_failure_path": "guard.inspect_only_verification",
+      "required_evidence": [
+        "user_confirmation",
+        "confirmed_action_scope",
+        "mst_session_id",
+        "history_head_verified",
+        "next_action"
+      ],
+      "terminal": false,
+      "to": "active",
+      "write_allowed": true
+    },
+    "terminal.completed.reject_split": {
+      "auto_allowed": true,
+      "from": [
+        "active"
+      ],
+      "guards": [
+        "completion_reject_reason_classified"
+      ],
+      "id": "terminal.completed.reject_split",
+      "ledger_event_family": "transition",
+      "on_reject": {
+        "confirmed_mismatch": "terminal.state_inconsistency",
+        "history_verified": "guard.inspect_only_verification",
+        "no_next_action": "continue.queued_action",
+        "objective_check_result": "guard.inspect_only_verification"
+      },
+      "projection_rule": "display completion attempt edge plus reject-specific continuation or inspect edge",
+      "reject_failure_path": "terminal.state_inconsistency",
+      "required_evidence": [
+        "objective_check_result",
+        "history_head",
+        "failed_guard"
+      ],
+      "terminal": false,
+      "to": "inspecting",
+      "write_allowed": false
+    },
+    "terminal.user_cancelled.lifecycle": {
+      "auto_allowed": false,
+      "from": [
+        "*"
+      ],
+      "guards": [
+        "user_cancel_requested",
+        "history_verified"
+      ],
+      "id": "terminal.user_cancelled.lifecycle",
+      "ledger_event_family": "external_lifecycle",
+      "on_reject": "guard.inspect_only_verification",
+      "projection_rule": "display terminal cancelled node only when cancel lifecycle evidence is ledger-backed",
+      "reject_failure_path": "terminal.state_inconsistency",
+      "required_evidence": [
+        "user_cancel_request",
+        "mst_session_id",
+        "history_head",
+        "cancel_scope"
+      ],
+      "terminal": true,
+      "to": "cancelled",
+      "write_allowed": true
+    }
+  },
   "schema_version": 1,
   "semantic_invariants": [
     "all transition from/to states are declared",

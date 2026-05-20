@@ -1,0 +1,2381 @@
+{
+  "artifact_id": "REQ-894-DOD-008-workflow-e2e-validation",
+  "request_id": "REQ-894",
+  "agi_id": "AGI-039",
+  "sprint": 9,
+  "task_id": "05",
+  "dod_id": "DOD-008",
+  "plan_id": "PLN-721",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T00:41:36.000Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+  "status": "pass",
+  "workflow_scenarios": {
+    "status": "pass",
+    "scenario_paths": [
+      "/mst:agile-plan",
+      "/mst:agile --resume",
+      "/mst:request",
+      "/mst:approve",
+      "delegated implementation loop",
+      "/mst:review",
+      "/mst:accept",
+      "/mst:recover",
+      "/mst:cleanup",
+      "/mst:dashboard",
+      "/mst:settings"
+    ],
+    "schema_contract": [
+      {
+        "scenario_id": "dod008-scenario-01",
+        "representative_path": "/mst:agile-plan",
+        "required_artifacts": [
+          "objective",
+          "spec",
+          "task",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-02",
+        "representative_path": "/mst:agile --resume",
+        "required_artifacts": [
+          "objective",
+          "request",
+          "task",
+          "trace",
+          "recover"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-03",
+        "representative_path": "/mst:request",
+        "required_artifacts": [
+          "request",
+          "spec",
+          "task",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-04",
+        "representative_path": "/mst:approve",
+        "required_artifacts": [
+          "request",
+          "task",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-05",
+        "representative_path": "delegated implementation loop",
+        "required_artifacts": [
+          "task",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-06",
+        "representative_path": "/mst:review",
+        "required_artifacts": [
+          "review",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-07",
+        "representative_path": "/mst:accept",
+        "required_artifacts": [
+          "accept",
+          "review",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-08",
+        "representative_path": "/mst:recover",
+        "required_artifacts": [
+          "recover",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-09",
+        "representative_path": "/mst:cleanup",
+        "required_artifacts": [
+          "cleanup",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-10",
+        "representative_path": "/mst:dashboard",
+        "required_artifacts": [
+          "dashboard",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-scenario-11",
+        "representative_path": "/mst:settings",
+        "required_artifacts": [
+          "settings",
+          "trace"
+        ],
+        "contract_only": true,
+        "repository_local_only": true
+      }
+    ],
+    "core_workflow_records": [
+      {
+        "scenario_id": "dod008-core-scenario-01",
+        "representative_path": "/mst:agile-plan",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-core-scenario-02",
+        "representative_path": "/mst:request",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-core-scenario-03",
+        "representative_path": "/mst:approve",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-core-scenario-04",
+        "representative_path": "delegated implementation loop",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-core-scenario-05",
+        "representative_path": "/mst:review",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      },
+      {
+        "scenario_id": "dod008-core-scenario-06",
+        "representative_path": "/mst:accept",
+        "reproduced_by_fixture": true,
+        "executes_runtime": false,
+        "repository_local_only": true
+      }
+    ]
+  },
+  "schema_results": {
+    "status": "pass",
+    "workflow_schema_contract": {
+      "contract_id": "REQ-894-DOD-008-workflow-schema-contract",
+      "request_id": "REQ-894",
+      "task_id": "01",
+      "dod_id": "DOD-008",
+      "format_version": "1.0.0",
+      "status": "pass",
+      "scenario_contract": [
+        {
+          "scenario_id": "dod008-scenario-01",
+          "representative_path": "/mst:agile-plan",
+          "required_artifacts": [
+            "objective",
+            "spec",
+            "task",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-02",
+          "representative_path": "/mst:agile --resume",
+          "required_artifacts": [
+            "objective",
+            "request",
+            "task",
+            "trace",
+            "recover"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-03",
+          "representative_path": "/mst:request",
+          "required_artifacts": [
+            "request",
+            "spec",
+            "task",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-04",
+          "representative_path": "/mst:approve",
+          "required_artifacts": [
+            "request",
+            "task",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-05",
+          "representative_path": "delegated implementation loop",
+          "required_artifacts": [
+            "task",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-06",
+          "representative_path": "/mst:review",
+          "required_artifacts": [
+            "review",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-07",
+          "representative_path": "/mst:accept",
+          "required_artifacts": [
+            "accept",
+            "review",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-08",
+          "representative_path": "/mst:recover",
+          "required_artifacts": [
+            "recover",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-09",
+          "representative_path": "/mst:cleanup",
+          "required_artifacts": [
+            "cleanup",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-10",
+          "representative_path": "/mst:dashboard",
+          "required_artifacts": [
+            "dashboard",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-scenario-11",
+          "representative_path": "/mst:settings",
+          "required_artifacts": [
+            "settings",
+            "trace"
+          ],
+          "contract_only": true,
+          "repository_local_only": true
+        }
+      ],
+      "artifact_schema_contract": [
+        {
+          "artifact_type": "objective",
+          "required_fields": [
+            "artifact_id",
+            "objective_id",
+            "title",
+            "status",
+            "request_ids",
+            "updated_at"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "request",
+          "required_fields": [
+            "artifact_id",
+            "request_id",
+            "objective_id",
+            "dod_id",
+            "status",
+            "task_ids"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "spec",
+          "required_fields": [
+            "artifact_id",
+            "spec_id",
+            "request_id",
+            "acceptance_criteria",
+            "artifact_types"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "task",
+          "required_fields": [
+            "artifact_id",
+            "task_id",
+            "request_id",
+            "status",
+            "owner_role",
+            "trace_id"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "trace",
+          "required_fields": [
+            "artifact_id",
+            "trace_id",
+            "request_id",
+            "scenario_id",
+            "event_refs",
+            "status"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "review",
+          "required_fields": [
+            "artifact_id",
+            "review_id",
+            "request_id",
+            "trace_id",
+            "findings",
+            "status"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "accept",
+          "required_fields": [
+            "artifact_id",
+            "acceptance_id",
+            "request_id",
+            "review_id",
+            "decision",
+            "status"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "recover",
+          "required_fields": [
+            "artifact_id",
+            "recovery_id",
+            "request_id",
+            "trigger",
+            "resume_token",
+            "mst_session_id",
+            "root_mst_id",
+            "recovery_judgement",
+            "status"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "cleanup",
+          "required_fields": [
+            "artifact_id",
+            "cleanup_id",
+            "request_id",
+            "targets",
+            "dry_run",
+            "report",
+            "request_artifacts_preserved",
+            "status"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "dashboard",
+          "required_fields": [
+            "artifact_id",
+            "dashboard_id",
+            "request_id",
+            "widgets",
+            "health",
+            "overview",
+            "status",
+            "updated_at"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        },
+        {
+          "artifact_type": "settings",
+          "required_fields": [
+            "artifact_id",
+            "settings_id",
+            "scope",
+            "effective_values",
+            "config",
+            "status",
+            "updated_at"
+          ],
+          "deterministic_validation": true,
+          "repository_local_only": true
+        }
+      ],
+      "no_go_metadata_guard": {
+        "status": "pass",
+        "criteria": [
+          {
+            "criterion_id": "host_user_absolute_root",
+            "category": "host-specific-root",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "home_alias_or_env_root",
+            "category": "shell-expanded-root",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "codex_user_state_surface",
+            "category": "user-scoped-codex-state",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "agent_user_skill_surface",
+            "category": "user-scoped-agent-state",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "claude_hook_surface",
+            "category": "user-scoped-claude-hook-state",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "parent_directory_escape",
+            "category": "path-escape",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "plugin_network_action",
+            "category": "plugin-side-effect",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "plugin_cache_action",
+            "category": "plugin-side-effect",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "plugin_rescan_action",
+            "category": "plugin-side-effect",
+            "required_result": "reject"
+          },
+          {
+            "criterion_id": "link_creation_action",
+            "category": "filesystem-side-effect",
+            "required_result": "reject"
+          }
+        ],
+        "deterministic_validation": true,
+        "repository_local_only": true
+      },
+      "lifecycle_smoke_artifacts": [
+        {
+          "artifact_id": "REQ-894-DOD-008-recover-smoke",
+          "artifact_type": "recover",
+          "recovery_id": "recover-smoke-001",
+          "request_id": "REQ-894",
+          "trigger": "interrupted_session",
+          "resume_token": "resume-token-fixture",
+          "mst_session_id": "MST-AGI-039-20260519T144424Z-req89403",
+          "root_mst_id": "AGI-039",
+          "canonical_session_identity": {
+            "mst_session_id": "MST-AGI-039-20260519T144424Z-req89403",
+            "root_mst_id": "AGI-039",
+            "lookup_key": "MST-AGI-039-20260519T144424Z-req89403",
+            "partition_key": "MST-AGI-039-20260519T144424Z-req89403",
+            "source": "structured_context"
+          },
+          "recovery_judgement": {
+            "primary_action": "resume_session",
+            "reason": "resume_ready",
+            "affected_resources": [
+              {
+                "kind": "mst_session_id",
+                "identifier": "MST-AGI-039-20260519T144424Z-req89403"
+              },
+              {
+                "kind": "session_worktree",
+                "identifier": "session-worktree-fixture"
+              },
+              {
+                "kind": "cleanup_stage_evidence",
+                "identifier": "cleanup-stage-fixture"
+              }
+            ],
+            "cleanup_stage_evidence": {
+              "evidence_state": "known",
+              "completed_destructive_stages": [],
+              "next_idempotent_stage": null,
+              "child_scan_fresh": true
+            }
+          },
+          "status": "pass",
+          "updated_at": "2026-05-19T14:44:24.000Z"
+        },
+        {
+          "artifact_id": "REQ-894-DOD-008-cleanup-smoke",
+          "artifact_type": "cleanup",
+          "cleanup_id": "cleanup-smoke-001",
+          "request_id": "REQ-894",
+          "targets": [
+            {
+              "kind": "active_flow_orphan_session",
+              "planned_count": 0,
+              "removed_count": 0
+            }
+          ],
+          "dry_run": true,
+          "report": {
+            "entrypoint": "direct-cli",
+            "session_id": "MST-AGI-039-20260519T144424Z-req89403",
+            "status": "ok",
+            "orphan_session_count": 0,
+            "planned_cleanup_count": 0,
+            "result": "nothing_to_clean"
+          },
+          "request_artifacts_preserved": {
+            "status": "pass",
+            "checked_paths": [
+              ".gran-maestro/requests/REQ-894/request.json",
+              ".gran-maestro/requests/REQ-894/tasks/03/spec.md"
+            ],
+            "mutated_path_count": 0
+          },
+          "status": "pass",
+          "updated_at": "2026-05-19T14:44:24.000Z"
+        },
+        {
+          "artifact_id": "REQ-894-DOD-008-dashboard-smoke",
+          "artifact_type": "dashboard",
+          "dashboard_id": "dashboard-smoke-001",
+          "request_id": "REQ-894",
+          "widgets": [
+            "health",
+            "overview.active-items",
+            "overview.next-steps",
+            "overview.pulse"
+          ],
+          "health": {
+            "route": "/api/health",
+            "ok": true
+          },
+          "overview": {
+            "active_items": {
+              "route": "/api/overview/active-items",
+              "shape": {
+                "items": "array",
+                "next_cursor": "string_or_null",
+                "has_more": "boolean",
+                "as_of": "iso_timestamp"
+              }
+            },
+            "next_steps": {
+              "route": "/api/overview/next-steps",
+              "shape": {
+                "items": "array",
+                "as_of": "iso_timestamp"
+              }
+            },
+            "pulse": {
+              "route": "/api/overview/pulse",
+              "shape": {
+                "active": "number",
+                "blocked": "number",
+                "done_7d": "number",
+                "stale_7d": "number",
+                "as_of": "iso_timestamp"
+              }
+            }
+          },
+          "status": "pass",
+          "updated_at": "2026-05-19T14:44:24.000Z"
+        },
+        {
+          "artifact_id": "REQ-894-DOD-008-settings-smoke",
+          "artifact_type": "settings",
+          "settings_id": "settings-smoke-001",
+          "scope": "project",
+          "request_id": "REQ-894",
+          "effective_values": {
+            "workflow_default_agent": "codex-dev",
+            "auto_mode_request": false,
+            "reference_auto_search": true
+          },
+          "config": {
+            "config_route": {
+              "route": "/api/config",
+              "shape": {
+                "merged": "object",
+                "overrides": "object",
+                "defaults": "object"
+              }
+            },
+            "defaults_route": {
+              "route": "/api/config/defaults",
+              "shape": "object"
+            },
+            "mode_route": {
+              "route": "/api/mode",
+              "shape": {
+                "active": "boolean"
+              }
+            }
+          },
+          "status": "pass",
+          "updated_at": "2026-05-19T14:44:24.000Z"
+        }
+      ],
+      "lifecycle_smoke_validation": {
+        "status": "pass",
+        "artifact_types": [
+          "recover",
+          "cleanup",
+          "dashboard",
+          "settings"
+        ],
+        "missing_artifact_types": [],
+        "missing_required_fields": [],
+        "deterministic_validation": true,
+        "repository_local_only": true
+      },
+      "acceptance_runtime_surface_ids": [
+        "DOD-008"
+      ],
+      "excluded_surfaces": [
+        {
+          "surface_id": "DOD-009",
+          "dod_id": "DOD-009",
+          "status": "pass",
+          "implementation_count": 0,
+          "runtime_invocation_count": 0,
+          "acceptance_gate_count": 0,
+          "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+        },
+        {
+          "surface_id": "DOD-010",
+          "dod_id": "DOD-010",
+          "status": "pass",
+          "implementation_count": 0,
+          "runtime_invocation_count": 0,
+          "acceptance_gate_count": 0,
+          "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+        },
+        {
+          "surface_id": "DOD-011",
+          "dod_id": "DOD-011",
+          "status": "pass",
+          "implementation_count": 0,
+          "runtime_invocation_count": 0,
+          "acceptance_gate_count": 0,
+          "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+        },
+        {
+          "surface_id": "DOD-012",
+          "dod_id": "DOD-012",
+          "status": "pass",
+          "implementation_count": 0,
+          "runtime_invocation_count": 0,
+          "acceptance_gate_count": 0,
+          "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+        },
+        {
+          "surface_id": "DOD-013",
+          "dod_id": "DOD-013",
+          "status": "pass",
+          "implementation_count": 0,
+          "runtime_invocation_count": 0,
+          "acceptance_gate_count": 0,
+          "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+        }
+      ],
+      "manual_readable_exports": {
+        "scenario_paths": [
+          "/mst:agile-plan",
+          "/mst:agile --resume",
+          "/mst:request",
+          "/mst:approve",
+          "delegated implementation loop",
+          "/mst:review",
+          "/mst:accept",
+          "/mst:recover",
+          "/mst:cleanup",
+          "/mst:dashboard",
+          "/mst:settings"
+        ],
+        "artifact_types": [
+          "objective",
+          "request",
+          "spec",
+          "task",
+          "trace",
+          "review",
+          "accept",
+          "recover",
+          "cleanup",
+          "dashboard",
+          "settings"
+        ],
+        "lifecycle_smoke_artifact_types": [
+          "recover",
+          "cleanup",
+          "dashboard",
+          "settings"
+        ],
+        "excluded_surface_ids": [
+          "DOD-009",
+          "DOD-010",
+          "DOD-011",
+          "DOD-012",
+          "DOD-013"
+        ],
+        "acceptance_runtime_surface_ids": [
+          "DOD-008"
+        ]
+      },
+      "forbidden_metadata_scan": {
+        "status": "pass",
+        "scanned_string_count": 311,
+        "violation_count": 0,
+        "violations": []
+      }
+    },
+    "core_workflow_harness": {
+      "harness_id": "REQ-894-02-DOD008-core-workflow-smoke",
+      "request_id": "REQ-894",
+      "task_id": "02",
+      "dod_id": "DOD-008",
+      "format_version": "1.0.0",
+      "status": "pass",
+      "mode": "repository-local-fixture",
+      "scenario_records": [
+        {
+          "scenario_id": "dod008-core-scenario-01",
+          "representative_path": "/mst:agile-plan",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-core-scenario-02",
+          "representative_path": "/mst:request",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-core-scenario-03",
+          "representative_path": "/mst:approve",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-core-scenario-04",
+          "representative_path": "delegated implementation loop",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-core-scenario-05",
+          "representative_path": "/mst:review",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        },
+        {
+          "scenario_id": "dod008-core-scenario-06",
+          "representative_path": "/mst:accept",
+          "reproduced_by_fixture": true,
+          "executes_runtime": false,
+          "repository_local_only": true
+        }
+      ],
+      "artifact_types": [
+        "request",
+        "spec",
+        "task",
+        "trace",
+        "review",
+        "accept"
+      ],
+      "artifacts": {
+        "request": {
+          "artifact_id": "REQ-894-DOD008-core-request",
+          "request_id": "REQ-894",
+          "objective_id": "AGI-039",
+          "dod_id": "DOD-008",
+          "status": "spec_ready",
+          "task_ids": [
+            "REQ-894-02"
+          ],
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/request.json"
+        },
+        "spec": {
+          "artifact_id": "REQ-894-DOD008-core-spec",
+          "spec_id": "REQ-894-02-spec",
+          "request_id": "REQ-894",
+          "acceptance_criteria": [
+            "T02-AC-001",
+            "T02-AC-002",
+            "T02-AC-003",
+            "T02-AC-004"
+          ],
+          "artifact_types": [
+            "request",
+            "spec",
+            "task",
+            "trace",
+            "review",
+            "accept"
+          ],
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/tasks/02/spec.md"
+        },
+        "task": {
+          "artifact_id": "REQ-894-DOD008-core-task",
+          "task_id": "REQ-894-02",
+          "request_id": "REQ-894",
+          "status": "reviewed",
+          "owner_role": "codex-dev",
+          "trace_id": "TRACE-REQ-894-02-core",
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/tasks/02/task.json"
+        },
+        "trace": {
+          "artifact_id": "REQ-894-DOD008-core-trace",
+          "trace_id": "TRACE-REQ-894-02-core",
+          "request_id": "REQ-894",
+          "scenario_id": "dod008-core-workflow-smoke",
+          "event_refs": [
+            "EVT-agile-plan-fixture",
+            "EVT-request-fixture",
+            "EVT-approve-fixture",
+            "EVT-delegated-loop-fixture",
+            "EVT-review-fixture",
+            "EVT-accept-fixture"
+          ],
+          "status": "pass",
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/traces/dod008-core-workflow.json"
+        },
+        "review": {
+          "artifact_id": "REQ-894-DOD008-core-review",
+          "review_id": "RV-001",
+          "request_id": "REQ-894",
+          "trace_id": "TRACE-REQ-894-02-core",
+          "findings": [
+            {
+              "finding_id": "FINDING-REQ-894-02-core-001",
+              "severity": "info",
+              "status": "closed"
+            }
+          ],
+          "status": "pass",
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/reviews/RV-001/review.json"
+        },
+        "accept": {
+          "artifact_id": "REQ-894-DOD008-core-accept",
+          "acceptance_id": "ACCEPT-REQ-894-02-core",
+          "request_id": "REQ-894",
+          "review_id": "RV-001",
+          "decision": "accepted",
+          "status": "pass",
+          "state_session": {
+            "status": "pass",
+            "canonical_sources": [
+              "MST_SESSION_ID",
+              "mst_session_id"
+            ],
+            "env": {
+              "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "context": {
+              "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+            },
+            "legacy_diagnostics": {
+              "diagnostic_only": true,
+              "fields": [
+                "MST_STATE_PPID",
+                "owner_pid",
+                "session_id"
+              ],
+              "canonical_source_count": 0
+            },
+            "boundary_checks": {
+              "env_and_context_match": true,
+              "legacy_only_identity_rejected": true,
+              "arbitrary_child_identity_injection": false
+            }
+          },
+          "path": ".gran-maestro/requests/REQ-894/acceptance/accept.json"
+        }
+      },
+      "artifact_validations": [
+        {
+          "artifact_type": "request",
+          "artifact_id": "REQ-894-DOD008-core-request",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "request_id",
+            "objective_id",
+            "dod_id",
+            "status",
+            "task_ids"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        },
+        {
+          "artifact_type": "spec",
+          "artifact_id": "REQ-894-DOD008-core-spec",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "spec_id",
+            "request_id",
+            "acceptance_criteria",
+            "artifact_types"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        },
+        {
+          "artifact_type": "task",
+          "artifact_id": "REQ-894-DOD008-core-task",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "task_id",
+            "request_id",
+            "status",
+            "owner_role",
+            "trace_id"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        },
+        {
+          "artifact_type": "trace",
+          "artifact_id": "REQ-894-DOD008-core-trace",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "trace_id",
+            "request_id",
+            "scenario_id",
+            "event_refs",
+            "status"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        },
+        {
+          "artifact_type": "review",
+          "artifact_id": "REQ-894-DOD008-core-review",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "review_id",
+            "request_id",
+            "trace_id",
+            "findings",
+            "status"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        },
+        {
+          "artifact_type": "accept",
+          "artifact_id": "REQ-894-DOD008-core-accept",
+          "status": "pass",
+          "required_fields": [
+            "artifact_id",
+            "acceptance_id",
+            "request_id",
+            "review_id",
+            "decision",
+            "status"
+          ],
+          "missing_fields": [],
+          "empty_fields": [],
+          "session_violations": []
+        }
+      ],
+      "session_metadata": {
+        "status": "pass",
+        "canonical_sources": [
+          "MST_SESSION_ID",
+          "mst_session_id"
+        ],
+        "env": {
+          "MST_SESSION_ID": "MST-REQ-894-20260520T000000000Z-dod008aa"
+        },
+        "context": {
+          "mst_session_id": "MST-REQ-894-20260520T000000000Z-dod008aa"
+        },
+        "legacy_diagnostics": {
+          "diagnostic_only": true,
+          "fields": [
+            "MST_STATE_PPID",
+            "owner_pid",
+            "session_id"
+          ],
+          "canonical_source_count": 0
+        },
+        "boundary_checks": {
+          "env_and_context_match": true,
+          "legacy_only_identity_rejected": true,
+          "arbitrary_child_identity_injection": false
+        }
+      },
+      "schema_contract_summary": {
+        "contract_id": "REQ-894-DOD-008-workflow-schema-contract",
+        "status": "pass",
+        "checked_artifact_types": [
+          "request",
+          "spec",
+          "task",
+          "trace",
+          "review",
+          "accept"
+        ],
+        "missing_contract_types": []
+      },
+      "command_metadata": [
+        {
+          "command_id": "npm-smoke",
+          "command": "node --test tests/smoke.test.mjs",
+          "mode": "deterministic-fixture",
+          "mutates_user_home": false,
+          "edits_hook_config": false,
+          "executes_codex_install": false,
+          "refreshes_codex_cache": false,
+          "runs_real_implementation": false
+        }
+      ],
+      "side_effect_summary": {
+        "repository_local_only": true,
+        "fixture_only": true,
+        "mutates_user_home": false,
+        "edits_hook_config": false,
+        "executes_codex_install": false,
+        "refreshes_codex_cache": false,
+        "runs_real_implementation": false
+      },
+      "forbidden_metadata_scan": {
+        "status": "pass",
+        "scanned_string_count": 127,
+        "violation_count": 0,
+        "violations": []
+      }
+    },
+    "lifecycle_smoke_validation": {
+      "status": "pass",
+      "artifact_types": [
+        "recover",
+        "cleanup",
+        "dashboard",
+        "settings"
+      ],
+      "missing_artifact_types": [],
+      "missing_required_fields": [],
+      "deterministic_validation": true,
+      "repository_local_only": true
+    },
+    "artifact_parity_validation": {
+      "validation_id": "REQ-894-04-DOD008-workflow-artifact-parity",
+      "request_id": "REQ-894",
+      "task_id": "04",
+      "dod_id": "DOD-008",
+      "format_version": "1.0.0",
+      "status": "pass",
+      "mode": "repository-local-fixture",
+      "canonical_claude_artifact_shape": [
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "request",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "request_id",
+            "objective_id",
+            "dod_id",
+            "status",
+            "task_ids"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "spec",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "spec_id",
+            "request_id",
+            "acceptance_criteria",
+            "artifact_types"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "task",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "task_id",
+            "request_id",
+            "status",
+            "owner_role",
+            "trace_id"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "trace",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "trace_id",
+            "request_id",
+            "scenario_id",
+            "event_refs",
+            "status"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "review",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "review_id",
+            "request_id",
+            "trace_id",
+            "findings",
+            "status"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "accept",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "acceptance_id",
+            "request_id",
+            "review_id",
+            "decision",
+            "status"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "recover",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "recovery_id",
+            "request_id",
+            "trigger",
+            "resume_token",
+            "mst_session_id",
+            "root_mst_id",
+            "recovery_judgement",
+            "status"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "cleanup",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "cleanup_id",
+            "request_id",
+            "targets",
+            "dry_run",
+            "report",
+            "request_artifacts_preserved",
+            "status"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "dashboard",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "dashboard_id",
+            "request_id",
+            "widgets",
+            "health",
+            "overview",
+            "status",
+            "updated_at"
+          ]
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "settings",
+          "source": "claude_canonical_shape",
+          "required_fields": [
+            "artifact_id",
+            "settings_id",
+            "scope",
+            "effective_values",
+            "config",
+            "status",
+            "updated_at"
+          ]
+        }
+      ],
+      "codex_fixture_artifact_shape": [
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "request",
+          "artifact_id": "REQ-894-DOD008-core-request",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "request_id",
+            "objective_id",
+            "dod_id",
+            "status",
+            "task_ids"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "request_id",
+            "objective_id",
+            "dod_id",
+            "status",
+            "task_ids"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "spec",
+          "artifact_id": "REQ-894-DOD008-core-spec",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "spec_id",
+            "request_id",
+            "acceptance_criteria",
+            "artifact_types"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "spec_id",
+            "request_id",
+            "acceptance_criteria",
+            "artifact_types"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "task",
+          "artifact_id": "REQ-894-DOD008-core-task",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "task_id",
+            "request_id",
+            "status",
+            "owner_role",
+            "trace_id"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "task_id",
+            "request_id",
+            "status",
+            "owner_role",
+            "trace_id"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "trace",
+          "artifact_id": "REQ-894-DOD008-core-trace",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "trace_id",
+            "request_id",
+            "scenario_id",
+            "event_refs",
+            "status"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "trace_id",
+            "request_id",
+            "scenario_id",
+            "event_refs",
+            "status"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "review",
+          "artifact_id": "REQ-894-DOD008-core-review",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "review_id",
+            "request_id",
+            "trace_id",
+            "findings",
+            "status"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "review_id",
+            "request_id",
+            "trace_id",
+            "findings",
+            "status"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "accept",
+          "artifact_id": "REQ-894-DOD008-core-accept",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "acceptance_id",
+            "request_id",
+            "review_id",
+            "decision",
+            "status"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "acceptance_id",
+            "request_id",
+            "review_id",
+            "decision",
+            "status"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "recover",
+          "artifact_id": "REQ-894-DOD-008-recover-smoke",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "recovery_id",
+            "request_id",
+            "trigger",
+            "resume_token",
+            "mst_session_id",
+            "root_mst_id",
+            "recovery_judgement",
+            "status"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "recovery_id",
+            "request_id",
+            "trigger",
+            "resume_token",
+            "mst_session_id",
+            "root_mst_id",
+            "recovery_judgement",
+            "status"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "cleanup",
+          "artifact_id": "REQ-894-DOD-008-cleanup-smoke",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "cleanup_id",
+            "request_id",
+            "targets",
+            "dry_run",
+            "report",
+            "request_artifacts_preserved",
+            "status"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "cleanup_id",
+            "request_id",
+            "targets",
+            "dry_run",
+            "report",
+            "request_artifacts_preserved",
+            "status"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "dashboard",
+          "artifact_id": "REQ-894-DOD-008-dashboard-smoke",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "dashboard_id",
+            "request_id",
+            "widgets",
+            "health",
+            "overview",
+            "status",
+            "updated_at"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "dashboard_id",
+            "request_id",
+            "widgets",
+            "health",
+            "overview",
+            "status",
+            "updated_at"
+          ],
+          "artifact_present": true
+        },
+        {
+          "surface_id": "DOD-008",
+          "artifact_type": "settings",
+          "artifact_id": "REQ-894-DOD-008-settings-smoke",
+          "source": "codex_fixture_shape",
+          "required_fields": [
+            "artifact_id",
+            "settings_id",
+            "scope",
+            "effective_values",
+            "config",
+            "status",
+            "updated_at"
+          ],
+          "present_required_fields": [
+            "artifact_id",
+            "settings_id",
+            "scope",
+            "effective_values",
+            "config",
+            "status",
+            "updated_at"
+          ],
+          "artifact_present": true
+        }
+      ],
+      "required_field_parity": {
+        "status": "pass",
+        "checked_artifact_types": [
+          "request",
+          "spec",
+          "task",
+          "trace",
+          "review",
+          "accept",
+          "recover",
+          "cleanup",
+          "dashboard",
+          "settings"
+        ],
+        "missing_blocker_count": 0,
+        "extra_blocker_count": 0,
+        "blocker_count": 0,
+        "artifact_diffs": [
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "request",
+            "claude_required_fields": [
+              "artifact_id",
+              "request_id",
+              "objective_id",
+              "dod_id",
+              "status",
+              "task_ids"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "request_id",
+              "objective_id",
+              "dod_id",
+              "status",
+              "task_ids"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "spec",
+            "claude_required_fields": [
+              "artifact_id",
+              "spec_id",
+              "request_id",
+              "acceptance_criteria",
+              "artifact_types"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "spec_id",
+              "request_id",
+              "acceptance_criteria",
+              "artifact_types"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "task",
+            "claude_required_fields": [
+              "artifact_id",
+              "task_id",
+              "request_id",
+              "status",
+              "owner_role",
+              "trace_id"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "task_id",
+              "request_id",
+              "status",
+              "owner_role",
+              "trace_id"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "trace",
+            "claude_required_fields": [
+              "artifact_id",
+              "trace_id",
+              "request_id",
+              "scenario_id",
+              "event_refs",
+              "status"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "trace_id",
+              "request_id",
+              "scenario_id",
+              "event_refs",
+              "status"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "review",
+            "claude_required_fields": [
+              "artifact_id",
+              "review_id",
+              "request_id",
+              "trace_id",
+              "findings",
+              "status"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "review_id",
+              "request_id",
+              "trace_id",
+              "findings",
+              "status"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "accept",
+            "claude_required_fields": [
+              "artifact_id",
+              "acceptance_id",
+              "request_id",
+              "review_id",
+              "decision",
+              "status"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "acceptance_id",
+              "request_id",
+              "review_id",
+              "decision",
+              "status"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "recover",
+            "claude_required_fields": [
+              "artifact_id",
+              "recovery_id",
+              "request_id",
+              "trigger",
+              "resume_token",
+              "mst_session_id",
+              "root_mst_id",
+              "recovery_judgement",
+              "status"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "recovery_id",
+              "request_id",
+              "trigger",
+              "resume_token",
+              "mst_session_id",
+              "root_mst_id",
+              "recovery_judgement",
+              "status"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "cleanup",
+            "claude_required_fields": [
+              "artifact_id",
+              "cleanup_id",
+              "request_id",
+              "targets",
+              "dry_run",
+              "report",
+              "request_artifacts_preserved",
+              "status"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "cleanup_id",
+              "request_id",
+              "targets",
+              "dry_run",
+              "report",
+              "request_artifacts_preserved",
+              "status"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "dashboard",
+            "claude_required_fields": [
+              "artifact_id",
+              "dashboard_id",
+              "request_id",
+              "widgets",
+              "health",
+              "overview",
+              "status",
+              "updated_at"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "dashboard_id",
+              "request_id",
+              "widgets",
+              "health",
+              "overview",
+              "status",
+              "updated_at"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          },
+          {
+            "surface_id": "DOD-008",
+            "artifact_type": "settings",
+            "claude_required_fields": [
+              "artifact_id",
+              "settings_id",
+              "scope",
+              "effective_values",
+              "config",
+              "status",
+              "updated_at"
+            ],
+            "codex_required_fields": [
+              "artifact_id",
+              "settings_id",
+              "scope",
+              "effective_values",
+              "config",
+              "status",
+              "updated_at"
+            ],
+            "missing_required_fields": [],
+            "extra_required_fields": [],
+            "status": "pass",
+            "blockers": []
+          }
+        ],
+        "blockers": []
+      },
+      "boundary_checks": {
+        "status": "pass",
+        "session_identity": {
+          "status": "pass",
+          "checked_artifact_types": [
+            "request",
+            "spec",
+            "task",
+            "trace",
+            "review",
+            "accept"
+          ],
+          "blocker_count": 0,
+          "blockers": []
+        },
+        "recovery": {
+          "status": "pass",
+          "artifact_type": "recover",
+          "artifact_id": "REQ-894-DOD-008-recover-smoke",
+          "blocker_count": 0,
+          "blockers": []
+        },
+        "orphan_session": {
+          "status": "pass",
+          "artifact_type": "cleanup",
+          "artifact_id": "REQ-894-DOD-008-cleanup-smoke",
+          "orphan_session_count": 0,
+          "blocker_count": 0,
+          "blockers": []
+        },
+        "blocker_count": 0,
+        "blockers": []
+      },
+      "excluded_surface_guard": {
+        "status": "pass",
+        "surface_ids": [
+          "DOD-009",
+          "DOD-010",
+          "DOD-011",
+          "DOD-012",
+          "DOD-013"
+        ],
+        "surfaces": [
+          {
+            "surface_id": "DOD-009",
+            "dod_id": "DOD-009",
+            "status": "pass",
+            "implementation_count": 0,
+            "runtime_invocation_count": 0,
+            "acceptance_gate_count": 0,
+            "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+          },
+          {
+            "surface_id": "DOD-010",
+            "dod_id": "DOD-010",
+            "status": "pass",
+            "implementation_count": 0,
+            "runtime_invocation_count": 0,
+            "acceptance_gate_count": 0,
+            "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+          },
+          {
+            "surface_id": "DOD-011",
+            "dod_id": "DOD-011",
+            "status": "pass",
+            "implementation_count": 0,
+            "runtime_invocation_count": 0,
+            "acceptance_gate_count": 0,
+            "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+          },
+          {
+            "surface_id": "DOD-012",
+            "dod_id": "DOD-012",
+            "status": "pass",
+            "implementation_count": 0,
+            "runtime_invocation_count": 0,
+            "acceptance_gate_count": 0,
+            "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+          },
+          {
+            "surface_id": "DOD-013",
+            "dod_id": "DOD-013",
+            "status": "pass",
+            "implementation_count": 0,
+            "runtime_invocation_count": 0,
+            "acceptance_gate_count": 0,
+            "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+          }
+        ],
+        "blocker_count": 0,
+        "blockers": []
+      },
+      "blocker_summary": {
+        "status": "pass",
+        "blocker_count": 0,
+        "missing_blocker_count": 0,
+        "extra_blocker_count": 0,
+        "blockers": [],
+        "human_readable": []
+      },
+      "input_summary": {
+        "core_harness_id": "REQ-894-02-DOD008-core-workflow-smoke",
+        "lifecycle_artifact_types": [
+          "recover",
+          "cleanup",
+          "dashboard",
+          "settings"
+        ],
+        "schema_contract_id": "REQ-894-DOD-008-workflow-schema-contract",
+        "deterministic_validation": true,
+        "repository_local_only": true,
+        "executes_real_claude_runtime": false,
+        "executes_real_codex_runtime": false
+      }
+    }
+  },
+  "focused_workflow_validation_summary": {
+    "status": "pass",
+    "focused_workflow_validation": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 16,
+      "tests_pass": 16,
+      "tests_fail": 0,
+      "summary": "16 DOD-008 workflow checks passed"
+    },
+    "schema_contract": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 5,
+      "tests_pass": 5,
+      "tests_fail": 0,
+      "summary": "schema contract checks passed"
+    },
+    "core_workflow_harness": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 3,
+      "tests_pass": 3,
+      "tests_fail": 0,
+      "summary": "core workflow harness checks passed"
+    },
+    "lifecycle_smoke": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 4,
+      "tests_pass": 4,
+      "tests_fail": 0,
+      "summary": "lifecycle smoke checks passed"
+    },
+    "artifact_parity": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 4,
+      "tests_pass": 4,
+      "tests_fail": 0,
+      "summary": "artifact parity checks passed"
+    }
+  },
+  "test_command_results": {
+    "focused_workflow_validation": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 16,
+      "tests_pass": 16,
+      "tests_fail": 0,
+      "summary": "16 DOD-008 workflow checks passed"
+    },
+    "schema_contract": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 5,
+      "tests_pass": 5,
+      "tests_fail": 0,
+      "summary": "schema contract checks passed"
+    },
+    "core_workflow_harness": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 3,
+      "tests_pass": 3,
+      "tests_fail": 0,
+      "summary": "core workflow harness checks passed"
+    },
+    "lifecycle_smoke": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 4,
+      "tests_pass": 4,
+      "tests_fail": 0,
+      "summary": "lifecycle smoke checks passed"
+    },
+    "artifact_parity": {
+      "command": "node --test tests/smoke.test.mjs",
+      "status": "pass",
+      "tests_total": 4,
+      "tests_pass": 4,
+      "tests_fail": 0,
+      "summary": "artifact parity checks passed"
+    },
+    "npm_test": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 57,
+      "tests_pass": 57,
+      "tests_fail": 0,
+      "summary": "57 passed"
+    },
+    "generator": {
+      "command": "node scripts/generate-dod-008-workflow-e2e-validation.mjs <repo-output> <summary-fixture>",
+      "generated_artifact_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+      "generated_output_path": null,
+      "status": "pass",
+      "parse_ok": true
+    },
+    "totals": {
+      "tests_total": 89,
+      "tests_pass": 89,
+      "tests_fail": 0
+    }
+  },
+  "source_commit": {
+    "status": "pass",
+    "tasks": [
+      {
+        "task_id": "REQ-894-01",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null
+      },
+      {
+        "task_id": "REQ-894-02",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null
+      },
+      {
+        "task_id": "REQ-894-03",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null
+      },
+      {
+        "task_id": "REQ-894-04",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null
+      },
+      {
+        "task_id": "REQ-894-05",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null
+      }
+    ]
+  },
+  "evidence_lifecycle": {
+    "status": "pass",
+    "focused_workflow_validation_pass": true,
+    "schema_results_pass": true,
+    "npm_test_pass": true,
+    "generator_pass": true,
+    "excluded_surfaces_pass": true,
+    "parse_failures_absent": true,
+    "forbidden_metadata_scan_pass": true
+  },
+  "excluded_surfaces": [
+    {
+      "surface_id": "DOD-009",
+      "dod_id": "DOD-009",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+    },
+    {
+      "surface_id": "DOD-010",
+      "dod_id": "DOD-010",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+    },
+    {
+      "surface_id": "DOD-011",
+      "dod_id": "DOD-011",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+    },
+    {
+      "surface_id": "DOD-012",
+      "dod_id": "DOD-012",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+    },
+    {
+      "surface_id": "DOD-013",
+      "dod_id": "DOD-013",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; not part of the DOD-008 workflow schema contract."
+    }
+  ],
+  "request_metadata_snapshot": {
+    "path": ".gran-maestro/requests/REQ-894/request.json",
+    "request_id": "REQ-894",
+    "agi_id": "AGI-039",
+    "sprint": 9,
+    "dod_id": "DOD-008",
+    "plan_id": "PLN-721",
+    "request_status": "phase2_execution",
+    "phase": 2,
+    "tasks": [
+      {
+        "task_id": "REQ-894-01",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-894-02",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-894-03",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-894-04",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-894-05",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      }
+    ]
+  },
+  "input_paths_read": [
+    ".gran-maestro/requests/REQ-894/request.json",
+    ".gran-maestro/requests/REQ-894/tasks/04/spec.md",
+    ".gran-maestro/requests/REQ-894/tasks/05/spec.md",
+    "scripts/lib/codex-plugin-discovery-smoke.mjs",
+    "scripts/generate-dod-007-request-evidence.mjs",
+    "tests/smoke.test.mjs",
+    ".gran-maestro/requests/REQ-893/evidence/dod-007-request-level-validation.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "forbidden_metadata_scan": {
+    "status": "pass",
+    "scanned_string_count": 1204,
+    "violation_count": 0,
+    "violations": []
+  }
+}

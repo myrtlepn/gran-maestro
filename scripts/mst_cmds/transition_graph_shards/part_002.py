@@ -56,6 +56,53 @@ def _guard_checks(
     return checks, failed
 def _any_bool(envelope: dict[str, Any], names: tuple[str, ...]) -> bool:
     return any(envelope.get(name) is True for name in names)
+def _evidence_is_stale(value: Any) -> bool:
+    if isinstance(value, dict):
+        status = value.get("status")
+        return (
+            value.get("stale") is True
+            or value.get("is_stale") is True
+            or (isinstance(status, str) and status.strip().lower() in {"stale", "expired"})
+        )
+    return False
+def _evidence_is_mismatch(key: str, value: Any, envelope: dict[str, Any]) -> bool:
+    if isinstance(value, dict):
+        status = value.get("status")
+        if (
+            value.get("mismatch") is True
+            or value.get("mismatched") is True
+            or value.get("confirmed_mismatch") is True
+            or (isinstance(status, str) and status.strip().lower() in {"mismatch", "mismatched"})
+        ):
+            return True
+        evidence_session = value.get("mst_session_id")
+        if isinstance(evidence_session, str) and envelope.get("mst_session_id") and evidence_session != envelope.get("mst_session_id"):
+            return True
+        if value.get("expected") is not None and value.get("actual") is not None and value.get("expected") != value.get("actual"):
+            return True
+        if key == "mismatch_subject" and value.get("confirmed") is True:
+            return True
+    return key == "mismatch_subject" and _value_present(value)
+def _completion_reject_path(
+    transition_id: Any,
+    transition: dict[str, Any],
+    *,
+    failed_guards: list[str],
+    missing_evidence: list[str],
+    stale_evidence: list[str],
+    mismatched_evidence: list[str],
+) -> Any:
+    if mismatched_evidence:
+        return "terminal.state_inconsistency"
+    if transition_id == "terminal.completed":
+        evidence_failure_keys = {"objective_check_result", "history_head"}
+        if evidence_failure_keys.intersection(missing_evidence) or evidence_failure_keys.intersection(stale_evidence):
+            return "guard.inspect_only_verification"
+        if "history_verified" in failed_guards:
+            return "guard.inspect_only_verification"
+        if "no_next_action" in failed_guards:
+            return "continue.queued_action"
+    return transition.get("on_reject")
 def validate_attempted_transition(envelope: dict[str, Any], graph: dict[str, Any]) -> dict[str, Any]:
     diagnostics: list[dict[str, Any]] = []
     if not isinstance(graph, dict):
@@ -166,6 +213,12 @@ def validate_attempted_transition(envelope: dict[str, Any], graph: dict[str, Any
 
     required_evidence = [str(item) for item in transition.get("required_evidence") or []]
     missing_evidence = [key for key in required_evidence if key not in evidence or not _value_present(evidence.get(key))]
+    stale_evidence = [key for key in required_evidence if key in evidence and _evidence_is_stale(evidence.get(key))]
+    mismatched_evidence = [
+        key
+        for key, value in evidence.items()
+        if isinstance(key, str) and _evidence_is_mismatch(key, value, envelope)
+    ]
     for key in missing_evidence:
         diagnostics.append(
             _attempt_diag(
@@ -173,6 +226,26 @@ def validate_attempted_transition(envelope: dict[str, Any], graph: dict[str, Any
                 field="required_evidence",
                 path=f"evidence.{key}",
                 reason=f"required evidence is missing: {key}",
+                graph=graph,
+            )
+        )
+    for key in stale_evidence:
+        diagnostics.append(
+            _attempt_diag(
+                "stale_evidence",
+                field="required_evidence",
+                path=f"evidence.{key}",
+                reason=f"required evidence is stale: {key}",
+                graph=graph,
+            )
+        )
+    for key in mismatched_evidence:
+        diagnostics.append(
+            _attempt_diag(
+                "evidence_mismatch",
+                field="evidence",
+                path=f"evidence.{key}",
+                reason=f"evidence is confirmed mismatched: {key}",
                 graph=graph,
             )
         )
@@ -229,19 +302,30 @@ def validate_attempted_transition(envelope: dict[str, Any], graph: dict[str, Any
         "write_allowed": transition.get("write_allowed"),
         "auto_requested": auto_requested,
         "write_requested": write_requested,
-        "write_permission_granted": bool(transition.get("write_allowed")),
-        "auto_continuation_allowed": bool(transition.get("auto_allowed")),
         "created_new_session": False,
     }
     if diagnostics:
+        on_reject = _completion_reject_path(
+            transition_id,
+            transition,
+            failed_guards=failed_guards,
+            missing_evidence=missing_evidence,
+            stale_evidence=stale_evidence,
+            mismatched_evidence=mismatched_evidence,
+        )
         return {
             **base,
             "status": "rejected",
             "accepted": False,
             "fail_closed": True,
+            "write_permission_granted": False,
+            "auto_continuation_allowed": False,
+            "auto_terminal_write": False,
             "failed_guards": failed_guards,
             "missing_evidence": missing_evidence,
-            "on_reject": transition.get("on_reject"),
+            "stale_evidence": stale_evidence,
+            "mismatched_evidence": mismatched_evidence,
+            "on_reject": on_reject,
             "diagnostics": diagnostics,
         }
     return {
@@ -249,8 +333,13 @@ def validate_attempted_transition(envelope: dict[str, Any], graph: dict[str, Any
         "status": "accepted",
         "accepted": True,
         "fail_closed": False,
+        "write_permission_granted": bool(transition.get("write_allowed")),
+        "auto_continuation_allowed": bool(transition.get("auto_allowed")),
+        "auto_terminal_write": bool(str(transition_id).startswith("terminal.") and transition.get("write_allowed")),
         "failed_guards": [],
         "missing_evidence": [],
+        "stale_evidence": [],
+        "mismatched_evidence": [],
         "on_reject": None,
         "diagnostics": [],
     }

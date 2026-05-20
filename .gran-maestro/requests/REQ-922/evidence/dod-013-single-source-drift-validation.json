@@ -1,0 +1,290 @@
+{
+  "artifact_id": "REQ-922-DOD-013-single-source-drift-validation",
+  "request_id": "REQ-922",
+  "task_id": "REQ-922-02",
+  "agi_id": "AGI-039",
+  "sprint": 15,
+  "dod_id": "DOD-013",
+  "plan_id": "PLN-746",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T07:13:05.000Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json",
+  "generator_script_path": "scripts/generate-dod-013-single-source-drift-validation.mjs",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-013",
+      "request_id": "REQ-922",
+      "agi_id": "AGI-039",
+      "sprint": 15,
+      "generator_script_path": "scripts/generate-dod-013-single-source-drift-validation.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod013SingleSourceDriftValidation",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
+  "status": "pass",
+  "repository_local_only": true,
+  "codex_only_fork_scan": {
+    "status": "pass",
+    "fork_count": 0,
+    "scanned_paths": [
+      ".codex-plugin/plugin.json",
+      ".agents/plugins/marketplace.json"
+    ],
+    "allowed_generated_projected_assets": [
+      ".codex-plugin/plugin.json",
+      ".agents/plugins/marketplace.json"
+    ],
+    "forbidden_source_forks": [],
+    "repository_local_only": true
+  },
+  "generated_drift_summary": {
+    "status": "pass",
+    "drift_count": 0,
+    "entries": [
+      {
+        "drift_check_id": "plugin-manifest-version-projection",
+        "canonical_path": ".claude-plugin/plugin.json",
+        "projected_asset_path": ".codex-plugin/plugin.json",
+        "canonical_version": "0.59.8",
+        "projected_version": "0.59.8",
+        "status": "pass"
+      },
+      {
+        "drift_check_id": "marketplace-version-projection",
+        "canonical_path": ".claude-plugin/marketplace.json",
+        "projected_asset_path": ".agents/plugins/marketplace.json",
+        "canonical_version": "0.59.8",
+        "projected_version": "0.59.8",
+        "status": "pass"
+      }
+    ]
+  },
+  "five_file_version_sync": {
+    "status": "pass",
+    "synced": true,
+    "version": "0.59.8",
+    "files": [
+      {
+        "path": ".claude-plugin/plugin.json",
+        "version": "0.59.8"
+      },
+      {
+        "path": "package.json",
+        "version": "0.59.8"
+      },
+      {
+        "path": ".claude-plugin/marketplace.json",
+        "version": "0.59.8"
+      },
+      {
+        "path": "extension/manifest.json",
+        "version": "0.59.8"
+      },
+      {
+        "path": "extension/package.json",
+        "version": "0.59.8"
+      }
+    ]
+  },
+  "canonical_source_coverage": [
+    {
+      "canonical_path": ".claude-plugin/plugin.json",
+      "projected_asset_path": ".codex-plugin/plugin.json",
+      "coverage_kind": "plugin-manifest-projection",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": ".claude-plugin/marketplace.json",
+      "projected_asset_path": ".agents/plugins/marketplace.json",
+      "coverage_kind": "marketplace-projection",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "skills/",
+      "projected_asset_path": "skills/",
+      "coverage_kind": "skill-source-reuse",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "agents/",
+      "projected_asset_path": "agents/",
+      "coverage_kind": "agent-source-reuse",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "hooks/",
+      "projected_asset_path": "hooks/hooks.json",
+      "coverage_kind": "hook-source-reuse",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "templates/defaults/",
+      "projected_asset_path": "templates/defaults/",
+      "coverage_kind": "default-template-source-reuse",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "package.json",
+      "projected_asset_path": "package.json",
+      "coverage_kind": "package-version-source",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    },
+    {
+      "canonical_path": "extension/manifest.json",
+      "projected_asset_path": "extension/manifest.json",
+      "coverage_kind": "extension-version-source",
+      "canonical_exists": true,
+      "projected_asset_exists": true,
+      "repository_local_only": true,
+      "validation_status": "pass"
+    }
+  ],
+  "source_evidence_refs": [
+    {
+      "dod_id": "DOD-011",
+      "request_id": "REQ-919",
+      "relationship": "source-work-package-breakdown",
+      "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+      "status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "dod_id": "DOD-012",
+      "request_id": "REQ-921",
+      "relationship": "source-docs-release-integration",
+      "request_evidence_path": ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json",
+      "status": "pass",
+      "repository_local_only": true
+    },
+    {
+      "dod_id": "DOD-012",
+      "request_id": "REQ-921",
+      "relationship": "source-integration-validation",
+      "request_evidence_path": ".gran-maestro/requests/REQ-921/evidence/dod-012-integration-validation.json",
+      "status": "pass",
+      "repository_local_only": true
+    }
+  ],
+  "docs_release_boundary": {
+    "status": "pass",
+    "checked_paths": [
+      "README.md",
+      "README.en.md",
+      "docs/RELEASE.md"
+    ],
+    "required_signals": [
+      "single_source_maintenance",
+      "codex_only_fork_zero",
+      "generated_drift_zero",
+      "five_file_version_sync",
+      "repository_local_validation"
+    ]
+  },
+  "validation_commands": [
+    {
+      "command": "node scripts/generate-dod-013-single-source-drift-validation.mjs <output-path>",
+      "scope": "artifact-generation",
+      "repository_local_only": true
+    },
+    {
+      "command": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; import { assertDod013SingleSourceDriftValidation } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod013SingleSourceDriftValidation(JSON.parse(readFileSync('<output-path>','utf8')));\"",
+      "scope": "artifact-assertion",
+      "repository_local_only": true
+    },
+    {
+      "command": "npm test",
+      "scope": "full-smoke",
+      "repository_local_only": true
+    }
+  ],
+  "no_go_boundary": {
+    "status": "pass",
+    "violation_count": 0,
+    "criteria": [
+      {
+        "criterion_id": "user_home_mutation",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "codex_config_toml_mutation",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "external_codex_install_cache_reload",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "symlink_creation",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "plugin_cache_mutation",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "claude_hooks_direct_edit",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "objective_md_direct_edit",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "codex_only_fork_creation",
+        "status": "pass"
+      },
+      {
+        "criterion_id": "release_push_publish_or_github_release",
+        "status": "pass"
+      }
+    ]
+  },
+  "command_outcomes": [],
+  "allowed_output_paths": [
+    ".gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "evidence_lifecycle": {
+    "status": "pass",
+    "codex_only_fork_scan_pass": true,
+    "generated_drift_pass": true,
+    "five_file_version_sync_pass": true,
+    "canonical_source_coverage_pass": true,
+    "source_evidence_refs_pass": true,
+    "shared_dod_registry_linkage_pass": true,
+    "no_go_boundary_pass": true
+  }
+}

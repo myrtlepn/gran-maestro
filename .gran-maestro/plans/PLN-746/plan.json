@@ -1,0 +1,26 @@
+{
+  "id": "PLN-746",
+  "title": "AGI-039 Sprint 15 DOD-013 single-source drift validation",
+  "status": "in_progress",
+  "created_at": "2026-05-20T07:05:57.000Z",
+  "linked_requests": [
+    "REQ-922"
+  ],
+  "cynefin_domain": "simple",
+  "type": "code",
+  "linked_objective": "AGI-039",
+  "sprint": 15,
+  "target_dod": "DOD-013",
+  "work_item_kind": "dod",
+  "reference_context": [
+    "REF-035",
+    "REF-037",
+    "REF-034",
+    "REF-038"
+  ],
+  "source_evidence": [
+    ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+    ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json",
+    ".gran-maestro/requests/REQ-921/evidence/dod-012-integration-validation.json"
+  ]
+}

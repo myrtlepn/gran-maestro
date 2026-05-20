@@ -5,6 +5,15 @@
 Gran Maestro 플러그인이 제공하는 31개 스킬의 전체 레퍼런스입니다.
 각 스킬은 `/mst:{name}` 형식으로 호출합니다.
 
+## Codex plugin skill invocation boundary
+
+Claude Code에서는 `/mst:{name}` slash command UX가 canonical invocation입니다. Codex plugin migration은 동일한 skill/agent catalog를 repository-local generated asset으로 투영하는 작업이며, 실제 Codex runtime 로드·업데이트·삭제는 사용자 소유 Codex 환경에서 명시적으로 수행해야 합니다.
+
+- 검증 가능 범위: `skills/`, `agents/`, `.codex-plugin/`, `.agents/plugins/`, DOD evidence, smoke tests.
+- 검증 명령: `node scripts/generate-dod-012-docs-release-integration.mjs <output>` 및 `npm test`.
+- 금지 경계: DOD-012 validation은 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`를 수정하지 않습니다.
+- release boundary: DOD-012는 docs/release coverage 완료를 의미하며 DOD-013 single-source drift validation은 follow-up/supporting only입니다.
+
 ---
 
 ## 목차

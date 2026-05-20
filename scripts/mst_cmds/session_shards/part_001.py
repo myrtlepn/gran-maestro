@@ -309,6 +309,7 @@ def validate_mst_session_metadata_consistency(
     base_dir: Path,
     mst_session_id: str,
     *,
+    validate_root_metadata: bool = True,
     require_root_metadata: bool = False,
     require_session_metadata: bool = False,
 ) -> StructuredMstSessionId:
@@ -322,7 +323,7 @@ def validate_mst_session_metadata_consistency(
         raise _structured_failure(f"missing root metadata: {root_path}")
     if require_session_metadata and session_payload is None:
         raise _structured_failure(f"missing session metadata: {session_path}")
-    if isinstance(root_payload, dict):
+    if validate_root_metadata and isinstance(root_payload, dict):
         _validate_metadata_payload(parsed, root_payload, source="root")
     if isinstance(session_payload, dict):
         _validate_metadata_payload(parsed, session_payload, source="session")
@@ -2247,7 +2248,11 @@ def _history_sidecars_match_tail(base_dir: Path, mst_session_id: str, tail_hash:
     verify_head = _read_verify_head(session_history_verify_path(base_dir, mst_session_id))
     return local_head == tail_hash and mirror_head == tail_hash and verify_head == tail_hash
 def write_session_history_event(base_dir: Path, mst_session_id: str, payload: dict) -> Path:
-    parsed = validate_mst_session_metadata_consistency(base_dir, mst_session_id)
+    parsed = validate_mst_session_metadata_consistency(
+        base_dir,
+        mst_session_id,
+        validate_root_metadata=False,
+    )
     path = session_history_path(base_dir, parsed.mst_session_id)
     if _should_skip_stale_invocation_history_append(base_dir, parsed.mst_session_id, payload):
         return path

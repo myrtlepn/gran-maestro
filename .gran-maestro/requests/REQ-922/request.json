@@ -1,0 +1,200 @@
+{
+  "id": "REQ-922",
+  "title": "AGI-039 Sprint 15 DOD-013 single-source drift validation",
+  "original_request": "AGI-039 Sprint 15 DOD-013 single-source drift validation: migration 결과가 Codex-only fork 없이 단일 Gran Maestro source에서 유지되는지 검증한다. DOD-011/DOD-012 evidence를 입력으로 Codex-only fork 0개, generated drift 0건, 5-file version sync 유지, canonical source coverage, no-go boundary를 request-level evidence로 기록한다.",
+  "status": "accepted",
+  "current_phase": 5,
+  "created_at": "2026-05-20T07:13:05.000Z",
+  "updated_at": "2026-05-20T07:36:31.000Z",
+  "auto_approve": true,
+  "source_plan": "PLN-746",
+  "dag_auto_chain": false,
+  "linked_objective": "AGI-039",
+  "sprint": 15,
+  "target_dod": "DOD-013",
+  "detected_base": "master",
+  "tasks": [
+    {
+      "id": "REQ-922-01",
+      "task_number": "01",
+      "title": "Add DOD-013 single-source validator contract",
+      "status": "completed",
+      "assigned_agent": "codex-dev",
+      "spec_path": ".gran-maestro/requests/REQ-922/tasks/01/spec.md",
+      "covers_ac": [
+        "PAC-1",
+        "PAC-2",
+        "PAC-3",
+        "PAC-5",
+        "PAC-6"
+      ],
+      "blockedBy": [],
+      "blocks": [
+        "REQ-922-02",
+        "REQ-922-03",
+        "REQ-922-04"
+      ],
+      "commit": "1e89df4"
+    },
+    {
+      "id": "REQ-922-02",
+      "task_number": "02",
+      "title": "Generate DOD-013 evidence artifact and registry linkage",
+      "status": "completed",
+      "assigned_agent": "codex-dev",
+      "spec_path": ".gran-maestro/requests/REQ-922/tasks/02/spec.md",
+      "covers_ac": [
+        "PAC-1",
+        "PAC-2",
+        "PAC-3",
+        "PAC-5",
+        "PAC-6"
+      ],
+      "blockedBy": [
+        "REQ-922-01"
+      ],
+      "blocks": [
+        "REQ-922-03",
+        "REQ-922-04"
+      ],
+      "commit": "1e89df4"
+    },
+    {
+      "id": "REQ-922-03",
+      "task_number": "03",
+      "title": "Strengthen docs release single-source boundary",
+      "status": "completed",
+      "assigned_agent": "codex-dev",
+      "spec_path": ".gran-maestro/requests/REQ-922/tasks/03/spec.md",
+      "covers_ac": [
+        "PAC-2",
+        "PAC-4",
+        "PAC-5",
+        "PAC-6"
+      ],
+      "blockedBy": [
+        "REQ-922-01",
+        "REQ-922-02"
+      ],
+      "blocks": [
+        "REQ-922-04"
+      ],
+      "commit": "1e89df4"
+    },
+    {
+      "id": "REQ-922-04",
+      "task_number": "04",
+      "title": "Record DOD-013 integration validation and objective completion evidence",
+      "status": "completed",
+      "assigned_agent": "codex-dev",
+      "spec_path": ".gran-maestro/requests/REQ-922/tasks/04/spec.md",
+      "covers_ac": [
+        "PAC-1",
+        "PAC-2",
+        "PAC-3",
+        "PAC-4",
+        "PAC-5",
+        "PAC-6"
+      ],
+      "blockedBy": [
+        "REQ-922-01",
+        "REQ-922-02",
+        "REQ-922-03"
+      ],
+      "blocks": [],
+      "commit": "1e89df4"
+    }
+  ],
+  "dependencies": {
+    "blockedBy": [],
+    "relatedTo": [
+      "REQ-919",
+      "REQ-921",
+      "PLN-746",
+      "DOD-011",
+      "DOD-012"
+    ],
+    "blocks": [
+      "AGI-039-objective-completion"
+    ]
+  },
+  "source_evidence": [
+    ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+    ".gran-maestro/requests/REQ-921/evidence/dod-012-docs-release-integration.json",
+    ".gran-maestro/requests/REQ-921/evidence/dod-012-integration-validation.json"
+  ],
+  "generated_evidence": [
+    ".gran-maestro/requests/REQ-922/evidence/dod-013-single-source-drift-validation.json",
+    ".gran-maestro/requests/REQ-922/evidence/dod-013-integration-validation.json"
+  ],
+  "reference_context": [
+    "REF-035",
+    "REF-037",
+    "REF-034",
+    "REF-038"
+  ],
+  "stitch_screens": [],
+  "no_go_boundary": {
+    "repository_local_only": true,
+    "forbidden_mutations": [
+      "user_home_mutation",
+      "codex_config_toml_mutation",
+      "external_codex_install_cache_reload",
+      "symlink_creation",
+      "plugin_cache_mutation",
+      "claude_hooks_direct_edit",
+      "objective_md_direct_edit",
+      "codex_only_fork_creation",
+      "release_push_publish_or_github_release"
+    ],
+    "violation_count": 0
+  },
+  "pac_summary": {
+    "PAC-1": "pass",
+    "PAC-2": "pass",
+    "PAC-3": "pass",
+    "PAC-4": "pass",
+    "PAC-5": "pass",
+    "PAC-6": "pass"
+  },
+  "implementation_validation": {
+    "command": "npm test",
+    "status": "pass",
+    "tests_total": 84,
+    "tests_pass": 84,
+    "tests_fail": 0
+  },
+  "review": {
+    "review_id": "RV-001",
+    "status": "pass",
+    "verdict": "accept_ready",
+    "reviewed_at": "2026-05-20T07:13:05.000Z",
+    "report_path": ".gran-maestro/requests/REQ-922/reviews/RV-001/review-report.md"
+  },
+  "accepted_at": "2026-05-20T07:36:31.000Z",
+  "acceptance": {
+    "status": "accepted",
+    "accepted_at": "2026-05-20T07:36:31.000Z",
+    "base_branch": "master",
+    "accepted_commit": "1e89df4",
+    "merge_mode": "fast-forward",
+    "final_validation": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 84,
+      "tests_pass": 84,
+      "tests_fail": 0
+    },
+    "review_id": "RV-001",
+    "dod_result": {
+      "DOD-013": "done"
+    },
+    "objective_transition": {
+      "method": "mst.py agile objective-transition",
+      "status": "done",
+      "helper_only": true,
+      "objective_md_direct_edit": false,
+      "evidence_ref": ".gran-maestro/requests/REQ-922/evidence/dod-013-integration-validation.json"
+    }
+  }
+}

@@ -48,6 +48,20 @@ REQUIRED_GRAPH_FIELDS = {
     "transitions",
     "semantic_invariants",
 }
+REQUIRED_LIFECYCLE_MAPPING_FIELDS = {
+    "id",
+    "from",
+    "to",
+    "terminal",
+    "auto_allowed",
+    "write_allowed",
+    "guards",
+    "required_evidence",
+    "on_reject",
+    "ledger_event_family",
+    "projection_rule",
+    "reject_failure_path",
+}
 REQUIRED_TRANSITION_FIELDS = {
     "from",
     "to",
@@ -237,6 +251,67 @@ def _base_graph() -> dict:
             "reject_loop_key": ["transition_validator"],
             "attempt_count": ["transition_validator"],
             "limit": ["transition_validator"],
+            "user_confirmation": ["confirmation_command"],
+            "confirmed_action_scope": ["confirmation_command"],
+            "history_head_verified": ["history_ledger"],
+            "user_cancel_request": ["cancel_command"],
+            "cancel_scope": ["cancel_command"],
+            "failed_guard": ["transition_validator"],
+        },
+        "lifecycle_mappings": {
+            "blocked.resume_confirmed": {
+                "id": "blocked.resume_confirmed",
+                "from": ["blocked"],
+                "to": "active",
+                "terminal": False,
+                "auto_allowed": True,
+                "write_allowed": True,
+                "guards": ["user_confirmation_verified", "history_verified", "next_action_present"],
+                "required_evidence": [
+                    "user_confirmation",
+                    "confirmed_action_scope",
+                    "mst_session_id",
+                    "history_head_verified",
+                    "next_action",
+                ],
+                "on_reject": "guard.inspect_only_verification",
+                "ledger_event_family": "external_lifecycle",
+                "projection_rule": "display blocked node to active continuation edge after confirmed evidence",
+                "reject_failure_path": "guard.inspect_only_verification",
+            },
+            "terminal.user_cancelled.lifecycle": {
+                "id": "terminal.user_cancelled.lifecycle",
+                "from": ["*"],
+                "to": "cancelled",
+                "terminal": True,
+                "auto_allowed": False,
+                "write_allowed": True,
+                "guards": ["user_cancel_requested", "history_verified"],
+                "required_evidence": ["user_cancel_request", "mst_session_id", "history_head", "cancel_scope"],
+                "on_reject": "guard.inspect_only_verification",
+                "ledger_event_family": "external_lifecycle",
+                "projection_rule": "display terminal cancelled node only when cancel lifecycle evidence is ledger-backed",
+                "reject_failure_path": "terminal.state_inconsistency",
+            },
+            "terminal.completed.reject_split": {
+                "id": "terminal.completed.reject_split",
+                "from": ["active"],
+                "to": "inspecting",
+                "terminal": False,
+                "auto_allowed": True,
+                "write_allowed": False,
+                "guards": ["completion_reject_reason_classified"],
+                "required_evidence": ["objective_check_result", "history_head", "failed_guard"],
+                "on_reject": {
+                    "no_next_action": "continue.queued_action",
+                    "history_verified": "guard.inspect_only_verification",
+                    "objective_check_result": "guard.inspect_only_verification",
+                    "confirmed_mismatch": "terminal.state_inconsistency",
+                },
+                "ledger_event_family": "transition",
+                "projection_rule": "display completion attempt edge plus reject-specific continuation or inspect edge",
+                "reject_failure_path": "terminal.state_inconsistency",
+            },
         },
         "semantic_invariants": [
             "all transition from/to states are declared",
@@ -251,14 +326,19 @@ def _base_graph() -> dict:
     return graph
 
 
-def _attempt_envelope(*, evidence: dict | None = None, transition: str = "terminal.completed") -> dict:
+def _attempt_envelope(
+    *,
+    evidence: dict | None = None,
+    transition: str = "terminal.completed",
+    current_state: str = "active",
+) -> dict:
     graph = _base_graph()
     return {
         "schema_version": 1,
         "mst_session_id": SID,
         "root_mst_id": ROOT,
         "graph": {"id": graph["id"], "version": graph["version"], "hash": graph["hash"]},
-        "current_state": "active",
+        "current_state": current_state,
         "attempted_transition": transition,
         "evidence": evidence or {"objective_check_result": {"done": False}, "history_head": "a" * 64},
         "guard_inputs": {
@@ -287,6 +367,9 @@ def _invalid_graph_cases() -> list[tuple[str, str, dict, dict | None]]:
     invalid_evidence = copy.deepcopy(base)
     invalid_evidence["transitions"]["continue.queued_action"]["required_evidence"].append("unknown_evidence_key")
 
+    invalid_lifecycle = copy.deepcopy(base)
+    invalid_lifecycle["lifecycle_mappings"]["blocked.resume_confirmed"].pop("ledger_event_family")
+
     view_gap = copy.deepcopy(base)
     generated_view = {
         "schema_version": 1,
@@ -301,6 +384,7 @@ def _invalid_graph_cases() -> list[tuple[str, str, dict, dict | None]]:
         ("unreachable nonterminal state", "unreachable_nonterminal_state", unreachable_nonterminal, None),
         ("reject without on_reject", "on_reject", reject_without_on_reject, None),
         ("invalid evidence producer", "evidence_producer", invalid_evidence, None),
+        ("invalid lifecycle mapping", "lifecycle_mapping", invalid_lifecycle, None),
         ("generated view coverage gap", "generated_view_coverage", view_gap, generated_view),
     ]
 
@@ -343,6 +427,59 @@ def test_graph_artifact_defines_machine_readable_contract() -> None:
     assert "terminal.security_confirmation_required" in transitions
     security = transitions["terminal.security_confirmation_required"]
     assert security["auto_allowed"] is False, "auto_allowed must not grant destructive/external action permission"
+
+
+def test_state_inventory_and_terminal_entry_coverage() -> None:
+    module = _transition_graph_module()
+    graph_path, graph = _load_canonical_graph()
+    result = _call_required(module, "validate_state_inventory_coverage", graph, source=str(graph_path))
+
+    assert isinstance(result, dict), result
+    assert result.get("status") == "ok", result
+    assert result.get("graph_version") == graph["version"], result
+    assert result.get("graph_hash") == graph["hash"], result
+    assert set(result.get("terminal_states") or []) >= {"completed", "failed", "cancelled"}, result
+    assert set(result.get("nonterminal_states") or []) >= {"active", "inspecting", "blocked"}, result
+    assert result.get("gaps") == [], result
+    terminal_entries = result.get("terminal_entry_coverage")
+    assert isinstance(terminal_entries, dict), result
+    for state in result["terminal_states"]:
+        entry = terminal_entries.get(state)
+        assert isinstance(entry, dict), (state, result)
+        assert entry.get("coverage") in {"graph_transition", "lifecycle_mapping"}, (state, entry)
+        assert entry.get("required_evidence"), (state, entry)
+
+
+def test_equivalent_lifecycle_mappings_cover_known_gap_candidates() -> None:
+    module = _transition_graph_module()
+    graph_path, graph = _load_canonical_graph()
+
+    result = _call_required(module, "validate_equivalent_lifecycle_mappings", graph, source=str(graph_path))
+    assert isinstance(result, dict), result
+    assert result.get("status") == "ok", result
+    mappings = result.get("mappings")
+    assert isinstance(mappings, dict), result
+
+    for mapping_id in (
+        "blocked.resume_confirmed",
+        "terminal.user_cancelled.lifecycle",
+        "terminal.completed.reject_split",
+    ):
+        mapping = mappings.get(mapping_id)
+        assert isinstance(mapping, dict), result
+        assert REQUIRED_LIFECYCLE_MAPPING_FIELDS <= set(mapping), (
+            mapping_id,
+            REQUIRED_LIFECYCLE_MAPPING_FIELDS - set(mapping),
+        )
+        assert mapping["required_evidence"], mapping
+        assert mapping["ledger_event_family"], mapping
+        assert mapping["projection_rule"], mapping
+        assert mapping["reject_failure_path"], mapping
+
+    missing = copy.deepcopy(graph)
+    missing["lifecycle_mappings"]["terminal.user_cancelled.lifecycle"].pop("projection_rule")
+    failed = _call_required(module, "validate_equivalent_lifecycle_mappings", missing, source="fixture:missing")
+    _assert_structured_non_success(failed, expected_code="lifecycle_mapping")
 
 
 def test_graph_schema_invariants_fail_closed() -> None:
@@ -397,6 +534,100 @@ def test_transition_validator_requires_explicit_envelope() -> None:
     missing_hash["graph"].pop("hash")
     failed = _call_required(module, "validate_attempted_transition", missing_hash, graph)
     _assert_structured_non_success(failed, expected_code="graph.hash")
+
+
+def test_transition_validator_splits_completion_reject_paths() -> None:
+    module = _transition_graph_module()
+    graph = _base_graph()
+
+    no_next_action_failed = _call_required(
+        module,
+        "validate_attempted_transition",
+        _attempt_envelope(
+            evidence={
+                "objective_check_result": {"done": True},
+                "history_head": "c" * 64,
+                "next_action": {"skill": "mst:continue", "source": "REQ-896"},
+            }
+        ),
+        graph,
+    )
+    assert no_next_action_failed.get("status") == "rejected", no_next_action_failed
+    assert no_next_action_failed.get("on_reject") == "continue.queued_action", no_next_action_failed
+    assert no_next_action_failed.get("write_permission_granted") is False, no_next_action_failed
+    assert no_next_action_failed.get("auto_terminal_write") is False, no_next_action_failed
+
+    missing_history = _call_required(
+        module,
+        "validate_attempted_transition",
+        _attempt_envelope(evidence={"objective_check_result": {"done": True}}),
+        graph,
+    )
+    assert missing_history.get("status") == "rejected", missing_history
+    assert missing_history.get("on_reject") == "guard.inspect_only_verification", missing_history
+    assert "history_head" in set(missing_history.get("missing_evidence") or []), missing_history
+    assert missing_history.get("write_permission_granted") is False, missing_history
+
+    stale_history = _call_required(
+        module,
+        "validate_attempted_transition",
+        _attempt_envelope(
+            evidence={
+                "objective_check_result": {"done": True},
+                "history_head": {"value": "d" * 64, "stale": True},
+            }
+        ),
+        graph,
+    )
+    assert stale_history.get("status") == "rejected", stale_history
+    assert stale_history.get("on_reject") == "guard.inspect_only_verification", stale_history
+    assert "history_head" in set(stale_history.get("stale_evidence") or []), stale_history
+
+    confirmed_mismatch = _call_required(
+        module,
+        "validate_attempted_transition",
+        _attempt_envelope(
+            evidence={
+                "objective_check_result": {"done": True},
+                "history_head": "e" * 64,
+                "mismatch_subject": {"kind": "session", "confirmed": True},
+            },
+            transition="continue.rehydrate_retry",
+        ),
+        graph,
+    )
+    assert confirmed_mismatch.get("status") == "rejected", confirmed_mismatch
+    assert confirmed_mismatch.get("on_reject") == "terminal.state_inconsistency", confirmed_mismatch
+    assert "mismatch_subject" in set(confirmed_mismatch.get("mismatched_evidence") or []), confirmed_mismatch
+    assert confirmed_mismatch.get("auto_terminal_write") is False, confirmed_mismatch
+
+    unsupported_terminal = _call_required(
+        module,
+        "validate_attempted_transition",
+        _attempt_envelope(transition="terminal.unsupported", current_state="active"),
+        graph,
+    )
+    _assert_structured_non_success(unsupported_terminal, expected_code="attempted_transition")
+
+
+def test_dod001_evidence_result_has_required_summary_fields() -> None:
+    module = _transition_graph_module()
+    graph_path, graph = _load_canonical_graph()
+    result = _call_required(module, "build_transition_graph_evidence_result", graph, source=str(graph_path))
+
+    assert isinstance(result, dict), result
+    assert result.get("dod_id") == "DOD-001", result
+    assert result.get("status") == "ok", result
+    assert result.get("graph_version") == graph["version"], result
+    assert result.get("graph_hash") == graph["hash"], result
+    assert result.get("checked_transitions"), result
+    assert isinstance(result.get("gaps"), list), result
+    assert result.get("severity") in {"info", "low", "medium", "high", "critical"}, result
+    assert result.get("evidence_ref") == str(graph_path), result
+    assert result.get("recommended_action"), result
+    assert result.get("mapped_dod") == "DOD-001", result
+    assert set(result.get("cross_references") or []) >= {"DOD-004", "DOD-005"}, result
+    assert result.get("completed_dods") == ["DOD-001"], result
 
 
 def test_repeated_on_reject_loop_is_bounded() -> None:
@@ -539,8 +770,12 @@ def test_generated_graph_view_detects_drift_without_dod017_artifacts() -> None:
 
 TESTS: list[Callable[[], None]] = [
     test_graph_artifact_defines_machine_readable_contract,
+    test_state_inventory_and_terminal_entry_coverage,
+    test_equivalent_lifecycle_mappings_cover_known_gap_candidates,
     test_graph_schema_invariants_fail_closed,
     test_transition_validator_requires_explicit_envelope,
+    test_transition_validator_splits_completion_reject_paths,
+    test_dod001_evidence_result_has_required_summary_fields,
     test_repeated_on_reject_loop_is_bounded,
     test_hook_boundary_uses_graph_on_reject_continuation,
     test_generated_graph_view_detects_drift_without_dod017_artifacts,
