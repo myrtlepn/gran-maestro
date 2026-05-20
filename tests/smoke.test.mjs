@@ -13,6 +13,7 @@ import {
   assertDod008WorkflowE2EValidationEvidence,
   assertDod008WorkflowSchemaContract,
   assertDod009ClaudePluginRegressionMatrix,
+  assertDod010BlockerFreeMigrationReport,
   assertDod009RequestEvidence,
   assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
@@ -26,10 +27,12 @@ import {
   buildDod008WorkflowE2EValidationEvidence,
   buildDod008WorkflowSchemaContract,
   buildDod009ClaudePluginRegressionMatrix,
+  buildDod010BlockerFreeMigrationReport,
   buildDod009RequestEvidence,
   scanDod008ScenarioSchemaMetadata,
   scanDod008RequestEvidenceMetadata,
   scanDod009RegressionMatrixMetadata,
+  scanDod010BlockerFreeMigrationReportMetadata,
   buildDod007RequestEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
   buildCodexRoleMappingEvidence,
@@ -40,6 +43,9 @@ import {
   defaultDod008WorkflowE2EValidationSummary,
   defaultDod009RequestEvidenceVerificationSummary,
   defaultDod007RequestEvidenceVerificationSummary,
+  dod010BlockerFreeMigrationReportRelativePath,
+  dod010EvidenceByDodIds,
+  dod010NormalizedBlockerTypes,
   dod008CoreWorkflowSmokeArtifactTypes,
   dod008CoreWorkflowSmokeScenarioPaths,
   dod008CoreWorkflowSmokeSessionId,
@@ -82,6 +88,7 @@ import {
   sprint4SelectionReason,
   stableEvidenceRelativePath,
   userConfigPathLiteral,
+  validateDod010BlockerFreeMigrationReport,
   validationEntrypoints,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
 import {
@@ -529,6 +536,88 @@ function assertNoForbiddenDod009EvidenceLiterals(evidence, forbiddenLiterals = [
     violation_count: 0,
     violations: [],
   });
+}
+
+function assertNoForbiddenDod010ReportLiterals(report, forbiddenLiterals = []) {
+  const stringLeaves = collectStringLeaves(report);
+  const forbiddenDefaults = [
+    repoRoot,
+    orchestrationRoot,
+    '/Users/',
+    '/private/',
+    '/home/',
+    '~/',
+    '$HOME',
+    '${HOME}',
+    '~/.codex',
+    '.claude/hooks',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'cache refresh',
+    'external install',
+    'plugin cache',
+    'ln -s',
+    ...forbiddenLiterals,
+  ];
+
+  for (const stringValue of stringLeaves) {
+    assert.doesNotMatch(stringValue, /(^|[\\/])\.\.(?:[\\/]|$)/u);
+    assert.doesNotMatch(stringValue, /%2e%2e/iu);
+    assert.doesNotMatch(stringValue, /^[A-Za-z]:[\\/]/u);
+  }
+
+  for (const literal of forbiddenDefaults) {
+    assert.ok(
+      stringLeaves.every((stringValue) =>
+        !stringValue.toLowerCase().includes(literal.toLowerCase()),
+      ),
+      `Forbidden literal found in DOD-010 report: ${literal}`,
+    );
+  }
+
+  assert.deepEqual(scanDod010BlockerFreeMigrationReportMetadata(report), {
+    status: 'pass',
+    scanned_string_count:
+      scanDod010BlockerFreeMigrationReportMetadata(report).scanned_string_count,
+    violation_count: 0,
+    violations: [],
+  });
+}
+
+function assertDod010FollowUpScopeAndReusableSummary(report) {
+  assert.deepEqual(
+    report.follow_up_scope.map((entry) => entry.dod_id),
+    ['DOD-011', 'DOD-012', 'DOD-013'],
+  );
+  assert.ok(report.follow_up_scope.every((entry) => entry.status === 'follow_up'));
+  assert.ok(report.follow_up_scope.every((entry) => entry.implementation_count === 0));
+  assert.ok(report.follow_up_scope.every((entry) => entry.runtime_invocation_count === 0));
+  assert.ok(report.follow_up_scope.every((entry) => entry.acceptance_gate_count === 0));
+  assert.deepEqual(report.completed_dods, dod010EvidenceByDodIds);
+  assert.equal(report.completed_dod_count, dod010EvidenceByDodIds.length);
+  assert.equal(
+    report.follow_up_scope.every((entry) => !report.completed_dods.includes(entry.dod_id)),
+    true,
+  );
+  assert.deepEqual(
+    Object.keys(report.reusable_blocker_risk_summary),
+    ['DOD-011', 'DOD-012', 'DOD-013'],
+  );
+
+  for (const dodId of ['DOD-011', 'DOD-012', 'DOD-013']) {
+    const summary = report.reusable_blocker_risk_summary[dodId];
+    for (const field of [
+      'blocker_count_summary',
+      'blocker_criteria_summary',
+      'evidence_coverage_summary',
+      'unresolved_non_release_blocking_risks_summary',
+      'follow_up_recommendations_summary',
+    ]) {
+      assert.equal(typeof summary[field], 'string');
+      assert.match(summary[field].trim(), /^[A-Z0-9].+[.!?]$/u);
+    }
+  }
 }
 
 test('smoke test runner executes deterministically', () => {
@@ -2057,6 +2146,164 @@ test('DOD-009 generated request evidence artifact metadata has no forbidden lite
 
   assertDod009RequestEvidence(evidence);
   assertNoForbiddenDod009EvidenceLiterals(evidence);
+});
+
+test('DOD-010 blocker-free migration report maps DOD-001 to DOD-009 evidence completeness', () => {
+  const report = buildDod010BlockerFreeMigrationReport();
+
+  assertDod010BlockerFreeMigrationReport(report);
+  assert.equal(report.artifact_id, 'REQ-916-DOD-010-blocker-free-migration-report');
+  assert.equal(report.task_id, '02');
+  assert.equal(report.format_version, '1.0.0');
+  assert.equal(report.request_evidence_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.deepEqual(Object.keys(report.evidence_by_dod), dod010EvidenceByDodIds);
+  assert.equal(report.report_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.equal(report.evidence_by_dod['DOD-002'].evidence_paths.length, 2);
+  assert.equal(report.evidence_by_dod['DOD-003'].evidence_paths.length, 2);
+  assert.ok(
+    dod010EvidenceByDodIds.every((dodId) => report.evidence_by_dod[dodId].status_source.status === 'done'),
+  );
+  assert.ok(
+    dod010EvidenceByDodIds.every((dodId) =>
+      ['pass', 'accepted'].includes(report.evidence_by_dod[dodId].primary_evidence_status),
+    ),
+  );
+  report.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assertDod010FollowUpScopeAndReusableSummary(report);
+  assertNoForbiddenDod010ReportLiterals(report);
+});
+
+test('DOD-010 validator normalizes blocker enums and rejects computed-summary drift', () => {
+  const report = buildDod010BlockerFreeMigrationReport();
+  const passingValidation = validateDod010BlockerFreeMigrationReport(report);
+
+  assert.equal(passingValidation.status, 'pass');
+  assert.equal(passingValidation.blocker_count, 0);
+  assert.deepEqual(Object.keys(passingValidation.blocker_counts_by_type), dod010NormalizedBlockerTypes);
+  assert.ok(
+    dod010NormalizedBlockerTypes.every((blockerType) =>
+      passingValidation.human_readable.criteria_summaries.some((summary) =>
+        summary.includes(`${blockerType}: 0`),
+      ),
+    ),
+  );
+
+  const mutatedReport = structuredClone(report);
+  mutatedReport.blocker_input_sources.push({
+    source_id: 'fixture:unknown-blocker',
+    source_path: 'tests/smoke.test.mjs',
+    blocker_type: 'future_blocker_type',
+    count: 2,
+    detail: 'fixture for unsupported blocker normalization',
+  });
+  mutatedReport.validator_summary = {
+    ...mutatedReport.validator_summary,
+    blocker_count: 0,
+    blocker_counts_by_type: {
+      ...mutatedReport.validator_summary.blocker_counts_by_type,
+      unsupported_blocker_type: 0,
+    },
+    human_readable: {
+      ...mutatedReport.validator_summary.human_readable,
+      blocker_count_summary: 'Computed blocker count: 0.',
+    },
+  };
+
+  const failingValidation = validateDod010BlockerFreeMigrationReport(mutatedReport);
+  assert.equal(failingValidation.status, 'fail');
+  assert.equal(failingValidation.blocker_counts_by_type.unsupported_blocker_type, 2);
+  assert.equal(failingValidation.blocker_count, 2);
+  assert.equal(failingValidation.reported_summary_matches_computed, false);
+  assert.match(failingValidation.human_readable.blocker_count_summary, /Computed blocker count: 2\./u);
+});
+
+test('DOD-010 validator rejects malformed unresolved risks and release-blocking counts', () => {
+  const report = buildDod010BlockerFreeMigrationReport();
+  const mutatedReport = structuredClone(report);
+  mutatedReport.unresolved_risks = [
+    {
+      id: '',
+      description: '',
+      classification: 'unknown',
+      release_blocking: true,
+      mitigating_evidence: [],
+    },
+  ];
+  mutatedReport.release_blocking_true_count = 1;
+
+  const validation = validateDod010BlockerFreeMigrationReport(mutatedReport);
+  assert.equal(validation.status, 'fail');
+  assert.ok(validation.blocker_counts_by_type.release_blocking_risk > 0);
+  assert.equal(validation.release_blocking_true_count, 1);
+});
+
+test('DOD-010 validator rejects no-go metadata path escapes and stale lifecycle rationale gaps', () => {
+  const report = buildDod010BlockerFreeMigrationReport();
+  const mutatedReport = structuredClone(report);
+  mutatedReport.input_paths_read.push('../escape');
+  mutatedReport.validation_commands.push('codex plugins reload mst');
+  mutatedReport.lifecycle_findings.push({
+    id: 'fixture-lifecycle-gap',
+    source_path: '.gran-maestro/requests/REQ-916/request.json',
+    finding_type: 'stale_request_snapshot',
+    description: 'Fixture lifecycle inconsistency without rationale.',
+    classification: 'non_release_blocking',
+    release_blocking: false,
+    rationale: '',
+  });
+
+  const validation = validateDod010BlockerFreeMigrationReport(mutatedReport);
+  assert.equal(validation.status, 'fail');
+  assert.ok(validation.blocker_counts_by_type.path_escape > 0);
+  assert.ok(validation.blocker_counts_by_type.no_go_violation > 0);
+  assert.ok(validation.blocker_counts_by_type.stale_lifecycle > 0);
+});
+
+test('DOD-010 request-level report generator writes parseable artifact to an explicit output path', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'dod-010-request-evidence-'));
+  const outputPath = join(tempDir, 'migration-report.json');
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/generate-dod-010-blocker-free-migration-report.mjs', outputPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const report = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertDod010BlockerFreeMigrationReport(report);
+    report.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assertDod010FollowUpScopeAndReusableSummary(report);
+    assert.equal(report.allowed_output_paths.length, 1);
+    assert.deepEqual(report.allowed_output_paths, [dod010BlockerFreeMigrationReportRelativePath]);
+    assertNoForbiddenDod010ReportLiterals(report, [tempDir, outputPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('DOD-010 persisted artifact preserves metadata, follow-up boundary, and allowlist guards', () => {
+  const report = JSON.parse(readRepoFile(dod010BlockerFreeMigrationReportRelativePath));
+
+  assertDod010BlockerFreeMigrationReport(report);
+  assert.equal(report.artifact_id, 'REQ-916-DOD-010-blocker-free-migration-report');
+  assert.equal(report.request_id, 'REQ-916');
+  assert.equal(report.agi_id, 'AGI-039');
+  assert.equal(report.sprint, 11);
+  assert.equal(report.task_id, '02');
+  assert.equal(report.dod_id, 'DOD-010');
+  assert.equal(report.plan_id, 'PLN-738');
+  assert.equal(report.request_evidence_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.equal(report.status, 'pass');
+  assertDod010FollowUpScopeAndReusableSummary(report);
+  assert.deepEqual(report.allowed_output_paths, [dod010BlockerFreeMigrationReportRelativePath]);
+  assertNoForbiddenDod010ReportLiterals(report);
 });
 
 test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {

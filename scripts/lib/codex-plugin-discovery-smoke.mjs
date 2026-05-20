@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -41,6 +41,24 @@ function findOrchestrationRoot(startDir) {
 }
 
 export const orchestrationRoot = findOrchestrationRoot(repoRoot);
+
+function findSharedGranMaestroPath(relativePath) {
+  let currentDir = repoRoot;
+
+  while (true) {
+    const candidate = join(currentDir, '.gran-maestro', relativePath);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      return join(orchestrationRoot, relativePath);
+    }
+
+    currentDir = parentDir;
+  }
+}
 
 export const stableEvidenceRelativePath =
   '.gran-maestro/requests/REQ-886/evidence/codex-plugin-discovery-smoke.json';
@@ -627,6 +645,87 @@ export const defaultDod009RequestEvidenceVerificationSummary = {
     generated_output_path: null,
   },
 };
+
+export const dod010EvidenceByDodIds = [
+  'DOD-001',
+  'DOD-002',
+  'DOD-003',
+  'DOD-004',
+  'DOD-005',
+  'DOD-006',
+  'DOD-007',
+  'DOD-008',
+  'DOD-009',
+];
+export const dod010NormalizedBlockerTypes = [
+  'missing_evidence',
+  'non_existing_evidence_path',
+  'parse_failure',
+  'failed_tests',
+  'generated_drift',
+  'unsupported_blocker_type',
+  'no_go_violation',
+  'stale_lifecycle',
+  'path_escape',
+  'release_blocking_risk',
+];
+export const dod010AllowedRiskClassifications = [
+  'blocker',
+  'non_release_blocking',
+  'follow_up',
+];
+export const dod010FollowUpDodIds = ['DOD-011', 'DOD-012', 'DOD-013'];
+export const dod010BlockerFreeMigrationReportRelativePath =
+  '.gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json';
+export const dod010BlockerFreeMigrationReportAbsolutePath = join(
+  repoRoot,
+  dod010BlockerFreeMigrationReportRelativePath,
+);
+const dod010ObjectiveRelativePath = '.gran-maestro/agile/AGI-039/objective/objective.md';
+const dod010ObjectiveAbsolutePath = join(dirname(orchestrationRoot), dod010ObjectiveRelativePath);
+const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/request.json';
+const dod010Req916RequestMetadataAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-916/request.json',
+);
+const dod010GeneratorScriptRelativePath =
+  'scripts/generate-dod-010-blocker-free-migration-report.mjs';
+const dod010NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'user_home_surface',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_config_surface',
+    category: 'user-scoped-codex-config',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_workspace_bypass',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'external_runtime_install',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_mutation',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'symlink_creation',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+];
 
 export const manifestFields = [
   'name',
@@ -2620,6 +2719,811 @@ export function scanDod009RegressionMatrixMetadata(metadata) {
     violation_count: violations.length,
     violations,
   };
+}
+
+export function scanDod010BlockerFreeMigrationReportMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_config_surface', literal: '~/.codex/config.toml' },
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'plugin_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'plugin_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'plugin_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'plugin_cache_phrase', literal: 'plugin cache' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+function collectNamedFieldValues(value, fieldName, values = []) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectNamedFieldValues(entry, fieldName, values));
+    return values;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return values;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === fieldName) {
+      values.push(entry);
+    }
+    collectNamedFieldValues(entry, fieldName, values);
+  }
+
+  return values;
+}
+
+function createDod010BlockerCounts() {
+  return Object.fromEntries(
+    dod010NormalizedBlockerTypes.map((blockerType) => [blockerType, 0]),
+  );
+}
+
+function incrementDod010BlockerCount(counts, blockerType, amount = 1) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return;
+  }
+
+  if (Object.hasOwn(counts, blockerType)) {
+    counts[blockerType] += amount;
+    return;
+  }
+
+  counts.unsupported_blocker_type += amount;
+}
+
+function buildDod010HumanReadableSummary(blockerCounts, blockerCount) {
+  return {
+    blocker_count_summary: `Computed blocker count: ${blockerCount}.`,
+    criteria_summaries: dod010NormalizedBlockerTypes.map(
+      (blockerType) => `${blockerType}: ${blockerCounts[blockerType]}.`,
+    ),
+  };
+}
+
+function summarizeDod010EvidenceRefs(rawValue) {
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    return [];
+  }
+
+  return rawValue
+    .split(/[;,]/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function inspectDod010RepositoryPath(path, { mustExist = true } = {}) {
+  const validation = validateRepositoryRelativePath(path);
+  if (validation.status !== 'pass') {
+    return {
+      status: 'fail',
+      code: 'path_escape',
+      normalized_path: null,
+      exists: false,
+      realpath_within_repo: false,
+      reason: validation.reason,
+    };
+  }
+
+  const normalizedPath = validation.normalized_path;
+  const resolutionBaseRoot = normalizedPath.startsWith('.gran-maestro/')
+    ? dirname(orchestrationRoot)
+    : repoRoot;
+  const absolutePath = join(resolutionBaseRoot, normalizedPath);
+  const exists = existsSync(absolutePath);
+  if (!exists) {
+    return {
+      status: mustExist ? 'fail' : 'pass',
+      code: 'non_existing_evidence_path',
+      normalized_path: normalizedPath,
+      exists: false,
+      realpath_within_repo: false,
+      reason: 'path does not exist under repository root',
+    };
+  }
+
+  const normalizedRepoRealpath = normalizePathSeparators(realpathSync(resolutionBaseRoot));
+  const normalizedTargetRealpath = normalizePathSeparators(realpathSync(absolutePath));
+  const realpathWithinRepo =
+    normalizedTargetRealpath === normalizedRepoRealpath ||
+    normalizedTargetRealpath.startsWith(`${normalizedRepoRealpath}/`);
+
+  return {
+    status: realpathWithinRepo ? 'pass' : 'fail',
+    code: realpathWithinRepo ? 'ok' : 'path_escape',
+    normalized_path: normalizedPath,
+    exists: true,
+    realpath_within_repo: realpathWithinRepo,
+    reason: realpathWithinRepo
+      ? 'repository-relative path accepted'
+      : 'resolved path escaped repository root',
+  };
+}
+
+function normalizeDod010EvidenceStatus(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'accepted') {
+    return 'accepted';
+  }
+
+  if (normalized === 'pass' || normalized === 'done') {
+    return 'pass';
+  }
+
+  return null;
+}
+
+function deriveDod010PrimaryEvidenceStatus(value) {
+  const directStatus = normalizeDod010EvidenceStatus(value?.status);
+  if (directStatus) {
+    return directStatus;
+  }
+
+  const nestedStatuses = collectNamedFieldValues(value, 'status')
+    .map((status) => normalizeDod010EvidenceStatus(status))
+    .filter(Boolean);
+  if (nestedStatuses.length > 0) {
+    return nestedStatuses.includes('accepted') ? 'accepted' : 'pass';
+  }
+
+  const numericPassFields = [
+    'parse_error_count',
+    'generated_drift_count',
+    'unsupported_blocker_count',
+    'missing_component_count',
+  ];
+  const hasZeroSignal = numericPassFields.some((field) => Number(value?.[field]) === 0);
+  return hasZeroSignal ? 'pass' : null;
+}
+
+function parseDod010ObjectiveEvidenceMarkers(objectiveText) {
+  const markers = new Map();
+  const pattern =
+    /<!--\s*dod:(DOD-\d{3})\s+status:([^\s]+)(?:[^>]*?)evidence_refs:\[([^\]]*)\]\s*-->/gu;
+
+  for (const match of objectiveText.matchAll(pattern)) {
+    const [, dodId, status, rawRefs] = match;
+    markers.set(dodId, {
+      dod_id: dodId,
+      status: String(status).trim(),
+      evidence_paths: summarizeDod010EvidenceRefs(rawRefs),
+    });
+  }
+
+  return markers;
+}
+
+function extractDod010ObjectiveProgress(objectiveText) {
+  const match = objectiveText.match(/진행률:\s*`(\d+)\/(\d+)/u);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    completed: Number(match[1]),
+    total: Number(match[2]),
+  };
+}
+
+function buildDod010LifecycleFindings(objectiveText) {
+  const findings = [];
+  const progress = extractDod010ObjectiveProgress(objectiveText);
+  const completedMarkers = [...objectiveText.matchAll(/<!--\s*dod:DOD-\d{3}\s+status:done\b/gu)].length;
+
+  if (progress && progress.completed !== completedMarkers) {
+    findings.push({
+      id: 'objective-progress-summary-mismatch',
+      source_path: dod010ObjectiveRelativePath,
+      finding_type: 'stale_objective_progress_summary',
+      description:
+        `Objective progress summary records ${progress.completed}/${progress.total} while ` +
+        `${completedMarkers} DoD markers are status:done.`,
+      classification: 'non_release_blocking',
+      release_blocking: false,
+      rationale:
+        'The objective summary text is stale, but the DOD markers and repository-local evidence remain authoritative.',
+    });
+  }
+
+  return findings;
+}
+
+function buildDod010FollowUpScope() {
+  return dod010FollowUpDodIds.map((dodId) => ({
+    dod_id: dodId,
+    status: 'follow_up',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason:
+      `${dodId} remains follow-up scope only and is excluded from the completed DOD-010 ` +
+      'migration report counts.',
+  }));
+}
+
+function buildDod010UnresolvedRisks() {
+  return dod010FollowUpDodIds.map((dodId) => ({
+    id: `${dodId.toLowerCase()}-follow-up-boundary`,
+    description:
+      `${dodId} remains outside the blocker-free DOD-010 completion boundary and must be ` +
+      'tracked as follow-up work.',
+    classification: 'follow_up',
+    release_blocking: false,
+    mitigating_evidence: [dod010ObjectiveRelativePath],
+  }));
+}
+
+function buildDod010ReusableBlockerRiskSummary({
+  blockerCount,
+  completedDodCount,
+  unresolvedNonReleaseBlockingRiskCount,
+}) {
+  return Object.fromEntries(
+    dod010FollowUpDodIds.map((dodId) => [
+      dodId,
+      {
+        blocker_count_summary:
+          `${dodId} inherits a blocker-free DOD-010 baseline because the computed blocker count ` +
+          `remains ${blockerCount}.`,
+        blocker_criteria_summary:
+          `${dodId} introduces no additional blocker criteria in this report because the ` +
+          'normalized blocker enum counts all remain zero.',
+        evidence_coverage_summary:
+          `${dodId} is excluded from the ${completedDodCount} completed DoD evidence entries and ` +
+          'stays in follow-up scope only.',
+        unresolved_non_release_blocking_risks_summary:
+          `${dodId} has ${unresolvedNonReleaseBlockingRiskCount} unresolved non-release-blocking ` +
+          'risks recorded in this migration report.',
+        follow_up_recommendations_summary:
+          `Track ${dodId} in a follow-up request after the DOD-010 blocker-free migration report ` +
+          'is accepted.',
+      },
+    ]),
+  );
+}
+
+function buildDod010EvidenceByDod({
+  objectiveMarkers,
+  parseFailures,
+}) {
+  const evidenceByDod = {};
+  const parsedEvidenceArtifacts = [];
+
+  for (const dodId of dod010EvidenceByDodIds) {
+    const marker = objectiveMarkers.get(dodId) ?? null;
+    const evidencePaths = sanitizeMetadataPathList(marker?.evidence_paths ?? []);
+    const evidencePathDetails = evidencePaths.map((path) => inspectDod010RepositoryPath(path));
+    let primaryEvidencePath = null;
+    let primaryEvidenceStatus = null;
+
+    for (const pathDetail of evidencePathDetails) {
+      if (
+        pathDetail.status !== 'pass' ||
+        typeof pathDetail.normalized_path !== 'string' ||
+        !pathDetail.normalized_path.endsWith('.json')
+      ) {
+        continue;
+      }
+
+      const artifact = collectJsonArtifact(
+        pathDetail.normalized_path.startsWith('.gran-maestro/')
+          ? join(dirname(orchestrationRoot), pathDetail.normalized_path)
+          : join(repoRoot, pathDetail.normalized_path),
+        readJsonFromAbsolutePath,
+        parseFailures,
+      );
+      parsedEvidenceArtifacts.push({
+        dod_id: dodId,
+        source_path: pathDetail.normalized_path,
+        value: artifact.value,
+      });
+      const derivedStatus = deriveDod010PrimaryEvidenceStatus(artifact.value);
+      if (!primaryEvidenceStatus && derivedStatus) {
+        primaryEvidencePath = pathDetail.normalized_path;
+        primaryEvidenceStatus = derivedStatus;
+      }
+    }
+
+    evidenceByDod[dodId] = {
+      dod_id: dodId,
+      status_source: {
+        source_path: dod010ObjectiveRelativePath,
+        status: marker?.status ?? null,
+      },
+      primary_evidence_path: primaryEvidencePath,
+      primary_evidence_status: primaryEvidenceStatus,
+      evidence_paths: evidencePaths,
+      evidence_path_details: evidencePathDetails.map((detail) => ({
+        normalized_path: detail.normalized_path,
+        exists: detail.exists,
+        realpath_within_repo: detail.realpath_within_repo,
+        status: detail.status,
+      })),
+    };
+  }
+
+  return {
+    evidence_by_dod: evidenceByDod,
+    parsed_evidence_artifacts: parsedEvidenceArtifacts,
+  };
+}
+
+function buildDod010BlockerInputSources(parsedEvidenceArtifacts) {
+  const blockerSourceDefinitions = [
+    {
+      source_id: 'parse_error_count',
+      blocker_type: 'parse_failure',
+      getter: (artifact) => Number(artifact?.parse_error_count ?? 0),
+    },
+    {
+      source_id: 'generated_drift_count',
+      blocker_type: 'generated_drift',
+      getter: (artifact) => Number(artifact?.generated_drift_count ?? 0),
+    },
+    {
+      source_id: 'unsupported_blocker_count',
+      blocker_type: 'unsupported_blocker_type',
+      getter: (artifact) => Number(artifact?.unsupported_blocker_count ?? 0),
+    },
+    {
+      source_id: 'forbidden_metadata_scan.violation_count',
+      blocker_type: 'no_go_violation',
+      getter: (artifact) => Number(artifact?.forbidden_metadata_scan?.violation_count ?? 0),
+    },
+    {
+      source_id: 'blocker_summary.blocker_count',
+      blocker_type: 'failed_tests',
+      getter: (artifact) => Number(artifact?.blocker_summary?.blocker_count ?? 0),
+    },
+  ];
+
+  return parsedEvidenceArtifacts.flatMap(({ dod_id, source_path, value }) =>
+    blockerSourceDefinitions.map((definition) => ({
+      source_id: `${dod_id}:${definition.source_id}`,
+      source_path,
+      blocker_type: definition.blocker_type,
+      count: definition.getter(value),
+    }))
+  );
+}
+
+function computeDod010ValidationResult(report) {
+  const blockerCounts = createDod010BlockerCounts();
+  const evidenceByDod = report?.evidence_by_dod ?? {};
+  const unresolvedRisks = report?.unresolved_risks;
+  const lifecycleFindings = report?.lifecycle_findings;
+  let computedReleaseBlockingTrueCount = 0;
+
+  for (const dodId of dod010EvidenceByDodIds) {
+    const entry = evidenceByDod[dodId];
+    if (!entry || typeof entry !== 'object') {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+      continue;
+    }
+
+    if (!['done', 'accepted', 'pass'].includes(entry.status_source?.status)) {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+    }
+
+    const evidencePaths = normalizeArray(entry.evidence_paths);
+    if (evidencePaths.length === 0) {
+      incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+    }
+
+    for (const evidencePath of evidencePaths) {
+      const pathValidation = inspectDod010RepositoryPath(evidencePath);
+      if (pathValidation.code === 'path_escape') {
+        incrementDod010BlockerCount(blockerCounts, 'path_escape');
+      } else if (pathValidation.code === 'non_existing_evidence_path') {
+        incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+      }
+    }
+
+    if (!['pass', 'accepted'].includes(entry.primary_evidence_status)) {
+      incrementDod010BlockerCount(blockerCounts, 'failed_tests');
+    }
+  }
+
+  for (const parseFailure of normalizeArray(report?.parse_failures)) {
+    const pathValidation = inspectDod010RepositoryPath(parseFailure?.path);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+    incrementDod010BlockerCount(blockerCounts, 'parse_failure');
+  }
+
+  for (const source of normalizeArray(report?.blocker_input_sources)) {
+    const sourceCount = Number(source?.count);
+    if (!Number.isInteger(sourceCount) || sourceCount < 0) {
+      incrementDod010BlockerCount(blockerCounts, 'unsupported_blocker_type');
+      continue;
+    }
+
+    const sourcePathValidation = inspectDod010RepositoryPath(source?.source_path);
+    if (sourcePathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (sourcePathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+
+    incrementDod010BlockerCount(blockerCounts, source?.blocker_type, sourceCount);
+  }
+
+  if (!Array.isArray(unresolvedRisks)) {
+    incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+  } else {
+    for (const risk of unresolvedRisks) {
+      const riskClassificationValid = dod010AllowedRiskClassifications.includes(risk?.classification);
+      const mitigatingEvidence = normalizeArray(risk?.mitigating_evidence);
+      const riskShapeValid =
+        typeof risk?.id === 'string' &&
+        risk.id.trim().length > 0 &&
+        typeof risk?.description === 'string' &&
+        risk.description.trim().length > 0 &&
+        riskClassificationValid &&
+        typeof risk?.release_blocking === 'boolean' &&
+        mitigatingEvidence.length > 0;
+
+      if (!riskShapeValid) {
+        incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+      }
+
+      if (risk?.release_blocking === true) {
+        computedReleaseBlockingTrueCount += 1;
+        incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+      }
+
+      for (const evidencePath of mitigatingEvidence) {
+        const pathValidation = inspectDod010RepositoryPath(evidencePath);
+        if (pathValidation.code === 'path_escape') {
+          incrementDod010BlockerCount(blockerCounts, 'path_escape');
+        } else if (pathValidation.code === 'non_existing_evidence_path') {
+          incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+        }
+      }
+    }
+  }
+
+  if (
+    !Number.isInteger(report?.release_blocking_true_count) ||
+    report.release_blocking_true_count !== computedReleaseBlockingTrueCount ||
+    report.release_blocking_true_count !== 0
+  ) {
+    incrementDod010BlockerCount(blockerCounts, 'release_blocking_risk');
+  }
+
+  if (!Array.isArray(lifecycleFindings)) {
+    incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+  } else {
+    for (const finding of lifecycleFindings) {
+      const hasRequiredFields =
+        typeof finding?.id === 'string' &&
+        finding.id.trim().length > 0 &&
+        typeof finding?.source_path === 'string' &&
+        finding.source_path.trim().length > 0 &&
+        typeof finding?.finding_type === 'string' &&
+        finding.finding_type.trim().length > 0 &&
+        typeof finding?.description === 'string' &&
+        finding.description.trim().length > 0 &&
+        dod010AllowedRiskClassifications.includes(finding?.classification) &&
+        typeof finding?.release_blocking === 'boolean' &&
+        typeof finding?.rationale === 'string';
+
+      if (!hasRequiredFields) {
+        incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+      }
+
+      if (finding?.release_blocking === false && finding?.rationale?.trim().length === 0) {
+        incrementDod010BlockerCount(blockerCounts, 'stale_lifecycle');
+      }
+
+      const pathValidation = inspectDod010RepositoryPath(finding?.source_path);
+      if (pathValidation.code === 'path_escape') {
+        incrementDod010BlockerCount(blockerCounts, 'path_escape');
+      } else if (pathValidation.code === 'non_existing_evidence_path') {
+        incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+      }
+    }
+  }
+
+  for (const inputPath of normalizeArray(report?.input_paths_read)) {
+    const pathValidation = inspectDod010RepositoryPath(inputPath);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+  }
+
+  for (const entrypoint of normalizeArray(report?.validation_entrypoints)) {
+    const pathValidation = inspectDod010RepositoryPath(entrypoint);
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    } else if (pathValidation.code === 'non_existing_evidence_path') {
+      incrementDod010BlockerCount(blockerCounts, 'non_existing_evidence_path');
+    }
+  }
+
+  for (const outputPath of normalizeArray(report?.allowed_output_paths)) {
+    const pathValidation = inspectDod010RepositoryPath(outputPath, { mustExist: false });
+    if (pathValidation.code === 'path_escape') {
+      incrementDod010BlockerCount(blockerCounts, 'path_escape');
+    }
+  }
+
+  const noGoScan = scanDod010BlockerFreeMigrationReportMetadata({
+    report_path: report?.report_path ?? null,
+    input_paths_read: report?.input_paths_read,
+    validation_entrypoints: report?.validation_entrypoints,
+    validation_commands: report?.validation_commands,
+    lifecycle_findings: report?.lifecycle_findings,
+    evidence_by_dod: report?.evidence_by_dod,
+    allowed_output_paths: report?.allowed_output_paths,
+  });
+  incrementDod010BlockerCount(blockerCounts, 'no_go_violation', noGoScan.violation_count);
+
+  const computedBlockerCount = Object.values(blockerCounts).reduce(
+    (total, count) => total + Number(count ?? 0),
+    0,
+  );
+  const humanReadable = buildDod010HumanReadableSummary(blockerCounts, computedBlockerCount);
+  const computedSummary = {
+    status:
+      computedBlockerCount === 0 &&
+      computedReleaseBlockingTrueCount === 0 &&
+      noGoScan.violation_count === 0
+        ? 'pass'
+        : 'fail',
+    blocker_count: computedBlockerCount,
+    blocker_counts_by_type: blockerCounts,
+    release_blocking_true_count: computedReleaseBlockingTrueCount,
+    no_go_scan_violations: noGoScan.violation_count,
+    human_readable: humanReadable,
+  };
+  const reportSummary = report?.validator_summary;
+  const reportedSummaryMatchesComputed = Boolean(
+    reportSummary &&
+      reportSummary.status === computedSummary.status &&
+      reportSummary.blocker_count === computedSummary.blocker_count &&
+      isDeepStrictEqual(reportSummary.blocker_counts_by_type, computedSummary.blocker_counts_by_type) &&
+      reportSummary.release_blocking_true_count === computedSummary.release_blocking_true_count &&
+      reportSummary.no_go_scan_violations === computedSummary.no_go_scan_violations &&
+      isDeepStrictEqual(reportSummary.human_readable, computedSummary.human_readable)
+  );
+
+  return {
+    ...computedSummary,
+    no_go_metadata_guard: {
+      status: noGoScan.status,
+      criteria: dod010NoGoMetadataGuardCriteria,
+      no_go_scan_violations: noGoScan.violation_count,
+    },
+    forbidden_metadata_scan: noGoScan,
+    reported_summary_matches_computed: reportedSummaryMatchesComputed,
+    report_status_matches_computed: report?.status === computedSummary.status,
+    status:
+      computedSummary.status === 'pass' &&
+      reportedSummaryMatchesComputed &&
+      report?.status === computedSummary.status
+        ? 'pass'
+        : 'fail',
+  };
+}
+
+export function validateDod010BlockerFreeMigrationReport(report) {
+  return computeDod010ValidationResult(report);
+}
+
+export function buildDod010BlockerFreeMigrationReport() {
+  const parseFailures = [];
+  const objectiveText = readTextIfExists(dod010ObjectiveAbsolutePath);
+  const requestMetadata = collectJsonArtifact(
+    dod010Req916RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const objectiveMarkers = parseDod010ObjectiveEvidenceMarkers(objectiveText);
+  const evidenceCoverage = buildDod010EvidenceByDod({
+    objectiveMarkers,
+    parseFailures,
+  });
+  const lifecycleFindings = buildDod010LifecycleFindings(objectiveText);
+  const followUpScope = buildDod010FollowUpScope();
+  const unresolvedRisks = buildDod010UnresolvedRisks();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const reportSkeleton = {
+    artifact_id: 'REQ-916-DOD-010-blocker-free-migration-report',
+    request_id: requestMetadata.value?.id ?? 'REQ-916',
+    agi_id: requestMetadata.value?.linked_objective ?? 'AGI-039',
+    sprint: requestMetadata.value?.sprint ?? 11,
+    task_id: '02',
+    dod_id: requestMetadata.value?.target_dod ?? 'DOD-010',
+    plan_id: requestMetadata.value?.source_plan ?? 'PLN-738',
+    format_version: '1.0.0',
+    generated_at: requestMetadata.value?.created_at ?? '2026-05-20T02:48:55.000Z',
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    report_path: dod010BlockerFreeMigrationReportRelativePath,
+    repository_local_only: true,
+    evidence_by_dod: evidenceCoverage.evidence_by_dod,
+    completed_dods: [...dod010EvidenceByDodIds],
+    completed_dod_count: dod010EvidenceByDodIds.length,
+    follow_up_scope: followUpScope,
+    blocker_input_sources: buildDod010BlockerInputSources(
+      evidenceCoverage.parsed_evidence_artifacts,
+    ),
+    unresolved_risks: unresolvedRisks,
+    release_blocking_true_count: 0,
+    lifecycle_findings: lifecycleFindings,
+    validation_entrypoints: [
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod010GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+    ],
+    validation_commands: [
+      `node ${dod010GeneratorScriptRelativePath} <output-path>`,
+      'npm test',
+    ],
+    allowed_output_paths: [dod010BlockerFreeMigrationReportRelativePath],
+    input_paths_read: [
+      dod010ObjectiveRelativePath,
+      dod010Req916RequestMetadataRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod010GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+      ...dod010EvidenceByDodIds.flatMap((dodId) =>
+        normalizeArray(evidenceCoverage.evidence_by_dod[dodId]?.evidence_paths)
+      ),
+    ].filter((path, index, paths) => paths.indexOf(path) === index),
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod010NoGoMetadataGuardCriteria,
+      no_go_scan_violations: 0,
+    },
+    validator_summary: {
+      status: 'fail',
+      blocker_count: -1,
+      blocker_counts_by_type: createDod010BlockerCounts(),
+      release_blocking_true_count: 0,
+      no_go_scan_violations: 0,
+      human_readable: {
+        blocker_count_summary: 'Computed blocker count: -1.',
+        criteria_summaries: [],
+      },
+    },
+    status: 'fail',
+  };
+  const computedSummary = computeDod010ValidationResult({
+    ...reportSkeleton,
+    status: 'pass',
+    validator_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      blocker_counts_by_type: createDod010BlockerCounts(),
+      release_blocking_true_count: 0,
+      no_go_scan_violations: 0,
+      human_readable: buildDod010HumanReadableSummary(createDod010BlockerCounts(), 0),
+    },
+  });
+
+  return {
+    ...reportSkeleton,
+    status: computedSummary.status,
+    blocker_count: computedSummary.blocker_count,
+    blocker_counts_by_type: computedSummary.blocker_counts_by_type,
+    no_go_scan_violations: computedSummary.no_go_scan_violations,
+    reusable_blocker_risk_summary: buildDod010ReusableBlockerRiskSummary({
+      blockerCount: computedSummary.blocker_count,
+      completedDodCount: dod010EvidenceByDodIds.length,
+      unresolvedNonReleaseBlockingRiskCount: unresolvedRisks.filter(
+        (risk) => risk.classification === 'non_release_blocking',
+      ).length,
+    }),
+    no_go_metadata_guard: computedSummary.no_go_metadata_guard,
+    forbidden_metadata_scan: computedSummary.forbidden_metadata_scan,
+    validator_summary: {
+      status: computedSummary.status,
+      blocker_count: computedSummary.blocker_count,
+      blocker_counts_by_type: computedSummary.blocker_counts_by_type,
+      release_blocking_true_count: computedSummary.release_blocking_true_count,
+      no_go_scan_violations: computedSummary.no_go_scan_violations,
+      human_readable: computedSummary.human_readable,
+    },
+  };
+}
+
+export function assertDod010BlockerFreeMigrationReport(report) {
+  assert.equal(report.artifact_id, 'REQ-916-DOD-010-blocker-free-migration-report');
+  assert.equal(report.request_id, 'REQ-916');
+  assert.equal(report.agi_id, 'AGI-039');
+  assert.equal(report.sprint, 11);
+  assert.equal(report.task_id, '02');
+  assert.equal(report.dod_id, 'DOD-010');
+  assert.equal(report.plan_id, 'PLN-738');
+  assert.equal(report.format_version, '1.0.0');
+  assert.equal(report.request_evidence_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.equal(report.report_path, dod010BlockerFreeMigrationReportRelativePath);
+  assert.equal(report.repository_local_only, true);
+  assert.deepEqual(Object.keys(report.evidence_by_dod), dod010EvidenceByDodIds);
+  assert.deepEqual(report.completed_dods, dod010EvidenceByDodIds);
+  assert.equal(report.completed_dod_count, dod010EvidenceByDodIds.length);
+  assert.deepEqual(
+    report.follow_up_scope.map((entry) => entry.dod_id),
+    dod010FollowUpDodIds,
+  );
+  assert.deepEqual(
+    Object.keys(report.reusable_blocker_risk_summary),
+    dod010FollowUpDodIds,
+  );
+  assert.deepEqual(
+    Object.keys(report.validator_summary.blocker_counts_by_type),
+    dod010NormalizedBlockerTypes,
+  );
+  assert.equal(report.validator_summary.blocker_count, 0);
+  assert.equal(report.validator_summary.release_blocking_true_count, 0);
+  assert.equal(report.validator_summary.no_go_scan_violations, 0);
+  assert.equal(report.validator_summary.human_readable.criteria_summaries.length, 10);
+  assert.equal(report.lifecycle_findings.length > 0, true);
+  assert.equal(report.no_go_metadata_guard.no_go_scan_violations, 0);
+  assert.equal(report.forbidden_metadata_scan.violation_count, 0);
+  assert.equal(report.status, 'pass');
+
+  const validation = validateDod010BlockerFreeMigrationReport(report);
+  assert.equal(validation.status, 'pass');
+  assert.equal(validation.reported_summary_matches_computed, true);
+  assert.equal(validation.report_status_matches_computed, true);
 }
 
 function buildDod009ExcludedSurfaces() {
