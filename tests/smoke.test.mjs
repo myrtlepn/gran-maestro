@@ -89,6 +89,7 @@ import {
   sprint4SelectionReason,
   stableEvidenceRelativePath,
   userConfigPathLiteral,
+  validateSharedDodEvidenceRegistryEntry,
   validateDod010BlockerFreeMigrationReport,
   validationEntrypoints,
 } from '../scripts/lib/codex-plugin-discovery-smoke.mjs';
@@ -2409,6 +2410,8 @@ test('DOD-010 persisted artifact preserves metadata, follow-up boundary, and all
 test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkage metadata', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
+    const validation = validateSharedDodEvidenceRegistryEntry(entry);
+    assert.equal(validation.status, 'pass', validation.issues.join('\n'));
     assertSharedDodEvidenceRegistryEntry(entry, expected);
   }
 });
@@ -2416,6 +2419,8 @@ test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkag
 test('Sprint 12 shared DOD evidence registry keeps DOD-009 and DOD-010 artifacts repo-scoped and validator-linked', () => {
   for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
     const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
+    const validation = validateSharedDodEvidenceRegistryEntry(entry);
+    assert.equal(validation.status, 'pass', validation.issues.join('\n'));
     assertSharedDodEvidenceRegistryEntry(entry, expected);
     assertRepoScopedExistingPath(entry.generator_script_path, `${expected.dod_id} generator_script_path`);
     assertRepoScopedExistingPath(entry.request_evidence_path, `${expected.dod_id} request_evidence_path`);

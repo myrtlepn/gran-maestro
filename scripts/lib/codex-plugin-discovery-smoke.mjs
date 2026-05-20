@@ -120,6 +120,8 @@ export const dod009RequestEvidenceAbsolutePath = join(
   repoRoot,
   dod009RequestEvidenceRelativePath,
 );
+const dod009GeneratorScriptRelativePath =
+  'scripts/generate-dod-009-claude-plugin-regression-validation.mjs';
 export const req893RequestMetadataRelativePath = '.gran-maestro/requests/REQ-893/request.json';
 const req893RequestMetadataOrchestrationRelativePath = 'requests/REQ-893/request.json';
 const req893RequestMetadataAbsolutePath = join(
@@ -727,7 +729,65 @@ const dod010NoGoMetadataGuardCriteria = [
   },
 ];
 
-export const sharedDodEvidenceRegistry = Object.freeze([]);
+export const sharedDodEvidenceRegistryRequiredFields = Object.freeze([
+  'dod_id',
+  'request_id',
+  'agi_id',
+  'sprint',
+  'generator_script_path',
+  'request_evidence_path',
+  'expected_status',
+  'validator_linkage',
+]);
+
+function buildSharedDodEvidenceRegistryEntry({
+  dod_id,
+  request_id,
+  agi_id,
+  sprint,
+  generator_script_path,
+  request_evidence_path,
+  expected_status,
+  validator_export_name,
+}) {
+  return Object.freeze({
+    dod_id,
+    request_id,
+    agi_id,
+    sprint,
+    generator_script_path,
+    request_evidence_path,
+    expected_status,
+    validator_linkage: Object.freeze({
+      export_name: validator_export_name,
+      helper_kind: 'assertion-helper',
+      validation_entrypoint: 'scripts/lib/codex-plugin-discovery-smoke.mjs',
+    }),
+  });
+}
+
+export const sharedDodEvidenceRegistry = Object.freeze([
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path: dod009GeneratorScriptRelativePath,
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: dod010GeneratorScriptRelativePath,
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  }),
+]);
 
 export const manifestFields = [
   'name',
@@ -1157,6 +1217,188 @@ function sanitizeMetadataCommand(command) {
     .replaceAll(normalizedRepoRoot, '.')
     .replaceAll(normalizedOrchestrationRoot, '.gran-maestro')
     .replaceAll(normalizedWorkspaceRoot, '.');
+}
+
+function getSharedDodEvidenceValidatorExportName(validatorLinkage) {
+  if (typeof validatorLinkage === 'function') {
+    return validatorLinkage.name || null;
+  }
+
+  if (typeof validatorLinkage === 'string') {
+    return validatorLinkage;
+  }
+
+  if (validatorLinkage && typeof validatorLinkage === 'object') {
+    if (typeof validatorLinkage.export_name === 'string') {
+      return validatorLinkage.export_name;
+    }
+
+    if (typeof validatorLinkage.name === 'string') {
+      return validatorLinkage.name;
+    }
+
+    if (typeof validatorLinkage.validator === 'function') {
+      return validatorLinkage.validator.name || null;
+    }
+  }
+
+  return null;
+}
+
+function resolveSharedDodEvidenceValidatorByName(exportName) {
+  switch (exportName) {
+    case 'assertDod009RequestEvidence':
+      return assertDod009RequestEvidence;
+    case 'assertDod010BlockerFreeMigrationReport':
+      return assertDod010BlockerFreeMigrationReport;
+    default:
+      return null;
+  }
+}
+
+function validateSharedDodEvidenceRegistryPath(path, fieldLabel, repoRootPath) {
+  const validation = validateRepositoryRelativePath(path);
+
+  if (validation.status !== 'pass') {
+    return {
+      status: 'fail',
+      normalized_path: null,
+      issues: [`${fieldLabel} must be a repo-relative path: ${validation.reason}.`],
+    };
+  }
+
+  const scopedPath = join(repoRootPath, validation.normalized_path);
+  if (!existsSync(scopedPath)) {
+    return {
+      status: 'fail',
+      normalized_path: validation.normalized_path,
+      issues: [`${fieldLabel} does not exist at ${validation.normalized_path}.`],
+    };
+  }
+
+  const repoRealPath = realpathSync(repoRootPath);
+  const targetRealPath = realpathSync(scopedPath);
+  const repoRelativePath = normalizePathSeparators(relative(repoRealPath, targetRealPath));
+
+  if (repoRelativePath.length === 0 || repoRelativePath === '..' || repoRelativePath.startsWith('../')) {
+    return {
+      status: 'fail',
+      normalized_path: validation.normalized_path,
+      issues: [`${fieldLabel} escapes repository root: ${validation.normalized_path}.`],
+    };
+  }
+
+  return {
+    status: 'pass',
+    normalized_path: validation.normalized_path,
+    issues: [],
+  };
+}
+
+export function validateSharedDodEvidenceRegistryEntry(
+  entry,
+  { repoRootPath = repoRoot } = {},
+) {
+  const issues = [];
+
+  for (const field of sharedDodEvidenceRegistryRequiredFields) {
+    if (!Object.hasOwn(entry ?? {}, field)) {
+      issues.push(`Missing required shared DOD registry field: ${field}.`);
+    }
+  }
+
+  const generatorPathValidation = validateSharedDodEvidenceRegistryPath(
+    entry?.generator_script_path,
+    'generator_script_path',
+    repoRootPath,
+  );
+  issues.push(...generatorPathValidation.issues);
+
+  const requestEvidencePathValidation = validateSharedDodEvidenceRegistryPath(
+    entry?.request_evidence_path,
+    'request_evidence_path',
+    repoRootPath,
+  );
+  issues.push(...requestEvidencePathValidation.issues);
+
+  const validatorExportName = getSharedDodEvidenceValidatorExportName(entry?.validator_linkage);
+  if (!validatorExportName) {
+    issues.push('validator_linkage must reference an exported shared smoke validator.');
+  }
+
+  const validator = validatorExportName
+    ? resolveSharedDodEvidenceValidatorByName(validatorExportName)
+    : null;
+  if (!validator) {
+    issues.push(
+      `validator_linkage export is not wired by scripts/lib/codex-plugin-discovery-smoke.mjs: ${validatorExportName ?? 'unknown'}.`,
+    );
+  }
+
+  if (
+    entry?.validator_linkage &&
+    typeof entry.validator_linkage === 'object' &&
+    !Array.isArray(entry.validator_linkage) &&
+    entry.validator_linkage.validation_entrypoint
+  ) {
+    const linkagePathValidation = validateSharedDodEvidenceRegistryPath(
+      entry.validator_linkage.validation_entrypoint,
+      'validator_linkage.validation_entrypoint',
+      repoRootPath,
+    );
+    issues.push(...linkagePathValidation.issues);
+  }
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    issues,
+    validator_export_name: validatorExportName,
+    validator,
+    normalized_entry: {
+      ...entry,
+      generator_script_path: generatorPathValidation.normalized_path,
+      request_evidence_path: requestEvidencePathValidation.normalized_path,
+    },
+  };
+}
+
+export function validateSharedDodEvidenceRegistry(
+  registry = sharedDodEvidenceRegistry,
+  { repoRootPath = repoRoot } = {},
+) {
+  if (!Array.isArray(registry)) {
+    return {
+      status: 'fail',
+      issues: ['sharedDodEvidenceRegistry must be an array-backed validation surface.'],
+      entries: [],
+    };
+  }
+
+  const entries = registry.map((entry) =>
+    validateSharedDodEvidenceRegistryEntry(entry, { repoRootPath }),
+  );
+  const issues = entries.flatMap((entryValidation) => entryValidation.issues);
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    issues,
+    entries,
+  };
+}
+
+export function assertSharedDodEvidenceRegistry(
+  registry = sharedDodEvidenceRegistry,
+  { repoRootPath = repoRoot } = {},
+) {
+  const validation = validateSharedDodEvidenceRegistry(registry, { repoRootPath });
+
+  assert.equal(
+    validation.status,
+    'pass',
+    validation.issues.length > 0
+      ? `Invalid shared DOD evidence registry:\n- ${validation.issues.join('\n- ')}`
+      : 'Invalid shared DOD evidence registry.',
+  );
 }
 
 function buildSkillProjectionNoGoGuard(projectionRecords) {
