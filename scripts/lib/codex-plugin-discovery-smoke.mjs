@@ -727,6 +727,8 @@ const dod010NoGoMetadataGuardCriteria = [
   },
 ];
 
+export const sharedDodEvidenceRegistry = Object.freeze([]);
+
 export const manifestFields = [
   'name',
   'version',

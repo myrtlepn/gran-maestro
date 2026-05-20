@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertCodexSkillAgentProjectionValidationEvidence,
@@ -84,6 +84,7 @@ import {
   requiredAgentRoleNames,
   repoRoot as smokeRepoRoot,
   skillAgentProjectionValidationEvidenceRelativePath,
+  sharedDodEvidenceRegistry,
   sprint4IntegrationContextPath,
   sprint4SelectionReason,
   stableEvidenceRelativePath,
@@ -256,6 +257,40 @@ const req912ValidationSummary = {
   },
 };
 
+const sprint12ForcedWireRegistryRequiredFields = [
+  'dod_id',
+  'request_id',
+  'agi_id',
+  'sprint',
+  'generator_script_path',
+  'request_evidence_path',
+  'expected_status',
+  'validator_linkage',
+];
+
+const sprint12ForcedWireRegistryExpectedEntries = {
+  'DOD-009': {
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path: 'scripts/generate-dod-009-claude-plugin-regression-validation.mjs',
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  },
+  'DOD-010': {
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: 'scripts/generate-dod-010-blocker-free-migration-report.mjs',
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  },
+};
+
 function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), 'utf8');
 }
@@ -269,6 +304,71 @@ function assertMetadataPathIsScoped(path) {
   assert.doesNotMatch(path, /\\/u);
   assert.doesNotMatch(path, /^~\//u);
   assert.doesNotMatch(path, /\$HOME|\$\{HOME\}/u);
+}
+
+function getSharedDodEvidenceRegistryEntry(dodId) {
+  assert.ok(
+    Array.isArray(sharedDodEvidenceRegistry),
+    'sharedDodEvidenceRegistry must be an exported array-backed validation surface.',
+  );
+  const entry = sharedDodEvidenceRegistry.find((candidate) => candidate?.dod_id === dodId);
+  assert.ok(
+    entry,
+    `Persisted ${dodId} request evidence exists without shared registry linkage in sharedDodEvidenceRegistry.`,
+  );
+  return entry;
+}
+
+function assertSharedDodEvidenceRegistryEntry(entry, expected) {
+  for (const field of sprint12ForcedWireRegistryRequiredFields) {
+    assert.ok(
+      Object.hasOwn(entry, field),
+      `Shared DOD evidence registry entry for ${expected.dod_id} is missing required field ${field}.`,
+    );
+  }
+
+  assert.equal(entry.dod_id, expected.dod_id);
+  assert.equal(entry.request_id, expected.request_id);
+  assert.equal(entry.agi_id, expected.agi_id);
+  assert.equal(entry.sprint, expected.sprint);
+  assert.equal(entry.generator_script_path, expected.generator_script_path);
+  assert.equal(entry.request_evidence_path, expected.request_evidence_path);
+  assert.equal(entry.expected_status, expected.expected_status);
+
+  if (typeof entry.validator_linkage === 'string') {
+    assert.equal(entry.validator_linkage, expected.validator_export_name);
+    return;
+  }
+
+  if (typeof entry.validator_linkage === 'function') {
+    assert.equal(entry.validator_linkage.name, expected.validator_export_name);
+    return;
+  }
+
+  if (entry.validator_linkage && typeof entry.validator_linkage === 'object') {
+    assert.equal(
+      entry.validator_linkage.export_name ?? entry.validator_linkage.name,
+      expected.validator_export_name,
+    );
+    return;
+  }
+
+  assert.fail(
+    `Shared DOD evidence registry entry for ${expected.dod_id} has unsupported validator_linkage metadata.`,
+  );
+}
+
+function assertRepoScopedExistingPath(path, fieldLabel) {
+  assertMetadataPathIsScoped(path);
+  const absolutePath = join(repoRoot, path);
+  assert.ok(existsSync(absolutePath), `${fieldLabel} does not exist at repo-relative path: ${path}`);
+
+  const repoRealPath = realpathSync(repoRoot);
+  const targetRealPath = realpathSync(absolutePath);
+  const repoRelativePath = relative(repoRealPath, targetRealPath).replace(/\\/gu, '/');
+
+  assert.ok(repoRelativePath.length > 0, `${fieldLabel} resolved to an empty repo-relative path.`);
+  assert.doesNotMatch(repoRelativePath, /^\.\.(?:\/|$)/u, `${fieldLabel} escapes repo root: ${path}`);
 }
 
 function collectStringLeaves(value, strings = []) {
@@ -2304,6 +2404,35 @@ test('DOD-010 persisted artifact preserves metadata, follow-up boundary, and all
   assertDod010FollowUpScopeAndReusableSummary(report);
   assert.deepEqual(report.allowed_output_paths, [dod010BlockerFreeMigrationReportRelativePath]);
   assertNoForbiddenDod010ReportLiterals(report);
+});
+
+test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkage metadata', () => {
+  for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
+    const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
+    assertSharedDodEvidenceRegistryEntry(entry, expected);
+  }
+});
+
+test('Sprint 12 shared DOD evidence registry keeps DOD-009 and DOD-010 artifacts repo-scoped and validator-linked', () => {
+  for (const expected of Object.values(sprint12ForcedWireRegistryExpectedEntries)) {
+    const entry = getSharedDodEvidenceRegistryEntry(expected.dod_id);
+    assertSharedDodEvidenceRegistryEntry(entry, expected);
+    assertRepoScopedExistingPath(entry.generator_script_path, `${expected.dod_id} generator_script_path`);
+    assertRepoScopedExistingPath(entry.request_evidence_path, `${expected.dod_id} request_evidence_path`);
+
+    const artifact = JSON.parse(readRepoFile(entry.request_evidence_path));
+    assert.equal(artifact.status, expected.expected_status);
+
+    if (expected.dod_id === 'DOD-009') {
+      assertDod009RequestEvidence(artifact);
+      assertNoForbiddenDod009EvidenceLiterals(artifact);
+      continue;
+    }
+
+    assertDod010BlockerFreeMigrationReport(artifact);
+    assertDod010FollowUpScopeAndReusableSummary(artifact);
+    assertNoForbiddenDod010ReportLiterals(artifact);
+  }
 });
 
 test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {
