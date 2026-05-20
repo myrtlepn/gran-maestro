@@ -55,6 +55,11 @@ ALLOWED_CONTINUATION_STATE = (
     "already_consumed",
     "no_completion_evidence",
 )
+ALLOWED_LIFECYCLE_CONSUMER_STATUS = (
+    "success",
+    "non_success",
+    "gap",
+)
 
 
 class _HashableDict(dict):
@@ -512,6 +517,227 @@ def _evidence_paths(*sections: Any) -> list[str]:
     return paths
 
 
+def _load_lifecycle_artifact_payload(fixture_or_context: Any) -> dict[str, Any]:
+    if isinstance(fixture_or_context, dict):
+        for key in (
+            "dispatch_lifecycle_artifact",
+            "lifecycle_artifact",
+            "dispatch_artifact",
+        ):
+            candidate = fixture_or_context.get(key)
+            if isinstance(candidate, dict):
+                return dict(candidate)
+        for key in (
+            "dispatch_lifecycle_artifact_path",
+            "lifecycle_artifact_path",
+            "dispatch_artifact_path",
+            "run_state_path",
+        ):
+            candidate = fixture_or_context.get(key)
+            if isinstance(candidate, (str, Path)):
+                return _load_context(candidate)
+        if any(key in fixture_or_context for key in ("task_id", "attempt_id", "attempts", "running_log_path", "trace_path")):
+            return dict(fixture_or_context)
+        return {}
+    if isinstance(fixture_or_context, (str, Path)):
+        return _load_context(fixture_or_context)
+    return {}
+
+
+def _artifact_path_projection(path_value: Any) -> dict[str, Any]:
+    path_text = _safe_text(path_value)
+    exists = False
+    if path_text:
+        try:
+            exists = Path(path_text).is_file()
+        except OSError:
+            exists = False
+    return {
+        "path": path_text,
+        "exists": exists,
+    }
+
+
+def _gap(code: str, *, field: str, message: str, path: Any = None) -> dict[str, Any]:
+    return {
+        "code": code,
+        "field": field,
+        "message": message,
+        "path": _safe_text(path),
+    }
+
+
+def _append_missing_text_gap(gaps: list[dict[str, Any]], payload: dict[str, Any], field: str) -> None:
+    if _safe_text(payload.get(field)):
+        return
+    gaps.append(
+        _gap(
+            "missing_required_field",
+            field=field,
+            message=f"lifecycle artifact field '{field}' is required",
+        )
+    )
+
+
+def _append_missing_path_gap(
+    gaps: list[dict[str, Any]],
+    payload: dict[str, Any],
+    field: str,
+    *,
+    required: bool,
+) -> dict[str, Any]:
+    projection = _artifact_path_projection(payload.get(field))
+    if not projection["path"]:
+        if required:
+            gaps.append(
+                _gap(
+                    "missing_required_field",
+                    field=field,
+                    message=f"lifecycle artifact field '{field}' is required",
+                )
+            )
+        return projection
+    if projection["exists"] is not True:
+        gaps.append(
+            _gap(
+                "missing_referenced_file",
+                field=field,
+                message=f"referenced lifecycle artifact file is missing for '{field}'",
+                path=projection["path"],
+            )
+        )
+    return projection
+
+
+def _attempt_summary(attempt: dict[str, Any], current_attempt_id: str) -> dict[str, Any]:
+    attempt_id = _safe_text(attempt.get("attempt_id"))
+    return {
+        "attempt_id": attempt_id,
+        "status": _safe_text(attempt.get("status")) or "unknown",
+        "fallback_from": _safe_text(attempt.get("fallback_from")) or None,
+        "fallback_to": _safe_text(attempt.get("fallback_to")) or None,
+        "is_current": bool(attempt_id and attempt_id == current_attempt_id),
+    }
+
+
+def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict[str, Any]:
+    payload = _load_lifecycle_artifact_payload(fixture_or_context)
+    attempts = payload.get("attempts") if isinstance(payload.get("attempts"), list) else []
+    current_attempt_id = _safe_text(payload.get("attempt_id"))
+    current_attempt_payload = {}
+    for attempt in attempts:
+        if isinstance(attempt, dict) and _safe_text(attempt.get("attempt_id")) == current_attempt_id:
+            current_attempt_payload = dict(attempt)
+            break
+    if not current_attempt_payload and attempts and isinstance(attempts[-1], dict):
+        current_attempt_payload = dict(attempts[-1])
+    lifecycle_status = _safe_text(payload.get("status")) or "unknown"
+    final_statuses = {"completed", "failed", "empty_result", "blocked", "fallback_completed"}
+
+    gaps: list[dict[str, Any]] = []
+    for field in ("task_id", "attempt_id", "parent_session_id", "mst_session_id", "root_mst_id", "status", "started_at", "last_heartbeat"):
+        _append_missing_text_gap(gaps, payload, field)
+    if lifecycle_status in final_statuses:
+        _append_missing_text_gap(gaps, payload, "terminated_at")
+    if not attempts:
+        gaps.append(
+            _gap(
+                "missing_required_field",
+                field="attempts",
+                message="lifecycle artifact attempts list is required",
+            )
+        )
+
+    artifacts = {
+        "running_log": _append_missing_path_gap(gaps, payload, "running_log_path", required=True),
+        "stdout_log": _append_missing_path_gap(gaps, payload, "stdout_log_path", required=False),
+        "stderr_log": _append_missing_path_gap(gaps, payload, "stderr_log_path", required=lifecycle_status == "failed"),
+        "trace": _append_missing_path_gap(gaps, payload, "trace_path", required=True),
+        "output": _append_missing_path_gap(gaps, payload, "output_path", required=lifecycle_status in final_statuses),
+    }
+
+    context_files = payload.get("context_files_read") if isinstance(payload.get("context_files_read"), list) else []
+    normalized_context_files: list[dict[str, Any]] = []
+    for index, entry in enumerate(context_files):
+        if not isinstance(entry, dict):
+            continue
+        normalized = {
+            "path": _safe_text(entry.get("path")),
+            "exists": bool(entry.get("exists")),
+            "hash": _safe_text(entry.get("hash")) or None,
+            "version": _safe_text(entry.get("version")) or None,
+        }
+        normalized_context_files.append(normalized)
+        if normalized["path"] and normalized["exists"] is not True:
+            gaps.append(
+                _gap(
+                    "missing_referenced_file",
+                    field=f"context_files_read[{index}].path",
+                    message="context file referenced by lifecycle artifact is missing",
+                    path=normalized["path"],
+                )
+            )
+
+    current_attempt_summary = _attempt_summary(current_attempt_payload, current_attempt_id)
+    attempts_summary = [
+        _attempt_summary(attempt, current_attempt_id)
+        for attempt in attempts
+        if isinstance(attempt, dict)
+    ]
+    failure = None
+    if lifecycle_status in {"failed", "empty_result", "blocked"}:
+        evidence_paths = [
+            artifacts["output"]["path"],
+            artifacts["stderr_log"]["path"],
+            artifacts["trace"]["path"],
+        ]
+        failure = {
+            "status": lifecycle_status,
+            "exit_code": payload.get("exit_code"),
+            "structured_error": payload.get("structured_error") if isinstance(payload.get("structured_error"), dict) else None,
+            "evidence_paths": [path for path in evidence_paths if path],
+        }
+
+    if gaps:
+        consumer_status = "gap"
+    elif lifecycle_status in {"completed", "fallback_completed"}:
+        consumer_status = "success"
+    elif lifecycle_status in {"failed", "empty_result", "blocked"}:
+        consumer_status = "non_success"
+    else:
+        consumer_status = "gap"
+
+    return _hashable_json(
+        {
+            "consumer_status": consumer_status,
+            "allowed_consumer_status": list(ALLOWED_LIFECYCLE_CONSUMER_STATUS),
+            "task_id": _safe_text(payload.get("task_id")),
+            "lifecycle_status": lifecycle_status,
+            "attempt_linkage": {
+                "task_id": _safe_text(payload.get("task_id")),
+                "attempt_id": current_attempt_id,
+                "parent_session_id": _safe_text(payload.get("parent_session_id")),
+                "mst_session_id": _safe_text(payload.get("mst_session_id")),
+                "root_mst_id": _safe_text(payload.get("root_mst_id")),
+            },
+            "current_attempt": current_attempt_summary,
+            "attempts": attempts_summary,
+            "artifacts": artifacts,
+            "final_status": {
+                "status": lifecycle_status,
+                "phase": _safe_text(payload.get("phase")) or "unknown",
+                "started_at": _safe_text(payload.get("started_at")),
+                "last_heartbeat": _safe_text(payload.get("last_heartbeat")),
+                "terminated_at": _safe_text(payload.get("terminated_at")),
+                "exit_code": payload.get("exit_code"),
+            },
+            "failure": failure,
+            "context_files_read": normalized_context_files,
+            "gaps": gaps,
+        }
+    )
+
+
 def resolve_continuation_guard(fixture_or_context: Any, *, hook_event: str) -> dict[str, Any]:
     hook_name = "Stop" if hook_event == "Stop" else "SessionStart"
     hook_source = "hooks/mst-stop-hook.sh" if hook_name == "Stop" else "hooks/mst-session-init.sh"
@@ -553,6 +779,7 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
     handoff = _dispatch_completion(context, mst_session_id, action)
     continuation = _continuation_projection(action, handoff)
     freshness = _projection_freshness(context, mst_session_id, generated_at)
+    lifecycle_consumer = project_lifecycle_artifact_consumer_summary(context) if _load_lifecycle_artifact_payload(context) else None
     blockers = _unique_blockers(
         _source_blockers(context, mst_session_id)
         + _automatic_blockers(
@@ -562,31 +789,32 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
             stack=stack,
         )
     )
-    evidence_paths = _evidence_paths(workflow, stack, action, blockers, freshness, handoff, continuation)
+    evidence_paths = _evidence_paths(workflow, stack, action, blockers, freshness, handoff, continuation, lifecycle_consumer)
     if not evidence_paths:
         evidence_paths = [DEFAULT_EVIDENCE_PATH.format(mst_session_id=mst_session_id or "unknown")]
 
-    return _hashable_json(
-        {
-            "schema_version": 1,
-            "mst_session_id": mst_session_id,
-            "canonical_mst_session_id": mst_session_id,
-            "lookup_key": mst_session_id,
-            "partition_key": mst_session_id,
-            "recovery_selector": mst_session_id,
-            "source_history_head": _history_head(context.get("source_history_head")),
-            "generated_at": generated_at,
-            "projection_freshness": freshness,
-            "active_workflow": workflow,
-            "current_task_stack": stack,
-            "next_action": action,
-            "continuation_handoff": handoff,
-            "continue": continuation,
-            "blockers": blockers,
-            "legacy_diagnostics": _legacy_diagnostics(context),
-            "evidence_paths": evidence_paths,
-        }
-    )
+    payload = {
+        "schema_version": 1,
+        "mst_session_id": mst_session_id,
+        "canonical_mst_session_id": mst_session_id,
+        "lookup_key": mst_session_id,
+        "partition_key": mst_session_id,
+        "recovery_selector": mst_session_id,
+        "source_history_head": _history_head(context.get("source_history_head")),
+        "generated_at": generated_at,
+        "projection_freshness": freshness,
+        "active_workflow": workflow,
+        "current_task_stack": stack,
+        "next_action": action,
+        "continuation_handoff": handoff,
+        "continue": continuation,
+        "blockers": blockers,
+        "legacy_diagnostics": _legacy_diagnostics(context),
+        "evidence_paths": evidence_paths,
+    }
+    if lifecycle_consumer is not None:
+        payload["lifecycle_artifact_consumer"] = lifecycle_consumer
+    return _hashable_json(payload)
 
 
 def _cli_context(args: argparse.Namespace) -> dict[str, Any]:

@@ -17,6 +17,16 @@ from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds._common import is_path_safe_mst_session_id, load_json, resolve_started_by_pid
 from scripts.mst_cmds.dispatch import _coerce_positive_int, _dispatch_state_path, _load_dispatch_config, _now_iso
 from scripts.mst_cmds.dispatch import _process_start_time, record_delegate_io_attention
+from scripts.mst_cmds.dispatch import (
+    _apply_lifecycle_paths,
+    _collect_context_files_read,
+    _lifecycle_attempt_id,
+    _lifecycle_label,
+    _parent_session_id,
+    _status_from_final_state,
+    _structured_error_payload,
+    _sync_attempt_payload,
+)
 
 
 def _atomic_save_json(path: Path, payload: dict) -> None:
@@ -75,24 +85,61 @@ def _run_session_metadata_fields(session_id: str) -> dict[str, str | int]:
     return fields
 
 
-def _register_state(args, session_id: str) -> str:
+def _register_state(
+    args,
+    session_id: str,
+    *,
+    raw_context: str,
+    log_dir: Path,
+    running_log_path: Path,
+    stdout_log_path: Path,
+    stderr_log_path: Path,
+) -> str:
     now = _now_iso()
     pid = os.getpid()
     pid_start_time = _process_start_time(pid) or f"pid:{pid}:started_at:{now}"
+    task_id = str(args.task_id).strip()
     payload = {
-        "task_id": str(args.task_id).strip(),
+        "task_id": task_id,
+        "attempt_id": _lifecycle_attempt_id(task_id, getattr(args, "attempt_id", None), None),
         "pid": pid,
         "pid_start_time": pid_start_time,
         "started_by_pid": _started_by_pid(),
         "started_at": now,
         "phase": "running",
+        "status": "running",
         "provider": str(args.provider).strip().lower(),
         "skill": str(getattr(args, "skill", "")).strip(),
+        "label": _lifecycle_label(
+            task_id,
+            str(getattr(args, "skill", "")).strip(),
+            getattr(args, "label", None),
+        ),
         "model": str(args.model).strip(),
         "worktree_dir": str(Path.cwd()),
+        "parent_session_id": _parent_session_id(
+            raw_context,
+            session_id,
+            getattr(args, "parent_session_id", None),
+        ),
         "last_heartbeat": now,
+        "provider_task_id": str(getattr(args, "provider_task_id", "") or os.environ.get("MST_PROVIDER_TASK_ID", "")).strip(),
+        "fallback_from": str(getattr(args, "fallback_from", "") or "").strip() or None,
+        "context_files_read": _collect_context_files_read(raw_context, getattr(args, "context_file", None)),
     }
+    payload = _apply_lifecycle_paths(
+        payload,
+        running_log_path=str(running_log_path),
+        stdout_log_path=str(stdout_log_path),
+        stderr_log_path=str(stderr_log_path),
+        transcript_summary_path=getattr(args, "transcript_summary_path", None),
+        output_path=str(Path(getattr(args, "output_path", "")).resolve())
+        if getattr(args, "output_path", None)
+        else str(stdout_log_path),
+    )
     payload.update(_run_session_metadata_fields(session_id))
+    payload["log_dir"] = str(log_dir)
+    payload = _sync_attempt_payload(payload)
     _atomic_save_json(_dispatch_state_path(payload["task_id"]), payload)
     return now
 
@@ -101,15 +148,27 @@ def _write_heartbeat(
     task_id: str,
     *,
     session_id: str,
+    raw_context: str,
     phase: str | None = None,
     final: bool = False,
     exit_code: int | None = None,
+    trace_path: Path | None = None,
 ) -> None:
     now = _now_iso()
     payload = _load_state(task_id)
     payload["task_id"] = task_id
     payload.update(_run_session_metadata_fields(session_id))
     payload["last_heartbeat"] = now
+    payload["attempt_id"] = _lifecycle_attempt_id(task_id, payload.get("attempt_id"), payload)
+    payload["label"] = _lifecycle_label(task_id, str(payload.get("skill") or ""), payload.get("label"))
+    payload["parent_session_id"] = _parent_session_id(
+        raw_context,
+        session_id,
+        payload.get("parent_session_id"),
+    )
+    payload["context_files_read"] = _collect_context_files_read(raw_context, None) or payload.get("context_files_read") or []
+    if trace_path is not None:
+        payload = _apply_lifecycle_paths(payload, trace_path=str(trace_path))
     if phase:
         payload["phase"] = str(phase).strip()
 
@@ -118,7 +177,19 @@ def _write_heartbeat(
         payload["terminated_at"] = now
         if exit_code is not None:
             payload["exit_code"] = int(exit_code)
+        payload["status"] = _status_from_final_state(
+            exit_code=payload.get("exit_code"),
+            output_path=str(payload.get("output_path") or ""),
+            fallback_from=str(payload.get("fallback_from") or ""),
+        )
+        payload["structured_error"] = _structured_error_payload(
+            exit_code=payload.get("exit_code"),
+            status=str(payload.get("status") or ""),
+        )
+    else:
+        payload["status"] = "running"
 
+    payload = _sync_attempt_payload(payload)
     _atomic_save_json(_dispatch_state_path(task_id), payload)
 
 
@@ -143,7 +214,7 @@ def _write_trace_file(
     exit_code: int,
     running_log_path: Path,
     session_id: str,
-) -> None:
+) -> Path:
     traces_dir = log_dir / "traces"
     traces_dir.mkdir(parents=True, exist_ok=True)
     label = _parse_trace_label(trace)
@@ -170,6 +241,7 @@ def _write_trace_file(
     if isinstance(root_mst_id, str) and root_mst_id:
         content.insert(5, f"root_mst_id: {root_mst_id}")
     trace_path.write_text("\n".join(content), encoding="utf-8")
+    return trace_path
 
 
 def _ensure_context_session_id(context_payload: dict, session_id: str, root_mst_id: str) -> None:
@@ -305,13 +377,27 @@ def cmd_run(args):
     stop_event = threading.Event()
     child_env = _child_env_with_run_session_id()
     run_session_id = child_env["MST_SESSION_ID"]
+    raw_context = child_env.get("MST_CONTEXT_JSON", "")
 
-    _register_state(args, run_session_id)
+    _register_state(
+        args,
+        run_session_id,
+        raw_context=raw_context,
+        log_dir=log_dir,
+        running_log_path=running_log_path,
+        stdout_log_path=stdout_log_path,
+        stderr_log_path=stderr_log_path,
+    )
 
     def heartbeat_loop() -> None:
         while not stop_event.wait(heartbeat_interval):
             with state_lock:
-                _write_heartbeat(task_id, session_id=run_session_id, phase="running")
+                _write_heartbeat(
+                    task_id,
+                    session_id=run_session_id,
+                    raw_context=raw_context,
+                    phase="running",
+                )
                 current_state = _load_state(task_id)
                 try:
                     record_delegate_io_attention(
@@ -406,14 +492,11 @@ def cmd_run(args):
     finally:
         stop_event.set()
         hb_thread.join(timeout=max(1.0, heartbeat_interval + 0.5))
-
-        with state_lock:
-            _write_heartbeat(task_id, session_id=run_session_id, final=True, exit_code=exit_code)
-
         terminated_at = _now_iso()
         duration_ms = max(0, (time.time_ns() - started_mono) // 1_000_000)
+        trace_path: Path | None = None
         if args.trace:
-            _write_trace_file(
+            trace_path = _write_trace_file(
                 log_dir=log_dir,
                 task_id=task_id,
                 provider=provider,
@@ -425,6 +508,15 @@ def cmd_run(args):
                 exit_code=exit_code,
                 running_log_path=running_log_path,
                 session_id=run_session_id,
+            )
+        with state_lock:
+            _write_heartbeat(
+                task_id,
+                session_id=run_session_id,
+                raw_context=raw_context,
+                final=True,
+                exit_code=exit_code,
+                trace_path=trace_path,
             )
 
         signal.signal(signal.SIGTERM, previous_term)
@@ -448,4 +540,12 @@ def register(subparsers):
     run.add_argument("--trace")
     run.add_argument("--heartbeat-interval")
     run.add_argument("--timeout", type=int, help="Subprocess timeout in seconds")
+    run.add_argument("--attempt-id")
+    run.add_argument("--label")
+    run.add_argument("--output-path")
+    run.add_argument("--transcript-summary-path")
+    run.add_argument("--provider-task-id")
+    run.add_argument("--parent-session-id")
+    run.add_argument("--fallback-from")
+    run.add_argument("--context-file", action="append")
     run.add_argument("cli_command", nargs=argparse.REMAINDER)

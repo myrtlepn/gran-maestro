@@ -10,7 +10,8 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-AGI-040-20260520T000000000Z-dispe2e1"
+ROOT_MST_ID = "AGI-040"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -96,6 +97,8 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
         _wait_for_file(state_file)
         running_state = json.loads(state_file.read_text(encoding="utf-8"))
         assert running_state.get("phase") == "running"
+        assert running_state.get("mst_session_id") == SESSION_ID
+        assert running_state.get("root_mst_id") == ROOT_MST_ID
 
         last_heartbeat = str(running_state.get("last_heartbeat", ""))
         for _ in range(3):
@@ -146,6 +149,8 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
 
         terminated_state = json.loads(state_file.read_text(encoding="utf-8"))
         assert terminated_state.get("phase") == "terminated"
+        assert terminated_state.get("mst_session_id") == SESSION_ID
+        assert terminated_state.get("root_mst_id") == ROOT_MST_ID
         assert isinstance(terminated_state.get("terminated_at"), str) and terminated_state["terminated_at"]
 
         listed_after = _run_mst(

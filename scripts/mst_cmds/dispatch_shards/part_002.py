@@ -24,10 +24,16 @@ def cmd_dispatch_register(args):
         if payload_error is not None:
             return _emit_dispatch_payload_mismatch(payload_error)
     canonical_fields = _canonical_dispatch_fields(session_id)
+    attempt_id = _lifecycle_attempt_id(
+        task_id,
+        getattr(args, "attempt_id", None),
+        existing_payload if isinstance(existing_payload, dict) else None,
+    )
     payload = {
         **canonical_fields,
         **_continuation_policy_from_context(child_env.get("MST_CONTEXT_JSON", "")),
         "task_id": task_id,
+        "attempt_id": attempt_id,
         "child_artifact_id": task_id,
         "external_control_surface": "dispatch",
         "created_new_session": False,
@@ -38,10 +44,21 @@ def cmd_dispatch_register(args):
         "phase": "running",
         "provider": str(args.provider).strip().lower(),
         "skill": str(getattr(args, "skill", "")).strip(),
+        "label": _lifecycle_label(task_id, str(getattr(args, "skill", "")).strip(), getattr(args, "label", None)),
         "model": str(args.model).strip(),
         "worktree_dir": str(args.worktree_dir),
         "last_heartbeat": now,
+        "status": "running",
+        "parent_session_id": _parent_session_id(
+            child_env.get("MST_CONTEXT_JSON", ""),
+            session_id,
+            getattr(args, "parent_session_id", None),
+        ),
     }
+    payload["provider_task_id"] = _safe_text(
+        getattr(args, "provider_task_id", None) or os.environ.get("MST_PROVIDER_TASK_ID")
+    )
+    payload["fallback_from"] = _safe_text(getattr(args, "fallback_from", None)) or None
     payload["next_execution"] = _dispatch_context_envelope(
         session_id=session_id,
         task_id=task_id,
@@ -57,6 +74,23 @@ def cmd_dispatch_register(args):
             )
     else:
         payload["started_by_pid"] = resolve_started_by_pid()
+    payload["context_files_read"] = _collect_context_files_read(
+        child_env.get("MST_CONTEXT_JSON", ""),
+        getattr(args, "context_file", None),
+    )
+    payload = _apply_lifecycle_paths(
+        payload,
+        running_log_path=getattr(args, "running_log_path", None),
+        stdout_log_path=getattr(args, "stdout_log_path", None),
+        stderr_log_path=getattr(args, "stderr_log_path", None),
+        transcript_summary_path=getattr(args, "transcript_summary_path", None),
+        trace_path=getattr(args, "trace_path", None),
+        output_path=getattr(args, "output_path", None),
+    )
+    if isinstance(existing_payload, dict):
+        payload["attempts"] = _ensure_attempts(existing_payload)
+        payload = _set_attempt_fallback_to(payload, payload.get("fallback_from") or "", attempt_id)
+    payload = _sync_attempt_payload(payload)
     try:
         cleanup_mod.write_active_flow_marker_for_pid(
             project_root=_common.BASE_DIR.parent,
@@ -116,6 +150,39 @@ def cmd_dispatch_heartbeat(args):
         raw_context=child_env.get("MST_CONTEXT_JSON", ""),
     )["next_execution"]
     payload["last_heartbeat"] = now
+    payload["attempt_id"] = _lifecycle_attempt_id(task_id, getattr(args, "attempt_id", None), payload)
+    payload["label"] = _lifecycle_label(
+        task_id,
+        str(payload.get("skill") or ""),
+        getattr(args, "label", None) or payload.get("label"),
+    )
+    payload["parent_session_id"] = _parent_session_id(
+        child_env.get("MST_CONTEXT_JSON", ""),
+        session_id,
+        getattr(args, "parent_session_id", None) or payload.get("parent_session_id"),
+    )
+    payload["provider_task_id"] = _safe_text(
+        getattr(args, "provider_task_id", None)
+        or payload.get("provider_task_id")
+        or os.environ.get("MST_PROVIDER_TASK_ID")
+    )
+    if getattr(args, "fallback_from", None):
+        payload["fallback_from"] = _safe_text(getattr(args, "fallback_from", None))
+    payload["context_files_read"] = _collect_context_files_read(
+        child_env.get("MST_CONTEXT_JSON", ""),
+        getattr(args, "context_file", None),
+    ) or payload.get("context_files_read") or []
+    payload = _apply_lifecycle_paths(
+        payload,
+        running_log_path=getattr(args, "running_log_path", None) or getattr(args, "log_file", None),
+        stdout_log_path=getattr(args, "stdout_log_path", None),
+        stderr_log_path=getattr(args, "stderr_log_path", None),
+        transcript_summary_path=getattr(args, "transcript_summary_path", None),
+        trace_path=getattr(args, "trace_path", None),
+        output_path=getattr(args, "output_path", None),
+    )
+    if "status" not in payload:
+        payload["status"] = "running"
     if args.phase:
         payload["phase"] = str(args.phase).strip()
 
@@ -124,12 +191,28 @@ def cmd_dispatch_heartbeat(args):
         payload["terminated_at"] = now
         if args.exit_code is not None:
             payload["exit_code"] = int(args.exit_code)
+        payload["status"] = _status_from_final_state(
+            exit_code=payload.get("exit_code"),
+            explicit_status=getattr(args, "status", None),
+            output_path=str(payload.get("output_path") or ""),
+            fallback_from=str(payload.get("fallback_from") or ""),
+        )
+        payload["structured_error"] = _structured_error_payload(
+            explicit_structured_error_json=getattr(args, "structured_error_json", None),
+            explicit_structured_error_message=getattr(args, "structured_error_message", None),
+            exit_code=payload.get("exit_code"),
+            status=str(payload.get("status") or ""),
+        )
         failure_kind = str(getattr(args, "failure_kind", "") or "").strip()
         if failure_kind:
             payload["failure_kind"] = failure_kind
         fallback_condition = str(getattr(args, "fallback_condition", "") or "").strip()
         if fallback_condition:
             payload["fallback_condition"] = fallback_condition
+        if getattr(args, "fallback_to", None):
+            payload["fallback_to"] = _safe_text(getattr(args, "fallback_to", None))
+    else:
+        payload["status"] = "running"
 
     log_file = getattr(args, "log_file", None)
     if log_file and not args.final:
@@ -148,6 +231,13 @@ def cmd_dispatch_heartbeat(args):
             pass
 
     try:
+        if getattr(args, "fallback_to", None):
+            payload = _set_attempt_fallback_to(
+                payload,
+                str(payload.get("attempt_id") or ""),
+                _safe_text(getattr(args, "fallback_to", None)),
+            )
+        payload = _sync_attempt_payload(payload)
         save_json(state_path, payload)
     except Exception as exc:
         print(f"[dispatch] warning: failed to write heartbeat state ({exc})", file=sys.stderr)
@@ -221,6 +311,7 @@ def cmd_dispatch_kill(args):
         if not isinstance(payload, dict):
             payload = {"task_id": task_id}
         payload["phase"] = "terminated"
+        payload["status"] = "terminated"
         payload["signal"] = signal_name
         payload["terminated_at"] = _now_iso()
         payload["last_heartbeat"] = payload.get("terminated_at")
@@ -361,6 +452,18 @@ def register(subparsers):
     register_cmd.add_argument("--model", required=True)
     register_cmd.add_argument("--worktree-dir", required=True)
     register_cmd.add_argument("--started-by-pid")
+    register_cmd.add_argument("--attempt-id")
+    register_cmd.add_argument("--label")
+    register_cmd.add_argument("--running-log-path")
+    register_cmd.add_argument("--stdout-log-path")
+    register_cmd.add_argument("--stderr-log-path")
+    register_cmd.add_argument("--transcript-summary-path")
+    register_cmd.add_argument("--trace-path")
+    register_cmd.add_argument("--output-path")
+    register_cmd.add_argument("--provider-task-id")
+    register_cmd.add_argument("--parent-session-id")
+    register_cmd.add_argument("--fallback-from")
+    register_cmd.add_argument("--context-file", action="append")
 
     heartbeat = dispatch_sub.add_parser("heartbeat")
     heartbeat.add_argument("--task-id", required=True)
@@ -370,6 +473,22 @@ def register(subparsers):
     heartbeat.add_argument("--failure-kind")
     heartbeat.add_argument("--fallback-condition")
     heartbeat.add_argument("--log-file")
+    heartbeat.add_argument("--attempt-id")
+    heartbeat.add_argument("--label")
+    heartbeat.add_argument("--status")
+    heartbeat.add_argument("--running-log-path")
+    heartbeat.add_argument("--stdout-log-path")
+    heartbeat.add_argument("--stderr-log-path")
+    heartbeat.add_argument("--transcript-summary-path")
+    heartbeat.add_argument("--trace-path")
+    heartbeat.add_argument("--output-path")
+    heartbeat.add_argument("--structured-error-json")
+    heartbeat.add_argument("--structured-error-message")
+    heartbeat.add_argument("--provider-task-id")
+    heartbeat.add_argument("--parent-session-id")
+    heartbeat.add_argument("--fallback-from")
+    heartbeat.add_argument("--fallback-to")
+    heartbeat.add_argument("--context-file", action="append")
 
     list_cmd = dispatch_sub.add_parser("list")
     list_cmd.add_argument("--format", choices=["json", "table"], default="table")

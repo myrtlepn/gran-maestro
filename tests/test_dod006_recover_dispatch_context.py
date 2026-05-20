@@ -27,6 +27,9 @@ def _init_workspace(path: Path) -> None:
 
 def _context(session_id: str = SID) -> dict:
     return {
+        "schema_version": 1,
+        "mst_session_id": session_id,
+        "root_mst_id": ROOT,
         "prompt_summary": "diagnostic-only",
         "core_rehydration": {
             "schema_version": 1,
@@ -36,7 +39,11 @@ def _context(session_id: str = SID) -> dict:
             "history": {"head_hash": "a" * 64, "seq": 7},
             "next_execution": {
                 "env": {"MST_SESSION_ID": session_id},
-                "context": {"mst_session_id": session_id, "recovery_fingerprint": "recover:test"},
+                "context": {
+                    "mst_session_id": session_id,
+                    "root_mst_id": ROOT,
+                    "recovery_fingerprint": "recover:test",
+                },
             },
         },
     }

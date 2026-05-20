@@ -8,7 +8,8 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
-SESSION_ID = "123e4567-e89b-42d3-a456-426614174000"
+SESSION_ID = "MST-AGI-040-20260520T000000000Z-dispst01"
+ROOT_MST_ID = "AGI-040"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -53,6 +54,7 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
     data = json.loads(run_file.read_text(encoding="utf-8"))
     assert data["pid"] == 12345
     assert data["mst_session_id"] == SESSION_ID
+    assert data["root_mst_id"] == ROOT_MST_ID
     assert data["phase"] == "running"
     assert data["provider"] == "codex"
     assert data["model"] == "gpt-test"
@@ -95,4 +97,6 @@ def test_dispatch_register_and_heartbeat_updates_state_file(tmp_path):
     data_final = json.loads(run_file.read_text(encoding="utf-8"))
     assert data_final["phase"] == "done"
     assert data_final["exit_code"] == 0
+    assert data_final["mst_session_id"] == SESSION_ID
+    assert data_final["root_mst_id"] == ROOT_MST_ID
     assert isinstance(data_final.get("terminated_at"), str) and data_final["terminated_at"]

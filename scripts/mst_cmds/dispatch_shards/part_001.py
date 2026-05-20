@@ -93,6 +93,303 @@ def _redact_delegate_tail(text: str) -> str:
 def _normalized_tail_hash(text: str) -> str:
     normalized = re.sub(r"\s+", " ", text).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+_LIFECYCLE_ATTEMPT_FIELDS = (
+    "attempt_id",
+    "task_id",
+    "provider",
+    "provider_task_id",
+    "skill",
+    "label",
+    "model",
+    "phase",
+    "status",
+    "started_at",
+    "last_heartbeat",
+    "terminated_at",
+    "exit_code",
+    "structured_error",
+    "worktree_dir",
+    "log_path",
+    "running_log_path",
+    "stdout_log_path",
+    "stderr_log_path",
+    "transcript_summary_path",
+    "trace_path",
+    "output_path",
+    "parent_session_id",
+    "mst_session_id",
+    "root_mst_id",
+    "schema_version",
+    "fallback_from",
+    "fallback_to",
+    "context_files_read",
+)
+
+
+def _json_object_or_empty(raw: str) -> dict:
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _safe_text(value) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _lifecycle_attempt_id(task_id: str, explicit_attempt_id: str | None = None, existing_payload: dict | None = None) -> str:
+    attempt_id = _safe_text(explicit_attempt_id)
+    if attempt_id:
+        return attempt_id
+    if isinstance(existing_payload, dict):
+        existing_attempt_id = _safe_text(existing_payload.get("attempt_id"))
+        if existing_attempt_id:
+            return existing_attempt_id
+    task_prefix = _safe_text(task_id) or "dispatch-task"
+    return f"{task_prefix}-attempt-{uuid.uuid4().hex[:12]}"
+
+
+def _lifecycle_label(task_id: str, skill: str = "", explicit_label: str | None = None) -> str:
+    label = _safe_text(explicit_label)
+    if label:
+        return label
+    label = _safe_text(skill)
+    if label:
+        return label
+    return _safe_text(task_id) or "dispatch"
+
+
+def _parent_session_id(raw_context: str, session_id: str, explicit_parent_session_id: str | None = None) -> str:
+    parent_session_id = _safe_text(explicit_parent_session_id)
+    if parent_session_id:
+        return parent_session_id
+
+    context = _json_object_or_empty(raw_context)
+    for candidate in (
+        context.get("parent_session_id"),
+        context.get("source_session_id"),
+        context.get("session_parent_id"),
+    ):
+        text = _safe_text(candidate)
+        if text:
+            return text
+
+    core = context.get("core_rehydration") if isinstance(context.get("core_rehydration"), dict) else {}
+    for candidate in (
+        core.get("parent_session_id"),
+        core.get("source_session_id"),
+        core.get("session_parent_id"),
+    ):
+        text = _safe_text(candidate)
+        if text:
+            return text
+
+    return session_id
+
+
+def _context_file_candidates(raw_context: str, explicit_paths: list[str] | None = None) -> list[str]:
+    candidates: list[str] = []
+    if explicit_paths:
+        candidates.extend(str(path) for path in explicit_paths if _safe_text(path))
+
+    context = _json_object_or_empty(raw_context)
+
+    def _append_from(value) -> None:
+        if isinstance(value, str):
+            text = _safe_text(value)
+            if text:
+                candidates.append(text)
+            return
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    text = _safe_text(item.get("path"))
+                    if text:
+                        candidates.append(text)
+                else:
+                    text = _safe_text(item)
+                    if text:
+                        candidates.append(text)
+
+    for key in ("context_files", "context_file_paths", "context_files_read"):
+        _append_from(context.get(key))
+
+    core = context.get("core_rehydration") if isinstance(context.get("core_rehydration"), dict) else {}
+    for key in ("context_files", "context_file_paths", "context_files_read"):
+        _append_from(core.get(key))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = _safe_text(candidate)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
+def _context_file_metadata(path_value: str) -> dict:
+    path = Path(path_value)
+    entry = {"path": str(path), "exists": False, "hash": None, "version": None}
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return entry
+    if not path.is_file():
+        return entry
+    entry["exists"] = True
+    entry["hash"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    entry["version"] = f"{int(stat_result.st_size)}:{int(stat_result.st_mtime_ns)}"
+    return entry
+
+
+def _collect_context_files_read(raw_context: str, explicit_paths: list[str] | None = None) -> list[dict]:
+    return [_context_file_metadata(path) for path in _context_file_candidates(raw_context, explicit_paths)]
+
+
+def _status_from_final_state(
+    *,
+    exit_code: int | None,
+    explicit_status: str | None = None,
+    output_path: str | None = None,
+    fallback_from: str | None = None,
+) -> str:
+    status = _safe_text(explicit_status).lower()
+    if status:
+        return status
+    if exit_code is not None and int(exit_code) != 0:
+        return "failed"
+    output = _safe_text(output_path)
+    if output:
+        try:
+            if Path(output).exists() and Path(output).stat().st_size == 0:
+                return "empty_result"
+        except OSError:
+            pass
+    if _safe_text(fallback_from):
+        return "fallback_completed"
+    return "completed"
+
+
+def _structured_error_payload(
+    *,
+    explicit_structured_error_json: str | None = None,
+    explicit_structured_error_message: str | None = None,
+    exit_code: int | None = None,
+    status: str = "",
+) -> dict | None:
+    raw_json = _safe_text(explicit_structured_error_json)
+    if raw_json:
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError:
+            payload = {"kind": "invalid_structured_error_json", "raw": raw_json}
+        if isinstance(payload, dict):
+            return payload
+        return {"kind": "invalid_structured_error_payload", "raw": payload}
+
+    message = _safe_text(explicit_structured_error_message)
+    normalized_status = _safe_text(status).lower()
+    if message:
+        payload = {"kind": normalized_status or "error", "message": message}
+        if exit_code is not None:
+            payload["exit_code"] = int(exit_code)
+        return payload
+
+    if exit_code is not None and int(exit_code) != 0:
+        return {
+            "kind": "non_zero_exit",
+            "exit_code": int(exit_code),
+            "message": f"command exited with code {int(exit_code)}",
+        }
+
+    return None
+
+
+def _attempt_snapshot(payload: dict) -> dict:
+    snapshot = {}
+    for field in _LIFECYCLE_ATTEMPT_FIELDS:
+        if field in payload:
+            snapshot[field] = payload[field]
+    return json.loads(json.dumps(snapshot, ensure_ascii=False))
+
+
+def _ensure_attempts(payload: dict) -> list[dict]:
+    attempts = payload.get("attempts")
+    normalized: list[dict] = []
+    if isinstance(attempts, list):
+        for attempt in attempts:
+            if isinstance(attempt, dict):
+                normalized.append(dict(attempt))
+    return normalized
+
+
+def _sync_attempt_payload(payload: dict) -> dict:
+    attempt_id = _safe_text(payload.get("attempt_id"))
+    if not attempt_id:
+        return payload
+    attempts = _ensure_attempts(payload)
+    current = _attempt_snapshot(payload)
+    replaced = False
+    for index, attempt in enumerate(attempts):
+        if _safe_text(attempt.get("attempt_id")) == attempt_id:
+            attempts[index] = current
+            replaced = True
+            break
+    if not replaced:
+        attempts.append(current)
+    payload["attempts"] = attempts
+    return payload
+
+
+def _set_attempt_fallback_to(payload: dict, from_attempt_id: str, to_attempt_id: str) -> dict:
+    from_attempt = _safe_text(from_attempt_id)
+    to_attempt = _safe_text(to_attempt_id)
+    if not from_attempt or not to_attempt:
+        return payload
+    attempts = _ensure_attempts(payload)
+    updated = False
+    for attempt in attempts:
+        if _safe_text(attempt.get("attempt_id")) == from_attempt:
+            attempt["fallback_to"] = to_attempt
+            updated = True
+            break
+    if _safe_text(payload.get("attempt_id")) == from_attempt:
+        payload["fallback_to"] = to_attempt
+        updated = True
+    if updated:
+        payload["attempts"] = attempts
+    return payload
+
+
+def _apply_lifecycle_paths(
+    payload: dict,
+    *,
+    running_log_path: str | None = None,
+    stdout_log_path: str | None = None,
+    stderr_log_path: str | None = None,
+    transcript_summary_path: str | None = None,
+    trace_path: str | None = None,
+    output_path: str | None = None,
+) -> dict:
+    if _safe_text(running_log_path):
+        payload["running_log_path"] = _safe_text(running_log_path)
+        payload["log_path"] = _safe_text(running_log_path)
+    if _safe_text(stdout_log_path):
+        payload["stdout_log_path"] = _safe_text(stdout_log_path)
+    if _safe_text(stderr_log_path):
+        payload["stderr_log_path"] = _safe_text(stderr_log_path)
+    if _safe_text(transcript_summary_path):
+        payload["transcript_summary_path"] = _safe_text(transcript_summary_path)
+    if _safe_text(trace_path):
+        payload["trace_path"] = _safe_text(trace_path)
+    if _safe_text(output_path):
+        payload["output_path"] = _safe_text(output_path)
+    return payload
+
+
 def _stream_sample(path: Path | str | None) -> dict:
     if path is None:
         return {
@@ -666,16 +963,17 @@ def _build_status_row(path: Path, stale_threshold: int, now: datetime) -> dict |
 
     task_id = str(payload.get("task_id") or path.stem)
     phase = str(payload.get("phase", "running"))
+    payload_status = _safe_text(payload.get("status")).lower()
     last_heartbeat = str(payload.get("last_heartbeat", ""))
     age_sec = _heartbeat_age_seconds(last_heartbeat, now)
     is_stale = phase not in _TERMINAL_PHASES and age_sec >= stale_threshold
 
     if phase in _TERMINAL_PHASES:
-        status = phase
+        status = payload_status or phase
     elif is_stale:
         status = "stale"
     else:
-        status = "running"
+        status = payload_status or "running"
 
     return {
         "task_id": task_id,
@@ -735,7 +1033,8 @@ def cmd_dispatch_build(args):
         f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch register '
         f"--task-id {q(task_id)} --pid $$ --provider {q(provider)} "
         f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))} "
-        f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}"'
+        f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}" '
+        f"--running-log-path {q(str(log_file))} --context-file {q(str(prompt_file))}"
     )
 
     gemini_failure_cmd = ""
@@ -776,7 +1075,8 @@ def cmd_dispatch_build(args):
 
     heartbeat_cmd = (
         f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat '
-        f"--task-id {q(task_id)} --log-file {q(str(log_file))}"
+        f"--task-id {q(task_id)} --log-file {q(str(log_file))} "
+        f"--running-log-path {q(str(log_file))}"
     )
     final_heartbeat_cmd = (
         f'{heartbeat_cmd} --final --exit-code "$EC" '

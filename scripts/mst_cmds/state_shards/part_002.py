@@ -247,6 +247,8 @@ def _update_snapshot_history_head(state_base_dir: Path, session_id: str, snapsho
         updated["history"] = history
         _atomic_json_write(_snapshot_path_for_session(state_base_dir, session_id), updated)
 def _latest_dispatch_context_for_session(session_id: str) -> dict:
+    from scripts.mst_cmds.current_work_handoff import project_lifecycle_artifact_consumer_summary
+
     run_directory = _common.run_dir_no_create()
     if not run_directory.is_dir():
         return {}
@@ -261,7 +263,16 @@ def _latest_dispatch_context_for_session(session_id: str) -> dict:
         if not task_id:
             continue
         timestamp = str(payload.get("last_heartbeat") or payload.get("started_at") or "")
-        candidates.append((timestamp, {"child_artifact_id": task_id, "external_control_surface": "dispatch"}))
+        candidates.append(
+            (
+                timestamp,
+                {
+                    "child_artifact_id": task_id,
+                    "external_control_surface": "dispatch",
+                    "lifecycle_artifact_consumer": project_lifecycle_artifact_consumer_summary(payload),
+                },
+            )
+        )
     if not candidates:
         return {}
     candidates.sort(key=lambda item: item[0])
