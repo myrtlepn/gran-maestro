@@ -1,0 +1,168 @@
+{
+  "artifact_id": "REQ-919-DOD-011-integration-validation",
+  "request_id": "REQ-919",
+  "task_id": "REQ-919-04",
+  "agi_id": "AGI-039",
+  "sprint": 13,
+  "dod_id": "DOD-011",
+  "plan_id": "PLN-743",
+  "status": "pass",
+  "validated_at": "2026-05-20T06:00:58Z",
+  "repository_local_only": true,
+  "review_disposition": "accept_ready",
+  "command_outcomes": [
+    {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 77,
+      "tests_pass": 77,
+      "tests_fail": 0,
+      "summary": "Full smoke suite passed with DOD-011 artifact, registry, no-go, and DOD-009/DOD-010 linkage coverage."
+    },
+    {
+      "command": "node scripts/generate-dod-011-migration-work-package-breakdown.mjs /tmp/dod-011-work-package-breakdown-check.json",
+      "status": "pass",
+      "output_path": "/tmp/dod-011-work-package-breakdown-check.json",
+      "summary": "Generator wrote parseable temp DOD-011 request evidence."
+    },
+    {
+      "command": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; import { assertDod011RequestEvidence } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod011RequestEvidence(JSON.parse(readFileSync('/tmp/dod-011-work-package-breakdown-check.json','utf8'))); console.log('DOD-011 temp evidence assertion PASS');\"",
+      "status": "pass",
+      "summary": "Temp output passed assertDod011RequestEvidence."
+    },
+    {
+      "command": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; import { assertDod011RequestEvidence } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod011RequestEvidence(JSON.parse(readFileSync('.gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json','utf8'))); console.log('DOD-011 persisted evidence assertion PASS');\"",
+      "status": "pass",
+      "summary": "Persisted request evidence passed assertDod011RequestEvidence."
+    }
+  ],
+  "pac_coverage": [
+    {
+      "pac_id": "PAC-1",
+      "status": "pass",
+      "evidence": "Eight work packages are ordered WP-1 through WP-8 with outputs, validation commands, and blocker criteria."
+    },
+    {
+      "pac_id": "PAC-2",
+      "status": "pass",
+      "evidence": "DOD-011 request evidence records work package coverage, dependency graph, validation commands, and no-go boundary."
+    },
+    {
+      "pac_id": "PAC-3",
+      "status": "pass",
+      "evidence": "No-go boundary status is pass with violation_count 0 and repository-local validation only."
+    },
+    {
+      "pac_id": "PAC-4",
+      "status": "pass",
+      "evidence": "DOD-009, DOD-010, and DOD-011 shared registry linkage remains pass."
+    },
+    {
+      "pac_id": "PAC-5",
+      "status": "pass",
+      "evidence": "DOD-012 and DOD-013 remain follow_up/supporting only, not completed or accepted."
+    },
+    {
+      "pac_id": "PAC-6",
+      "status": "pass",
+      "evidence": "Dependency graph exposes topological order WP-1 through WP-8 for downstream request decomposition."
+    },
+    {
+      "pac_id": "PAC-7",
+      "status": "pass",
+      "evidence": "Full smoke suite passed 77/77 with zero failures and no DOD-009/DOD-010 registry regression."
+    }
+  ],
+  "acceptance_results": [
+    {
+      "ac_id": "T04-AC-001",
+      "status": "pass",
+      "evidence": "npm test passed 77/77 with 0 failures."
+    },
+    {
+      "ac_id": "T04-AC-002",
+      "status": "pass",
+      "evidence": "Temp generator output passed assertDod011RequestEvidence."
+    },
+    {
+      "ac_id": "T04-AC-003",
+      "status": "pass",
+      "evidence": "Persisted artifact path, generator path, expected status, validator export, and registry linkage matched."
+    },
+    {
+      "ac_id": "T04-AC-004",
+      "status": "pass",
+      "evidence": "No-go boundary violation_count is 0."
+    },
+    {
+      "ac_id": "T04-AC-005",
+      "status": "pass",
+      "evidence": "DOD-009 and DOD-010 predecessor evidence references both report request evidence status pass and registry linkage pass."
+    },
+    {
+      "ac_id": "T04-AC-006",
+      "status": "pass",
+      "evidence": "DOD-012 and DOD-013 are retained as follow_up/supporting only."
+    },
+    {
+      "ac_id": "T04-AC-007",
+      "status": "pass",
+      "evidence": "Shared registry linkage for DOD-009, DOD-010, and DOD-011 remains pass under the full smoke suite."
+    }
+  ],
+  "dod_registry_linkage": [
+    {
+      "dod_id": "DOD-009",
+      "request_id": "REQ-912",
+      "request_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "status": "pass",
+      "relationship": "predecessor"
+    },
+    {
+      "dod_id": "DOD-010",
+      "request_id": "REQ-916",
+      "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+      "status": "pass",
+      "relationship": "predecessor"
+    },
+    {
+      "dod_id": "DOD-011",
+      "request_id": "REQ-919",
+      "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+      "status": "pass",
+      "relationship": "target"
+    }
+  ],
+  "no_go_boundary": {
+    "status": "pass",
+    "violation_count": 0,
+    "criteria": [
+      "user_home_mutation",
+      "external_codex_install_cache_reload",
+      "symlink_creation",
+      "plugin_cache_mutation",
+      "claude_hooks_direct_edit",
+      "objective_md_direct_edit"
+    ]
+  },
+  "follow_up_scope": [
+    {
+      "dod_id": "DOD-012",
+      "status": "follow_up",
+      "completion_status": "not_done"
+    },
+    {
+      "dod_id": "DOD-013",
+      "status": "supporting",
+      "completion_status": "not_done"
+    }
+  ],
+  "acceptance_bar": {
+    "full_smoke_77_or_better_with_zero_failures": true,
+    "temp_artifact_assertion_pass": true,
+    "persisted_artifact_assertion_pass": true,
+    "shared_registry_linkage_dod_009_010_011_pass": true,
+    "no_go_boundary_violation_count_zero": true,
+    "dod_012_dod_013_follow_up_only": true
+  }
+}
