@@ -1,0 +1,1103 @@
+{
+  "artifact_id": "REQ-919-DOD-011-migration-work-package-breakdown",
+  "request_id": "REQ-919",
+  "agi_id": "AGI-039",
+  "sprint": 13,
+  "task_id": "02",
+  "dod_id": "DOD-011",
+  "plan_id": "PLN-743",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T05:42:28Z",
+  "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+  "generator_script_path": "scripts/generate-dod-011-migration-work-package-breakdown.mjs",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-011",
+      "request_id": "REQ-919",
+      "agi_id": "AGI-039",
+      "sprint": 13,
+      "generator_script_path": "scripts/generate-dod-011-migration-work-package-breakdown.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod011RequestEvidence",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
+  "status": "pass",
+  "repository_local_only": true,
+  "work_packages": [
+    {
+      "id": "WP-1",
+      "title": "Inventory and parity schema baseline",
+      "phase": "inventory",
+      "sequence": 1,
+      "inputs": [
+        {
+          "path": ".claude-plugin/plugin.json",
+          "kind": "canonical-manifest"
+        },
+        {
+          "path": "skills/",
+          "kind": "skill-catalog"
+        },
+        {
+          "path": "agents/",
+          "kind": "agent-catalog"
+        },
+        {
+          "path": "hooks/hooks.json",
+          "kind": "canonical-hook-config"
+        },
+        {
+          "path": ".gran-maestro/agile/AGI-039/objective/details/migration-execution-breakdown.md",
+          "kind": "objective-detail"
+        }
+      ],
+      "outputs": [
+        {
+          "path": ".gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json",
+          "kind": "inventory-artifact"
+        },
+        {
+          "path": ".gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json",
+          "kind": "validation-evidence"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "test -f .claude-plugin/plugin.json && test -f hooks/hooks.json && test -f skills/agile/SKILL.md && test -f agents/architect.md"
+        ],
+        "success_criteria": [
+          "Canonical manifest, hook config, skill catalog, and agent catalog remain available from the repository."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Establishes the baseline inventory and coverage inputs for the migration breakdown."
+        }
+      ],
+      "depends_on": [],
+      "blocks": [
+        "WP-2"
+      ]
+    },
+    {
+      "id": "WP-2",
+      "title": "Codex manifest and marketplace generator",
+      "phase": "generator",
+      "sequence": 2,
+      "inputs": [
+        {
+          "path": ".claude-plugin/plugin.json",
+          "kind": "canonical-manifest"
+        },
+        {
+          "path": ".claude-plugin/marketplace.json",
+          "kind": "canonical-marketplace"
+        },
+        {
+          "path": "package.json",
+          "kind": "version-source"
+        }
+      ],
+      "outputs": [
+        {
+          "path": ".codex-plugin/plugin.json",
+          "kind": "generated-manifest"
+        },
+        {
+          "path": ".agents/plugins/marketplace.json",
+          "kind": "generated-marketplace"
+        },
+        {
+          "path": "scripts/generate-codex-plugin-discovery-smoke.mjs",
+          "kind": "generator-entrypoint"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>"
+        ],
+        "success_criteria": [
+          "The generator emits parseable JSON with repo-relative output metadata and no unsupported drift."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Captures the generator lane that downstream implementation requests must execute."
+        },
+        {
+          "dod_id": "DOD-013",
+          "status": "supporting",
+          "rationale": "Single-source drift control depends on generated asset parity, but remains follow-up scope."
+        }
+      ],
+      "depends_on": [
+        "WP-1"
+      ],
+      "blocks": [
+        "WP-3"
+      ]
+    },
+    {
+      "id": "WP-3",
+      "title": "Codex hook adapter parity",
+      "phase": "adapter",
+      "sequence": 3,
+      "inputs": [
+        {
+          "path": "hooks/hooks.json",
+          "kind": "canonical-hook-config"
+        },
+        {
+          "path": ".gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json",
+          "kind": "baseline-evidence"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "hooks/hooks.codex.json",
+          "kind": "adapter-config"
+        },
+        {
+          "path": "hooks/codex-mst-session-init.sh",
+          "kind": "adapter-script"
+        },
+        {
+          "path": "hooks/codex-mst-pre-tool-use.sh",
+          "kind": "adapter-script"
+        },
+        {
+          "path": "hooks/codex-mst-stop-hook.sh",
+          "kind": "adapter-script"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "rg -n 'SessionStart|PreToolUse|Stop|UserPromptSubmit' hooks/hooks.json"
+        ],
+        "success_criteria": [
+          "Canonical hook events remain enumerated and the adapter lane can be validated without touching user-scoped hook state."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Preserves the adapter execution lane inside the breakdown ordering."
+        }
+      ],
+      "depends_on": [
+        "WP-2"
+      ],
+      "blocks": [
+        "WP-4"
+      ]
+    },
+    {
+      "id": "WP-4",
+      "title": "Skill and command UX parity",
+      "phase": "skill-agent-parity",
+      "sequence": 4,
+      "inputs": [
+        {
+          "path": "skills/agile/SKILL.md",
+          "kind": "core-skill"
+        },
+        {
+          "path": "skills/request/SKILL.md",
+          "kind": "core-skill"
+        },
+        {
+          "path": "scripts/lib/codex-plugin-discovery-smoke.mjs",
+          "kind": "smoke-lib"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "skills/",
+          "kind": "skill-projection-surface"
+        },
+        {
+          "path": "docs/skills-reference.md",
+          "kind": "invocation-guide"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "test -f skills/agile/SKILL.md && test -f skills/request/SKILL.md"
+        ],
+        "success_criteria": [
+          "Core MST skills remain discoverable from repository-local assets without installing Codex plugins."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Maps user-visible skill invocation parity into an executable work package."
+        }
+      ],
+      "depends_on": [
+        "WP-3"
+      ],
+      "blocks": [
+        "WP-5"
+      ]
+    },
+    {
+      "id": "WP-5",
+      "title": "Agent and subagent projection parity",
+      "phase": "skill-agent-parity",
+      "sequence": 5,
+      "inputs": [
+        {
+          "path": "agents/pm-conductor.md",
+          "kind": "canonical-agent"
+        },
+        {
+          "path": "agents/architect.md",
+          "kind": "canonical-agent"
+        },
+        {
+          "path": ".gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json",
+          "kind": "baseline-evidence"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "agents/",
+          "kind": "agent-projection-surface"
+        },
+        {
+          "path": ".gran-maestro/requests/REQ-891/evidence/dod-006-role-mapping-validation.json",
+          "kind": "role-mapping-report"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "test -f agents/pm-conductor.md && test -f agents/architect.md"
+        ],
+        "success_criteria": [
+          "Canonical agent roles remain available for projection without introducing a Codex-only fork."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Keeps role projection as a discrete execution step inside the shared parity phase."
+        }
+      ],
+      "depends_on": [
+        "WP-4"
+      ],
+      "blocks": [
+        "WP-6"
+      ]
+    },
+    {
+      "id": "WP-6",
+      "title": "Config, model, and provider parity",
+      "phase": "config-provider-parity",
+      "sequence": 6,
+      "inputs": [
+        {
+          "path": "templates/defaults/config.json",
+          "kind": "default-config"
+        },
+        {
+          "path": "package.json",
+          "kind": "project-config"
+        }
+      ],
+      "outputs": [
+        {
+          "path": ".codex/config.toml",
+          "kind": "config-template"
+        },
+        {
+          "path": "docs/configuration.md",
+          "kind": "provider-mapping-doc"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "test -f templates/defaults/config.json && test -f docs/configuration.md"
+        ],
+        "success_criteria": [
+          "Config and provider mapping inputs remain repository-local and ready for parity validation."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Captures provider and approval/sandbox parity as a gated package."
+        }
+      ],
+      "depends_on": [
+        "WP-5"
+      ],
+      "blocks": [
+        "WP-7"
+      ]
+    },
+    {
+      "id": "WP-7",
+      "title": "State-machine and workflow parity",
+      "phase": "state-workflow-parity",
+      "sequence": 7,
+      "inputs": [
+        {
+          "path": "scripts/mst.py",
+          "kind": "workflow-runtime"
+        },
+        {
+          "path": "tests/test_workflow_state_transition_integrity.py",
+          "kind": "state-fixture"
+        },
+        {
+          "path": "tests/test_dod011_continuation_contract.py",
+          "kind": "continuation-fixture"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "tests/test_workflow_state_transition_integrity.py",
+          "kind": "transition-validation"
+        },
+        {
+          "path": "tests/test_dod011_continuation_contract.py",
+          "kind": "continuation-validation"
+        },
+        {
+          "path": "tests/test_dod012_auto_continuation_contract.py",
+          "kind": "follow-up-validation"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py -q"
+        ],
+        "success_criteria": [
+          "State transitions and continuation contracts pass with repository-local fixtures only."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-011",
+          "status": "supporting",
+          "rationale": "Preserves the runtime parity gate before docs and release follow-up work."
+        }
+      ],
+      "depends_on": [
+        "WP-6"
+      ],
+      "blocks": [
+        "WP-8"
+      ]
+    },
+    {
+      "id": "WP-8",
+      "title": "Documentation and release follow-up integration",
+      "phase": "docs-release",
+      "sequence": 8,
+      "inputs": [
+        {
+          "path": "README.md",
+          "kind": "user-doc"
+        },
+        {
+          "path": "docs/RELEASE.md",
+          "kind": "release-checklist"
+        },
+        {
+          "path": "docs/configuration.md",
+          "kind": "config-doc"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "README.md",
+          "kind": "codex-doc-section"
+        },
+        {
+          "path": "docs/RELEASE.md",
+          "kind": "release-checklist-update"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "kind": "release-note"
+        }
+      ],
+      "validation": {
+        "repository_local_only": true,
+        "commands": [
+          "test -f README.md && test -f docs/RELEASE.md && test -f docs/configuration.md"
+        ],
+        "success_criteria": [
+          "Docs and release assets exist locally and remain follow-up scope until later requests complete them."
+        ]
+      },
+      "blocker_criteria": [
+        {
+          "blocker_type": "unsupported_blocker",
+          "status": "block",
+          "severity": "high",
+          "resolution_signal": "All package outputs map to a native, adapter, or documented follow-up path."
+        },
+        {
+          "blocker_type": "generated_drift",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Generated artifact or parity summary drift count remains zero."
+        },
+        {
+          "blocker_type": "no_go_mutation",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation remains repository-local and performs no forbidden mutation."
+        },
+        {
+          "blocker_type": "missing_validation_evidence",
+          "status": "block",
+          "severity": "medium",
+          "resolution_signal": "Validation artifacts exist and parse without schema errors."
+        }
+      ],
+      "downstream_dod": [
+        {
+          "dod_id": "DOD-012",
+          "status": "follow_up",
+          "rationale": "Documentation and release execution stays outside the done boundary for this task."
+        },
+        {
+          "dod_id": "DOD-013",
+          "status": "supporting",
+          "rationale": "Single-source release discipline depends on this package but is not completed here."
+        }
+      ],
+      "depends_on": [
+        "WP-7"
+      ],
+      "blocks": []
+    }
+  ],
+  "dependency_graph": {
+    "nodes": [
+      {
+        "id": "WP-1",
+        "phase": "inventory",
+        "sequence": 1,
+        "depends_on": [],
+        "blocks": [
+          "WP-2"
+        ]
+      },
+      {
+        "id": "WP-2",
+        "phase": "generator",
+        "sequence": 2,
+        "depends_on": [
+          "WP-1"
+        ],
+        "blocks": [
+          "WP-3"
+        ]
+      },
+      {
+        "id": "WP-3",
+        "phase": "adapter",
+        "sequence": 3,
+        "depends_on": [
+          "WP-2"
+        ],
+        "blocks": [
+          "WP-4"
+        ]
+      },
+      {
+        "id": "WP-4",
+        "phase": "skill-agent-parity",
+        "sequence": 4,
+        "depends_on": [
+          "WP-3"
+        ],
+        "blocks": [
+          "WP-5"
+        ]
+      },
+      {
+        "id": "WP-5",
+        "phase": "skill-agent-parity",
+        "sequence": 5,
+        "depends_on": [
+          "WP-4"
+        ],
+        "blocks": [
+          "WP-6"
+        ]
+      },
+      {
+        "id": "WP-6",
+        "phase": "config-provider-parity",
+        "sequence": 6,
+        "depends_on": [
+          "WP-5"
+        ],
+        "blocks": [
+          "WP-7"
+        ]
+      },
+      {
+        "id": "WP-7",
+        "phase": "state-workflow-parity",
+        "sequence": 7,
+        "depends_on": [
+          "WP-6"
+        ],
+        "blocks": [
+          "WP-8"
+        ]
+      },
+      {
+        "id": "WP-8",
+        "phase": "docs-release",
+        "sequence": 8,
+        "depends_on": [
+          "WP-7"
+        ],
+        "blocks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "WP-1",
+        "to": "WP-2"
+      },
+      {
+        "from": "WP-2",
+        "to": "WP-3"
+      },
+      {
+        "from": "WP-3",
+        "to": "WP-4"
+      },
+      {
+        "from": "WP-4",
+        "to": "WP-5"
+      },
+      {
+        "from": "WP-5",
+        "to": "WP-6"
+      },
+      {
+        "from": "WP-6",
+        "to": "WP-7"
+      },
+      {
+        "from": "WP-7",
+        "to": "WP-8"
+      }
+    ],
+    "topological_order": [
+      "WP-1",
+      "WP-2",
+      "WP-3",
+      "WP-4",
+      "WP-5",
+      "WP-6",
+      "WP-7",
+      "WP-8"
+    ]
+  },
+  "validation_commands": [
+    {
+      "command": "node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>",
+      "scope": "artifact-generation",
+      "repository_local_only": true
+    },
+    {
+      "command": "node --input-type=module -e \"import { readFileSync } from 'node:fs'; import { assertDod011RequestEvidence } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod011RequestEvidence(JSON.parse(readFileSync('<output-path>','utf8')));\"",
+      "scope": "artifact-assertion",
+      "repository_local_only": true
+    },
+    {
+      "command": "test -f .claude-plugin/plugin.json && test -f hooks/hooks.json && test -f skills/agile/SKILL.md && test -f agents/architect.md",
+      "scope": "WP-1",
+      "repository_local_only": true
+    },
+    {
+      "command": "rg -n 'SessionStart|PreToolUse|Stop|UserPromptSubmit' hooks/hooks.json",
+      "scope": "WP-3",
+      "repository_local_only": true
+    },
+    {
+      "command": "test -f skills/agile/SKILL.md && test -f skills/request/SKILL.md",
+      "scope": "WP-4",
+      "repository_local_only": true
+    },
+    {
+      "command": "test -f agents/pm-conductor.md && test -f agents/architect.md",
+      "scope": "WP-5",
+      "repository_local_only": true
+    },
+    {
+      "command": "test -f templates/defaults/config.json && test -f docs/configuration.md",
+      "scope": "WP-6",
+      "repository_local_only": true
+    },
+    {
+      "command": "python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py -q",
+      "scope": "WP-7",
+      "repository_local_only": true
+    },
+    {
+      "command": "test -f README.md && test -f docs/RELEASE.md && test -f docs/configuration.md",
+      "scope": "WP-8",
+      "repository_local_only": true
+    },
+    {
+      "command": "npm test",
+      "scope": "full-smoke",
+      "repository_local_only": true
+    }
+  ],
+  "no_go_boundary": {
+    "status": "pass",
+    "violation_count": 0,
+    "criteria": [
+      {
+        "criterion_id": "user_home_mutation",
+        "status": "pass",
+        "boundary": "No user-home files or directories are modified."
+      },
+      {
+        "criterion_id": "external_codex_install_cache_reload",
+        "status": "pass",
+        "boundary": "No external Codex install, cache refresh, or reload command is required."
+      },
+      {
+        "criterion_id": "symlink_creation",
+        "status": "pass",
+        "boundary": "No symlink creation is needed for validation."
+      },
+      {
+        "criterion_id": "plugin_cache_mutation",
+        "status": "pass",
+        "boundary": "No plugin cache mutation or rescan is performed."
+      },
+      {
+        "criterion_id": "claude_hooks_direct_edit",
+        "status": "pass",
+        "boundary": "Validation never edits user-scoped .claude hooks."
+      },
+      {
+        "criterion_id": "objective_md_direct_edit",
+        "status": "pass",
+        "boundary": "objective.md remains a read-only reference input."
+      }
+    ]
+  },
+  "predecessor_evidence_refs": [
+    {
+      "dod_id": "DOD-009",
+      "request_id": "REQ-912",
+      "agi_id": "AGI-039",
+      "sprint": 10,
+      "request_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "generator_script_path": "scripts/generate-dod-009-claude-plugin-regression-validation.mjs",
+      "validator_export_name": "assertDod009RequestEvidence",
+      "shared_dod_registry_linkage_status": "pass",
+      "request_evidence_status": "pass",
+      "relationship": "downstream-planning-input",
+      "repository_local_only": true
+    },
+    {
+      "dod_id": "DOD-010",
+      "request_id": "REQ-916",
+      "agi_id": "AGI-039",
+      "sprint": 11,
+      "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+      "generator_script_path": "scripts/generate-dod-010-blocker-free-migration-report.mjs",
+      "validator_export_name": "assertDod010BlockerFreeMigrationReport",
+      "shared_dod_registry_linkage_status": "pass",
+      "request_evidence_status": "pass",
+      "relationship": "downstream-planning-input",
+      "repository_local_only": true
+    }
+  ],
+  "follow_up_scope": [
+    {
+      "dod_id": "DOD-012",
+      "status": "follow_up",
+      "reason": "Documentation and release integration remains outside the DOD-011 done boundary."
+    },
+    {
+      "dod_id": "DOD-013",
+      "status": "supporting",
+      "reason": "Single-source drift control remains a downstream dependency instead of a completed scope item."
+    }
+  ],
+  "source_documents": {
+    "status": "pass",
+    "documents": [
+      {
+        "path": ".gran-maestro/agile/AGI-039/objective/details/migration-execution-breakdown.md",
+        "kind": "objective-detail",
+        "exists": true
+      },
+      {
+        "path": ".gran-maestro/plans/PLN-743/plan.md",
+        "kind": "plan",
+        "exists": true
+      },
+      {
+        "path": ".gran-maestro/requests/REQ-919/tasks/01/spec.md",
+        "kind": "upstream-spec",
+        "exists": true
+      },
+      {
+        "path": ".gran-maestro/requests/REQ-919/tasks/02/spec.md",
+        "kind": "task-spec",
+        "exists": true
+      },
+      {
+        "path": ".gran-maestro/requests/REQ-919/discussion/req-arch-decision.md",
+        "kind": "architecture-decision",
+        "exists": true
+      }
+    ]
+  },
+  "request_metadata_snapshot": {
+    "path": ".gran-maestro/requests/REQ-919/request.json",
+    "request_id": "REQ-919",
+    "agi_id": "AGI-039",
+    "sprint": 13,
+    "dod_id": "DOD-011",
+    "plan_id": "PLN-743",
+    "request_status": "phase2_execution",
+    "phase": 2,
+    "tasks": [
+      {
+        "task_id": "REQ-919-01",
+        "status": "committed",
+        "source_commit": "ab8cfff",
+        "task_commit": "ab8cfff",
+        "integration_commit": null,
+        "validated_at": "2026-05-20T05:12:00.000Z"
+      },
+      {
+        "task_id": "REQ-919-02",
+        "status": "committed",
+        "source_commit": "f509bb8",
+        "task_commit": "f509bb8",
+        "integration_commit": null,
+        "validated_at": "2026-05-20T05:35:38Z"
+      },
+      {
+        "task_id": "REQ-919-03",
+        "status": "running",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null
+      },
+      {
+        "task_id": "REQ-919-04",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null
+      }
+    ]
+  },
+  "pac_summary": [
+    {
+      "id": "PAC-1",
+      "grade": "MUST",
+      "tags": [
+        "TIER-A"
+      ]
+    },
+    {
+      "id": "PAC-2",
+      "grade": "MUST",
+      "tags": [
+        "TIER-A"
+      ]
+    },
+    {
+      "id": "PAC-3",
+      "grade": "MUST",
+      "tags": [
+        "TIER-A"
+      ]
+    },
+    {
+      "id": "PAC-4",
+      "grade": "MUST",
+      "tags": [
+        "TIER-A"
+      ]
+    },
+    {
+      "id": "PAC-5",
+      "grade": "MUST",
+      "tags": [
+        "TIER-B"
+      ]
+    },
+    {
+      "id": "PAC-6",
+      "grade": "SHOULD",
+      "tags": [
+        "IMPACT",
+        "TIER-B"
+      ]
+    },
+    {
+      "id": "PAC-7",
+      "grade": "SHOULD",
+      "tags": [
+        "IMPACT",
+        "TIER-B"
+      ]
+    }
+  ],
+  "input_paths_read": [
+    ".gran-maestro/requests/REQ-919/request.json",
+    ".gran-maestro/plans/PLN-743/plan.md",
+    ".gran-maestro/plans/PLN-743/plan.ids.json",
+    ".gran-maestro/requests/REQ-919/tasks/01/spec.md",
+    ".gran-maestro/requests/REQ-919/tasks/02/spec.md",
+    ".gran-maestro/requests/REQ-919/discussion/req-arch-decision.md",
+    ".gran-maestro/agile/AGI-039/objective/details/migration-execution-breakdown.md",
+    ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+    ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+    "scripts/lib/codex-plugin-discovery-smoke.mjs",
+    "scripts/generate-dod-011-migration-work-package-breakdown.mjs",
+    "tests/smoke.test.mjs"
+  ],
+  "allowed_output_paths": [
+    ".gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "evidence_lifecycle": {
+    "status": "pass",
+    "request_metadata_loaded": true,
+    "plan_ids_loaded": true,
+    "source_documents_loaded": true,
+    "shared_dod_registry_linkage_pass": true,
+    "predecessor_linkage_pass": true,
+    "work_package_contract_pass": true,
+    "dependency_graph_pass": true,
+    "no_go_boundary_pass": true,
+    "follow_up_scope_pass": true
+  }
+}

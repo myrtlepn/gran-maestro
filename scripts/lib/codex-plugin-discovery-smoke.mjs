@@ -852,6 +852,16 @@ export const sharedDodEvidenceRegistry = Object.freeze([
     expected_status: 'pass',
     validator_export_name: 'assertDod010BlockerFreeMigrationReport',
   }),
+  buildSharedDodEvidenceRegistryEntry({
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  }),
 ]);
 
 export function getSharedDodEvidenceRegistryEntryByDodId(
@@ -870,10 +880,14 @@ export function buildSharedDodEvidenceRegistryLinkage({
   requestEvidencePath,
   repoRootPath = repoRoot,
   registry = sharedDodEvidenceRegistry,
+  allowMissingRequestEvidencePath = false,
 } = {}) {
   const entry = getSharedDodEvidenceRegistryEntryByDodId(dodId, registry);
   const validation = entry
-    ? validateSharedDodEvidenceRegistryEntry(entry, { repoRootPath })
+    ? validateSharedDodEvidenceRegistryEntry(entry, {
+        repoRootPath,
+        allowMissingRequestEvidencePath,
+      })
     : {
         status: 'fail',
         issues: [`Missing shared DOD evidence registry entry for ${dodId ?? 'unknown'}.`],
@@ -1405,12 +1419,19 @@ function resolveSharedDodEvidenceValidatorByName(exportName) {
       return assertDod009RequestEvidence;
     case 'assertDod010BlockerFreeMigrationReport':
       return assertDod010BlockerFreeMigrationReport;
+    case 'assertDod011RequestEvidence':
+      return assertDod011RequestEvidence;
     default:
       return null;
   }
 }
 
-function validateSharedDodEvidenceRegistryPath(path, fieldLabel, repoRootPath) {
+function validateSharedDodEvidenceRegistryPath(
+  path,
+  fieldLabel,
+  repoRootPath,
+  { allowMissing = false } = {},
+) {
   const validation = validateRepositoryRelativePath(path);
 
   if (validation.status !== 'pass') {
@@ -1423,6 +1444,14 @@ function validateSharedDodEvidenceRegistryPath(path, fieldLabel, repoRootPath) {
 
   const scopedPath = join(repoRootPath, validation.normalized_path);
   if (!existsSync(scopedPath)) {
+    if (allowMissing) {
+      return {
+        status: 'pass',
+        normalized_path: validation.normalized_path,
+        issues: [],
+      };
+    }
+
     return {
       status: 'fail',
       normalized_path: validation.normalized_path,
@@ -1451,7 +1480,7 @@ function validateSharedDodEvidenceRegistryPath(path, fieldLabel, repoRootPath) {
 
 export function validateSharedDodEvidenceRegistryEntry(
   entry,
-  { repoRootPath = repoRoot } = {},
+  { repoRootPath = repoRoot, allowMissingRequestEvidencePath = false } = {},
 ) {
   const issues = [];
 
@@ -1472,6 +1501,7 @@ export function validateSharedDodEvidenceRegistryEntry(
     entry?.request_evidence_path,
     'request_evidence_path',
     repoRootPath,
+    { allowMissing: allowMissingRequestEvidencePath },
   );
   issues.push(...requestEvidencePathValidation.issues);
 
@@ -4540,9 +4570,15 @@ export function buildDod011RequestEvidence() {
   const predecessorEvidenceRefs = buildDod011PredecessorEvidenceRefs(parseFailures);
   const followUpScope = buildDod011FollowUpScope();
   const sourceDocuments = buildDod011SourceDocuments();
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestSnapshot.dod_id ?? 'DOD-011',
+    requestEvidencePath: dod011RequestEvidenceRelativePath,
+    allowMissingRequestEvidencePath: true,
+  });
   const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
   const status =
     sanitizedParseFailures.length === 0 &&
+    sharedDodRegistryLinkage.status === 'pass' &&
     predecessorEvidenceRefs.every(
       (entry) =>
         entry.shared_dod_registry_linkage_status === 'pass' &&
@@ -4567,6 +4603,7 @@ export function buildDod011RequestEvidence() {
       '2026-05-20T04:52:57.000Z',
     request_evidence_path: dod011RequestEvidenceRelativePath,
     generator_script_path: dod011GeneratorScriptRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
     status,
     repository_local_only: true,
     work_packages: workPackages,
@@ -4604,6 +4641,7 @@ export function buildDod011RequestEvidence() {
       request_metadata_loaded: requestMetadata.error === null,
       plan_ids_loaded: planIds.error === null,
       source_documents_loaded: sourceDocuments.status === 'pass',
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
       predecessor_linkage_pass: predecessorEvidenceRefs.every(
         (entry) => entry.shared_dod_registry_linkage_status === 'pass',
       ),
@@ -4628,6 +4666,16 @@ export function assertDod011RequestEvidence(evidence) {
   assert.equal(evidence.format_version, '1.0.0');
   assert.equal(evidence.request_evidence_path, dod011RequestEvidenceRelativePath);
   assert.equal(evidence.generator_script_path, dod011GeneratorScriptRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-011',
+    request_id: 'REQ-919',
+    agi_id: 'AGI-039',
+    sprint: 13,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod011RequestEvidence',
+  });
   assert.equal(evidence.repository_local_only, true);
   assert.equal(evidence.status, 'pass');
   assert.equal(evidence.parse_error_count, 0);
@@ -4710,6 +4758,7 @@ export function assertDod011RequestEvidence(evidence) {
   assert.equal(evidence.evidence_lifecycle?.request_metadata_loaded, true);
   assert.equal(evidence.evidence_lifecycle?.plan_ids_loaded, true);
   assert.equal(evidence.evidence_lifecycle?.source_documents_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.shared_dod_registry_linkage_pass, true);
   assert.equal(evidence.evidence_lifecycle?.predecessor_linkage_pass, true);
   assert.equal(evidence.evidence_lifecycle?.work_package_contract_pass, true);
   assert.equal(evidence.evidence_lifecycle?.dependency_graph_pass, true);
