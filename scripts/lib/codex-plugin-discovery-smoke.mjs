@@ -96,6 +96,12 @@ export const dod008WorkflowE2EValidationEvidenceAbsolutePath = join(
   repoRoot,
   dod008WorkflowE2EValidationEvidenceRelativePath,
 );
+export const dod009RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json';
+export const dod009RequestEvidenceAbsolutePath = join(
+  repoRoot,
+  dod009RequestEvidenceRelativePath,
+);
 export const req893RequestMetadataRelativePath = '.gran-maestro/requests/REQ-893/request.json';
 const req893RequestMetadataOrchestrationRelativePath = 'requests/REQ-893/request.json';
 const req893RequestMetadataAbsolutePath = join(
@@ -107,6 +113,12 @@ const req894RequestMetadataOrchestrationRelativePath = 'requests/REQ-894/request
 const req894RequestMetadataAbsolutePath = join(
   orchestrationRoot,
   req894RequestMetadataOrchestrationRelativePath,
+);
+export const req912RequestMetadataRelativePath = '.gran-maestro/requests/REQ-912/request.json';
+const req912RequestMetadataOrchestrationRelativePath = 'requests/REQ-912/request.json';
+const req912RequestMetadataAbsolutePath = join(
+  orchestrationRoot,
+  req912RequestMetadataOrchestrationRelativePath,
 );
 export const req890Dod005ValidationEvidenceRelativePath =
   '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json';
@@ -570,6 +582,49 @@ export const defaultDod008WorkflowE2EValidationSummary = {
     generated_output_path: null,
     status: 'pass',
     parse_ok: true,
+  },
+};
+
+export const defaultDod009RequestEvidenceVerificationSummary = {
+  plugin_manifest_hooks: {
+    command: 'python3 -m pytest tests/test_plugin_manifest_hooks.py tests/test_hooks_json_registration.py',
+    status: 'pass',
+    tests_total: 8,
+    tests_pass: 8,
+    tests_fail: 0,
+    summary: 'plugin manifest and hooks regression checks passed',
+  },
+  workflow_state_continuation: {
+    command:
+      'python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py',
+    status: 'pass',
+    tests_total: 21,
+    tests_pass: 21,
+    tests_fail: 0,
+    summary: 'workflow state and continuation regression checks passed',
+  },
+  run_wrapper_session_migration: {
+    command: 'python3 -m pytest tests/test_run_wrapper.py tests/test_session_id_migration.py',
+    status: 'pass',
+    tests_total: 20,
+    tests_pass: 20,
+    tests_fail: 0,
+    summary: 'run wrapper and session migration regression checks passed',
+  },
+  npm_test: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 65,
+    tests_pass: 65,
+    tests_fail: 0,
+    summary: 'smoke tests passed',
+  },
+  generator: {
+    command: 'node scripts/generate-dod-009-claude-plugin-regression-validation.mjs <temp-output>',
+    status: 'pass',
+    parse_ok: true,
+    generated_artifact_path: dod009RequestEvidenceRelativePath,
+    generated_output_path: null,
   },
 };
 
@@ -2002,6 +2057,18 @@ function latestTaskAttempt(task) {
   return normalizeArray(task?.attempts).at(-1) ?? null;
 }
 
+function extractCommitHash(commit) {
+  if (typeof commit === 'string') {
+    return commit;
+  }
+
+  if (commit && typeof commit === 'object' && typeof commit.hash === 'string') {
+    return commit.hash;
+  }
+
+  return null;
+}
+
 function buildReq893RequestMetadataSnapshot(requestMetadata) {
   const tasks = normalizeArray(requestMetadata?.tasks);
   const relevantTaskIds = new Set(['REQ-893-01', 'REQ-893-02', 'REQ-893-03', 'REQ-893-04']);
@@ -2072,6 +2139,46 @@ function buildReq894RequestMetadataSnapshot(requestMetadata) {
             latestAttempt?.commit ??
             null,
           task_commit: task?.commit ?? latestAttempt?.commit ?? null,
+          integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
+          validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
+          self_check: selfCheck,
+        };
+      }),
+  };
+}
+
+function buildReq912RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-912-01',
+    'REQ-912-02',
+    'REQ-912-03',
+  ]);
+
+  return {
+    path: req912RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+        const selfCheck = summarizeSelfCheck(task?.self_check ?? latestAttempt?.self_check);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: task?.integration_commit ??
+            latestAttempt?.integration_commit ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          task_commit: extractCommitHash(task?.commit) ?? extractCommitHash(latestAttempt?.commit),
           integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
           validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
           self_check: selfCheck,
@@ -2192,6 +2299,40 @@ function normalizeDod008WorkflowE2EValidationSummary(verificationSummary = {}) {
   };
 }
 
+function normalizeDod009RequestEvidenceVerificationSummary(verificationSummary = {}) {
+  const defaults = defaultDod009RequestEvidenceVerificationSummary;
+  const normalizeSummary = (name) =>
+    normalizeDod007ContractSummary(verificationSummary[name], defaults[name]);
+
+  return {
+    plugin_manifest_hooks: normalizeSummary('plugin_manifest_hooks'),
+    workflow_state_continuation: normalizeSummary('workflow_state_continuation'),
+    run_wrapper_session_migration: normalizeSummary('run_wrapper_session_migration'),
+    npm_test: normalizeSummary('npm_test'),
+    generator: {
+      ...defaults.generator,
+      ...(verificationSummary.generator ?? {}),
+      command: sanitizeMetadataCommand(
+        verificationSummary.generator?.command ?? defaults.generator.command,
+      ),
+      generated_artifact_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_artifact_path ??
+          defaults.generator.generated_artifact_path,
+        null,
+      ),
+      generated_output_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_output_path ??
+          defaults.generator.generated_output_path,
+        null,
+      ),
+      status: normalizeEvidenceStatus(
+        verificationSummary.generator?.status ?? defaults.generator.status,
+      ),
+      parse_ok: verificationSummary.generator?.parse_ok ?? defaults.generator.parse_ok,
+    },
+  };
+}
+
 function dod008FocusedWorkflowSummariesPass(verificationSummary) {
   return [
     verificationSummary.focused_workflow_validation,
@@ -2199,6 +2340,15 @@ function dod008FocusedWorkflowSummariesPass(verificationSummary) {
     verificationSummary.core_workflow_harness,
     verificationSummary.lifecycle_smoke,
     verificationSummary.artifact_parity,
+  ].every(dod007SummaryPasses);
+}
+
+function dod009CommandSummariesPass(verificationSummary) {
+  return [
+    verificationSummary.plugin_manifest_hooks,
+    verificationSummary.workflow_state_continuation,
+    verificationSummary.run_wrapper_session_migration,
+    verificationSummary.npm_test,
   ].every(dod007SummaryPasses);
 }
 
@@ -4568,6 +4718,24 @@ function summarizeDod008WorkflowCommandTotals(verificationSummary) {
   );
 }
 
+function summarizeDod009CommandTotals(verificationSummary) {
+  const summaries = [
+    verificationSummary.plugin_manifest_hooks,
+    verificationSummary.workflow_state_continuation,
+    verificationSummary.run_wrapper_session_migration,
+    verificationSummary.npm_test,
+  ];
+
+  return summaries.reduce(
+    (totals, summary) => ({
+      tests_total: totals.tests_total + Number(summary.tests_total ?? 0),
+      tests_pass: totals.tests_pass + Number(summary.tests_pass ?? 0),
+      tests_fail: totals.tests_fail + Number(summary.tests_fail ?? 0),
+    }),
+    { tests_total: 0, tests_pass: 0, tests_fail: 0 },
+  );
+}
+
 function buildDod008EvidenceLifecycle({
   verificationSummary,
   schemaContract,
@@ -4613,6 +4781,129 @@ function buildDod008EvidenceLifecycle({
     generator_pass: generatorPass,
     excluded_surfaces_pass: excludedSurfacesPass,
     parse_failures_absent: parseFailures.length === 0,
+  };
+}
+
+function buildDod009PriorEvidenceLink(evidence) {
+  return {
+    status:
+      evidence?.status === 'pass' &&
+      evidence?.request_id === 'REQ-894' &&
+      evidence?.dod_id === 'DOD-008' &&
+      evidence?.request_evidence_path === dod008WorkflowE2EValidationEvidenceRelativePath
+        ? 'pass'
+        : 'fail',
+    relationship: 'supporting-reference-only',
+    request_id: evidence?.request_id ?? 'REQ-894',
+    agi_id: evidence?.agi_id ?? 'AGI-039',
+    sprint: evidence?.sprint ?? 9,
+    dod_id: evidence?.dod_id ?? 'DOD-008',
+    plan_id: evidence?.plan_id ?? 'PLN-721',
+    artifact_id: evidence?.artifact_id ?? null,
+    request_evidence_path: evidence?.request_evidence_path ??
+      dod008WorkflowE2EValidationEvidenceRelativePath,
+    prior_evidence_status: evidence?.status ?? 'missing',
+    substitutes_claude_regression_result: false,
+  };
+}
+
+function summarizeDod009RequestEvidenceBlockers({
+  matrixContract,
+  linkedPriorEvidence,
+  verificationSummary,
+  parseFailures,
+  forbiddenMetadataScan,
+}) {
+  const blockers = [...normalizeArray(matrixContract?.blocker_summary?.human_readable)];
+
+  if (linkedPriorEvidence.status !== 'pass') {
+    blockers.push(
+      `linked_prior_evidence ${linkedPriorEvidence.request_evidence_path}: expected pass, got ${linkedPriorEvidence.prior_evidence_status}.`,
+    );
+  }
+
+  for (const [summaryId, summary] of Object.entries({
+    plugin_manifest_hooks: verificationSummary.plugin_manifest_hooks,
+    workflow_state_continuation: verificationSummary.workflow_state_continuation,
+    run_wrapper_session_migration: verificationSummary.run_wrapper_session_migration,
+    npm_test: verificationSummary.npm_test,
+  })) {
+    if (summary.status !== 'pass') {
+      blockers.push(
+        `${summaryId}: ${summary.summary ?? 'command summary reported failure.'}`,
+      );
+    }
+  }
+
+  if (
+    verificationSummary.generator.status !== 'pass' ||
+    verificationSummary.generator.parse_ok !== true ||
+    verificationSummary.generator.generated_artifact_path !== dod009RequestEvidenceRelativePath
+  ) {
+    blockers.push('generator: request-level evidence artifact metadata did not validate.');
+  }
+
+  for (const failure of parseFailures) {
+    blockers.push(`parse_failure ${failure.path}: ${failure.error}.`);
+  }
+
+  if (forbiddenMetadataScan.status !== 'pass') {
+    for (const violation of forbiddenMetadataScan.violations) {
+      blockers.push(`forbidden_metadata ${violation.fixture_id}.`);
+    }
+  }
+
+  return blockers;
+}
+
+function buildDod009EvidenceLifecycle({
+  verificationSummary,
+  matrixContract,
+  linkedPriorEvidence,
+  excludedSurfaces,
+  parseFailures,
+  forbiddenMetadataScan,
+}) {
+  const commandSummariesPass = dod009CommandSummariesPass(verificationSummary);
+  const generatorPass =
+    verificationSummary.generator.status === 'pass' &&
+    verificationSummary.generator.parse_ok === true &&
+    verificationSummary.generator.generated_artifact_path === dod009RequestEvidenceRelativePath;
+  const matrixPass = matrixContract.status === 'pass';
+  const linkedPriorEvidencePass = linkedPriorEvidence.status === 'pass';
+  const noGoGuardPass =
+    matrixContract.no_go_metadata_guard.status === 'pass' &&
+    matrixContract.forbidden_metadata_scan.status === 'pass';
+  const excludedSurfacesPass = excludedSurfaces.every(
+    (surface) =>
+      surface.status === 'pass' &&
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0,
+  );
+  const parseFailuresAbsent = parseFailures.length === 0;
+  const forbiddenMetadataScanPass = forbiddenMetadataScan.status === 'pass';
+
+  return {
+    status:
+      matrixPass &&
+      linkedPriorEvidencePass &&
+      commandSummariesPass &&
+      generatorPass &&
+      noGoGuardPass &&
+      excludedSurfacesPass &&
+      parseFailuresAbsent &&
+      forbiddenMetadataScanPass
+        ? 'pass'
+        : 'fail',
+    matrix_pass: matrixPass,
+    linked_prior_evidence_pass: linkedPriorEvidencePass,
+    command_summaries_pass: commandSummariesPass,
+    generator_pass: generatorPass,
+    no_go_guard_pass: noGoGuardPass,
+    excluded_surfaces_pass: excludedSurfacesPass,
+    parse_failures_absent: parseFailuresAbsent,
+    forbidden_metadata_scan_pass: forbiddenMetadataScanPass,
   };
 }
 
@@ -4742,6 +5033,131 @@ export function buildDod008WorkflowE2EValidationEvidence({
       ...evidenceWithoutScan.evidence_lifecycle,
       status,
       forbidden_metadata_scan_pass: forbiddenMetadataScan.status === 'pass',
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+export function buildDod009RequestEvidence({
+  verificationSummary,
+} = {}) {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    req912RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const linkedDod008Evidence = collectJsonArtifact(
+    dod008WorkflowE2EValidationEvidenceAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const normalizedVerification = normalizeDod009RequestEvidenceVerificationSummary(
+    verificationSummary,
+  );
+  const requestSnapshot = buildReq912RequestMetadataSnapshot(requestMetadata.value);
+  const matrixContract = buildDod009ClaudePluginRegressionMatrix();
+  const linkedPriorEvidence = buildDod009PriorEvidenceLink(linkedDod008Evidence.value);
+  const excludedSurfaces = matrixContract.excluded_surfaces.map((surface) => ({ ...surface }));
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const evidenceWithoutScan = {
+    artifact_id: 'REQ-912-DOD-009-claude-plugin-regression-validation',
+    request_id: requestSnapshot.request_id ?? 'REQ-912',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 10,
+    task_id: '02',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-009',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-736',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-20T01:47:31.000Z',
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    status: 'fail',
+    claude_plugin_regression_matrix: matrixContract,
+    linked_prior_evidence: linkedPriorEvidence,
+    no_go_metadata_guard: {
+      status:
+        matrixContract.no_go_metadata_guard.status === 'pass' &&
+        matrixContract.forbidden_metadata_scan.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      criteria: matrixContract.no_go_metadata_guard.criteria,
+      contract_forbidden_metadata_scan: matrixContract.forbidden_metadata_scan,
+    },
+    test_command_results: {
+      plugin_manifest_hooks: normalizedVerification.plugin_manifest_hooks,
+      workflow_state_continuation: normalizedVerification.workflow_state_continuation,
+      run_wrapper_session_migration: normalizedVerification.run_wrapper_session_migration,
+      npm_test: normalizedVerification.npm_test,
+      generator: normalizedVerification.generator,
+      totals: summarizeDod009CommandTotals(normalizedVerification),
+    },
+    blocker_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      human_readable: [],
+    },
+    evidence_lifecycle: {
+      status: 'fail',
+    },
+    excluded_surfaces: excludedSurfaces,
+    request_metadata_snapshot: requestSnapshot,
+    manual_readable_exports: {
+      canonical_source_paths: matrixContract.manual_readable_exports.canonical_source_paths,
+      excluded_surface_ids: [...dod009ExcludedSurfaceIds],
+      blocker_summary_fields: ['status', 'blocker_count', 'human_readable'],
+      command_summary_fields: [
+        'plugin_manifest_hooks',
+        'workflow_state_continuation',
+        'run_wrapper_session_migration',
+        'npm_test',
+        'generator',
+      ],
+      linked_prior_evidence_paths: [dod008WorkflowE2EValidationEvidenceRelativePath],
+    },
+    input_paths_read: [
+      req912RequestMetadataRelativePath,
+      dod008WorkflowE2EValidationEvidenceRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      'scripts/generate-dod-008-workflow-e2e-validation.mjs',
+      'scripts/generate-dod-009-claude-plugin-regression-validation.mjs',
+      'tests/smoke.test.mjs',
+      ...matrixContract.input_paths_read,
+    ].filter((path, index, paths) => paths.indexOf(path) === index),
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod009RegressionMatrixMetadata(evidenceWithoutScan);
+  const lifecycle = buildDod009EvidenceLifecycle({
+    verificationSummary: normalizedVerification,
+    matrixContract,
+    linkedPriorEvidence,
+    excludedSurfaces,
+    parseFailures: sanitizedParseFailures,
+    forbiddenMetadataScan,
+  });
+  const blockers = summarizeDod009RequestEvidenceBlockers({
+    matrixContract,
+    linkedPriorEvidence,
+    verificationSummary: normalizedVerification,
+    parseFailures: sanitizedParseFailures,
+    forbiddenMetadataScan,
+  });
+  const status = lifecycle.status;
+
+  return {
+    ...evidenceWithoutScan,
+    status,
+    blocker_summary: {
+      status: blockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: blockers.length,
+      human_readable: blockers,
+    },
+    evidence_lifecycle: {
+      ...lifecycle,
+      status,
     },
     forbidden_metadata_scan: forbiddenMetadataScan,
   };
@@ -5524,6 +5940,115 @@ export function assertDod009ClaudePluginRegressionMatrix(contract) {
     contract.manual_readable_exports.excluded_surface_ids,
     dod009ExcludedSurfaceIds,
   );
+}
+
+export function assertDod009RequestEvidence(evidence, expectedSummary = null) {
+  assert.equal(evidence.artifact_id, 'REQ-912-DOD-009-claude-plugin-regression-validation');
+  assert.equal(evidence.request_id, 'REQ-912');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 10);
+  assert.equal(evidence.task_id, '02');
+  assert.equal(evidence.dod_id, 'DOD-009');
+  assert.equal(evidence.plan_id, 'PLN-736');
+  assert.equal(evidence.request_evidence_path, dod009RequestEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assertDod009ClaudePluginRegressionMatrix(evidence.claude_plugin_regression_matrix);
+  assert.equal(evidence.linked_prior_evidence.status, 'pass');
+  assert.equal(evidence.linked_prior_evidence.relationship, 'supporting-reference-only');
+  assert.equal(
+    evidence.linked_prior_evidence.request_evidence_path,
+    dod008WorkflowE2EValidationEvidenceRelativePath,
+  );
+  assert.equal(evidence.linked_prior_evidence.prior_evidence_status, 'pass');
+  assert.equal(evidence.no_go_metadata_guard.status, 'pass');
+  assert.equal(evidence.no_go_metadata_guard.contract_forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.test_command_results.plugin_manifest_hooks.status, 'pass');
+  assert.equal(evidence.test_command_results.workflow_state_continuation.status, 'pass');
+  assert.equal(evidence.test_command_results.run_wrapper_session_migration.status, 'pass');
+  assert.equal(evidence.test_command_results.npm_test.status, 'pass');
+  assert.equal(evidence.test_command_results.generator.status, 'pass');
+  assert.equal(
+    evidence.test_command_results.generator.generated_artifact_path,
+    dod009RequestEvidenceRelativePath,
+  );
+  assert.equal(evidence.evidence_lifecycle.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.matrix_pass, true);
+  assert.equal(evidence.evidence_lifecycle.linked_prior_evidence_pass, true);
+  assert.equal(evidence.evidence_lifecycle.command_summaries_pass, true);
+  assert.equal(evidence.evidence_lifecycle.generator_pass, true);
+  assert.equal(evidence.evidence_lifecycle.no_go_guard_pass, true);
+  assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
+  assert.equal(evidence.evidence_lifecycle.parse_failures_absent, true);
+  assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod009ExcludedSurfaceIds,
+  );
+  assert.ok(
+    evidence.excluded_surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(evidence.blocker_summary.status, 'pass');
+  assert.equal(evidence.blocker_summary.blocker_count, 0);
+  assert.deepEqual(evidence.blocker_summary.human_readable, []);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    evidence.manual_readable_exports.canonical_source_paths,
+    dod009MatrixSurfacePaths,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.excluded_surface_ids,
+    dod009ExcludedSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.command_summary_fields,
+    [
+      'plugin_manifest_hooks',
+      'workflow_state_continuation',
+      'run_wrapper_session_migration',
+      'npm_test',
+      'generator',
+    ],
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.linked_prior_evidence_paths,
+    [dod008WorkflowE2EValidationEvidenceRelativePath],
+  );
+
+  if (expectedSummary) {
+    const normalizedExpected = normalizeDod009RequestEvidenceVerificationSummary(expectedSummary);
+
+    for (const summaryId of [
+      'plugin_manifest_hooks',
+      'workflow_state_continuation',
+      'run_wrapper_session_migration',
+      'npm_test',
+    ]) {
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_total,
+        normalizedExpected[summaryId].tests_total,
+      );
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_pass,
+        normalizedExpected[summaryId].tests_pass,
+      );
+      assert.equal(
+        evidence.test_command_results[summaryId].tests_fail,
+        normalizedExpected[summaryId].tests_fail,
+      );
+    }
+
+    assert.equal(
+      evidence.test_command_results.generator.generated_artifact_path,
+      normalizedExpected.generator.generated_artifact_path,
+    );
+  }
 }
 
 export function assertDod008CoreWorkflowSmokeHarness(harness) {

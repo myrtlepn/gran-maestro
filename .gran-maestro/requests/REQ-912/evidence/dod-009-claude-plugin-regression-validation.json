@@ -1,0 +1,611 @@
+{
+  "artifact_id": "REQ-912-DOD-009-claude-plugin-regression-validation",
+  "request_id": "REQ-912",
+  "agi_id": "AGI-039",
+  "sprint": 10,
+  "task_id": "02",
+  "dod_id": "DOD-009",
+  "plan_id": "PLN-736",
+  "format_version": "1.0.0",
+  "generated_at": "2026-05-20T02:08:08.321120+00:00",
+  "request_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+  "status": "pass",
+  "claude_plugin_regression_matrix": {
+    "contract_id": "REQ-912-DOD-009-claude-plugin-regression-matrix",
+    "request_id": "REQ-912",
+    "task_id": "01",
+    "dod_id": "DOD-009",
+    "format_version": "1.0.0",
+    "comparison_subject": "claude-plugin-mode",
+    "codex_artifact_substitution_permitted": false,
+    "repository_local_only": true,
+    "matrix_surfaces": [
+      {
+        "surface_id": "claude_plugin_manifest",
+        "canonical_source_path": ".claude-plugin/plugin.json",
+        "input_kind": "file",
+        "contract": "manifest-pointer-and-version",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "root_package_version",
+        "canonical_source_path": "package.json",
+        "input_kind": "file",
+        "contract": "version-sync",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "claude_plugin_marketplace",
+        "canonical_source_path": ".claude-plugin/marketplace.json",
+        "input_kind": "file",
+        "contract": "version-sync",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "extension_manifest_version",
+        "canonical_source_path": "extension/manifest.json",
+        "input_kind": "file",
+        "contract": "version-sync",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "extension_package_version",
+        "canonical_source_path": "extension/package.json",
+        "input_kind": "file",
+        "contract": "version-sync",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "canonical_hooks_config",
+        "canonical_source_path": "hooks/hooks.json",
+        "input_kind": "file",
+        "contract": "hooks-pointer-and-registration",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "skills_directory",
+        "canonical_source_path": "skills/",
+        "input_kind": "directory",
+        "contract": "skills-discovery",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      },
+      {
+        "surface_id": "agents_directory",
+        "canonical_source_path": "agents/",
+        "input_kind": "directory",
+        "contract": "agents-parity",
+        "verification_scope": "claude-canonical-source",
+        "evidence_ready": true,
+        "repository_local_only": true
+      }
+    ],
+    "contract_checks": {
+      "version_sync": {
+        "status": "pass",
+        "checked_paths": [
+          "package.json",
+          ".claude-plugin/plugin.json",
+          ".claude-plugin/marketplace.json",
+          "extension/manifest.json",
+          "extension/package.json"
+        ],
+        "baseline_version": "0.59.8",
+        "unique_version_count": 1,
+        "versions_by_path": {
+          "package.json": "0.59.8",
+          ".claude-plugin/plugin.json": "0.59.8",
+          ".claude-plugin/marketplace.json": "0.59.8",
+          "extension/manifest.json": "0.59.8",
+          "extension/package.json": "0.59.8"
+        }
+      },
+      "agents_parity": {
+        "status": "pass",
+        "manifest_agent_paths": [
+          "./agents/architect.md",
+          "./agents/feedback-composer.md",
+          "./agents/outsource-brief.md",
+          "./agents/pm-conductor.md",
+          "./agents/schema-designer.md",
+          "./agents/ui-designer.md"
+        ],
+        "filesystem_agent_paths": [
+          "./agents/architect.md",
+          "./agents/feedback-composer.md",
+          "./agents/outsource-brief.md",
+          "./agents/pm-conductor.md",
+          "./agents/schema-designer.md",
+          "./agents/ui-designer.md"
+        ],
+        "missing_manifest_entries": [],
+        "extra_manifest_entries": []
+      },
+      "skills_directory_registration": {
+        "status": "pass",
+        "manifest_skills_pointer": "./skills/",
+        "canonical_directory_path": "skills/",
+        "skill_file_count": 40,
+        "skill_source_paths_sample": [
+          "skills/accept/SKILL.md",
+          "skills/agile-plan/SKILL.md",
+          "skills/agile/SKILL.md",
+          "skills/approve/SKILL.md",
+          "skills/archive/SKILL.md",
+          "skills/cancel/SKILL.md",
+          "skills/claude/SKILL.md",
+          "skills/cleanup/SKILL.md"
+        ]
+      },
+      "hooks_pointer": {
+        "status": "pass",
+        "manifest_hooks_pointer": "./hooks/hooks.json",
+        "canonical_source_path": "hooks/hooks.json"
+      },
+      "hooks_registration": {
+        "status": "pass",
+        "event_ids": [
+          "PreToolUse",
+          "SessionStart",
+          "Stop",
+          "UserPromptSubmit"
+        ],
+        "command_paths": [
+          "${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh",
+          "${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh",
+          "${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh",
+          "${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh"
+        ],
+        "missing_command_paths": [],
+        "extra_command_paths": [],
+        "shared_command_path_count": 1
+      }
+    },
+    "no_go_metadata_guard": {
+      "status": "pass",
+      "criteria": [
+        {
+          "criterion_id": "host_user_absolute_root",
+          "category": "host-specific-root",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "home_alias_or_env_root",
+          "category": "shell-expanded-root",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "codex_user_config_surface",
+          "category": "user-scoped-codex-config",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "claude_hook_workspace_bypass",
+          "category": "user-scoped-claude-hook-state",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "parent_directory_escape",
+          "category": "path-escape",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "plugin_runtime_side_effect",
+          "category": "plugin-side-effect",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "plugin_cache_side_effect",
+          "category": "plugin-side-effect",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "plugin_index_rescan_side_effect",
+          "category": "plugin-side-effect",
+          "required_result": "reject"
+        },
+        {
+          "criterion_id": "link_creation_side_effect",
+          "category": "filesystem-side-effect",
+          "required_result": "reject"
+        }
+      ],
+      "deterministic_validation": true,
+      "repository_local_only": true
+    },
+    "excluded_surfaces": [
+      {
+        "surface_id": "DOD-010",
+        "dod_id": "DOD-010",
+        "status": "pass",
+        "implementation_count": 0,
+        "runtime_invocation_count": 0,
+        "acceptance_gate_count": 0,
+        "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+      },
+      {
+        "surface_id": "DOD-011",
+        "dod_id": "DOD-011",
+        "status": "pass",
+        "implementation_count": 0,
+        "runtime_invocation_count": 0,
+        "acceptance_gate_count": 0,
+        "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+      },
+      {
+        "surface_id": "DOD-012",
+        "dod_id": "DOD-012",
+        "status": "pass",
+        "implementation_count": 0,
+        "runtime_invocation_count": 0,
+        "acceptance_gate_count": 0,
+        "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+      },
+      {
+        "surface_id": "DOD-013",
+        "dod_id": "DOD-013",
+        "status": "pass",
+        "implementation_count": 0,
+        "runtime_invocation_count": 0,
+        "acceptance_gate_count": 0,
+        "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+      }
+    ],
+    "blocker_summary": {
+      "status": "pass",
+      "blocker_count": 0,
+      "human_readable": []
+    },
+    "manual_readable_exports": {
+      "matrix_surface_ids": [
+        "claude_plugin_manifest",
+        "root_package_version",
+        "claude_plugin_marketplace",
+        "extension_manifest_version",
+        "extension_package_version",
+        "canonical_hooks_config",
+        "skills_directory",
+        "agents_directory"
+      ],
+      "canonical_source_paths": [
+        ".claude-plugin/plugin.json",
+        "package.json",
+        ".claude-plugin/marketplace.json",
+        "extension/manifest.json",
+        "extension/package.json",
+        "hooks/hooks.json",
+        "skills/",
+        "agents/"
+      ],
+      "excluded_surface_ids": [
+        "DOD-010",
+        "DOD-011",
+        "DOD-012",
+        "DOD-013"
+      ],
+      "blocker_summary_fields": [
+        "status",
+        "blocker_count",
+        "human_readable"
+      ]
+    },
+    "input_paths_read": [
+      ".claude-plugin/plugin.json",
+      "package.json",
+      ".claude-plugin/marketplace.json",
+      "extension/manifest.json",
+      "extension/package.json",
+      "hooks/hooks.json",
+      "skills/",
+      "agents/"
+    ],
+    "parse_error_count": 0,
+    "parse_failures": [],
+    "status": "pass",
+    "forbidden_metadata_scan": {
+      "status": "pass",
+      "scanned_string_count": 170,
+      "violation_count": 0,
+      "violations": []
+    }
+  },
+  "linked_prior_evidence": {
+    "status": "pass",
+    "relationship": "supporting-reference-only",
+    "request_id": "REQ-894",
+    "agi_id": "AGI-039",
+    "sprint": 9,
+    "dod_id": "DOD-008",
+    "plan_id": "PLN-721",
+    "artifact_id": "REQ-894-DOD-008-workflow-e2e-validation",
+    "request_evidence_path": ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+    "prior_evidence_status": "pass",
+    "substitutes_claude_regression_result": false
+  },
+  "no_go_metadata_guard": {
+    "status": "pass",
+    "criteria": [
+      {
+        "criterion_id": "host_user_absolute_root",
+        "category": "host-specific-root",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "home_alias_or_env_root",
+        "category": "shell-expanded-root",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "codex_user_config_surface",
+        "category": "user-scoped-codex-config",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "claude_hook_workspace_bypass",
+        "category": "user-scoped-claude-hook-state",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "parent_directory_escape",
+        "category": "path-escape",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "plugin_runtime_side_effect",
+        "category": "plugin-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "plugin_cache_side_effect",
+        "category": "plugin-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "plugin_index_rescan_side_effect",
+        "category": "plugin-side-effect",
+        "required_result": "reject"
+      },
+      {
+        "criterion_id": "link_creation_side_effect",
+        "category": "filesystem-side-effect",
+        "required_result": "reject"
+      }
+    ],
+    "contract_forbidden_metadata_scan": {
+      "status": "pass",
+      "scanned_string_count": 170,
+      "violation_count": 0,
+      "violations": []
+    }
+  },
+  "test_command_results": {
+    "plugin_manifest_hooks": {
+      "command": "python3 -m pytest tests/test_plugin_manifest_hooks.py tests/test_hooks_json_registration.py",
+      "status": "pass",
+      "tests_total": 14,
+      "tests_pass": 14,
+      "tests_fail": 0,
+      "summary": "14 passed in 0.06s"
+    },
+    "workflow_state_continuation": {
+      "command": "python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py",
+      "status": "pass",
+      "tests_total": 15,
+      "tests_pass": 15,
+      "tests_fail": 0,
+      "summary": "15 passed in 32.79s"
+    },
+    "run_wrapper_session_migration": {
+      "command": "python3 -m pytest tests/test_run_wrapper.py tests/test_session_id_migration.py",
+      "status": "pass",
+      "tests_total": 19,
+      "tests_pass": 19,
+      "tests_fail": 0,
+      "summary": "19 passed in 11.45s"
+    },
+    "npm_test": {
+      "command": "npm test",
+      "status": "pass",
+      "tests_total": 65,
+      "tests_pass": 65,
+      "tests_fail": 0,
+      "summary": "65 passed"
+    },
+    "generator": {
+      "command": "node scripts/generate-dod-009-claude-plugin-regression-validation.mjs /tmp/dod-009-final-check.json",
+      "status": "pass",
+      "parse_ok": true,
+      "generated_artifact_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "generated_output_path": null
+    },
+    "totals": {
+      "tests_total": 113,
+      "tests_pass": 113,
+      "tests_fail": 0
+    }
+  },
+  "blocker_summary": {
+    "status": "pass",
+    "blocker_count": 0,
+    "human_readable": []
+  },
+  "evidence_lifecycle": {
+    "status": "pass",
+    "matrix_pass": true,
+    "linked_prior_evidence_pass": true,
+    "command_summaries_pass": true,
+    "generator_pass": true,
+    "no_go_guard_pass": true,
+    "excluded_surfaces_pass": true,
+    "parse_failures_absent": true,
+    "forbidden_metadata_scan_pass": true
+  },
+  "excluded_surfaces": [
+    {
+      "surface_id": "DOD-010",
+      "dod_id": "DOD-010",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+    },
+    {
+      "surface_id": "DOD-011",
+      "dod_id": "DOD-011",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+    },
+    {
+      "surface_id": "DOD-012",
+      "dod_id": "DOD-012",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+    },
+    {
+      "surface_id": "DOD-013",
+      "dod_id": "DOD-013",
+      "status": "pass",
+      "implementation_count": 0,
+      "runtime_invocation_count": 0,
+      "acceptance_gate_count": 0,
+      "reason": "Excluded surface only; follow-up migration work remains outside the DOD-009 contract."
+    }
+  ],
+  "request_metadata_snapshot": {
+    "path": ".gran-maestro/requests/REQ-912/request.json",
+    "request_id": "REQ-912",
+    "agi_id": "AGI-039",
+    "sprint": 10,
+    "dod_id": "DOD-009",
+    "plan_id": "PLN-736",
+    "request_status": "phase2_execution",
+    "phase": 2,
+    "tasks": [
+      {
+        "task_id": "REQ-912-01",
+        "status": "committed",
+        "source_commit": "d41af12",
+        "task_commit": "d41af12",
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-912-02",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      },
+      {
+        "task_id": "REQ-912-03",
+        "status": "pending",
+        "source_commit": null,
+        "task_commit": null,
+        "integration_commit": null,
+        "validated_at": null,
+        "self_check": {
+          "status": "pass",
+          "command_count": 0,
+          "summaries": [],
+          "tests_total": 0,
+          "tests_pass": 0,
+          "tests_fail": 0
+        }
+      }
+    ]
+  },
+  "manual_readable_exports": {
+    "canonical_source_paths": [
+      ".claude-plugin/plugin.json",
+      "package.json",
+      ".claude-plugin/marketplace.json",
+      "extension/manifest.json",
+      "extension/package.json",
+      "hooks/hooks.json",
+      "skills/",
+      "agents/"
+    ],
+    "excluded_surface_ids": [
+      "DOD-010",
+      "DOD-011",
+      "DOD-012",
+      "DOD-013"
+    ],
+    "blocker_summary_fields": [
+      "status",
+      "blocker_count",
+      "human_readable"
+    ],
+    "command_summary_fields": [
+      "plugin_manifest_hooks",
+      "workflow_state_continuation",
+      "run_wrapper_session_migration",
+      "npm_test",
+      "generator"
+    ],
+    "linked_prior_evidence_paths": [
+      ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json"
+    ]
+  },
+  "input_paths_read": [
+    ".gran-maestro/requests/REQ-912/request.json",
+    ".gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json",
+    "scripts/lib/codex-plugin-discovery-smoke.mjs",
+    "scripts/generate-dod-008-workflow-e2e-validation.mjs",
+    "scripts/generate-dod-009-claude-plugin-regression-validation.mjs",
+    "tests/smoke.test.mjs",
+    ".claude-plugin/plugin.json",
+    "package.json",
+    ".claude-plugin/marketplace.json",
+    "extension/manifest.json",
+    "extension/package.json",
+    "hooks/hooks.json",
+    "skills/",
+    "agents/"
+  ],
+  "parse_error_count": 0,
+  "parse_failures": [],
+  "forbidden_metadata_scan": {
+    "status": "pass",
+    "scanned_string_count": 305,
+    "violation_count": 0,
+    "violations": []
+  }
+}

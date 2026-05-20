@@ -13,6 +13,7 @@ import {
   assertDod008WorkflowE2EValidationEvidence,
   assertDod008WorkflowSchemaContract,
   assertDod009ClaudePluginRegressionMatrix,
+  assertDod009RequestEvidence,
   assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
   assertCodexRoleMappingEvidence,
@@ -25,6 +26,7 @@ import {
   buildDod008WorkflowE2EValidationEvidence,
   buildDod008WorkflowSchemaContract,
   buildDod009ClaudePluginRegressionMatrix,
+  buildDod009RequestEvidence,
   scanDod008ScenarioSchemaMetadata,
   scanDod008RequestEvidenceMetadata,
   scanDod009RegressionMatrixMetadata,
@@ -36,6 +38,7 @@ import {
   coreMstSkillNames,
   defaultCodexSkillAgentProjectionValidationSummary,
   defaultDod008WorkflowE2EValidationSummary,
+  defaultDod009RequestEvidenceVerificationSummary,
   defaultDod007RequestEvidenceVerificationSummary,
   dod008CoreWorkflowSmokeArtifactTypes,
   dod008CoreWorkflowSmokeScenarioPaths,
@@ -50,9 +53,11 @@ import {
   dod008WorkflowScenarioPaths,
   dod009ExcludedSurfaceIds,
   dod009MatrixSurfacePaths,
+  dod009RequestEvidenceRelativePath,
   dod007ExcludedSurfaceIds,
   dod007RequestEvidenceRelativePath,
   req894RequestMetadataRelativePath,
+  req912RequestMetadataRelativePath,
   excludedDodIds as skillProjectionExcludedDodIds,
   fallbackSkillDiscoveryRootPath,
   fallbackSkillRepoTargetPath,
@@ -206,6 +211,41 @@ const req894ValidationSummary = {
     tests_pass: 57,
     tests_fail: 0,
     summary: '57 passed',
+  },
+};
+const req912ValidationSummary = {
+  ...defaultDod009RequestEvidenceVerificationSummary,
+  plugin_manifest_hooks: {
+    ...defaultDod009RequestEvidenceVerificationSummary.plugin_manifest_hooks,
+    tests_total: 8,
+    tests_pass: 8,
+    tests_fail: 0,
+    summary: '8 plugin manifest and hooks regression checks passed',
+  },
+  workflow_state_continuation: {
+    ...defaultDod009RequestEvidenceVerificationSummary.workflow_state_continuation,
+    tests_total: 21,
+    tests_pass: 21,
+    tests_fail: 0,
+    summary: '21 workflow state and continuation regression checks passed',
+  },
+  run_wrapper_session_migration: {
+    ...defaultDod009RequestEvidenceVerificationSummary.run_wrapper_session_migration,
+    tests_total: 20,
+    tests_pass: 20,
+    tests_fail: 0,
+    summary: '20 run wrapper and session migration regression checks passed',
+  },
+  npm_test: {
+    ...defaultDod009RequestEvidenceVerificationSummary.npm_test,
+    tests_total: 65,
+    tests_pass: 65,
+    tests_fail: 0,
+    summary: '65 smoke tests passed',
+  },
+  generator: {
+    ...defaultDod009RequestEvidenceVerificationSummary.generator,
+    generated_output_path: '/tmp/req-912-dod-009-request-evidence.test.json',
   },
 };
 
@@ -444,6 +484,51 @@ function assertNoForbiddenDod009ContractLiterals(contract, forbiddenLiterals = [
       `Forbidden literal found in DOD-009 contract metadata: ${literal}`,
     );
   }
+}
+
+function assertNoForbiddenDod009EvidenceLiterals(evidence, forbiddenLiterals = []) {
+  const stringLeaves = collectStringLeaves(evidence);
+  const forbiddenDefaults = [
+    repoRoot,
+    orchestrationRoot,
+    '/Users/',
+    '/private/',
+    '/home/',
+    '~/',
+    '$HOME',
+    '${HOME}',
+    '~/.codex',
+    '.claude/hooks',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'cache refresh',
+    'external install',
+    'ln -s',
+    ...forbiddenLiterals,
+  ];
+
+  for (const stringValue of stringLeaves) {
+    assert.doesNotMatch(stringValue, /(^|[\\/])\.\.(?:[\\/]|$)/u);
+    assert.doesNotMatch(stringValue, /%2e%2e/iu);
+    assert.doesNotMatch(stringValue, /^[A-Za-z]:[\\/]/u);
+  }
+
+  for (const literal of forbiddenDefaults) {
+    assert.ok(
+      stringLeaves.every((stringValue) =>
+        !stringValue.toLowerCase().includes(literal.toLowerCase()),
+      ),
+      `Forbidden literal found in DOD-009 evidence: ${literal}`,
+    );
+  }
+
+  assert.deepEqual(scanDod009RegressionMatrixMetadata(evidence), {
+    status: 'pass',
+    scanned_string_count: scanDod009RegressionMatrixMetadata(evidence).scanned_string_count,
+    violation_count: 0,
+    violations: [],
+  });
 }
 
 test('smoke test runner executes deterministically', () => {
@@ -1876,6 +1961,102 @@ test('DOD-009 excluded surfaces stay zero-count and blocker summary stays human-
     failingContract.blocker_summary.human_readable.join('\n'),
     /extension\/package\.json/,
   );
+});
+
+test('DOD-009 request evidence records request linkage matrix results and command summaries', () => {
+  const evidence = buildDod009RequestEvidence({
+    verificationSummary: req912ValidationSummary,
+  });
+
+  assertDod009RequestEvidence(evidence, req912ValidationSummary);
+  evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+  assert.equal(evidence.request_evidence_path, dod009RequestEvidenceRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.path, req912RequestMetadataRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.request_id, 'REQ-912');
+  assert.equal(evidence.request_metadata_snapshot.agi_id, 'AGI-039');
+  assert.equal(evidence.request_metadata_snapshot.sprint, 10);
+  assert.equal(evidence.request_metadata_snapshot.dod_id, 'DOD-009');
+  assert.equal(evidence.request_metadata_snapshot.plan_id, 'PLN-736');
+  assert.equal(evidence.claude_plugin_regression_matrix.status, 'pass');
+  assert.equal(evidence.linked_prior_evidence.status, 'pass');
+  assert.equal(evidence.linked_prior_evidence.request_id, 'REQ-894');
+  assert.equal(
+    evidence.linked_prior_evidence.request_evidence_path,
+    dod008WorkflowE2EValidationEvidenceRelativePath,
+  );
+  assert.equal(evidence.test_command_results.plugin_manifest_hooks.status, 'pass');
+  assert.equal(evidence.test_command_results.workflow_state_continuation.status, 'pass');
+  assert.equal(evidence.test_command_results.run_wrapper_session_migration.status, 'pass');
+  assert.equal(evidence.test_command_results.npm_test.status, 'pass');
+  assert.equal(evidence.blocker_summary.status, 'pass');
+  assert.deepEqual(evidence.blocker_summary.human_readable, []);
+  assertNoForbiddenDod009EvidenceLiterals(evidence);
+});
+
+test('DOD-009 request evidence preserves failed command summaries without pass status', () => {
+  const failingSummary = {
+    ...req912ValidationSummary,
+    plugin_manifest_hooks: {
+      ...req912ValidationSummary.plugin_manifest_hooks,
+      status: 'fail',
+      tests_pass: 7,
+      tests_fail: 1,
+      summary: '7 passed, 1 failed: hooks registration regression preserved',
+    },
+  };
+  const evidence = buildDod009RequestEvidence({
+    verificationSummary: failingSummary,
+  });
+
+  assert.equal(evidence.status, 'fail');
+  assert.equal(evidence.evidence_lifecycle.command_summaries_pass, false);
+  assert.equal(evidence.test_command_results.plugin_manifest_hooks.status, 'fail');
+  assert.match(
+    evidence.blocker_summary.human_readable.join('\n'),
+    /hooks registration regression preserved/,
+  );
+  assertNoForbiddenDod009EvidenceLiterals(evidence);
+});
+
+test('DOD-009 request evidence generator writes parseable request-level evidence shape', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'dod-009-request-evidence-'));
+  const outputPath = join(tempDir, 'evidence.json');
+  const verificationPath = join(tempDir, 'verification-summary.json');
+
+  try {
+    writeFileSync(`${verificationPath}`, `${JSON.stringify(req912ValidationSummary, null, 2)}\n`, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/generate-dod-009-claude-plugin-regression-validation.mjs',
+        outputPath,
+        verificationPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), outputPath);
+
+    const evidence = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assertDod009RequestEvidence(evidence, req912ValidationSummary);
+    evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
+    assert.equal(evidence.test_command_results.generator.generated_output_path, null);
+    assertNoForbiddenDod009EvidenceLiterals(evidence, [tempDir, outputPath, verificationPath]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('DOD-009 generated request evidence artifact metadata has no forbidden literals', () => {
+  const evidence = JSON.parse(readRepoFile(dod009RequestEvidenceRelativePath));
+
+  assertDod009RequestEvidence(evidence);
+  assertNoForbiddenDod009EvidenceLiterals(evidence);
 });
 
 test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {
