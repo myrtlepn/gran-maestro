@@ -7,8 +7,30 @@
   "dod_id": "DOD-009",
   "plan_id": "PLN-736",
   "format_version": "1.0.0",
-  "generated_at": "2026-05-20T02:08:08.321120+00:00",
+  "generated_at": "2026-05-20T02:33:57.311743+00:00",
   "request_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-009",
+      "request_id": "REQ-912",
+      "agi_id": "AGI-039",
+      "sprint": 10,
+      "generator_script_path": "scripts/generate-dod-009-claude-plugin-regression-validation.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod009RequestEvidence",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
   "status": "pass",
   "claude_plugin_regression_matrix": {
     "contract_id": "REQ-912-DOD-009-claude-plugin-regression-matrix",
@@ -395,26 +417,26 @@
     "plugin_manifest_hooks": {
       "command": "python3 -m pytest tests/test_plugin_manifest_hooks.py tests/test_hooks_json_registration.py",
       "status": "pass",
-      "tests_total": 14,
-      "tests_pass": 14,
+      "tests_total": 8,
+      "tests_pass": 8,
       "tests_fail": 0,
-      "summary": "14 passed in 0.06s"
+      "summary": "plugin manifest and hooks regression checks passed"
     },
     "workflow_state_continuation": {
       "command": "python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py",
       "status": "pass",
-      "tests_total": 15,
-      "tests_pass": 15,
+      "tests_total": 21,
+      "tests_pass": 21,
       "tests_fail": 0,
-      "summary": "15 passed in 32.79s"
+      "summary": "workflow state and continuation regression checks passed"
     },
     "run_wrapper_session_migration": {
       "command": "python3 -m pytest tests/test_run_wrapper.py tests/test_session_id_migration.py",
       "status": "pass",
-      "tests_total": 19,
-      "tests_pass": 19,
+      "tests_total": 20,
+      "tests_pass": 20,
       "tests_fail": 0,
-      "summary": "19 passed in 11.45s"
+      "summary": "run wrapper and session migration regression checks passed"
     },
     "npm_test": {
       "command": "npm test",
@@ -422,18 +444,18 @@
       "tests_total": 65,
       "tests_pass": 65,
       "tests_fail": 0,
-      "summary": "65 passed"
+      "summary": "smoke tests passed"
     },
     "generator": {
-      "command": "node scripts/generate-dod-009-claude-plugin-regression-validation.mjs /tmp/dod-009-final-check.json",
+      "command": "node scripts/generate-dod-009-claude-plugin-regression-validation.mjs <temp-output>",
       "status": "pass",
       "parse_ok": true,
       "generated_artifact_path": ".gran-maestro/requests/REQ-912/evidence/dod-009-claude-plugin-regression-validation.json",
       "generated_output_path": null
     },
     "totals": {
-      "tests_total": 113,
-      "tests_pass": 113,
+      "tests_total": 114,
+      "tests_pass": 114,
       "tests_fail": 0
     }
   },
@@ -451,7 +473,8 @@
     "no_go_guard_pass": true,
     "excluded_surfaces_pass": true,
     "parse_failures_absent": true,
-    "forbidden_metadata_scan_pass": true
+    "forbidden_metadata_scan_pass": true,
+    "shared_dod_registry_linkage_pass": true
   },
   "excluded_surfaces": [
     {
@@ -498,12 +521,12 @@
     "sprint": 10,
     "dod_id": "DOD-009",
     "plan_id": "PLN-736",
-    "request_status": "phase2_execution",
-    "phase": 2,
+    "request_status": "accepted",
+    "phase": 5,
     "tasks": [
       {
         "task_id": "REQ-912-01",
-        "status": "committed",
+        "status": "accepted",
         "source_commit": "d41af12",
         "task_commit": "d41af12",
         "integration_commit": null,
@@ -519,10 +542,10 @@
       },
       {
         "task_id": "REQ-912-02",
-        "status": "pending",
-        "source_commit": null,
-        "task_commit": null,
-        "integration_commit": null,
+        "status": "accepted",
+        "source_commit": "4a0805c",
+        "task_commit": "4a0805c",
+        "integration_commit": "4a0805c",
         "validated_at": null,
         "self_check": {
           "status": "pass",
@@ -535,10 +558,10 @@
       },
       {
         "task_id": "REQ-912-03",
-        "status": "pending",
-        "source_commit": null,
+        "status": "accepted",
+        "source_commit": "4a0805c",
         "task_commit": null,
-        "integration_commit": null,
+        "integration_commit": "4a0805c",
         "validated_at": null,
         "self_check": {
           "status": "pass",
@@ -604,7 +627,7 @@
   "parse_failures": [],
   "forbidden_metadata_scan": {
     "status": "pass",
-    "scanned_string_count": 305,
+    "scanned_string_count": 321,
     "violation_count": 0,
     "violations": []
   }

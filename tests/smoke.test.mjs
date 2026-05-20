@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  assertSharedDodEvidenceRegistryLinkage,
   assertCodexSkillAgentProjectionValidationEvidence,
   assertDod008CoreWorkflowSmokeHarness,
   assertDod008LifecycleSmokeArtifacts,
@@ -2159,6 +2160,17 @@ test('DOD-009 request evidence records request linkage matrix results and comman
   });
 
   assertDod009RequestEvidence(evidence, req912ValidationSummary);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path:
+      'scripts/generate-dod-009-claude-plugin-regression-validation.mjs',
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  });
   evidence.input_paths_read.forEach(assertMetadataPathIsScoped);
   assert.equal(evidence.request_evidence_path, dod009RequestEvidenceRelativePath);
   assert.equal(evidence.request_metadata_snapshot.path, req912RequestMetadataRelativePath);
@@ -2253,6 +2265,16 @@ test('DOD-010 blocker-free migration report maps DOD-001 to DOD-009 evidence com
   const report = buildDod010BlockerFreeMigrationReport();
 
   assertDod010BlockerFreeMigrationReport(report);
+  assertSharedDodEvidenceRegistryLinkage(report.shared_dod_registry_linkage, {
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: 'scripts/generate-dod-010-blocker-free-migration-report.mjs',
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  });
   assert.equal(report.artifact_id, 'REQ-916-DOD-010-blocker-free-migration-report');
   assert.equal(report.task_id, '02');
   assert.equal(report.format_version, '1.0.0');
@@ -2427,6 +2449,14 @@ test('Sprint 12 shared DOD evidence registry keeps DOD-009 and DOD-010 artifacts
 
     const artifact = JSON.parse(readRepoFile(entry.request_evidence_path));
     assert.equal(artifact.status, expected.expected_status);
+    assert.equal(
+      artifact.shared_dod_registry_linkage?.registry_entry?.generator_script_path,
+      entry.generator_script_path,
+    );
+    assert.equal(
+      artifact.shared_dod_registry_linkage?.registry_entry?.request_evidence_path,
+      entry.request_evidence_path,
+    );
 
     if (expected.dod_id === 'DOD-009') {
       assertDod009RequestEvidence(artifact);

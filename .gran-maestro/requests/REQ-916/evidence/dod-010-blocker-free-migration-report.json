@@ -10,6 +10,28 @@
   "generated_at": "2026-05-20T02:48:55.000Z",
   "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
   "report_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+  "shared_dod_registry_linkage": {
+    "status": "pass",
+    "linkage_source": "shared_dod_evidence_registry",
+    "request_evidence_path_matches_registry": true,
+    "generator_script_exists": true,
+    "validator_entrypoint_exists": true,
+    "issues": [],
+    "registry_entry": {
+      "dod_id": "DOD-010",
+      "request_id": "REQ-916",
+      "agi_id": "AGI-039",
+      "sprint": 11,
+      "generator_script_path": "scripts/generate-dod-010-blocker-free-migration-report.mjs",
+      "request_evidence_path": ".gran-maestro/requests/REQ-916/evidence/dod-010-blocker-free-migration-report.json",
+      "expected_status": "pass",
+      "validator_linkage": {
+        "export_name": "assertDod010BlockerFreeMigrationReport",
+        "helper_kind": "assertion-helper",
+        "validation_entrypoint": "scripts/lib/codex-plugin-discovery-smoke.mjs"
+      }
+    }
+  },
   "repository_local_only": true,
   "evidence_by_dod": {
     "DOD-001": {
@@ -649,7 +671,7 @@
       "id": "objective-progress-summary-mismatch",
       "source_path": ".gran-maestro/agile/AGI-039/objective/objective.md",
       "finding_type": "stale_objective_progress_summary",
-      "description": "Objective progress summary records 0/13 while 9 DoD markers are status:done.",
+      "description": "Objective progress summary records 0/13 while 10 DoD markers are status:done.",
       "classification": "non_release_blocking",
       "release_blocking": false,
       "rationale": "The objective summary text is stale, but the DOD markers and repository-local evidence remain authoritative."
@@ -802,7 +824,7 @@
   },
   "forbidden_metadata_scan": {
     "status": "pass",
-    "scanned_string_count": 111,
+    "scanned_string_count": 122,
     "violation_count": 0,
     "violations": []
   }

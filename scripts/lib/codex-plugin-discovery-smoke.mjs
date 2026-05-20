@@ -789,6 +789,95 @@ export const sharedDodEvidenceRegistry = Object.freeze([
   }),
 ]);
 
+export function getSharedDodEvidenceRegistryEntryByDodId(
+  dodId,
+  registry = sharedDodEvidenceRegistry,
+) {
+  if (!Array.isArray(registry)) {
+    return null;
+  }
+
+  return registry.find((entry) => entry?.dod_id === dodId) ?? null;
+}
+
+export function buildSharedDodEvidenceRegistryLinkage({
+  dodId,
+  requestEvidencePath,
+  repoRootPath = repoRoot,
+  registry = sharedDodEvidenceRegistry,
+} = {}) {
+  const entry = getSharedDodEvidenceRegistryEntryByDodId(dodId, registry);
+  const validation = entry
+    ? validateSharedDodEvidenceRegistryEntry(entry, { repoRootPath })
+    : {
+        status: 'fail',
+        issues: [`Missing shared DOD evidence registry entry for ${dodId ?? 'unknown'}.`],
+        normalized_entry: null,
+        validator_export_name: null,
+      };
+  const normalizedEntry = validation.normalized_entry;
+  const requestEvidencePathMatchesRegistry =
+    normalizedEntry?.request_evidence_path === requestEvidencePath;
+  const generatorScriptExists = Boolean(
+    normalizedEntry?.generator_script_path &&
+      existsSync(join(repoRootPath, normalizedEntry.generator_script_path)),
+  );
+  const validationEntrypoint =
+    entry?.validator_linkage &&
+    typeof entry.validator_linkage === 'object' &&
+    !Array.isArray(entry.validator_linkage)
+      ? entry.validator_linkage.validation_entrypoint ?? null
+      : null;
+  const validatorEntrypointExists =
+    typeof validationEntrypoint === 'string' &&
+    validationEntrypoint.length > 0 &&
+    existsSync(join(repoRootPath, validationEntrypoint));
+  const issues = [...validation.issues];
+
+  if (!requestEvidencePathMatchesRegistry) {
+    issues.push(
+      `Shared DOD registry request_evidence_path mismatch for ${dodId ?? 'unknown'}: ` +
+        `expected ${normalizedEntry?.request_evidence_path ?? 'missing'}, got ${requestEvidencePath ?? 'missing'}.`,
+    );
+  }
+
+  if (!generatorScriptExists) {
+    issues.push(
+      `Shared DOD registry generator script is not resolvable for ${dodId ?? 'unknown'}.`,
+    );
+  }
+
+  if (!validatorEntrypointExists) {
+    issues.push(
+      `Shared DOD registry validator entrypoint is not resolvable for ${dodId ?? 'unknown'}.`,
+    );
+  }
+
+  return {
+    status: issues.length === 0 ? 'pass' : 'fail',
+    linkage_source: 'shared_dod_evidence_registry',
+    request_evidence_path_matches_registry: requestEvidencePathMatchesRegistry,
+    generator_script_exists: generatorScriptExists,
+    validator_entrypoint_exists: validatorEntrypointExists,
+    issues,
+    registry_entry: normalizedEntry
+      ? {
+          ...normalizedEntry,
+          validator_linkage: {
+            export_name: validation.validator_export_name,
+            helper_kind:
+              entry?.validator_linkage &&
+              typeof entry.validator_linkage === 'object' &&
+              !Array.isArray(entry.validator_linkage)
+                ? entry.validator_linkage.helper_kind ?? null
+                : null,
+            validation_entrypoint: validationEntrypoint,
+          },
+        }
+      : null,
+  };
+}
+
 export const manifestFields = [
   'name',
   'version',
@@ -3385,7 +3474,12 @@ function computeDod010ValidationResult(report) {
   const evidenceByDod = report?.evidence_by_dod ?? {};
   const unresolvedRisks = report?.unresolved_risks;
   const lifecycleFindings = report?.lifecycle_findings;
+  const registryLinkage = report?.shared_dod_registry_linkage;
   let computedReleaseBlockingTrueCount = 0;
+
+  if (!registryLinkage || registryLinkage.status !== 'pass') {
+    incrementDod010BlockerCount(blockerCounts, 'missing_evidence');
+  }
 
   for (const dodId of dod010EvidenceByDodIds) {
     const entry = evidenceByDod[dodId];
@@ -3548,6 +3642,7 @@ function computeDod010ValidationResult(report) {
 
   const noGoScan = scanDod010BlockerFreeMigrationReportMetadata({
     report_path: report?.report_path ?? null,
+    shared_dod_registry_linkage: report?.shared_dod_registry_linkage,
     input_paths_read: report?.input_paths_read,
     validation_entrypoints: report?.validation_entrypoints,
     validation_commands: report?.validation_commands,
@@ -3626,6 +3721,10 @@ export function buildDod010BlockerFreeMigrationReport() {
   const followUpScope = buildDod010FollowUpScope();
   const unresolvedRisks = buildDod010UnresolvedRisks();
   const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestMetadata.value?.target_dod ?? 'DOD-010',
+    requestEvidencePath: dod010BlockerFreeMigrationReportRelativePath,
+  });
   const reportSkeleton = {
     artifact_id: 'REQ-916-DOD-010-blocker-free-migration-report',
     request_id: requestMetadata.value?.id ?? 'REQ-916',
@@ -3638,6 +3737,7 @@ export function buildDod010BlockerFreeMigrationReport() {
     generated_at: requestMetadata.value?.created_at ?? '2026-05-20T02:48:55.000Z',
     request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
     report_path: dod010BlockerFreeMigrationReportRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
     repository_local_only: true,
     evidence_by_dod: evidenceCoverage.evidence_by_dod,
     completed_dods: [...dod010EvidenceByDodIds],
@@ -3739,6 +3839,16 @@ export function assertDod010BlockerFreeMigrationReport(report) {
   assert.equal(report.format_version, '1.0.0');
   assert.equal(report.request_evidence_path, dod010BlockerFreeMigrationReportRelativePath);
   assert.equal(report.report_path, dod010BlockerFreeMigrationReportRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(report.shared_dod_registry_linkage, {
+    dod_id: 'DOD-010',
+    request_id: 'REQ-916',
+    agi_id: 'AGI-039',
+    sprint: 11,
+    generator_script_path: dod010GeneratorScriptRelativePath,
+    request_evidence_path: dod010BlockerFreeMigrationReportRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod010BlockerFreeMigrationReport',
+  });
   assert.equal(report.repository_local_only, true);
   assert.deepEqual(Object.keys(report.evidence_by_dod), dod010EvidenceByDodIds);
   assert.deepEqual(report.completed_dods, dod010EvidenceByDodIds);
@@ -6206,6 +6316,10 @@ export function buildDod009RequestEvidence({
   const requestSnapshot = buildReq912RequestMetadataSnapshot(requestMetadata.value);
   const matrixContract = buildDod009ClaudePluginRegressionMatrix();
   const linkedPriorEvidence = buildDod009PriorEvidenceLink(linkedDod008Evidence.value);
+  const sharedDodRegistryLinkage = buildSharedDodEvidenceRegistryLinkage({
+    dodId: requestSnapshot.dod_id ?? 'DOD-009',
+    requestEvidencePath: dod009RequestEvidenceRelativePath,
+  });
   const excludedSurfaces = matrixContract.excluded_surfaces.map((surface) => ({ ...surface }));
   const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
   const evidenceWithoutScan = {
@@ -6222,6 +6336,7 @@ export function buildDod009RequestEvidence({
       requestMetadata.value?.created_at ??
       '2026-05-20T01:47:31.000Z',
     request_evidence_path: dod009RequestEvidenceRelativePath,
+    shared_dod_registry_linkage: sharedDodRegistryLinkage,
     status: 'fail',
     claude_plugin_regression_matrix: matrixContract,
     linked_prior_evidence: linkedPriorEvidence,
@@ -6293,19 +6408,27 @@ export function buildDod009RequestEvidence({
     parseFailures: sanitizedParseFailures,
     forbiddenMetadataScan,
   });
-  const status = lifecycle.status;
+  const registryLinkageBlockers = sharedDodRegistryLinkage.issues.map(
+    (issue) => `shared_dod_registry_linkage: ${issue}`,
+  );
+  const allBlockers = [...blockers, ...registryLinkageBlockers];
+  const status =
+    lifecycle.status === 'pass' && sharedDodRegistryLinkage.status === 'pass'
+      ? 'pass'
+      : 'fail';
 
   return {
     ...evidenceWithoutScan,
     status,
     blocker_summary: {
-      status: blockers.length === 0 ? 'pass' : 'fail',
-      blocker_count: blockers.length,
-      human_readable: blockers,
+      status: allBlockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: allBlockers.length,
+      human_readable: allBlockers,
     },
     evidence_lifecycle: {
       ...lifecycle,
       status,
+      shared_dod_registry_linkage_pass: sharedDodRegistryLinkage.status === 'pass',
     },
     forbidden_metadata_scan: forbiddenMetadataScan,
   };
@@ -7099,6 +7222,16 @@ export function assertDod009RequestEvidence(evidence, expectedSummary = null) {
   assert.equal(evidence.dod_id, 'DOD-009');
   assert.equal(evidence.plan_id, 'PLN-736');
   assert.equal(evidence.request_evidence_path, dod009RequestEvidenceRelativePath);
+  assertSharedDodEvidenceRegistryLinkage(evidence.shared_dod_registry_linkage, {
+    dod_id: 'DOD-009',
+    request_id: 'REQ-912',
+    agi_id: 'AGI-039',
+    sprint: 10,
+    generator_script_path: dod009GeneratorScriptRelativePath,
+    request_evidence_path: dod009RequestEvidenceRelativePath,
+    expected_status: 'pass',
+    validator_export_name: 'assertDod009RequestEvidence',
+  });
   assert.equal(evidence.status, 'pass');
   assert.equal(evidence.parse_error_count, 0);
   assertDod009ClaudePluginRegressionMatrix(evidence.claude_plugin_regression_matrix);
@@ -7128,6 +7261,7 @@ export function assertDod009RequestEvidence(evidence, expectedSummary = null) {
   assert.equal(evidence.evidence_lifecycle.no_go_guard_pass, true);
   assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
   assert.equal(evidence.evidence_lifecycle.parse_failures_absent, true);
+  assert.equal(evidence.evidence_lifecycle.shared_dod_registry_linkage_pass, true);
   assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
   assert.deepEqual(
     evidence.excluded_surfaces.map((surface) => surface.surface_id),
@@ -7197,6 +7331,41 @@ export function assertDod009RequestEvidence(evidence, expectedSummary = null) {
       normalizedExpected.generator.generated_artifact_path,
     );
   }
+}
+
+export function assertSharedDodEvidenceRegistryLinkage(
+  linkage,
+  {
+    dod_id,
+    request_id,
+    agi_id,
+    sprint,
+    generator_script_path,
+    request_evidence_path,
+    expected_status,
+    validator_export_name,
+  },
+) {
+  assert.ok(linkage && typeof linkage === 'object');
+  assert.equal(linkage.status, 'pass');
+  assert.equal(linkage.linkage_source, 'shared_dod_evidence_registry');
+  assert.equal(linkage.request_evidence_path_matches_registry, true);
+  assert.equal(linkage.generator_script_exists, true);
+  assert.equal(linkage.validator_entrypoint_exists, true);
+  assert.deepEqual(linkage.issues, []);
+  assert.ok(linkage.registry_entry && typeof linkage.registry_entry === 'object');
+  assert.equal(linkage.registry_entry.dod_id, dod_id);
+  assert.equal(linkage.registry_entry.request_id, request_id);
+  assert.equal(linkage.registry_entry.agi_id, agi_id);
+  assert.equal(linkage.registry_entry.sprint, sprint);
+  assert.equal(linkage.registry_entry.generator_script_path, generator_script_path);
+  assert.equal(linkage.registry_entry.request_evidence_path, request_evidence_path);
+  assert.equal(linkage.registry_entry.expected_status, expected_status);
+  assert.deepEqual(linkage.registry_entry.validator_linkage, {
+    export_name: validator_export_name,
+    helper_kind: 'assertion-helper',
+    validation_entrypoint: 'scripts/lib/codex-plugin-discovery-smoke.mjs',
+  });
 }
 
 export function assertDod008CoreWorkflowSmokeHarness(harness) {
