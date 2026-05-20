@@ -12,6 +12,7 @@ import {
   assertDod008WorkflowArtifactParityValidation,
   assertDod008WorkflowE2EValidationEvidence,
   assertDod008WorkflowSchemaContract,
+  assertDod009ClaudePluginRegressionMatrix,
   assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
   assertCodexRoleMappingEvidence,
@@ -23,8 +24,10 @@ import {
   buildDod008WorkflowArtifactParityValidation,
   buildDod008WorkflowE2EValidationEvidence,
   buildDod008WorkflowSchemaContract,
+  buildDod009ClaudePluginRegressionMatrix,
   scanDod008ScenarioSchemaMetadata,
   scanDod008RequestEvidenceMetadata,
+  scanDod009RegressionMatrixMetadata,
   buildDod007RequestEvidence,
   buildCodexPluginDiscoverySmokeEvidence,
   buildCodexRoleMappingEvidence,
@@ -45,6 +48,8 @@ import {
   dod008NoGoMetadataGuardCriteria,
   dod008WorkflowE2EValidationEvidenceRelativePath,
   dod008WorkflowScenarioPaths,
+  dod009ExcludedSurfaceIds,
+  dod009MatrixSurfacePaths,
   dod007ExcludedSurfaceIds,
   dod007RequestEvidenceRelativePath,
   req894RequestMetadataRelativePath,
@@ -401,6 +406,44 @@ function assertNoForbiddenDod008EvidenceLiterals(evidence, forbiddenLiterals = [
     violation_count: 0,
     violations: [],
   });
+}
+
+function assertNoForbiddenDod009ContractLiterals(contract, forbiddenLiterals = []) {
+  const stringLeaves = collectStringLeaves(contract);
+  const forbiddenDefaults = [
+    repoRoot,
+    orchestrationRoot,
+    '/Users/',
+    '/private/',
+    '/home/',
+    '~/',
+    '$HOME',
+    '${HOME}',
+    '~/.codex',
+    '.claude/hooks',
+    'codex plugins install',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'cache refresh',
+    'external install',
+    'ln -s',
+    ...forbiddenLiterals,
+  ];
+
+  for (const stringValue of stringLeaves) {
+    assert.doesNotMatch(stringValue, /(^|[\\/])\.\.(?:[\\/]|$)/u);
+    assert.doesNotMatch(stringValue, /%2e%2e/iu);
+    assert.doesNotMatch(stringValue, /^[A-Za-z]:[\\/]/u);
+  }
+
+  for (const literal of forbiddenDefaults) {
+    assert.ok(
+      stringLeaves.every((stringValue) =>
+        !stringValue.toLowerCase().includes(literal.toLowerCase()),
+      ),
+      `Forbidden literal found in DOD-009 contract metadata: ${literal}`,
+    );
+  }
 }
 
 test('smoke test runner executes deterministically', () => {
@@ -1709,6 +1752,130 @@ test('DOD-008 generated workflow E2E artifact metadata has no forbidden literals
 
   assertDod008WorkflowE2EValidationEvidence(evidence, req894ValidationSummary);
   assertNoForbiddenDod008EvidenceLiterals(evidence);
+});
+
+test('DOD-009 Claude plugin regression matrix records canonical source surfaces', () => {
+  const contract = buildDod009ClaudePluginRegressionMatrix();
+
+  assertDod009ClaudePluginRegressionMatrix(contract);
+  assert.deepEqual(dod009MatrixSurfacePaths, [
+    '.claude-plugin/plugin.json',
+    'package.json',
+    '.claude-plugin/marketplace.json',
+    'extension/manifest.json',
+    'extension/package.json',
+    'hooks/hooks.json',
+    'skills/',
+    'agents/',
+  ]);
+  assert.deepEqual(
+    contract.matrix_surfaces.map((surface) => surface.canonical_source_path),
+    dod009MatrixSurfacePaths,
+  );
+  assert.ok(
+    contract.matrix_surfaces.every((surface) => surface.verification_scope === 'claude-canonical-source'),
+  );
+  assertNoForbiddenDod009ContractLiterals(contract.matrix_surfaces);
+});
+
+test('DOD-009 Claude plugin regression matrix validates version agents skills and hooks contracts', () => {
+  const contract = buildDod009ClaudePluginRegressionMatrix();
+
+  assert.equal(contract.contract_checks.version_sync.status, 'pass');
+  assert.deepEqual(contract.contract_checks.version_sync.checked_paths, [
+    'package.json',
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/marketplace.json',
+    'extension/manifest.json',
+    'extension/package.json',
+  ]);
+  assert.equal(contract.contract_checks.version_sync.unique_version_count, 1);
+  assert.equal(contract.contract_checks.agents_parity.status, 'pass');
+  assert.equal(contract.contract_checks.agents_parity.missing_manifest_entries.length, 0);
+  assert.equal(contract.contract_checks.agents_parity.extra_manifest_entries.length, 0);
+  assert.equal(contract.contract_checks.skills_directory_registration.status, 'pass');
+  assert.equal(contract.contract_checks.skills_directory_registration.manifest_skills_pointer, './skills/');
+  assert.ok(contract.contract_checks.skills_directory_registration.skill_file_count > 0);
+  assert.equal(contract.contract_checks.hooks_pointer.status, 'pass');
+  assert.equal(contract.contract_checks.hooks_pointer.manifest_hooks_pointer, './hooks/hooks.json');
+  assert.equal(contract.contract_checks.hooks_registration.status, 'pass');
+  assert.deepEqual(contract.contract_checks.hooks_registration.command_paths, [
+    '${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh',
+    '${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh',
+    '${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh',
+    '${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh',
+  ]);
+  assert.equal(contract.blocker_summary.status, 'pass');
+  assert.deepEqual(contract.blocker_summary.human_readable, []);
+});
+
+test('DOD-009 no-go metadata guard rejects user-home and external mutation literals', () => {
+  const contract = buildDod009ClaudePluginRegressionMatrix();
+  const scannedMetadata = {
+    matrix_surfaces: contract.matrix_surfaces,
+    contract_checks: contract.contract_checks,
+    no_go_metadata_guard: contract.no_go_metadata_guard,
+    manual_readable_exports: contract.manual_readable_exports,
+  };
+
+  assert.equal(contract.forbidden_metadata_scan.status, 'pass');
+  assert.equal(contract.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(scanDod009RegressionMatrixMetadata(scannedMetadata), {
+    status: 'pass',
+    scanned_string_count: scanDod009RegressionMatrixMetadata(scannedMetadata).scanned_string_count,
+    violation_count: 0,
+    violations: [],
+  });
+
+  for (const forbiddenValue of [
+    '/Users/example/.codex/config.toml',
+    '~/project',
+    '$HOME/project',
+    '~/.codex/config.toml',
+    '.claude/hooks/mst-stop-hook.sh',
+    '../escape',
+    '%2e%2e/escape',
+    'codex plugins install mst',
+    'codex plugins refresh',
+    'codex plugins reload',
+    'external install request',
+    'cache refresh command',
+    'ln -s skills ~/.agents/skills/gran-maestro',
+  ]) {
+    const scan = scanDod009RegressionMatrixMetadata({
+      matrix_surfaces: [{ canonical_source_path: forbiddenValue }],
+    });
+    assert.equal(scan.status, 'fail', forbiddenValue);
+    assert.ok(scan.violation_count > 0, forbiddenValue);
+  }
+
+  assertNoForbiddenDod009ContractLiterals(scannedMetadata);
+});
+
+test('DOD-009 excluded surfaces stay zero-count and blocker summary stays human-readable', () => {
+  const contract = buildDod009ClaudePluginRegressionMatrix();
+  const failingContract = buildDod009ClaudePluginRegressionMatrix({
+    versionOverrides: {
+      'extension/package.json': '9.9.9',
+    },
+  });
+
+  assert.deepEqual(dod009ExcludedSurfaceIds, ['DOD-010', 'DOD-011', 'DOD-012', 'DOD-013']);
+  assert.deepEqual(
+    contract.manual_readable_exports.excluded_surface_ids,
+    dod009ExcludedSurfaceIds,
+  );
+  assert.ok(contract.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(contract.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(contract.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+  assert.equal(failingContract.status, 'fail');
+  assert.equal(failingContract.contract_checks.version_sync.status, 'fail');
+  assert.ok(Array.isArray(failingContract.blocker_summary.human_readable));
+  assert.ok(failingContract.blocker_summary.human_readable.length > 0);
+  assert.match(
+    failingContract.blocker_summary.human_readable.join('\n'),
+    /extension\/package\.json/,
+  );
 });
 
 test('codex hook adapter parity evidence records DOD-005 metadata and baseline references', () => {

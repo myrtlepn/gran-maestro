@@ -416,6 +416,82 @@ export const dod008NoGoMetadataGuardCriteria = [
     required_result: 'reject',
   },
 ];
+export const dod009MatrixSurfacePaths = [
+  '.claude-plugin/plugin.json',
+  'package.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+  'hooks/hooks.json',
+  'skills/',
+  'agents/',
+];
+export const dod009ExcludedSurfaceIds = [
+  'DOD-010',
+  'DOD-011',
+  'DOD-012',
+  'DOD-013',
+];
+const dod009VersionSyncPaths = [
+  'package.json',
+  '.claude-plugin/plugin.json',
+  '.claude-plugin/marketplace.json',
+  'extension/manifest.json',
+  'extension/package.json',
+];
+const dod009HooksCommandPaths = [
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-auto-chain-context.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-pre-tool-use.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-session-init.sh',
+  '${CLAUDE_PLUGIN_ROOT}/hooks/mst-stop-hook.sh',
+];
+const dod009NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'host_user_absolute_root',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'home_alias_or_env_root',
+    category: 'shell-expanded-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_config_surface',
+    category: 'user-scoped-codex-config',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_workspace_bypass',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_runtime_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_index_rescan_side_effect',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'link_creation_side_effect',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+];
 export const dod008CoreWorkflowSmokeScenarioPaths = [
   '/mst:agile-plan',
   '/mst:request',
@@ -2337,6 +2413,357 @@ export function scanDod008ScenarioSchemaMetadata(metadata) {
     scanned_string_count: strings.length,
     violation_count: violations.length,
     violations,
+  };
+}
+
+export function scanDod009RegressionMatrixMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_config_surface', literal: '~/.codex/config.toml' },
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'plugin_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'plugin_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'plugin_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+function buildDod009ExcludedSurfaces() {
+  return dod009ExcludedSurfaceIds.map((surfaceId) => ({
+    surface_id: surfaceId,
+    dod_id: surfaceId,
+    status: 'pass',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason: 'Excluded surface only; follow-up migration work remains outside the DOD-009 contract.',
+  }));
+}
+
+function buildDod009MatrixSurfaces() {
+  const definitions = [
+    {
+      surface_id: 'claude_plugin_manifest',
+      canonical_source_path: '.claude-plugin/plugin.json',
+      input_kind: 'file',
+      contract: 'manifest-pointer-and-version',
+    },
+    {
+      surface_id: 'root_package_version',
+      canonical_source_path: 'package.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'claude_plugin_marketplace',
+      canonical_source_path: '.claude-plugin/marketplace.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'extension_manifest_version',
+      canonical_source_path: 'extension/manifest.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'extension_package_version',
+      canonical_source_path: 'extension/package.json',
+      input_kind: 'file',
+      contract: 'version-sync',
+    },
+    {
+      surface_id: 'canonical_hooks_config',
+      canonical_source_path: 'hooks/hooks.json',
+      input_kind: 'file',
+      contract: 'hooks-pointer-and-registration',
+    },
+    {
+      surface_id: 'skills_directory',
+      canonical_source_path: 'skills/',
+      input_kind: 'directory',
+      contract: 'skills-discovery',
+    },
+    {
+      surface_id: 'agents_directory',
+      canonical_source_path: 'agents/',
+      input_kind: 'directory',
+      contract: 'agents-parity',
+    },
+  ];
+
+  return definitions.map((surface) => ({
+    ...surface,
+    verification_scope: 'claude-canonical-source',
+    evidence_ready: true,
+    repository_local_only: true,
+  }));
+}
+
+function flattenDod009HookCommands(hooksConfig) {
+  return Object.values(hooksConfig?.hooks ?? {}).flatMap((entries) =>
+    normalizeArray(entries).flatMap((entry) =>
+      normalizeArray(entry?.hooks).map((hook) => hook?.command).filter((command) =>
+        typeof command === 'string'
+      )
+    )
+  );
+}
+
+function summarizeDod009Blockers(contractChecks, parseFailures, forbiddenMetadataScan) {
+  const blockers = [];
+
+  if (contractChecks.version_sync.status !== 'pass') {
+    const baselineVersion = contractChecks.version_sync.baseline_version;
+    for (const [path, version] of Object.entries(contractChecks.version_sync.versions_by_path)) {
+      if (version !== baselineVersion) {
+        blockers.push(
+          `version_sync ${path}: expected ${baselineVersion ?? 'missing'}, got ${version ?? 'missing'}.`,
+        );
+      }
+    }
+  }
+
+  for (const path of contractChecks.agents_parity.missing_manifest_entries) {
+    blockers.push(`agents_parity missing manifest entry: ${path}.`);
+  }
+
+  for (const path of contractChecks.agents_parity.extra_manifest_entries) {
+    blockers.push(`agents_parity unexpected manifest entry: ${path}.`);
+  }
+
+  if (contractChecks.skills_directory_registration.status !== 'pass') {
+    blockers.push(
+      `skills_directory_registration manifest pointer: expected ./skills/, got ${contractChecks.skills_directory_registration.manifest_skills_pointer ?? 'missing'}.`,
+    );
+  }
+
+  if (contractChecks.hooks_pointer.status !== 'pass') {
+    blockers.push(
+      `hooks_pointer manifest pointer: expected ./hooks/hooks.json, got ${contractChecks.hooks_pointer.manifest_hooks_pointer ?? 'missing'}.`,
+    );
+  }
+
+  if (contractChecks.hooks_registration.status !== 'pass') {
+    for (const commandPath of contractChecks.hooks_registration.missing_command_paths) {
+      blockers.push(`hooks_registration missing canonical command: ${commandPath}.`);
+    }
+    for (const commandPath of contractChecks.hooks_registration.extra_command_paths) {
+      blockers.push(`hooks_registration unexpected command: ${commandPath}.`);
+    }
+  }
+
+  if (parseFailures.length > 0) {
+    for (const failure of parseFailures) {
+      blockers.push(`parse_failure ${failure.path}: ${failure.error}.`);
+    }
+  }
+
+  if (forbiddenMetadataScan.status !== 'pass') {
+    for (const violation of forbiddenMetadataScan.violations) {
+      blockers.push(`forbidden_metadata ${violation.fixture_id}.`);
+    }
+  }
+
+  return blockers;
+}
+
+export function buildDod009ClaudePluginRegressionMatrix({
+  versionOverrides = {},
+} = {}) {
+  const parseFailures = [];
+  const readRepoJsonArtifact = (path) =>
+    collectJsonArtifact(join(repoRoot, path), readJsonFromAbsolutePath, parseFailures);
+
+  const pluginManifest = readRepoJsonArtifact('.claude-plugin/plugin.json').value;
+  const rootPackage = readRepoJsonArtifact('package.json').value;
+  const marketplaceManifest = readRepoJsonArtifact('.claude-plugin/marketplace.json').value;
+  const extensionManifest = readRepoJsonArtifact('extension/manifest.json').value;
+  const extensionPackage = readRepoJsonArtifact('extension/package.json').value;
+  const hooksConfig = readRepoJsonArtifact('hooks/hooks.json').value;
+
+  const versionsByPath = {
+    'package.json': versionOverrides['package.json'] ?? rootPackage?.version ?? null,
+    '.claude-plugin/plugin.json':
+      versionOverrides['.claude-plugin/plugin.json'] ?? pluginManifest?.version ?? null,
+    '.claude-plugin/marketplace.json':
+      versionOverrides['.claude-plugin/marketplace.json'] ??
+      marketplaceManifest?.plugins?.[0]?.version ??
+      null,
+    'extension/manifest.json':
+      versionOverrides['extension/manifest.json'] ?? extensionManifest?.version ?? null,
+    'extension/package.json':
+      versionOverrides['extension/package.json'] ?? extensionPackage?.version ?? null,
+  };
+  const baselineVersion = versionsByPath['package.json'];
+  const uniqueVersions = [...new Set(Object.values(versionsByPath))];
+  const manifestAgentPaths = normalizeArray(pluginManifest?.agents).slice().sort();
+  const filesystemAgentPaths = listAgentSourcePaths().map((path) => `./${path}`).sort();
+  const missingManifestEntries = filesystemAgentPaths.filter((path) => !manifestAgentPaths.includes(path));
+  const extraManifestEntries = manifestAgentPaths.filter((path) => !filesystemAgentPaths.includes(path));
+  const skillSourcePaths = listSkillSourcePaths();
+  const manifestSkillsPointer = pluginManifest?.skills ?? null;
+  const manifestHooksPointer = pluginManifest?.hooks ?? null;
+  const hookCommands = [...new Set(flattenDod009HookCommands(hooksConfig))].sort();
+  const missingCommandPaths = dod009HooksCommandPaths.filter((path) => !hookCommands.includes(path));
+  const extraCommandPaths = hookCommands.filter((path) => !dod009HooksCommandPaths.includes(path));
+  const eventIds = Object.keys(hooksConfig?.hooks ?? {}).sort();
+  const excludedSurfaces = buildDod009ExcludedSurfaces();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+
+  const contractChecks = {
+    version_sync: {
+      status:
+        baselineVersion &&
+        uniqueVersions.length === 1 &&
+        Object.values(versionsByPath).every((version) => typeof version === 'string' && version.length > 0)
+          ? 'pass'
+          : 'fail',
+      checked_paths: [...dod009VersionSyncPaths],
+      baseline_version: baselineVersion ?? null,
+      unique_version_count: uniqueVersions.length,
+      versions_by_path: versionsByPath,
+    },
+    agents_parity: {
+      status: missingManifestEntries.length === 0 && extraManifestEntries.length === 0 ? 'pass' : 'fail',
+      manifest_agent_paths: manifestAgentPaths,
+      filesystem_agent_paths: filesystemAgentPaths,
+      missing_manifest_entries: missingManifestEntries,
+      extra_manifest_entries: extraManifestEntries,
+    },
+    skills_directory_registration: {
+      status:
+        manifestSkillsPointer === './skills/' && skillSourcePaths.length > 0
+          ? 'pass'
+          : 'fail',
+      manifest_skills_pointer: manifestSkillsPointer,
+      canonical_directory_path: 'skills/',
+      skill_file_count: skillSourcePaths.length,
+      skill_source_paths_sample: skillSourcePaths.slice(0, 8),
+    },
+    hooks_pointer: {
+      status: manifestHooksPointer === './hooks/hooks.json' ? 'pass' : 'fail',
+      manifest_hooks_pointer: manifestHooksPointer,
+      canonical_source_path: 'hooks/hooks.json',
+    },
+    hooks_registration: {
+      status:
+        isDeepStrictEqual(hookCommands, dod009HooksCommandPaths) &&
+        isDeepStrictEqual(eventIds, ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'])
+          ? 'pass'
+          : 'fail',
+      event_ids: eventIds,
+      command_paths: hookCommands,
+      missing_command_paths: missingCommandPaths,
+      extra_command_paths: extraCommandPaths,
+      shared_command_path_count: flattenDod009HookCommands(hooksConfig).length - hookCommands.length,
+    },
+  };
+
+  const contractWithoutScan = {
+    contract_id: 'REQ-912-DOD-009-claude-plugin-regression-matrix',
+    request_id: 'REQ-912',
+    task_id: '01',
+    dod_id: 'DOD-009',
+    format_version: '1.0.0',
+    comparison_subject: 'claude-plugin-mode',
+    codex_artifact_substitution_permitted: false,
+    repository_local_only: true,
+    matrix_surfaces: buildDod009MatrixSurfaces(),
+    contract_checks: contractChecks,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod009NoGoMetadataGuardCriteria,
+      deterministic_validation: true,
+      repository_local_only: true,
+    },
+    excluded_surfaces: excludedSurfaces,
+    blocker_summary: {
+      status: 'pass',
+      blocker_count: 0,
+      human_readable: [],
+    },
+    manual_readable_exports: {
+      matrix_surface_ids: buildDod009MatrixSurfaces().map((surface) => surface.surface_id),
+      canonical_source_paths: [...dod009MatrixSurfacePaths],
+      excluded_surface_ids: [...dod009ExcludedSurfaceIds],
+      blocker_summary_fields: ['status', 'blocker_count', 'human_readable'],
+    },
+    input_paths_read: [...dod009MatrixSurfacePaths],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod009RegressionMatrixMetadata(contractWithoutScan);
+  const humanReadableBlockers = summarizeDod009Blockers(
+    contractChecks,
+    sanitizedParseFailures,
+    forbiddenMetadataScan,
+  );
+  const contractStatus =
+    Object.values(contractChecks).every((check) => check.status === 'pass') &&
+    sanitizedParseFailures.length === 0 &&
+    forbiddenMetadataScan.status === 'pass' &&
+    excludedSurfaces.every((surface) =>
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0
+    )
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...contractWithoutScan,
+    status: contractStatus,
+    blocker_summary: {
+      status: humanReadableBlockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: humanReadableBlockers.length,
+      human_readable: humanReadableBlockers,
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
   };
 }
 
@@ -5032,6 +5459,70 @@ export function assertDod008WorkflowSchemaContract(evidence) {
   assert.deepEqual(
     evidence.manual_readable_exports.lifecycle_smoke_artifact_types,
     dod008LifecycleSmokeArtifactTypes,
+  );
+}
+
+export function assertDod009ClaudePluginRegressionMatrix(contract) {
+  assert.equal(contract.contract_id, 'REQ-912-DOD-009-claude-plugin-regression-matrix');
+  assert.equal(contract.request_id, 'REQ-912');
+  assert.equal(contract.task_id, '01');
+  assert.equal(contract.dod_id, 'DOD-009');
+  assert.equal(contract.status, 'pass');
+  assert.equal(contract.comparison_subject, 'claude-plugin-mode');
+  assert.equal(contract.codex_artifact_substitution_permitted, false);
+  assert.equal(contract.repository_local_only, true);
+  assert.deepEqual(
+    contract.matrix_surfaces.map((surface) => surface.canonical_source_path),
+    dod009MatrixSurfacePaths,
+  );
+  assert.ok(
+    contract.matrix_surfaces.every(
+      (surface) =>
+        surface.verification_scope === 'claude-canonical-source' &&
+        surface.repository_local_only === true,
+    ),
+  );
+  assert.equal(contract.contract_checks.version_sync.status, 'pass');
+  assert.deepEqual(contract.contract_checks.version_sync.checked_paths, dod009VersionSyncPaths);
+  assert.equal(contract.contract_checks.version_sync.unique_version_count, 1);
+  assert.equal(contract.contract_checks.agents_parity.status, 'pass');
+  assert.deepEqual(contract.contract_checks.agents_parity.missing_manifest_entries, []);
+  assert.deepEqual(contract.contract_checks.agents_parity.extra_manifest_entries, []);
+  assert.equal(contract.contract_checks.skills_directory_registration.status, 'pass');
+  assert.equal(contract.contract_checks.skills_directory_registration.manifest_skills_pointer, './skills/');
+  assert.equal(contract.contract_checks.hooks_pointer.status, 'pass');
+  assert.equal(contract.contract_checks.hooks_pointer.manifest_hooks_pointer, './hooks/hooks.json');
+  assert.equal(contract.contract_checks.hooks_registration.status, 'pass');
+  assert.deepEqual(contract.contract_checks.hooks_registration.command_paths, dod009HooksCommandPaths);
+  assert.equal(contract.no_go_metadata_guard.status, 'pass');
+  assert.deepEqual(
+    contract.no_go_metadata_guard.criteria.map((criterion) => criterion.criterion_id),
+    dod009NoGoMetadataGuardCriteria.map((criterion) => criterion.criterion_id),
+  );
+  assert.equal(contract.forbidden_metadata_scan.status, 'pass');
+  assert.equal(contract.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    contract.excluded_surfaces.map((surface) => surface.surface_id),
+    dod009ExcludedSurfaceIds,
+  );
+  assert.ok(
+    contract.excluded_surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(contract.blocker_summary.status, 'pass');
+  assert.equal(contract.blocker_summary.blocker_count, 0);
+  assert.deepEqual(contract.blocker_summary.human_readable, []);
+  assert.deepEqual(
+    contract.manual_readable_exports.canonical_source_paths,
+    dod009MatrixSurfacePaths,
+  );
+  assert.deepEqual(
+    contract.manual_readable_exports.excluded_surface_ids,
+    dod009ExcludedSurfaceIds,
   );
 }
 
