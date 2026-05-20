@@ -15,6 +15,7 @@ import {
   assertDod008WorkflowSchemaContract,
   assertDod009ClaudePluginRegressionMatrix,
   assertDod010BlockerFreeMigrationReport,
+  assertDod011RequestEvidence,
   assertDod009RequestEvidence,
   assertDod007RequestEvidence,
   assertCodexPluginDiscoverySmokeEvidence,
@@ -29,6 +30,7 @@ import {
   buildDod008WorkflowSchemaContract,
   buildDod009ClaudePluginRegressionMatrix,
   buildDod010BlockerFreeMigrationReport,
+  buildDod011RequestEvidence,
   buildDod009RequestEvidence,
   scanDod008ScenarioSchemaMetadata,
   scanDod008RequestEvidenceMetadata,
@@ -45,6 +47,8 @@ import {
   defaultDod009RequestEvidenceVerificationSummary,
   defaultDod007RequestEvidenceVerificationSummary,
   dod010BlockerFreeMigrationReportRelativePath,
+  dod011GeneratorScriptRelativePath,
+  dod011RequestEvidenceRelativePath,
   dod010EvidenceByDodIds,
   dod010NormalizedBlockerTypes,
   dod008CoreWorkflowSmokeArtifactTypes,
@@ -293,8 +297,54 @@ const sprint12ForcedWireRegistryExpectedEntries = {
   },
 };
 
+const dod011RequiredPhaseOrder = [
+  'inventory',
+  'generator',
+  'adapter',
+  'skill-agent-parity',
+  'config-provider-parity',
+  'state-workflow-parity',
+  'docs-release',
+];
+const dod011RequiredPackageFields = [
+  'id',
+  'phase',
+  'sequence',
+  'inputs',
+  'outputs',
+  'validation',
+  'blocker_criteria',
+  'downstream_dod',
+];
+const dod011RequiredNoGoCriterionIds = [
+  'user_home_mutation',
+  'external_codex_install_cache_reload',
+  'symlink_creation',
+  'plugin_cache_mutation',
+  'claude_hooks_direct_edit',
+  'objective_md_direct_edit',
+];
+const dod011PredecessorDodIds = ['DOD-009', 'DOD-010'];
+const dod011FollowUpDodIds = ['DOD-012', 'DOD-013'];
+
 function readRepoFile(path) {
   return readFileSync(join(repoRoot, path), 'utf8');
+}
+
+function readDod011RequestEvidenceArtifact() {
+  return JSON.parse(readRepoFile(dod011RequestEvidenceRelativePath));
+}
+
+function extractDod011ValidationCommand(commandEntry) {
+  if (typeof commandEntry === 'string') {
+    return commandEntry;
+  }
+
+  if (commandEntry && typeof commandEntry === 'object' && typeof commandEntry.command === 'string') {
+    return commandEntry.command;
+  }
+
+  return null;
 }
 
 function assertMetadataPathIsScoped(path) {
@@ -2427,6 +2477,135 @@ test('DOD-010 persisted artifact preserves metadata, follow-up boundary, and all
   assertDod010FollowUpScopeAndReusableSummary(report);
   assert.deepEqual(report.allowed_output_paths, [dod010BlockerFreeMigrationReportRelativePath]);
   assertNoForbiddenDod010ReportLiterals(report);
+});
+
+test('DOD-011 smoke surface exports the planned request-evidence helper contract', () => {
+  assert.equal(dod011RequestEvidenceRelativePath, '.gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json');
+  assert.equal(
+    dod011GeneratorScriptRelativePath,
+    'scripts/generate-dod-011-migration-work-package-breakdown.mjs',
+  );
+  assert.equal(typeof buildDod011RequestEvidence, 'function');
+  assert.equal(typeof assertDod011RequestEvidence, 'function');
+});
+
+test('DOD-011 persisted request evidence records top-level schema and work package order', () => {
+  const evidence = readDod011RequestEvidenceArtifact();
+
+  assertDod011RequestEvidence(evidence);
+  assert.equal(evidence.request_id, 'REQ-919');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 13);
+  assert.equal(evidence.dod_id, 'DOD-011');
+  assert.equal(evidence.status, 'pass');
+  assert.ok(Array.isArray(evidence.work_packages));
+  assert.equal(evidence.work_packages.length, 8);
+  assert.deepEqual(
+    evidence.work_packages.map((workPackage) => workPackage.id),
+    ['WP-1', 'WP-2', 'WP-3', 'WP-4', 'WP-5', 'WP-6', 'WP-7', 'WP-8'],
+  );
+  assert.deepEqual(
+    evidence.work_packages.map((workPackage) => workPackage.sequence),
+    [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  assert.deepEqual(
+    [...new Set(evidence.work_packages.map((workPackage) => workPackage.phase))],
+    dod011RequiredPhaseOrder,
+  );
+
+  for (const workPackage of evidence.work_packages) {
+    for (const field of dod011RequiredPackageFields) {
+      assert.ok(
+        Object.hasOwn(workPackage, field),
+        `DOD-011 work package ${workPackage.id ?? 'unknown'} is missing ${field}.`,
+      );
+    }
+  }
+});
+
+test('DOD-011 persisted request evidence exposes dependency graph and repository-local validation boundaries', () => {
+  const evidence = readDod011RequestEvidenceArtifact();
+
+  assertDod011RequestEvidence(evidence);
+  assert.ok(evidence.dependency_graph && typeof evidence.dependency_graph === 'object');
+  assert.ok(Array.isArray(evidence.dependency_graph.nodes));
+  assert.ok(Array.isArray(evidence.dependency_graph.edges));
+  assert.ok(Array.isArray(evidence.dependency_graph.topological_order));
+  assert.deepEqual(
+    evidence.dependency_graph.nodes.map((node) => node.id),
+    evidence.work_packages.map((workPackage) => workPackage.id),
+  );
+  assert.deepEqual(
+    evidence.dependency_graph.topological_order,
+    evidence.work_packages.map((workPackage) => workPackage.id),
+  );
+
+  const sequenceById = new Map(
+    evidence.work_packages.map((workPackage) => [workPackage.id, workPackage.sequence]),
+  );
+  for (const edge of evidence.dependency_graph.edges) {
+    assert.ok(edge && typeof edge === 'object');
+    assert.equal(typeof edge.from, 'string');
+    assert.equal(typeof edge.to, 'string');
+    assert.ok(
+      sequenceById.get(edge.from) < sequenceById.get(edge.to),
+      `DOD-011 dependency edge ${edge.from} -> ${edge.to} must preserve topological order.`,
+    );
+  }
+
+  assert.ok(Array.isArray(evidence.validation_commands));
+  assert.ok(evidence.validation_commands.length > 0);
+  for (const commandEntry of evidence.validation_commands) {
+    const command = extractDod011ValidationCommand(commandEntry);
+    assert.equal(typeof command, 'string');
+    assert.ok(command.length > 0);
+    assert.doesNotMatch(command, /~\/|\/Users\/|\.claude\/hooks|objective\.md/u);
+    assert.doesNotMatch(command, /codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s/u);
+  }
+
+  assert.ok(evidence.no_go_boundary && typeof evidence.no_go_boundary === 'object');
+  assert.equal(evidence.no_go_boundary.status, 'pass');
+  assert.equal(evidence.no_go_boundary.violation_count, 0);
+  assert.deepEqual(
+    evidence.no_go_boundary.criteria.map((criterion) => criterion.criterion_id),
+    dod011RequiredNoGoCriterionIds,
+  );
+  assert.ok(
+    evidence.no_go_boundary.criteria.every((criterion) => criterion.status === 'pass'),
+  );
+});
+
+test('DOD-011 persisted request evidence preserves predecessor linkage and follow-up-only scope', () => {
+  const evidence = readDod011RequestEvidenceArtifact();
+
+  assertDod011RequestEvidence(evidence);
+  assert.ok(Array.isArray(evidence.predecessor_evidence_refs));
+  assert.deepEqual(
+    evidence.predecessor_evidence_refs.map((entry) => entry.dod_id),
+    dod011PredecessorDodIds,
+  );
+
+  for (const predecessor of evidence.predecessor_evidence_refs) {
+    assert.equal(predecessor.shared_dod_registry_linkage_status, 'pass');
+    assert.equal(typeof predecessor.request_evidence_path, 'string');
+    assert.ok(predecessor.request_evidence_path.startsWith('.gran-maestro/requests/REQ-'));
+  }
+
+  assert.ok(Array.isArray(evidence.follow_up_scope));
+  assert.deepEqual(
+    evidence.follow_up_scope.map((entry) => entry.dod_id),
+    dod011FollowUpDodIds,
+  );
+  assert.ok(
+    evidence.follow_up_scope.every((entry) =>
+      ['follow_up', 'supporting'].includes(entry.status),
+    ),
+  );
+  assert.ok(
+    evidence.follow_up_scope.every((entry) =>
+      !['completed', 'done', 'accepted'].includes(entry.status),
+    ),
+  );
 });
 
 test('Sprint 12 shared DOD evidence registry requires DOD-009 and DOD-010 linkage metadata', () => {

@@ -683,6 +683,12 @@ export const dod010BlockerFreeMigrationReportAbsolutePath = join(
   repoRoot,
   dod010BlockerFreeMigrationReportRelativePath,
 );
+export const dod011RequestEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-919/evidence/dod-011-migration-work-package-breakdown.json';
+export const dod011RequestEvidenceAbsolutePath = join(
+  repoRoot,
+  dod011RequestEvidenceRelativePath,
+);
 const dod010ObjectiveRelativePath = '.gran-maestro/agile/AGI-039/objective/objective.md';
 const dod010ObjectiveAbsolutePath = join(dirname(orchestrationRoot), dod010ObjectiveRelativePath);
 const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/request.json';
@@ -691,6 +697,8 @@ const dod010Req916RequestMetadataAbsolutePath = findSharedGranMaestroPath(
 );
 const dod010GeneratorScriptRelativePath =
   'scripts/generate-dod-010-blocker-free-migration-report.mjs';
+export const dod011GeneratorScriptRelativePath =
+  'scripts/generate-dod-011-migration-work-package-breakdown.mjs';
 const dod010NoGoMetadataGuardCriteria = [
   {
     criterion_id: 'user_home_surface',
@@ -3878,6 +3886,14 @@ export function assertDod010BlockerFreeMigrationReport(report) {
   assert.equal(validation.status, 'pass');
   assert.equal(validation.reported_summary_matches_computed, true);
   assert.equal(validation.report_status_matches_computed, true);
+}
+
+export function buildDod011RequestEvidence() {
+  throw new Error('buildDod011RequestEvidence is not implemented.');
+}
+
+export function assertDod011RequestEvidence() {
+  throw new Error('assertDod011RequestEvidence is not implemented.');
 }
 
 function buildDod009ExcludedSurfaces() {
