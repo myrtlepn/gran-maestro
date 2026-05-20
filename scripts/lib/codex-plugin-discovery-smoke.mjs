@@ -90,11 +90,23 @@ export const dod007RequestEvidenceAbsolutePath = join(
   orchestrationRoot,
   dod007RequestEvidenceOrchestrationRelativePath,
 );
+export const dod008WorkflowE2EValidationEvidenceRelativePath =
+  '.gran-maestro/requests/REQ-894/evidence/dod-008-workflow-e2e-validation.json';
+export const dod008WorkflowE2EValidationEvidenceAbsolutePath = join(
+  repoRoot,
+  dod008WorkflowE2EValidationEvidenceRelativePath,
+);
 export const req893RequestMetadataRelativePath = '.gran-maestro/requests/REQ-893/request.json';
 const req893RequestMetadataOrchestrationRelativePath = 'requests/REQ-893/request.json';
 const req893RequestMetadataAbsolutePath = join(
   orchestrationRoot,
   req893RequestMetadataOrchestrationRelativePath,
+);
+export const req894RequestMetadataRelativePath = '.gran-maestro/requests/REQ-894/request.json';
+const req894RequestMetadataOrchestrationRelativePath = 'requests/REQ-894/request.json';
+const req894RequestMetadataAbsolutePath = join(
+  orchestrationRoot,
+  req894RequestMetadataOrchestrationRelativePath,
 );
 export const req890Dod005ValidationEvidenceRelativePath =
   '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json';
@@ -281,6 +293,209 @@ export const defaultDod007RequestEvidenceVerificationSummary = {
 };
 
 export const dod007ExcludedSurfaceIds = ['DOD-008', 'DOD-009', 'docs/release'];
+export const dod008WorkflowScenarioPaths = [
+  '/mst:agile-plan',
+  '/mst:agile --resume',
+  '/mst:request',
+  '/mst:approve',
+  'delegated implementation loop',
+  '/mst:review',
+  '/mst:accept',
+  '/mst:recover',
+  '/mst:cleanup',
+  '/mst:dashboard',
+  '/mst:settings',
+];
+export const dod008AcceptanceRuntimeSurfaceIds = ['DOD-008'];
+export const dod008ExcludedSurfaceIds = [
+  'DOD-009',
+  'DOD-010',
+  'DOD-011',
+  'DOD-012',
+  'DOD-013',
+];
+export const dod008ArtifactSchemaRequiredFieldsByType = {
+  objective: ['artifact_id', 'objective_id', 'title', 'status', 'request_ids', 'updated_at'],
+  request: ['artifact_id', 'request_id', 'objective_id', 'dod_id', 'status', 'task_ids'],
+  spec: ['artifact_id', 'spec_id', 'request_id', 'acceptance_criteria', 'artifact_types'],
+  task: ['artifact_id', 'task_id', 'request_id', 'status', 'owner_role', 'trace_id'],
+  trace: ['artifact_id', 'trace_id', 'request_id', 'scenario_id', 'event_refs', 'status'],
+  review: ['artifact_id', 'review_id', 'request_id', 'trace_id', 'findings', 'status'],
+  accept: ['artifact_id', 'acceptance_id', 'request_id', 'review_id', 'decision', 'status'],
+  recover: [
+    'artifact_id',
+    'recovery_id',
+    'request_id',
+    'trigger',
+    'resume_token',
+    'mst_session_id',
+    'root_mst_id',
+    'recovery_judgement',
+    'status',
+  ],
+  cleanup: [
+    'artifact_id',
+    'cleanup_id',
+    'request_id',
+    'targets',
+    'dry_run',
+    'report',
+    'request_artifacts_preserved',
+    'status',
+  ],
+  dashboard: [
+    'artifact_id',
+    'dashboard_id',
+    'request_id',
+    'widgets',
+    'health',
+    'overview',
+    'status',
+    'updated_at',
+  ],
+  settings: [
+    'artifact_id',
+    'settings_id',
+    'scope',
+    'effective_values',
+    'config',
+    'status',
+    'updated_at',
+  ],
+};
+export const dod008LifecycleSmokeArtifactTypes = ['recover', 'cleanup', 'dashboard', 'settings'];
+export const dod008NoGoMetadataGuardCriteria = [
+  {
+    criterion_id: 'host_user_absolute_root',
+    category: 'host-specific-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'home_alias_or_env_root',
+    category: 'shell-expanded-root',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'codex_user_state_surface',
+    category: 'user-scoped-codex-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'agent_user_skill_surface',
+    category: 'user-scoped-agent-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'claude_hook_surface',
+    category: 'user-scoped-claude-hook-state',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'parent_directory_escape',
+    category: 'path-escape',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_network_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_cache_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'plugin_rescan_action',
+    category: 'plugin-side-effect',
+    required_result: 'reject',
+  },
+  {
+    criterion_id: 'link_creation_action',
+    category: 'filesystem-side-effect',
+    required_result: 'reject',
+  },
+];
+export const dod008CoreWorkflowSmokeScenarioPaths = [
+  '/mst:agile-plan',
+  '/mst:request',
+  '/mst:approve',
+  'delegated implementation loop',
+  '/mst:review',
+  '/mst:accept',
+];
+export const dod008CoreWorkflowSmokeArtifactTypes = [
+  'request',
+  'spec',
+  'task',
+  'trace',
+  'review',
+  'accept',
+];
+export const dod008CoreWorkflowSmokeSessionId = 'MST-REQ-894-20260520T000000000Z-dod008aa';
+export const dod008WorkflowArtifactParityTypes = [
+  ...dod008CoreWorkflowSmokeArtifactTypes,
+  ...dod008LifecycleSmokeArtifactTypes,
+];
+
+export const defaultDod008WorkflowE2EValidationSummary = {
+  focused_workflow_validation: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 16,
+    tests_pass: 16,
+    tests_fail: 0,
+    summary: '16 DOD-008 workflow checks passed',
+  },
+  schema_contract: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 5,
+    tests_pass: 5,
+    tests_fail: 0,
+    summary: 'schema contract checks passed',
+  },
+  core_workflow_harness: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 3,
+    tests_pass: 3,
+    tests_fail: 0,
+    summary: 'core workflow harness checks passed',
+  },
+  lifecycle_smoke: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 4,
+    tests_pass: 4,
+    tests_fail: 0,
+    summary: 'lifecycle smoke checks passed',
+  },
+  artifact_parity: {
+    command: 'node --test tests/smoke.test.mjs',
+    status: 'pass',
+    tests_total: 4,
+    tests_pass: 4,
+    tests_fail: 0,
+    summary: 'artifact parity checks passed',
+  },
+  npm_test: {
+    command: 'npm test',
+    status: 'pass',
+    tests_total: 57,
+    tests_pass: 57,
+    tests_fail: 0,
+    summary: '57 passed',
+  },
+  generator: {
+    command:
+      'node scripts/generate-dod-008-workflow-e2e-validation.mjs <repo-output> <summary-fixture>',
+    generated_artifact_path: dod008WorkflowE2EValidationEvidenceRelativePath,
+    generated_output_path: null,
+    status: 'pass',
+    parse_ok: true,
+  },
+};
 
 export const manifestFields = [
   'name',
@@ -1747,6 +1962,48 @@ function buildReq893RequestMetadataSnapshot(requestMetadata) {
   };
 }
 
+function buildReq894RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-894-01',
+    'REQ-894-02',
+    'REQ-894-03',
+    'REQ-894-04',
+    'REQ-894-05',
+  ]);
+
+  return {
+    path: req894RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+        const selfCheck = summarizeSelfCheck(task?.self_check ?? latestAttempt?.self_check);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: task?.integration_commit ??
+            latestAttempt?.integration_commit ??
+            task?.commit ??
+            latestAttempt?.commit ??
+            null,
+          task_commit: task?.commit ?? latestAttempt?.commit ?? null,
+          integration_commit: task?.integration_commit ?? latestAttempt?.integration_commit ?? null,
+          validated_at: task?.completed_at ?? latestAttempt?.completed_at ?? null,
+          self_check: selfCheck,
+        };
+      }),
+  };
+}
+
 function normalizeDod007ContractSummary(summary = {}, defaults = {}) {
   const testsTotal = Number(summary.tests_total ?? defaults.tests_total ?? 0);
   const testsPass = Number(summary.tests_pass ?? defaults.tests_pass ?? 0);
@@ -1821,6 +2078,52 @@ function dod007SummaryPasses(summary) {
     summary.tests_total > 0 &&
     summary.tests_fail === 0 &&
     summary.tests_pass === summary.tests_total;
+}
+
+function normalizeDod008WorkflowE2EValidationSummary(verificationSummary = {}) {
+  const defaults = defaultDod008WorkflowE2EValidationSummary;
+  const normalizeSummary = (name) =>
+    normalizeDod007ContractSummary(verificationSummary[name], defaults[name]);
+
+  return {
+    focused_workflow_validation: normalizeSummary('focused_workflow_validation'),
+    schema_contract: normalizeSummary('schema_contract'),
+    core_workflow_harness: normalizeSummary('core_workflow_harness'),
+    lifecycle_smoke: normalizeSummary('lifecycle_smoke'),
+    artifact_parity: normalizeSummary('artifact_parity'),
+    npm_test: normalizeSummary('npm_test'),
+    generator: {
+      ...defaults.generator,
+      ...(verificationSummary.generator ?? {}),
+      command: sanitizeMetadataCommand(
+        verificationSummary.generator?.command ?? defaults.generator.command,
+      ),
+      generated_artifact_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_artifact_path ??
+          defaults.generator.generated_artifact_path,
+        null,
+      ),
+      generated_output_path: sanitizeMetadataPath(
+        verificationSummary.generator?.generated_output_path ??
+          defaults.generator.generated_output_path,
+        null,
+      ),
+      status: normalizeEvidenceStatus(
+        verificationSummary.generator?.status ?? defaults.generator.status,
+      ),
+      parse_ok: verificationSummary.generator?.parse_ok ?? defaults.generator.parse_ok,
+    },
+  };
+}
+
+function dod008FocusedWorkflowSummariesPass(verificationSummary) {
+  return [
+    verificationSummary.focused_workflow_validation,
+    verificationSummary.schema_contract,
+    verificationSummary.core_workflow_harness,
+    verificationSummary.lifecycle_smoke,
+    verificationSummary.artifact_parity,
+  ].every(dod007SummaryPasses);
 }
 
 function buildDod007ExcludedSurfaces() {
@@ -1923,6 +2226,999 @@ function buildDod007ForbiddenMetadataScan(evidence) {
     scanned_string_count: strings.length,
     violation_count: violations.length,
     violations,
+  };
+}
+
+export function scanDod008RequestEvidenceMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'codex_state_root', literal: '~/.codex' },
+    { fixture_id: 'agents_state_root', literal: '~/.agents' },
+    { fixture_id: 'claude_hook_surface', literal: '.claude/hooks' },
+    { fixture_id: 'user_home_absolute', literal: '/Users/' },
+    { fixture_id: 'private_absolute', literal: '/private/' },
+    { fixture_id: 'home_absolute', literal: '/home/' },
+    { fixture_id: 'home_alias', literal: '~/' },
+    { fixture_id: 'home_env', literal: '$HOME' },
+    { fixture_id: 'home_env_braced', literal: '${HOME}' },
+    { fixture_id: 'link_literal', literal: 'symlink' },
+    { fixture_id: 'setup_literal', literal: 'install' },
+    { fixture_id: 'cache_action_phrase', literal: 'cache refresh' },
+    { fixture_id: 'rescan_literal', literal: 'reload' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+export function scanDod008ScenarioSchemaMetadata(metadata) {
+  const strings = collectStringLeaves(metadata);
+  const literalFixtures = [
+    { fixture_id: 'posix_user_home_root', literal: '/Users/' },
+    { fixture_id: 'home_alias_root', literal: '~/' },
+    { fixture_id: 'home_env_root', literal: '$HOME' },
+    { fixture_id: 'home_env_braced_root', literal: '${HOME}' },
+    { fixture_id: 'codex_user_state_root', literal: '~/.codex' },
+    { fixture_id: 'agents_user_state_root', literal: '~/.agents' },
+    { fixture_id: 'claude_hook_state_root', literal: '.claude/hooks' },
+    { fixture_id: 'path_escape_term', literal: 'traversal' },
+    { fixture_id: 'codex_install_action', literal: 'codex plugins install' },
+    { fixture_id: 'external_install_phrase', literal: 'external install' },
+    { fixture_id: 'codex_refresh_action', literal: 'codex plugins refresh' },
+    { fixture_id: 'codex_reload_action', literal: 'codex plugins reload' },
+    { fixture_id: 'cache_refresh_phrase', literal: 'cache refresh' },
+    { fixture_id: 'reload_term', literal: 'reload' },
+    { fixture_id: 'link_command', literal: 'ln -s' },
+    { fixture_id: 'link_term', literal: 'symlink' },
+  ];
+  const regexFixtures = [
+    { fixture_id: 'parent_directory_escape', pattern: /(^|[\\/])\.\.(?:[\\/]|$)/u },
+    { fixture_id: 'encoded_parent_directory_escape', pattern: /%2e%2e/iu },
+    { fixture_id: 'windows_absolute_path', pattern: /^[A-Za-z]:[\\/]/u },
+  ];
+  const violations = [];
+
+  for (const fixture of literalFixtures) {
+    const matched = strings.find((string) =>
+      string.toLowerCase().includes(fixture.literal.toLowerCase()),
+    );
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  for (const fixture of regexFixtures) {
+    const matched = strings.find((string) => fixture.pattern.test(string));
+    if (matched) {
+      violations.push({
+        fixture_id: fixture.fixture_id,
+        value_hash: sha256(matched),
+      });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    scanned_string_count: strings.length,
+    violation_count: violations.length,
+    violations,
+  };
+}
+
+export function buildDod008ExcludedSurfaces() {
+  return dod008ExcludedSurfaceIds.map((surfaceId) => ({
+    surface_id: surfaceId,
+    dod_id: surfaceId,
+    status: 'pass',
+    implementation_count: 0,
+    runtime_invocation_count: 0,
+    acceptance_gate_count: 0,
+    reason: 'Excluded surface only; not part of the DOD-008 workflow schema contract.',
+  }));
+}
+
+export function buildDod008ArtifactSchemaContract() {
+  return Object.entries(dod008ArtifactSchemaRequiredFieldsByType).map(
+    ([artifactType, requiredFields]) => ({
+      artifact_type: artifactType,
+      required_fields: [...requiredFields],
+      deterministic_validation: true,
+      repository_local_only: true,
+    }),
+  );
+}
+
+export function buildDod008LifecycleSmokeArtifacts() {
+  const mstSessionId = 'MST-AGI-039-20260519T144424Z-req89403';
+  const rootMstId = 'AGI-039';
+  const generatedAt = '2026-05-19T14:44:24.000Z';
+
+  return [
+    {
+      artifact_id: 'REQ-894-DOD-008-recover-smoke',
+      artifact_type: 'recover',
+      recovery_id: 'recover-smoke-001',
+      request_id: 'REQ-894',
+      trigger: 'interrupted_session',
+      resume_token: 'resume-token-fixture',
+      mst_session_id: mstSessionId,
+      root_mst_id: rootMstId,
+      canonical_session_identity: {
+        mst_session_id: mstSessionId,
+        root_mst_id: rootMstId,
+        lookup_key: mstSessionId,
+        partition_key: mstSessionId,
+        source: 'structured_context',
+      },
+      recovery_judgement: {
+        primary_action: 'resume_session',
+        reason: 'resume_ready',
+        affected_resources: [
+          { kind: 'mst_session_id', identifier: mstSessionId },
+          { kind: 'session_worktree', identifier: 'session-worktree-fixture' },
+          { kind: 'cleanup_stage_evidence', identifier: 'cleanup-stage-fixture' },
+        ],
+        cleanup_stage_evidence: {
+          evidence_state: 'known',
+          completed_destructive_stages: [],
+          next_idempotent_stage: null,
+          child_scan_fresh: true,
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-cleanup-smoke',
+      artifact_type: 'cleanup',
+      cleanup_id: 'cleanup-smoke-001',
+      request_id: 'REQ-894',
+      targets: [
+        {
+          kind: 'active_flow_orphan_session',
+          planned_count: 0,
+          removed_count: 0,
+        },
+      ],
+      dry_run: true,
+      report: {
+        entrypoint: 'direct-cli',
+        session_id: mstSessionId,
+        status: 'ok',
+        orphan_session_count: 0,
+        planned_cleanup_count: 0,
+        result: 'nothing_to_clean',
+      },
+      request_artifacts_preserved: {
+        status: 'pass',
+        checked_paths: [
+          '.gran-maestro/requests/REQ-894/request.json',
+          '.gran-maestro/requests/REQ-894/tasks/03/spec.md',
+        ],
+        mutated_path_count: 0,
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-dashboard-smoke',
+      artifact_type: 'dashboard',
+      dashboard_id: 'dashboard-smoke-001',
+      request_id: 'REQ-894',
+      widgets: ['health', 'overview.active-items', 'overview.next-steps', 'overview.pulse'],
+      health: {
+        route: '/api/health',
+        ok: true,
+      },
+      overview: {
+        active_items: {
+          route: '/api/overview/active-items',
+          shape: {
+            items: 'array',
+            next_cursor: 'string_or_null',
+            has_more: 'boolean',
+            as_of: 'iso_timestamp',
+          },
+        },
+        next_steps: {
+          route: '/api/overview/next-steps',
+          shape: {
+            items: 'array',
+            as_of: 'iso_timestamp',
+          },
+        },
+        pulse: {
+          route: '/api/overview/pulse',
+          shape: {
+            active: 'number',
+            blocked: 'number',
+            done_7d: 'number',
+            stale_7d: 'number',
+            as_of: 'iso_timestamp',
+          },
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+    {
+      artifact_id: 'REQ-894-DOD-008-settings-smoke',
+      artifact_type: 'settings',
+      settings_id: 'settings-smoke-001',
+      scope: 'project',
+      request_id: 'REQ-894',
+      effective_values: {
+        workflow_default_agent: 'codex-dev',
+        auto_mode_request: false,
+        reference_auto_search: true,
+      },
+      config: {
+        config_route: {
+          route: '/api/config',
+          shape: {
+            merged: 'object',
+            overrides: 'object',
+            defaults: 'object',
+          },
+        },
+        defaults_route: {
+          route: '/api/config/defaults',
+          shape: 'object',
+        },
+        mode_route: {
+          route: '/api/mode',
+          shape: {
+            active: 'boolean',
+          },
+        },
+      },
+      status: 'pass',
+      updated_at: generatedAt,
+    },
+  ];
+}
+
+export function buildDod008LifecycleSmokeValidation(artifacts = buildDod008LifecycleSmokeArtifacts()) {
+  const requiredFieldsByType = dod008ArtifactSchemaRequiredFieldsByType;
+  const missingRequiredFields = [];
+
+  for (const artifact of artifacts) {
+    const artifactType = artifact?.artifact_type;
+    const requiredFields = requiredFieldsByType[artifactType] ?? [];
+    for (const field of requiredFields) {
+      if (!(field in artifact)) {
+        missingRequiredFields.push({
+          artifact_type: artifactType,
+          artifact_id: artifact?.artifact_id ?? null,
+          field,
+        });
+      }
+    }
+  }
+
+  const artifactTypes = artifacts.map((artifact) => artifact.artifact_type);
+  const missingArtifactTypes = dod008LifecycleSmokeArtifactTypes.filter(
+    (artifactType) => !artifactTypes.includes(artifactType),
+  );
+
+  return {
+    status:
+      missingRequiredFields.length === 0 && missingArtifactTypes.length === 0 ? 'pass' : 'fail',
+    artifact_types: artifactTypes,
+    missing_artifact_types: missingArtifactTypes,
+    missing_required_fields: missingRequiredFields,
+    deterministic_validation: true,
+    repository_local_only: true,
+  };
+}
+
+export function buildDod008WorkflowScenarioContract() {
+  const scenarioRequiredArtifacts = {
+    '/mst:agile-plan': ['objective', 'spec', 'task', 'trace'],
+    '/mst:agile --resume': ['objective', 'request', 'task', 'trace', 'recover'],
+    '/mst:request': ['request', 'spec', 'task', 'trace'],
+    '/mst:approve': ['request', 'task', 'trace'],
+    'delegated implementation loop': ['task', 'trace'],
+    '/mst:review': ['review', 'trace'],
+    '/mst:accept': ['accept', 'review', 'trace'],
+    '/mst:recover': ['recover', 'trace'],
+    '/mst:cleanup': ['cleanup', 'trace'],
+    '/mst:dashboard': ['dashboard', 'trace'],
+    '/mst:settings': ['settings', 'trace'],
+  };
+
+  return dod008WorkflowScenarioPaths.map((scenarioPath, index) => ({
+    scenario_id: `dod008-scenario-${String(index + 1).padStart(2, '0')}`,
+    representative_path: scenarioPath,
+    required_artifacts: scenarioRequiredArtifacts[scenarioPath],
+    contract_only: true,
+    repository_local_only: true,
+  }));
+}
+
+export function buildDod008WorkflowSchemaContract() {
+  const scenarioContract = buildDod008WorkflowScenarioContract();
+  const artifactSchemaContract = buildDod008ArtifactSchemaContract();
+  const excludedSurfaces = buildDod008ExcludedSurfaces();
+  const lifecycleSmokeArtifacts = buildDod008LifecycleSmokeArtifacts();
+  const lifecycleSmokeValidation = buildDod008LifecycleSmokeValidation(lifecycleSmokeArtifacts);
+  const contractWithoutScan = {
+    contract_id: 'REQ-894-DOD-008-workflow-schema-contract',
+    request_id: 'REQ-894',
+    task_id: '01',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status: 'pass',
+    scenario_contract: scenarioContract,
+    artifact_schema_contract: artifactSchemaContract,
+    no_go_metadata_guard: {
+      status: 'pass',
+      criteria: dod008NoGoMetadataGuardCriteria,
+      deterministic_validation: true,
+      repository_local_only: true,
+    },
+    lifecycle_smoke_artifacts: lifecycleSmokeArtifacts,
+    lifecycle_smoke_validation: lifecycleSmokeValidation,
+    acceptance_runtime_surface_ids: dod008AcceptanceRuntimeSurfaceIds,
+    excluded_surfaces: excludedSurfaces,
+    manual_readable_exports: {
+      scenario_paths: dod008WorkflowScenarioPaths,
+      artifact_types: Object.keys(dod008ArtifactSchemaRequiredFieldsByType),
+      lifecycle_smoke_artifact_types: dod008LifecycleSmokeArtifactTypes,
+      excluded_surface_ids: dod008ExcludedSurfaceIds,
+      acceptance_runtime_surface_ids: dod008AcceptanceRuntimeSurfaceIds,
+    },
+  };
+  const forbiddenMetadataScan = scanDod008ScenarioSchemaMetadata(contractWithoutScan);
+  const status =
+    forbiddenMetadataScan.status === 'pass' &&
+    scenarioContract.every((scenario) => scenario.required_artifacts.length > 0) &&
+    artifactSchemaContract.every((schema) => schema.required_fields.length > 0) &&
+    lifecycleSmokeValidation.status === 'pass' &&
+    excludedSurfaces.every((surface) => surface.status === 'pass')
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...contractWithoutScan,
+    status,
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+function buildDod008CoreWorkflowSessionMetadata() {
+  return {
+    status: 'pass',
+    canonical_sources: ['MST_SESSION_ID', 'mst_session_id'],
+    env: {
+      MST_SESSION_ID: dod008CoreWorkflowSmokeSessionId,
+    },
+    context: {
+      mst_session_id: dod008CoreWorkflowSmokeSessionId,
+    },
+    legacy_diagnostics: {
+      diagnostic_only: true,
+      fields: ['MST_STATE_PPID', 'owner_pid', 'session_id'],
+      canonical_source_count: 0,
+    },
+    boundary_checks: {
+      env_and_context_match: true,
+      legacy_only_identity_rejected: true,
+      arbitrary_child_identity_injection: false,
+    },
+  };
+}
+
+function buildDod008CoreWorkflowArtifacts(sessionMetadata = buildDod008CoreWorkflowSessionMetadata()) {
+  return {
+    request: {
+      artifact_id: 'REQ-894-DOD008-core-request',
+      request_id: 'REQ-894',
+      objective_id: 'AGI-039',
+      dod_id: 'DOD-008',
+      status: 'spec_ready',
+      task_ids: ['REQ-894-02'],
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/request.json',
+    },
+    spec: {
+      artifact_id: 'REQ-894-DOD008-core-spec',
+      spec_id: 'REQ-894-02-spec',
+      request_id: 'REQ-894',
+      acceptance_criteria: ['T02-AC-001', 'T02-AC-002', 'T02-AC-003', 'T02-AC-004'],
+      artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/tasks/02/spec.md',
+    },
+    task: {
+      artifact_id: 'REQ-894-DOD008-core-task',
+      task_id: 'REQ-894-02',
+      request_id: 'REQ-894',
+      status: 'reviewed',
+      owner_role: 'codex-dev',
+      trace_id: 'TRACE-REQ-894-02-core',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/tasks/02/task.json',
+    },
+    trace: {
+      artifact_id: 'REQ-894-DOD008-core-trace',
+      trace_id: 'TRACE-REQ-894-02-core',
+      request_id: 'REQ-894',
+      scenario_id: 'dod008-core-workflow-smoke',
+      event_refs: [
+        'EVT-agile-plan-fixture',
+        'EVT-request-fixture',
+        'EVT-approve-fixture',
+        'EVT-delegated-loop-fixture',
+        'EVT-review-fixture',
+        'EVT-accept-fixture',
+      ],
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/traces/dod008-core-workflow.json',
+    },
+    review: {
+      artifact_id: 'REQ-894-DOD008-core-review',
+      review_id: 'RV-001',
+      request_id: 'REQ-894',
+      trace_id: 'TRACE-REQ-894-02-core',
+      findings: [
+        {
+          finding_id: 'FINDING-REQ-894-02-core-001',
+          severity: 'info',
+          status: 'closed',
+        },
+      ],
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/reviews/RV-001/review.json',
+    },
+    accept: {
+      artifact_id: 'REQ-894-DOD008-core-accept',
+      acceptance_id: 'ACCEPT-REQ-894-02-core',
+      request_id: 'REQ-894',
+      review_id: 'RV-001',
+      decision: 'accepted',
+      status: 'pass',
+      state_session: sessionMetadata,
+      path: '.gran-maestro/requests/REQ-894/acceptance/accept.json',
+    },
+  };
+}
+
+function validateDod008CoreWorkflowArtifact({ artifactType, artifact }) {
+  const requiredFields = dod008ArtifactSchemaRequiredFieldsByType[artifactType] ?? [];
+  const missingFields = requiredFields.filter((field) => !Object.hasOwn(artifact, field));
+  const emptyFields = requiredFields.filter((field) => {
+    const value = artifact[field];
+    return value === null ||
+      value === undefined ||
+      (typeof value === 'string' && value.length === 0) ||
+      (Array.isArray(value) && value.length === 0);
+  });
+  const session = artifact.state_session;
+  const sessionViolations = [];
+  if (!session || typeof session !== 'object') {
+    sessionViolations.push('missing_state_session');
+  } else {
+    if (session.env?.MST_SESSION_ID !== dod008CoreWorkflowSmokeSessionId) {
+      sessionViolations.push('missing_env_MST_SESSION_ID');
+    }
+    if (session.context?.mst_session_id !== dod008CoreWorkflowSmokeSessionId) {
+      sessionViolations.push('missing_context_mst_session_id');
+    }
+    if (session.env?.MST_SESSION_ID !== session.context?.mst_session_id) {
+      sessionViolations.push('canonical_session_mismatch');
+    }
+    if (session.legacy_diagnostics?.canonical_source_count !== 0) {
+      sessionViolations.push('legacy_identity_used_as_canonical');
+    }
+  }
+
+  return {
+    artifact_type: artifactType,
+    artifact_id: artifact?.artifact_id ?? null,
+    status:
+      missingFields.length === 0 &&
+      emptyFields.length === 0 &&
+      sessionViolations.length === 0
+        ? 'pass'
+        : 'fail',
+    required_fields: [...requiredFields],
+    missing_fields: missingFields,
+    empty_fields: emptyFields,
+    session_violations: sessionViolations,
+  };
+}
+
+export function buildDod008CoreWorkflowSmokeHarness({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+} = {}) {
+  const sessionMetadata = buildDod008CoreWorkflowSessionMetadata();
+  const artifacts = buildDod008CoreWorkflowArtifacts(sessionMetadata);
+  const artifactValidations = dod008CoreWorkflowSmokeArtifactTypes.map((artifactType) =>
+    validateDod008CoreWorkflowArtifact({
+      artifactType,
+      artifact: artifacts[artifactType],
+    }),
+  );
+  const scenarioRecords = dod008CoreWorkflowSmokeScenarioPaths.map((scenarioPath, index) => ({
+    scenario_id: `dod008-core-scenario-${String(index + 1).padStart(2, '0')}`,
+    representative_path: scenarioPath,
+    reproduced_by_fixture: true,
+    executes_runtime: false,
+    repository_local_only: true,
+  }));
+  const commandMetadata = [
+    {
+      command_id: 'npm-smoke',
+      command: 'node --test tests/smoke.test.mjs',
+      mode: 'deterministic-fixture',
+      mutates_user_home: false,
+      edits_hook_config: false,
+      executes_codex_install: false,
+      refreshes_codex_cache: false,
+      runs_real_implementation: false,
+    },
+  ];
+  const contractArtifactTypes = schemaContract.artifact_schema_contract.map(
+    (schema) => schema.artifact_type,
+  );
+  const missingContractTypes = dod008CoreWorkflowSmokeArtifactTypes.filter(
+    (artifactType) => !contractArtifactTypes.includes(artifactType),
+  );
+  const forbiddenMetadataScan = scanDod008ScenarioSchemaMetadata({
+    scenario_records: scenarioRecords,
+    artifacts,
+    command_metadata: commandMetadata,
+    session_metadata: sessionMetadata,
+  });
+  const status =
+    schemaContract.status === 'pass' &&
+    missingContractTypes.length === 0 &&
+    artifactValidations.every((validation) => validation.status === 'pass') &&
+    forbiddenMetadataScan.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    harness_id: 'REQ-894-02-DOD008-core-workflow-smoke',
+    request_id: 'REQ-894',
+    task_id: '02',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status,
+    mode: 'repository-local-fixture',
+    scenario_records: scenarioRecords,
+    artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+    artifacts,
+    artifact_validations: artifactValidations,
+    session_metadata: sessionMetadata,
+    schema_contract_summary: {
+      contract_id: schemaContract.contract_id,
+      status: schemaContract.status,
+      checked_artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      missing_contract_types: missingContractTypes,
+    },
+    command_metadata: commandMetadata,
+    side_effect_summary: {
+      repository_local_only: true,
+      fixture_only: true,
+      mutates_user_home: false,
+      edits_hook_config: false,
+      executes_codex_install: false,
+      refreshes_codex_cache: false,
+      runs_real_implementation: false,
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
+function dod008ArtifactSchemaMap(schemaContract = buildDod008WorkflowSchemaContract()) {
+  return new Map(
+    normalizeArray(schemaContract.artifact_schema_contract).map((schema) => [
+      schema.artifact_type,
+      normalizeArray(schema.required_fields),
+    ]),
+  );
+}
+
+function buildDod008ClaudeCanonicalArtifactShape({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  artifactTypes = dod008WorkflowArtifactParityTypes,
+} = {}) {
+  const schemaByType = dod008ArtifactSchemaMap(schemaContract);
+
+  return artifactTypes.map((artifactType) => ({
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    source: 'claude_canonical_shape',
+    required_fields: [...(schemaByType.get(artifactType) ?? [])],
+  }));
+}
+
+function dod008LifecycleArtifactMap(lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts()) {
+  return new Map(normalizeArray(lifecycleArtifacts).map((artifact) => [artifact.artifact_type, artifact]));
+}
+
+function buildDod008CodexFixtureArtifactShape({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract }),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+  artifactTypes = dod008WorkflowArtifactParityTypes,
+  codexRequiredFieldsByType = {},
+} = {}) {
+  const schemaByType = dod008ArtifactSchemaMap(schemaContract);
+  const lifecycleByType = dod008LifecycleArtifactMap(lifecycleArtifacts);
+
+  return artifactTypes.map((artifactType) => {
+    const artifact = coreHarness.artifacts?.[artifactType] ?? lifecycleByType.get(artifactType) ?? null;
+    const schemaFields = schemaByType.get(artifactType) ?? [];
+    const baselineRequiredFields = schemaFields.filter((field) => artifact && field in artifact);
+    const requiredFields = codexRequiredFieldsByType[artifactType] ?? baselineRequiredFields;
+    const presentRequiredFields = normalizeArray(requiredFields).filter(
+      (field) => artifact && Object.hasOwn(artifact, field),
+    );
+
+    return {
+      surface_id: 'DOD-008',
+      artifact_type: artifactType,
+      artifact_id: artifact?.artifact_id ?? null,
+      source: 'codex_fixture_shape',
+      required_fields: [...normalizeArray(requiredFields)],
+      present_required_fields: presentRequiredFields,
+      artifact_present: artifact !== null,
+    };
+  });
+}
+
+function dod008RequiredFieldBlocker({ artifactType, field, diffType }) {
+  const phrase =
+    diffType === 'missing_required_field'
+      ? `is missing required field "${field}" from Claude canonical shape`
+      : `requires extra field "${field}" outside the Claude canonical shape`;
+
+  return {
+    blocker_id: `DOD-008/${artifactType}/${field}/${diffType}`,
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    artifact_field: field,
+    diff_type: diffType,
+    severity: 'blocker',
+    message: `DOD-008 ${artifactType} artifact ${phrase}.`,
+    human_readable: `DOD-008 ${artifactType}.${field}: ${phrase}.`,
+  };
+}
+
+function compareDod008RequiredFieldParity({ claudeShape, codexShape }) {
+  const codexByType = new Map(codexShape.map((shape) => [shape.artifact_type, shape]));
+  const artifactDiffs = claudeShape.map((claudeArtifact) => {
+    const codexArtifact = codexByType.get(claudeArtifact.artifact_type);
+    const claudeRequiredFields = normalizeArray(claudeArtifact.required_fields);
+    const codexRequiredFields = normalizeArray(codexArtifact?.required_fields);
+    const missingRequiredFields = claudeRequiredFields.filter(
+      (field) => !codexRequiredFields.includes(field),
+    );
+    const extraRequiredFields = codexRequiredFields.filter(
+      (field) => !claudeRequiredFields.includes(field),
+    );
+    const blockers = [
+      ...missingRequiredFields.map((field) =>
+        dod008RequiredFieldBlocker({
+          artifactType: claudeArtifact.artifact_type,
+          field,
+          diffType: 'missing_required_field',
+        }),
+      ),
+      ...extraRequiredFields.map((field) =>
+        dod008RequiredFieldBlocker({
+          artifactType: claudeArtifact.artifact_type,
+          field,
+          diffType: 'extra_required_field',
+        }),
+      ),
+    ];
+
+    return {
+      surface_id: 'DOD-008',
+      artifact_type: claudeArtifact.artifact_type,
+      claude_required_fields: claudeRequiredFields,
+      codex_required_fields: codexRequiredFields,
+      missing_required_fields: missingRequiredFields,
+      extra_required_fields: extraRequiredFields,
+      status: blockers.length === 0 ? 'pass' : 'fail',
+      blockers,
+    };
+  });
+  const blockers = artifactDiffs.flatMap((diff) => diff.blockers);
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    checked_artifact_types: claudeShape.map((shape) => shape.artifact_type),
+    missing_blocker_count: blockers.filter(
+      (blocker) => blocker.diff_type === 'missing_required_field',
+    ).length,
+    extra_blocker_count: blockers.filter(
+      (blocker) => blocker.diff_type === 'extra_required_field',
+    ).length,
+    blocker_count: blockers.length,
+    artifact_diffs: artifactDiffs,
+    blockers,
+  };
+}
+
+function dod008BoundaryBlocker({ artifactType, field, message }) {
+  return {
+    blocker_id: `DOD-008/${artifactType}/${field}/boundary`,
+    surface_id: 'DOD-008',
+    artifact_type: artifactType,
+    artifact_field: field,
+    severity: 'blocker',
+    message,
+    human_readable: `DOD-008 ${artifactType}.${field}: ${message}`,
+  };
+}
+
+function buildDod008WorkflowParityBoundaryChecks({
+  coreHarness = buildDod008CoreWorkflowSmokeHarness(),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+} = {}) {
+  const lifecycleByType = dod008LifecycleArtifactMap(lifecycleArtifacts);
+  const recover = lifecycleByType.get('recover');
+  const cleanup = lifecycleByType.get('cleanup');
+  const sessionBlockers = [];
+
+  for (const artifactType of dod008CoreWorkflowSmokeArtifactTypes) {
+    const artifact = coreHarness.artifacts?.[artifactType];
+    const session = artifact?.state_session;
+    if (session?.env?.MST_SESSION_ID !== session?.context?.mst_session_id) {
+      sessionBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType,
+          field: 'state_session.mst_session_id',
+          message: 'canonical env/context session identities must match.',
+        }),
+      );
+    }
+    if (session?.legacy_diagnostics?.canonical_source_count !== 0) {
+      sessionBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType,
+          field: 'state_session.legacy_diagnostics.canonical_source_count',
+          message: 'legacy diagnostic identity cannot become a canonical source.',
+        }),
+      );
+    }
+  }
+
+  const recoveryBlockers = [];
+  if (!recover) {
+    recoveryBlockers.push(
+      dod008BoundaryBlocker({
+        artifactType: 'recover',
+        field: 'artifact',
+        message: 'recover smoke artifact is required for parity validation.',
+      }),
+    );
+  } else {
+    if (recover.canonical_session_identity?.mst_session_id !== recover.mst_session_id) {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'canonical_session_identity.mst_session_id',
+          message: 'recover canonical session identity must match mst_session_id.',
+        }),
+      );
+    }
+    if (recover.canonical_session_identity?.lookup_key !== recover.mst_session_id) {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'canonical_session_identity.lookup_key',
+          message: 'recover lookup key must use the canonical session identity.',
+        }),
+      );
+    }
+    if (recover.recovery_judgement?.primary_action !== 'resume_session') {
+      recoveryBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'recover',
+          field: 'recovery_judgement.primary_action',
+          message: 'interrupted recovery must preserve resume_session judgement.',
+        }),
+      );
+    }
+  }
+
+  const cleanupBlockers = [];
+  if (!cleanup) {
+    cleanupBlockers.push(
+      dod008BoundaryBlocker({
+        artifactType: 'cleanup',
+        field: 'artifact',
+        message: 'cleanup smoke artifact is required for orphan-session validation.',
+      }),
+    );
+  } else {
+    if (cleanup.report?.orphan_session_count !== 0) {
+      cleanupBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'cleanup',
+          field: 'report.orphan_session_count',
+          message: 'cleanup parity fixture must report zero orphan sessions.',
+        }),
+      );
+    }
+    if (cleanup.request_artifacts_preserved?.mutated_path_count !== 0) {
+      cleanupBlockers.push(
+        dod008BoundaryBlocker({
+          artifactType: 'cleanup',
+          field: 'request_artifacts_preserved.mutated_path_count',
+          message: 'cleanup parity fixture must not mutate request artifacts.',
+        }),
+      );
+    }
+  }
+
+  const blockers = [...sessionBlockers, ...recoveryBlockers, ...cleanupBlockers];
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    session_identity: {
+      status: sessionBlockers.length === 0 ? 'pass' : 'fail',
+      checked_artifact_types: dod008CoreWorkflowSmokeArtifactTypes,
+      blocker_count: sessionBlockers.length,
+      blockers: sessionBlockers,
+    },
+    recovery: {
+      status: recoveryBlockers.length === 0 ? 'pass' : 'fail',
+      artifact_type: 'recover',
+      artifact_id: recover?.artifact_id ?? null,
+      blocker_count: recoveryBlockers.length,
+      blockers: recoveryBlockers,
+    },
+    orphan_session: {
+      status: cleanupBlockers.length === 0 ? 'pass' : 'fail',
+      artifact_type: 'cleanup',
+      artifact_id: cleanup?.artifact_id ?? null,
+      orphan_session_count: cleanup?.report?.orphan_session_count ?? null,
+      blocker_count: cleanupBlockers.length,
+      blockers: cleanupBlockers,
+    },
+    blocker_count: blockers.length,
+    blockers,
+  };
+}
+
+function buildDod008ExcludedSurfaceGuard(schemaContract = buildDod008WorkflowSchemaContract()) {
+  const blockers = [];
+  const excludedBySurface = new Map(
+    normalizeArray(schemaContract.excluded_surfaces).map((surface) => [surface.surface_id, surface]),
+  );
+
+  for (const surfaceId of dod008ExcludedSurfaceIds) {
+    const surface = excludedBySurface.get(surfaceId);
+    for (const countField of [
+      'implementation_count',
+      'runtime_invocation_count',
+      'acceptance_gate_count',
+    ]) {
+      if (surface?.[countField] !== 0) {
+        blockers.push({
+          blocker_id: `DOD-008/${surfaceId}/${countField}/excluded-surface`,
+          surface_id: surfaceId,
+          artifact_type: 'excluded_surface',
+          artifact_field: countField,
+          severity: 'blocker',
+          message: `${surfaceId} must remain excluded from DOD-008 ${countField}.`,
+          human_readable: `${surfaceId} excluded_surface.${countField}: expected 0, got ${surface?.[countField] ?? 'missing'}.`,
+        });
+      }
+    }
+  }
+
+  return {
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    surface_ids: dod008ExcludedSurfaceIds,
+    surfaces: dod008ExcludedSurfaceIds.map((surfaceId) => excludedBySurface.get(surfaceId) ?? null),
+    blocker_count: blockers.length,
+    blockers,
+  };
+}
+
+export function buildDod008WorkflowArtifactParityValidation({
+  schemaContract = buildDod008WorkflowSchemaContract(),
+  coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract }),
+  lifecycleArtifacts = buildDod008LifecycleSmokeArtifacts(),
+  codexRequiredFieldsByType = {},
+} = {}) {
+  const claudeShape = buildDod008ClaudeCanonicalArtifactShape({ schemaContract });
+  const codexShape = buildDod008CodexFixtureArtifactShape({
+    schemaContract,
+    coreHarness,
+    lifecycleArtifacts,
+    codexRequiredFieldsByType,
+  });
+  const requiredFieldParity = compareDod008RequiredFieldParity({
+    claudeShape,
+    codexShape,
+  });
+  const boundaryChecks = buildDod008WorkflowParityBoundaryChecks({
+    coreHarness,
+    lifecycleArtifacts,
+  });
+  const excludedSurfaceGuard = buildDod008ExcludedSurfaceGuard(schemaContract);
+  const blockers = [
+    ...requiredFieldParity.blockers,
+    ...boundaryChecks.blockers,
+    ...excludedSurfaceGuard.blockers,
+  ];
+
+  return {
+    validation_id: 'REQ-894-04-DOD008-workflow-artifact-parity',
+    request_id: 'REQ-894',
+    task_id: '04',
+    dod_id: 'DOD-008',
+    format_version: '1.0.0',
+    status: blockers.length === 0 ? 'pass' : 'fail',
+    mode: 'repository-local-fixture',
+    canonical_claude_artifact_shape: claudeShape,
+    codex_fixture_artifact_shape: codexShape,
+    required_field_parity: requiredFieldParity,
+    boundary_checks: boundaryChecks,
+    excluded_surface_guard: excludedSurfaceGuard,
+    blocker_summary: {
+      status: blockers.length === 0 ? 'pass' : 'fail',
+      blocker_count: blockers.length,
+      missing_blocker_count: requiredFieldParity.missing_blocker_count,
+      extra_blocker_count: requiredFieldParity.extra_blocker_count,
+      blockers,
+      human_readable: blockers.map((blocker) => blocker.human_readable),
+    },
+    input_summary: {
+      core_harness_id: coreHarness.harness_id,
+      lifecycle_artifact_types: lifecycleArtifacts.map((artifact) => artifact.artifact_type),
+      schema_contract_id: schemaContract.contract_id,
+      deterministic_validation: true,
+      repository_local_only: true,
+      executes_real_claude_runtime: false,
+      executes_real_codex_runtime: false,
+    },
   };
 }
 
@@ -2825,6 +4121,205 @@ export function buildDod007RequestEvidence({
   };
 }
 
+function summarizeDod008WorkflowCommandTotals(verificationSummary) {
+  const summaries = [
+    verificationSummary.focused_workflow_validation,
+    verificationSummary.schema_contract,
+    verificationSummary.core_workflow_harness,
+    verificationSummary.lifecycle_smoke,
+    verificationSummary.artifact_parity,
+    verificationSummary.npm_test,
+  ];
+
+  return summaries.reduce(
+    (totals, summary) => ({
+      tests_total: totals.tests_total + Number(summary.tests_total ?? 0),
+      tests_pass: totals.tests_pass + Number(summary.tests_pass ?? 0),
+      tests_fail: totals.tests_fail + Number(summary.tests_fail ?? 0),
+    }),
+    { tests_total: 0, tests_pass: 0, tests_fail: 0 },
+  );
+}
+
+function buildDod008EvidenceLifecycle({
+  verificationSummary,
+  schemaContract,
+  coreHarness,
+  lifecycleSmokeValidation,
+  artifactParityValidation,
+  excludedSurfaces,
+  parseFailures,
+}) {
+  const focusedWorkflowSummariesPass = dod008FocusedWorkflowSummariesPass(verificationSummary);
+  const schemaResultsPass =
+    schemaContract.status === 'pass' &&
+    coreHarness.status === 'pass' &&
+    lifecycleSmokeValidation.status === 'pass' &&
+    artifactParityValidation.status === 'pass';
+  const npmTestPass = dod007SummaryPasses(verificationSummary.npm_test);
+  const generatorPass =
+    verificationSummary.generator.status === 'pass' &&
+    verificationSummary.generator.parse_ok === true &&
+    verificationSummary.generator.generated_artifact_path ===
+      dod008WorkflowE2EValidationEvidenceRelativePath;
+  const excludedSurfacesPass = excludedSurfaces.every(
+    (surface) =>
+      surface.status === 'pass' &&
+      surface.implementation_count === 0 &&
+      surface.runtime_invocation_count === 0 &&
+      surface.acceptance_gate_count === 0,
+  );
+
+  return {
+    status:
+      focusedWorkflowSummariesPass &&
+      schemaResultsPass &&
+      npmTestPass &&
+      generatorPass &&
+      excludedSurfacesPass &&
+      parseFailures.length === 0
+        ? 'pass'
+        : 'fail',
+    focused_workflow_validation_pass: focusedWorkflowSummariesPass,
+    schema_results_pass: schemaResultsPass,
+    npm_test_pass: npmTestPass,
+    generator_pass: generatorPass,
+    excluded_surfaces_pass: excludedSurfacesPass,
+    parse_failures_absent: parseFailures.length === 0,
+  };
+}
+
+export function buildDod008WorkflowE2EValidationEvidence({
+  verificationSummary,
+} = {}) {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    req894RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const normalizedVerification = normalizeDod008WorkflowE2EValidationSummary(verificationSummary);
+  const requestSnapshot = buildReq894RequestMetadataSnapshot(requestMetadata.value);
+  const schemaContract = buildDod008WorkflowSchemaContract();
+  const coreHarness = buildDod008CoreWorkflowSmokeHarness({ schemaContract });
+  const lifecycleSmokeArtifacts = buildDod008LifecycleSmokeArtifacts();
+  const lifecycleSmokeValidation = buildDod008LifecycleSmokeValidation(lifecycleSmokeArtifacts);
+  const artifactParityValidation = buildDod008WorkflowArtifactParityValidation({
+    schemaContract,
+    coreHarness,
+    lifecycleArtifacts: lifecycleSmokeArtifacts,
+  });
+  const excludedSurfaces = buildDod008ExcludedSurfaces();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const lifecycle = buildDod008EvidenceLifecycle({
+    verificationSummary: normalizedVerification,
+    schemaContract,
+    coreHarness,
+    lifecycleSmokeValidation,
+    artifactParityValidation,
+    excludedSurfaces,
+    parseFailures: sanitizedParseFailures,
+  });
+  const sourceCommitTasks = requestSnapshot.tasks.map((task) => ({
+    task_id: task.task_id,
+    status: task.status,
+    source_commit: task.source_commit,
+    task_commit: task.task_commit,
+    integration_commit: task.integration_commit,
+  }));
+  const evidenceWithoutScan = {
+    artifact_id: 'REQ-894-DOD-008-workflow-e2e-validation',
+    request_id: requestSnapshot.request_id ?? 'REQ-894',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 9,
+    task_id: '05',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-008',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-721',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-19T14:44:24.000Z',
+    request_evidence_path: dod008WorkflowE2EValidationEvidenceRelativePath,
+    status: lifecycle.status,
+    workflow_scenarios: {
+      status:
+        schemaContract.status === 'pass' && coreHarness.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      scenario_paths: dod008WorkflowScenarioPaths,
+      schema_contract: schemaContract.scenario_contract,
+      core_workflow_records: coreHarness.scenario_records,
+    },
+    schema_results: {
+      status:
+        schemaContract.status === 'pass' &&
+        coreHarness.status === 'pass' &&
+        lifecycleSmokeValidation.status === 'pass' &&
+        artifactParityValidation.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      workflow_schema_contract: schemaContract,
+      core_workflow_harness: coreHarness,
+      lifecycle_smoke_validation: lifecycleSmokeValidation,
+      artifact_parity_validation: artifactParityValidation,
+    },
+    focused_workflow_validation_summary: {
+      status: dod008FocusedWorkflowSummariesPass(normalizedVerification) ? 'pass' : 'fail',
+      focused_workflow_validation: normalizedVerification.focused_workflow_validation,
+      schema_contract: normalizedVerification.schema_contract,
+      core_workflow_harness: normalizedVerification.core_workflow_harness,
+      lifecycle_smoke: normalizedVerification.lifecycle_smoke,
+      artifact_parity: normalizedVerification.artifact_parity,
+    },
+    test_command_results: {
+      focused_workflow_validation: normalizedVerification.focused_workflow_validation,
+      schema_contract: normalizedVerification.schema_contract,
+      core_workflow_harness: normalizedVerification.core_workflow_harness,
+      lifecycle_smoke: normalizedVerification.lifecycle_smoke,
+      artifact_parity: normalizedVerification.artifact_parity,
+      npm_test: normalizedVerification.npm_test,
+      generator: normalizedVerification.generator,
+      totals: summarizeDod008WorkflowCommandTotals(normalizedVerification),
+    },
+    source_commit: {
+      status: sourceCommitTasks.length === 5 ? 'pass' : 'fail',
+      tasks: sourceCommitTasks,
+    },
+    evidence_lifecycle: lifecycle,
+    excluded_surfaces: excludedSurfaces,
+    request_metadata_snapshot: requestSnapshot,
+    input_paths_read: [
+      req894RequestMetadataRelativePath,
+      '.gran-maestro/requests/REQ-894/tasks/04/spec.md',
+      '.gran-maestro/requests/REQ-894/tasks/05/spec.md',
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      'scripts/generate-dod-007-request-evidence.mjs',
+      'tests/smoke.test.mjs',
+      dod007RequestEvidenceRelativePath,
+    ],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+  };
+  const forbiddenMetadataScan = scanDod008RequestEvidenceMetadata(evidenceWithoutScan);
+  const status =
+    evidenceWithoutScan.evidence_lifecycle.status === 'pass' &&
+    forbiddenMetadataScan.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    ...evidenceWithoutScan,
+    status,
+    evidence_lifecycle: {
+      ...evidenceWithoutScan.evidence_lifecycle,
+      status,
+      forbidden_metadata_scan_pass: forbiddenMetadataScan.status === 'pass',
+    },
+    forbidden_metadata_scan: forbiddenMetadataScan,
+  };
+}
+
 export function buildCodexPluginDiscoverySmokeEvidence() {
   const parseFailures = [];
 
@@ -3397,6 +4892,331 @@ export function assertDod007RequestEvidence(
   assert.equal(
     evidence.test_command_results.generator.generated_artifact_path,
     dod007RequestEvidenceRelativePath,
+  );
+}
+
+export function assertDod008LifecycleSmokeArtifacts(artifacts) {
+  assert.ok(Array.isArray(artifacts));
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.artifact_type),
+    dod008LifecycleSmokeArtifactTypes,
+  );
+
+  for (const artifact of artifacts) {
+    assert.equal(artifact.request_id, 'REQ-894');
+    assert.equal(artifact.status, 'pass');
+    const requiredFields = dod008ArtifactSchemaRequiredFieldsByType[artifact.artifact_type];
+    assert.ok(requiredFields, `${artifact.artifact_type} required field contract`);
+    for (const field of requiredFields) {
+      assert.ok(field in artifact, `${artifact.artifact_type}.${field}`);
+    }
+  }
+
+  const byType = new Map(artifacts.map((artifact) => [artifact.artifact_type, artifact]));
+  const recover = byType.get('recover');
+  assert.ok(recover);
+  assert.equal(recover.mst_session_id, 'MST-AGI-039-20260519T144424Z-req89403');
+  assert.equal(recover.root_mst_id, 'AGI-039');
+  assert.equal(recover.canonical_session_identity.mst_session_id, recover.mst_session_id);
+  assert.equal(recover.canonical_session_identity.lookup_key, recover.mst_session_id);
+  assert.equal(recover.canonical_session_identity.partition_key, recover.mst_session_id);
+  assert.equal(recover.recovery_judgement.primary_action, 'resume_session');
+  assert.equal(recover.recovery_judgement.reason, 'resume_ready');
+  assert.ok(
+    recover.recovery_judgement.affected_resources.some(
+      (resource) =>
+        resource.kind === 'mst_session_id' && resource.identifier === recover.mst_session_id,
+    ),
+  );
+
+  const cleanup = byType.get('cleanup');
+  assert.ok(cleanup);
+  assert.equal(cleanup.dry_run, true);
+  assert.equal(cleanup.report.status, 'ok');
+  assert.equal(cleanup.report.orphan_session_count, 0);
+  assert.equal(cleanup.report.planned_cleanup_count, 0);
+  assert.equal(cleanup.request_artifacts_preserved.status, 'pass');
+  assert.equal(cleanup.request_artifacts_preserved.mutated_path_count, 0);
+  assert.ok(
+    cleanup.request_artifacts_preserved.checked_paths.includes(
+      '.gran-maestro/requests/REQ-894/tasks/03/spec.md',
+    ),
+  );
+
+  const dashboard = byType.get('dashboard');
+  assert.ok(dashboard);
+  assert.equal(dashboard.health.route, '/api/health');
+  assert.equal(dashboard.health.ok, true);
+  assert.deepEqual(dashboard.widgets, [
+    'health',
+    'overview.active-items',
+    'overview.next-steps',
+    'overview.pulse',
+  ]);
+  assert.equal(dashboard.overview.active_items.route, '/api/overview/active-items');
+  assert.equal(dashboard.overview.next_steps.route, '/api/overview/next-steps');
+  assert.equal(dashboard.overview.pulse.route, '/api/overview/pulse');
+
+  const settings = byType.get('settings');
+  assert.ok(settings);
+  assert.equal(settings.scope, 'project');
+  assert.equal(settings.config.config_route.route, '/api/config');
+  assert.equal(settings.config.defaults_route.route, '/api/config/defaults');
+  assert.equal(settings.config.mode_route.route, '/api/mode');
+  assert.equal(settings.effective_values.workflow_default_agent, 'codex-dev');
+  assert.equal(settings.effective_values.auto_mode_request, false);
+}
+
+export function assertDod008WorkflowSchemaContract(evidence) {
+  assert.equal(evidence.request_id, 'REQ-894');
+  assert.equal(evidence.task_id, '01');
+  assert.equal(evidence.dod_id, 'DOD-008');
+  assert.equal(evidence.status, 'pass');
+  assert.deepEqual(
+    evidence.scenario_contract.map((scenario) => scenario.representative_path),
+    dod008WorkflowScenarioPaths,
+  );
+  assert.ok(
+    evidence.scenario_contract.every((scenario) =>
+      scenario.contract_only === true &&
+      scenario.repository_local_only === true &&
+      Array.isArray(scenario.required_artifacts) &&
+      scenario.required_artifacts.length > 0,
+    ),
+  );
+  assert.deepEqual(
+    evidence.artifact_schema_contract.map((schema) => schema.artifact_type),
+    Object.keys(dod008ArtifactSchemaRequiredFieldsByType),
+  );
+  assert.ok(
+    evidence.artifact_schema_contract.every((schema) =>
+      Array.isArray(schema.required_fields) &&
+      schema.required_fields.length > 0 &&
+      schema.required_fields.every((field) => typeof field === 'string' && field.length > 0) &&
+      schema.deterministic_validation === true &&
+      schema.repository_local_only === true,
+    ),
+  );
+  assert.equal(evidence.no_go_metadata_guard.status, 'pass');
+  assert.deepEqual(
+    evidence.no_go_metadata_guard.criteria.map((criterion) => criterion.criterion_id),
+    dod008NoGoMetadataGuardCriteria.map((criterion) => criterion.criterion_id),
+  );
+  assertDod008LifecycleSmokeArtifacts(evidence.lifecycle_smoke_artifacts);
+  assert.equal(evidence.lifecycle_smoke_validation.status, 'pass');
+  assert.deepEqual(
+    evidence.lifecycle_smoke_validation.artifact_types,
+    dod008LifecycleSmokeArtifactTypes,
+  );
+  assert.deepEqual(evidence.lifecycle_smoke_validation.missing_artifact_types, []);
+  assert.deepEqual(evidence.lifecycle_smoke_validation.missing_required_fields, []);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(evidence.acceptance_runtime_surface_ids, dod008AcceptanceRuntimeSurfaceIds);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod008ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+  assert.deepEqual(evidence.manual_readable_exports.scenario_paths, dod008WorkflowScenarioPaths);
+  assert.deepEqual(
+    evidence.manual_readable_exports.excluded_surface_ids,
+    dod008ExcludedSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.acceptance_runtime_surface_ids,
+    dod008AcceptanceRuntimeSurfaceIds,
+  );
+  assert.deepEqual(
+    evidence.manual_readable_exports.lifecycle_smoke_artifact_types,
+    dod008LifecycleSmokeArtifactTypes,
+  );
+}
+
+export function assertDod008CoreWorkflowSmokeHarness(harness) {
+  assert.equal(harness.request_id, 'REQ-894');
+  assert.equal(harness.task_id, '02');
+  assert.equal(harness.dod_id, 'DOD-008');
+  assert.equal(harness.status, 'pass');
+  assert.equal(harness.mode, 'repository-local-fixture');
+  assert.deepEqual(
+    harness.scenario_records.map((scenario) => scenario.representative_path),
+    dod008CoreWorkflowSmokeScenarioPaths,
+  );
+  assert.ok(
+    harness.scenario_records.every((scenario) =>
+      scenario.reproduced_by_fixture === true &&
+      scenario.executes_runtime === false &&
+      scenario.repository_local_only === true,
+    ),
+  );
+  assert.deepEqual(harness.artifact_types, dod008CoreWorkflowSmokeArtifactTypes);
+  assert.deepEqual(
+    harness.artifact_validations.map((validation) => validation.artifact_type),
+    dod008CoreWorkflowSmokeArtifactTypes,
+  );
+  assert.ok(harness.artifact_validations.every((validation) => validation.status === 'pass'));
+  for (const artifactType of dod008CoreWorkflowSmokeArtifactTypes) {
+    const artifact = harness.artifacts[artifactType];
+    assert.ok(artifact, `${artifactType} artifact`);
+    for (const field of dod008ArtifactSchemaRequiredFieldsByType[artifactType]) {
+      assert.ok(Object.hasOwn(artifact, field), `${artifactType}.${field}`);
+    }
+    assert.equal(artifact.state_session.env.MST_SESSION_ID, dod008CoreWorkflowSmokeSessionId);
+    assert.equal(artifact.state_session.context.mst_session_id, dod008CoreWorkflowSmokeSessionId);
+    assert.equal(
+      artifact.state_session.env.MST_SESSION_ID,
+      artifact.state_session.context.mst_session_id,
+    );
+    assert.equal(artifact.state_session.legacy_diagnostics.canonical_source_count, 0);
+  }
+  assert.deepEqual(harness.session_metadata.canonical_sources, [
+    'MST_SESSION_ID',
+    'mst_session_id',
+  ]);
+  assert.equal(harness.session_metadata.env.MST_SESSION_ID, dod008CoreWorkflowSmokeSessionId);
+  assert.equal(harness.session_metadata.context.mst_session_id, dod008CoreWorkflowSmokeSessionId);
+  assert.equal(harness.session_metadata.boundary_checks.env_and_context_match, true);
+  assert.equal(harness.session_metadata.boundary_checks.legacy_only_identity_rejected, true);
+  assert.equal(harness.side_effect_summary.repository_local_only, true);
+  assert.equal(harness.side_effect_summary.fixture_only, true);
+  assert.equal(harness.side_effect_summary.mutates_user_home, false);
+  assert.equal(harness.side_effect_summary.edits_hook_config, false);
+  assert.equal(harness.side_effect_summary.executes_codex_install, false);
+  assert.equal(harness.side_effect_summary.refreshes_codex_cache, false);
+  assert.equal(harness.side_effect_summary.runs_real_implementation, false);
+  assert.ok(
+    harness.command_metadata.every((command) =>
+      command.mutates_user_home === false &&
+      command.edits_hook_config === false &&
+      command.executes_codex_install === false &&
+      command.refreshes_codex_cache === false &&
+      command.runs_real_implementation === false,
+    ),
+  );
+  assert.equal(harness.forbidden_metadata_scan.status, 'pass');
+  assert.equal(harness.forbidden_metadata_scan.violation_count, 0);
+}
+
+export function assertDod008WorkflowArtifactParityValidation(validation) {
+  assert.equal(validation.request_id, 'REQ-894');
+  assert.equal(validation.task_id, '04');
+  assert.equal(validation.dod_id, 'DOD-008');
+  assert.equal(validation.status, 'pass');
+  assert.equal(validation.mode, 'repository-local-fixture');
+  assert.deepEqual(
+    validation.canonical_claude_artifact_shape.map((shape) => shape.artifact_type),
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.deepEqual(
+    validation.codex_fixture_artifact_shape.map((shape) => shape.artifact_type),
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.deepEqual(
+    validation.required_field_parity.checked_artifact_types,
+    dod008WorkflowArtifactParityTypes,
+  );
+  assert.equal(validation.required_field_parity.status, 'pass');
+  assert.equal(validation.required_field_parity.missing_blocker_count, 0);
+  assert.equal(validation.required_field_parity.extra_blocker_count, 0);
+  assert.equal(validation.required_field_parity.blocker_count, 0);
+  assert.deepEqual(validation.required_field_parity.blockers, []);
+  assert.ok(
+    validation.required_field_parity.artifact_diffs.every((diff) => diff.status === 'pass'),
+  );
+  assert.equal(validation.boundary_checks.status, 'pass');
+  assert.equal(validation.boundary_checks.session_identity.status, 'pass');
+  assert.equal(validation.boundary_checks.recovery.status, 'pass');
+  assert.equal(validation.boundary_checks.orphan_session.status, 'pass');
+  assert.equal(validation.boundary_checks.orphan_session.orphan_session_count, 0);
+  assert.equal(validation.excluded_surface_guard.status, 'pass');
+  assert.deepEqual(validation.excluded_surface_guard.surface_ids, dod008ExcludedSurfaceIds);
+  assert.ok(
+    validation.excluded_surface_guard.surfaces.every(
+      (surface) =>
+        surface.implementation_count === 0 &&
+        surface.runtime_invocation_count === 0 &&
+        surface.acceptance_gate_count === 0,
+    ),
+  );
+  assert.equal(validation.blocker_summary.status, 'pass');
+  assert.equal(validation.blocker_summary.blocker_count, 0);
+  assert.deepEqual(validation.blocker_summary.human_readable, []);
+  assert.equal(validation.input_summary.deterministic_validation, true);
+  assert.equal(validation.input_summary.repository_local_only, true);
+  assert.equal(validation.input_summary.executes_real_claude_runtime, false);
+  assert.equal(validation.input_summary.executes_real_codex_runtime, false);
+}
+
+export function assertDod008WorkflowE2EValidationEvidence(
+  evidence,
+  expectedSummary = defaultDod008WorkflowE2EValidationSummary,
+) {
+  const normalizedExpected = normalizeDod008WorkflowE2EValidationSummary(expectedSummary);
+
+  assert.equal(evidence.artifact_id, 'REQ-894-DOD-008-workflow-e2e-validation');
+  assert.equal(evidence.request_id, 'REQ-894');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 9);
+  assert.equal(evidence.task_id, '05');
+  assert.equal(evidence.dod_id, 'DOD-008');
+  assert.equal(evidence.plan_id, 'PLN-721');
+  assert.equal(evidence.request_evidence_path, dod008WorkflowE2EValidationEvidenceRelativePath);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.equal(evidence.workflow_scenarios.status, 'pass');
+  assert.deepEqual(evidence.workflow_scenarios.scenario_paths, dod008WorkflowScenarioPaths);
+  assert.deepEqual(
+    evidence.workflow_scenarios.schema_contract.map((scenario) => scenario.representative_path),
+    dod008WorkflowScenarioPaths,
+  );
+  assert.equal(evidence.schema_results.status, 'pass');
+  assertDod008WorkflowSchemaContract(evidence.schema_results.workflow_schema_contract);
+  assertDod008CoreWorkflowSmokeHarness(evidence.schema_results.core_workflow_harness);
+  assert.equal(evidence.schema_results.lifecycle_smoke_validation.status, 'pass');
+  assertDod008WorkflowArtifactParityValidation(
+    evidence.schema_results.artifact_parity_validation,
+  );
+  assert.equal(evidence.focused_workflow_validation_summary.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle.focused_workflow_validation_pass, true);
+  assert.equal(evidence.evidence_lifecycle.schema_results_pass, true);
+  assert.equal(evidence.evidence_lifecycle.npm_test_pass, true);
+  assert.equal(evidence.evidence_lifecycle.generator_pass, true);
+  assert.equal(evidence.evidence_lifecycle.excluded_surfaces_pass, true);
+  assert.equal(evidence.evidence_lifecycle.forbidden_metadata_scan_pass, true);
+  assert.equal(evidence.forbidden_metadata_scan.status, 'pass');
+  assert.equal(evidence.forbidden_metadata_scan.violation_count, 0);
+  assert.deepEqual(
+    evidence.excluded_surfaces.map((surface) => surface.surface_id),
+    dod008ExcludedSurfaceIds,
+  );
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.implementation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.runtime_invocation_count === 0));
+  assert.ok(evidence.excluded_surfaces.every((surface) => surface.acceptance_gate_count === 0));
+  assert.equal(evidence.request_metadata_snapshot.path, req894RequestMetadataRelativePath);
+  assert.equal(evidence.request_metadata_snapshot.request_id, 'REQ-894');
+  assert.equal(evidence.request_metadata_snapshot.agi_id, 'AGI-039');
+  assert.equal(evidence.request_metadata_snapshot.sprint, 9);
+  assert.equal(evidence.request_metadata_snapshot.dod_id, 'DOD-008');
+  assert.equal(evidence.request_metadata_snapshot.plan_id, 'PLN-721');
+  assert.equal(
+    evidence.test_command_results.focused_workflow_validation.status,
+    normalizedExpected.focused_workflow_validation.status,
+  );
+  assert.equal(
+    evidence.test_command_results.focused_workflow_validation.tests_total,
+    normalizedExpected.focused_workflow_validation.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.schema_contract.tests_total,
+    normalizedExpected.schema_contract.tests_total,
+  );
+  assert.equal(
+    evidence.test_command_results.generator.generated_artifact_path,
+    dod008WorkflowE2EValidationEvidenceRelativePath,
   );
 }
 

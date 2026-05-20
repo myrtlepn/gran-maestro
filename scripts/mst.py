@@ -104,6 +104,7 @@ def _invocation_history_session_id() -> str | None:
         session_cmds.validate_mst_session_metadata_consistency(
             BASE_DIR,
             session_id,
+            validate_root_metadata=False,
             require_session_metadata=True,
         )
     except ValueError as exc:

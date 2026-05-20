@@ -760,6 +760,8 @@ def _ledger_replay_projection(history_result) -> dict:
         if not isinstance(event, dict):
             continue
         event_type = str(event.get("event_type") or event.get("type") or "")
+        if event_type == "skill.recover":
+            continue
         if event_type.startswith("skill."):
             skill = event.get("skill")
             if isinstance(skill, str) and skill.strip():
