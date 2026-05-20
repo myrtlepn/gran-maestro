@@ -173,10 +173,53 @@ def test_canonical_env_context_conflict_fails_without_repairing_to_legacy_aliase
         assert not (workspace / ".gran-maestro" / "state" / CLAUDE_SESSION_ID).exists()
 
 
+def test_canonical_env_write_uses_only_canonical_identity_paths() -> None:
+    with _workspace() as raw:
+        workspace = Path(raw)
+        (workspace / ".gran-maestro").mkdir()
+        policy_home = workspace / "policy"
+        policy_home.mkdir()
+        env = _env(workspace, {"MST_SESSION_ID": SID})
+
+        result = _run(
+            workspace,
+            "state",
+            "set",
+            "--skill",
+            "mst:request",
+            "--step",
+            "1",
+            "--total",
+            "3",
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        payload = _read_json_from_stdout(result.stdout)
+        assert payload["mst_session_id"] == SID
+        assert payload["sessionId"] == SID
+        assert payload["legacy_diagnostics"]["MST_STATE_PPID"] == LEGACY_PPID
+        assert payload["legacy_diagnostics"]["hook_session_id"] == CLAUDE_SESSION_ID
+        assert payload["legacy_diagnostics"]["hook_transcript_stem"] == TRANSCRIPT_SESSION_ID
+
+        base = workspace / ".gran-maestro"
+        snapshot_path = base / "state" / SID / "snapshot.json"
+        assert snapshot_path.exists()
+
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        assert snapshot["mst_session_id"] == SID
+        assert snapshot["sessionId"] == SID
+
+        for legacy_id in (LEGACY_PPID, "legacy-snapshot-alias", CLAUDE_SESSION_ID, TRANSCRIPT_SESSION_ID):
+            assert not (base / "state" / legacy_id).exists()
+            assert not (base / "sessions" / legacy_id).exists()
+
+
 def main() -> int:
     for test in (
         test_legacy_only_state_mutation_commands_are_structured_no_mutation,
         test_canonical_env_context_conflict_fails_without_repairing_to_legacy_aliases,
+        test_canonical_env_write_uses_only_canonical_identity_paths,
     ):
         test()
         print(f"PASS {test.__name__}")

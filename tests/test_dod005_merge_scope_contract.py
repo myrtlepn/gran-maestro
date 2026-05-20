@@ -13,15 +13,25 @@ from scripts.mst_cmds.worktree import cmd_worktree_resolve_base, role_branch_nam
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OBJECTIVE_DETAIL = (
-    ROOT
-    / ".gran-maestro"
+OBJECTIVE_DETAIL_RELATIVE = (
+    Path(".gran-maestro")
     / "agile"
     / "AGI-038"
     / "objective"
     / "details"
     / "merge-contract-and-state-machine.md"
 )
+
+
+def _resolve_repo_path(relative_path: Path) -> Path:
+    for base in (ROOT, *ROOT.parents):
+        candidate = base / relative_path
+        if candidate.exists():
+            return candidate
+    return ROOT / relative_path
+
+
+OBJECTIVE_DETAIL = _resolve_repo_path(OBJECTIVE_DETAIL_RELATIVE)
 MST_SESSION_ID = "MST-AGI-038-20260515T010203004Z-abc12345"
 REQ_ID = "REQ-870"
 

@@ -215,6 +215,11 @@ def test_objective_transition_dod(tmp_path):
     updated_objective = paths["objective"].read_text(encoding="utf-8")
     assert "<!-- dod:DOD-001 status:done priority:must -->" in updated_objective
 
+    check_proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
+    check_payload = json.loads(check_proc.stdout)
+    assert check_proc.returncode == 0
+    assert check_payload["dods"]["DOD-001"]["status"] == "done"
+
     changelog_entries = [
         json.loads(line)
         for line in paths["changelog"].read_text(encoding="utf-8").splitlines()
@@ -366,3 +371,41 @@ def test_agile_result_defaults_sprint_goals_to_empty_array(tmp_path):
     saved = json.loads(paths["result_json"].read_text(encoding="utf-8"))
     assert saved["generated"] == {"pln": [], "req": []}
     assert saved["sprint_goals"] == []
+
+
+def test_agile_result_persists_generated_links_and_dod_ref(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "result",
+        agi_id,
+        "--sprint",
+        "7",
+        "--status",
+        "done",
+        "--planned",
+        "JT-S007",
+        "--completed",
+        "JT-S007",
+        "--pln",
+        "PLN-737",
+        "--req",
+        "REQ-913",
+        "--dod-ref",
+        "DOD-007",
+        "--json",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "done"
+    assert payload["generated"] == {"pln": ["PLN-737"], "req": ["REQ-913"]}
+    assert payload["dod_ref"] == "DOD-007"
+
+    saved = json.loads(_sprint_paths(workspace, agi_id, 7)["result_json"].read_text(encoding="utf-8"))
+    assert saved["status"] == "done"
+    assert saved["generated"] == {"pln": ["PLN-737"], "req": ["REQ-913"]}
+    assert saved["dod_ref"] == "DOD-007"

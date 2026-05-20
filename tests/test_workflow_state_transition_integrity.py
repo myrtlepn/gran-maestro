@@ -9,6 +9,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from scripts import mst
+from scripts.mst_cmds import request as request_cmds
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST = REPO_ROOT / "scripts" / "mst.py"
 PPID = 99901
@@ -21,6 +24,41 @@ def _state_path(workspace: Path, session_id: str = CANONICAL_SESSION_ID) -> Path
 
 def _prepare_workspace(workspace: Path) -> None:
     (workspace / ".gran-maestro" / "tmp").mkdir(parents=True, exist_ok=True)
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _request_path(workspace: Path, req_id: str) -> Path:
+    return workspace / ".gran-maestro" / "requests" / req_id / "request.json"
+
+
+def _seed_request(
+    workspace: Path,
+    req_id: str,
+    *,
+    phase: int,
+    status: str,
+    tasks: list[dict[str, str]] | None = None,
+    extra: dict | None = None,
+) -> None:
+    payload: dict = {
+        "id": req_id,
+        "current_phase": phase,
+        "status": status,
+        "dependencies": {"blockedBy": [], "blocks": []},
+    }
+    if tasks is not None:
+        payload["tasks"] = tasks
+    if extra:
+        payload.update(extra)
+    _write_json(_request_path(workspace, req_id), payload)
+
+
+def _read_request(workspace: Path, req_id: str) -> dict:
+    return json.loads(_request_path(workspace, req_id).read_text(encoding="utf-8"))
 
 
 def _run(
@@ -184,6 +222,74 @@ def test_active_to_inactive_updates_last_active_at(tmp_path):
     parsed = datetime.fromisoformat(state["last_active_at"].replace("Z", "+00:00"))
     age = datetime.now(timezone.utc) - parsed
     assert age.total_seconds() < 5
+
+
+def test_request_lifecycle_fixture_preserves_review_and_accept_scope(tmp_path, monkeypatch):
+    req_id = "REQ-913"
+    base_dir = tmp_path / ".gran-maestro"
+
+    _seed_request(
+        tmp_path,
+        req_id,
+        phase=1,
+        status="phase1_analysis",
+        extra={"title": "DOD-007 lifecycle compatibility"},
+    )
+    phase1 = _read_request(tmp_path, req_id)
+    assert phase1["current_phase"] == 1
+    assert phase1["status"] == "phase1_analysis"
+
+    _seed_request(
+        tmp_path,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[
+            {"id": "T01", "status": "committed"},
+            {"id": "T02", "status": "completed"},
+        ],
+        extra={"review_summary": {"status": "pending_phase3_review"}},
+    )
+    phase2 = _read_request(tmp_path, req_id)
+    assert phase2["current_phase"] == 2
+    assert phase2["status"] == "phase2_execution"
+
+    monkeypatch.setattr(mst, "BASE_DIR", base_dir)
+    mst._sync_base_dir()
+    result = request_cmds.advance_phase2_if_ready(req_id)
+    assert result["ready"] is True
+    assert result["advanced"] is True
+
+    phase3 = _read_request(tmp_path, req_id)
+    assert phase3["current_phase"] == 3
+    assert phase3["status"] == "phase3_review"
+
+    latest_review = {
+        "iteration": 2,
+        "status": "completed",
+        "review_summary": {"status": "passed"},
+    }
+    accepted = dict(phase3)
+    accepted["review_iterations"] = [latest_review]
+    accepted["review_summary"] = {"status": "passed"}
+    accepted["accept_summary"] = {
+        "scope": "request_child_accept",
+        "session_to_original": False,
+        "target_branch": "gran-maestro/session/REQ-913-01",
+    }
+    accepted["current_phase"] = 5
+    accepted["status"] = "accepted"
+    _write_json(_request_path(tmp_path, req_id), accepted)
+
+    phase5 = _read_request(tmp_path, req_id)
+    assert [phase1["current_phase"], phase2["current_phase"], phase3["current_phase"], phase5["current_phase"]] == [1, 2, 3, 5]
+    assert [phase2["status"], phase3["status"], phase5["status"]] == ["phase2_execution", "phase3_review", "accepted"]
+    assert phase5["review_iterations"][-1]["status"] == "completed"
+    assert phase5["review_iterations"][-1]["review_summary"]["status"] == "passed"
+    assert phase5["review_summary"]["status"] == "passed"
+    assert phase5["accept_summary"]["scope"] == "request_child_accept"
+    assert phase5["accept_summary"]["session_to_original"] is False
+    assert phase5["accept_summary"]["target_branch"].startswith("gran-maestro/session/")
 
 
 def test_legacy_only_identity_inputs_are_diagnostic_only_for_workflow_mutation(tmp_path):
