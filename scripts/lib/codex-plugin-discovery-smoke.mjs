@@ -695,6 +695,28 @@ const dod010Req916RequestMetadataRelativePath = '.gran-maestro/requests/REQ-916/
 const dod010Req916RequestMetadataAbsolutePath = findSharedGranMaestroPath(
   'requests/REQ-916/request.json',
 );
+const dod011ObjectiveDetailRelativePath =
+  '.gran-maestro/agile/AGI-039/objective/details/migration-execution-breakdown.md';
+const dod011ObjectiveDetailAbsolutePath = findSharedGranMaestroPath(
+  'agile/AGI-039/objective/details/migration-execution-breakdown.md',
+);
+const dod011PlanRelativePath = '.gran-maestro/plans/PLN-743/plan.md';
+const dod011PlanAbsolutePath = findSharedGranMaestroPath('plans/PLN-743/plan.md');
+const dod011PlanIdsRelativePath = '.gran-maestro/plans/PLN-743/plan.ids.json';
+const dod011PlanIdsAbsolutePath = findSharedGranMaestroPath('plans/PLN-743/plan.ids.json');
+const dod011Req919RequestMetadataRelativePath = '.gran-maestro/requests/REQ-919/request.json';
+const dod011Req919RequestMetadataAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/request.json',
+);
+const dod011Task01SpecRelativePath = '.gran-maestro/requests/REQ-919/tasks/01/spec.md';
+const dod011Task01SpecAbsolutePath = findSharedGranMaestroPath('requests/REQ-919/tasks/01/spec.md');
+const dod011Task02SpecRelativePath = '.gran-maestro/requests/REQ-919/tasks/02/spec.md';
+const dod011Task02SpecAbsolutePath = findSharedGranMaestroPath('requests/REQ-919/tasks/02/spec.md');
+const dod011ArchitectureDecisionRelativePath =
+  '.gran-maestro/requests/REQ-919/discussion/req-arch-decision.md';
+const dod011ArchitectureDecisionAbsolutePath = findSharedGranMaestroPath(
+  'requests/REQ-919/discussion/req-arch-decision.md',
+);
 const dod010GeneratorScriptRelativePath =
   'scripts/generate-dod-010-blocker-free-migration-report.mjs';
 export const dod011GeneratorScriptRelativePath =
@@ -736,6 +758,41 @@ const dod010NoGoMetadataGuardCriteria = [
     required_result: 'reject',
   },
 ];
+const dod011RequiredPhaseOrder = Object.freeze([
+  'inventory',
+  'generator',
+  'adapter',
+  'skill-agent-parity',
+  'config-provider-parity',
+  'state-workflow-parity',
+  'docs-release',
+]);
+const dod011RequiredPackageIds = Object.freeze([
+  'WP-1',
+  'WP-2',
+  'WP-3',
+  'WP-4',
+  'WP-5',
+  'WP-6',
+  'WP-7',
+  'WP-8',
+]);
+const dod011RequiredNoGoBoundaryIds = Object.freeze([
+  'user_home_mutation',
+  'external_codex_install_cache_reload',
+  'symlink_creation',
+  'plugin_cache_mutation',
+  'claude_hooks_direct_edit',
+  'objective_md_direct_edit',
+]);
+const dod011RequiredBlockerTypes = Object.freeze([
+  'unsupported_blocker',
+  'generated_drift',
+  'no_go_mutation',
+  'missing_validation_evidence',
+]);
+const dod011ValidationCommandForbiddenPattern =
+  /(?:~\/|\/Users\/|\.claude\/hooks|objective\.md|codex plugins (?:install|refresh|reload)|cache refresh|plugin cache|ln -s)/u;
 
 export const sharedDodEvidenceRegistryRequiredFields = Object.freeze([
   'dod_id',
@@ -3888,12 +3945,776 @@ export function assertDod010BlockerFreeMigrationReport(report) {
   assert.equal(validation.report_status_matches_computed, true);
 }
 
-export function buildDod011RequestEvidence() {
-  throw new Error('buildDod011RequestEvidence is not implemented.');
+function buildReq919RequestMetadataSnapshot(requestMetadata) {
+  const tasks = normalizeArray(requestMetadata?.tasks);
+  const relevantTaskIds = new Set([
+    'REQ-919-01',
+    'REQ-919-02',
+    'REQ-919-03',
+    'REQ-919-04',
+  ]);
+
+  return {
+    path: dod011Req919RequestMetadataRelativePath,
+    request_id: requestMetadata?.id ?? null,
+    agi_id: requestMetadata?.linked_objective ?? null,
+    sprint: requestMetadata?.sprint ?? null,
+    dod_id: requestMetadata?.target_dod ?? null,
+    plan_id: requestMetadata?.source_plan ?? null,
+    request_status: requestMetadata?.status ?? null,
+    phase: requestMetadata?.current_phase ?? null,
+    tasks: tasks
+      .filter((task) => relevantTaskIds.has(task?.id))
+      .map((task) => {
+        const latestAttempt = latestTaskAttempt(task);
+
+        return {
+          task_id: task?.id ?? null,
+          status: task?.status ?? null,
+          source_commit: extractCommitHash(task?.source_commit) ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          task_commit: extractCommitHash(task?.task_commit) ??
+            extractCommitHash(task?.commit) ??
+            extractCommitHash(latestAttempt?.commit) ??
+            null,
+          integration_commit: extractCommitHash(task?.integration_commit) ??
+            extractCommitHash(latestAttempt?.integration_commit) ??
+            null,
+          validated_at: task?.validated_at ?? latestAttempt?.completed_at ?? null,
+        };
+      }),
+  };
 }
 
-export function assertDod011RequestEvidence() {
-  throw new Error('assertDod011RequestEvidence is not implemented.');
+function buildDod011BlockerCriteria() {
+  return dod011RequiredBlockerTypes.map((blockerType) => ({
+    blocker_type: blockerType,
+    status: 'block',
+    severity: blockerType === 'unsupported_blocker' ? 'high' : 'medium',
+    resolution_signal:
+      blockerType === 'unsupported_blocker'
+        ? 'All package outputs map to a native, adapter, or documented follow-up path.'
+        : blockerType === 'generated_drift'
+          ? 'Generated artifact or parity summary drift count remains zero.'
+          : blockerType === 'no_go_mutation'
+            ? 'Validation remains repository-local and performs no forbidden mutation.'
+            : 'Validation artifacts exist and parse without schema errors.',
+  }));
+}
+
+function buildDod011WorkPackages() {
+  return [
+    {
+      id: 'WP-1',
+      title: 'Inventory and parity schema baseline',
+      phase: 'inventory',
+      sequence: 1,
+      inputs: [
+        { path: '.claude-plugin/plugin.json', kind: 'canonical-manifest' },
+        { path: 'skills/', kind: 'skill-catalog' },
+        { path: 'agents/', kind: 'agent-catalog' },
+        { path: 'hooks/hooks.json', kind: 'canonical-hook-config' },
+        { path: dod011ObjectiveDetailRelativePath, kind: 'objective-detail' },
+      ],
+      outputs: [
+        {
+          path: '.gran-maestro/agile/AGI-039/objective/details/plugin-component-inventory.json',
+          kind: 'inventory-artifact',
+        },
+        {
+          path: '.gran-maestro/requests/REQ-884/evidence/plugin-component-inventory-validation.json',
+          kind: 'validation-evidence',
+        },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f .claude-plugin/plugin.json && test -f hooks/hooks.json && test -f skills/agile/SKILL.md && test -f agents/architect.md',
+        ],
+        success_criteria: [
+          'Canonical manifest, hook config, skill catalog, and agent catalog remain available from the repository.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Establishes the baseline inventory and coverage inputs for the migration breakdown.',
+        },
+      ],
+      depends_on: [],
+      blocks: ['WP-2'],
+    },
+    {
+      id: 'WP-2',
+      title: 'Codex manifest and marketplace generator',
+      phase: 'generator',
+      sequence: 2,
+      inputs: [
+        { path: '.claude-plugin/plugin.json', kind: 'canonical-manifest' },
+        { path: '.claude-plugin/marketplace.json', kind: 'canonical-marketplace' },
+        { path: 'package.json', kind: 'version-source' },
+      ],
+      outputs: [
+        { path: '.codex-plugin/plugin.json', kind: 'generated-manifest' },
+        { path: '.agents/plugins/marketplace.json', kind: 'generated-marketplace' },
+        { path: 'scripts/generate-codex-plugin-discovery-smoke.mjs', kind: 'generator-entrypoint' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>',
+        ],
+        success_criteria: [
+          'The generator emits parseable JSON with repo-relative output metadata and no unsupported drift.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Captures the generator lane that downstream implementation requests must execute.',
+        },
+        {
+          dod_id: 'DOD-013',
+          status: 'supporting',
+          rationale: 'Single-source drift control depends on generated asset parity, but remains follow-up scope.',
+        },
+      ],
+      depends_on: ['WP-1'],
+      blocks: ['WP-3'],
+    },
+    {
+      id: 'WP-3',
+      title: 'Codex hook adapter parity',
+      phase: 'adapter',
+      sequence: 3,
+      inputs: [
+        { path: 'hooks/hooks.json', kind: 'canonical-hook-config' },
+        { path: '.gran-maestro/requests/REQ-890/evidence/dod-005-codex-hook-adapter-validation.json', kind: 'baseline-evidence' },
+      ],
+      outputs: [
+        { path: 'hooks/hooks.codex.json', kind: 'adapter-config' },
+        { path: 'hooks/codex-mst-session-init.sh', kind: 'adapter-script' },
+        { path: 'hooks/codex-mst-pre-tool-use.sh', kind: 'adapter-script' },
+        { path: 'hooks/codex-mst-stop-hook.sh', kind: 'adapter-script' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          "rg -n 'SessionStart|PreToolUse|Stop|UserPromptSubmit' hooks/hooks.json",
+        ],
+        success_criteria: [
+          'Canonical hook events remain enumerated and the adapter lane can be validated without touching user-scoped hook state.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Preserves the adapter execution lane inside the breakdown ordering.',
+        },
+      ],
+      depends_on: ['WP-2'],
+      blocks: ['WP-4'],
+    },
+    {
+      id: 'WP-4',
+      title: 'Skill and command UX parity',
+      phase: 'skill-agent-parity',
+      sequence: 4,
+      inputs: [
+        { path: 'skills/agile/SKILL.md', kind: 'core-skill' },
+        { path: 'skills/request/SKILL.md', kind: 'core-skill' },
+        { path: 'scripts/lib/codex-plugin-discovery-smoke.mjs', kind: 'smoke-lib' },
+      ],
+      outputs: [
+        { path: 'skills/', kind: 'skill-projection-surface' },
+        { path: 'docs/skills-reference.md', kind: 'invocation-guide' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f skills/agile/SKILL.md && test -f skills/request/SKILL.md',
+        ],
+        success_criteria: [
+          'Core MST skills remain discoverable from repository-local assets without installing Codex plugins.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Maps user-visible skill invocation parity into an executable work package.',
+        },
+      ],
+      depends_on: ['WP-3'],
+      blocks: ['WP-5'],
+    },
+    {
+      id: 'WP-5',
+      title: 'Agent and subagent projection parity',
+      phase: 'skill-agent-parity',
+      sequence: 5,
+      inputs: [
+        { path: 'agents/pm-conductor.md', kind: 'canonical-agent' },
+        { path: 'agents/architect.md', kind: 'canonical-agent' },
+        { path: '.gran-maestro/requests/REQ-891/evidence/dod-006-codex-skill-agent-projection-validation.json', kind: 'baseline-evidence' },
+      ],
+      outputs: [
+        { path: 'agents/', kind: 'agent-projection-surface' },
+        { path: '.gran-maestro/requests/REQ-891/evidence/dod-006-role-mapping-validation.json', kind: 'role-mapping-report' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f agents/pm-conductor.md && test -f agents/architect.md',
+        ],
+        success_criteria: [
+          'Canonical agent roles remain available for projection without introducing a Codex-only fork.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Keeps role projection as a discrete execution step inside the shared parity phase.',
+        },
+      ],
+      depends_on: ['WP-4'],
+      blocks: ['WP-6'],
+    },
+    {
+      id: 'WP-6',
+      title: 'Config, model, and provider parity',
+      phase: 'config-provider-parity',
+      sequence: 6,
+      inputs: [
+        { path: 'templates/defaults/config.json', kind: 'default-config' },
+        { path: 'package.json', kind: 'project-config' },
+      ],
+      outputs: [
+        { path: '.codex/config.toml', kind: 'config-template' },
+        { path: 'docs/configuration.md', kind: 'provider-mapping-doc' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f templates/defaults/config.json && test -f docs/configuration.md',
+        ],
+        success_criteria: [
+          'Config and provider mapping inputs remain repository-local and ready for parity validation.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Captures provider and approval/sandbox parity as a gated package.',
+        },
+      ],
+      depends_on: ['WP-5'],
+      blocks: ['WP-7'],
+    },
+    {
+      id: 'WP-7',
+      title: 'State-machine and workflow parity',
+      phase: 'state-workflow-parity',
+      sequence: 7,
+      inputs: [
+        { path: 'scripts/mst.py', kind: 'workflow-runtime' },
+        { path: 'tests/test_workflow_state_transition_integrity.py', kind: 'state-fixture' },
+        { path: 'tests/test_dod011_continuation_contract.py', kind: 'continuation-fixture' },
+      ],
+      outputs: [
+        { path: 'tests/test_workflow_state_transition_integrity.py', kind: 'transition-validation' },
+        { path: 'tests/test_dod011_continuation_contract.py', kind: 'continuation-validation' },
+        { path: 'tests/test_dod012_auto_continuation_contract.py', kind: 'follow-up-validation' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'python3 -m pytest tests/test_workflow_state_transition_integrity.py tests/test_dod011_continuation_contract.py tests/test_dod012_auto_continuation_contract.py -q',
+        ],
+        success_criteria: [
+          'State transitions and continuation contracts pass with repository-local fixtures only.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-011',
+          status: 'supporting',
+          rationale: 'Preserves the runtime parity gate before docs and release follow-up work.',
+        },
+      ],
+      depends_on: ['WP-6'],
+      blocks: ['WP-8'],
+    },
+    {
+      id: 'WP-8',
+      title: 'Documentation and release follow-up integration',
+      phase: 'docs-release',
+      sequence: 8,
+      inputs: [
+        { path: 'README.md', kind: 'user-doc' },
+        { path: 'docs/RELEASE.md', kind: 'release-checklist' },
+        { path: 'docs/configuration.md', kind: 'config-doc' },
+      ],
+      outputs: [
+        { path: 'README.md', kind: 'codex-doc-section' },
+        { path: 'docs/RELEASE.md', kind: 'release-checklist-update' },
+        { path: 'CHANGELOG.md', kind: 'release-note' },
+      ],
+      validation: {
+        repository_local_only: true,
+        commands: [
+          'test -f README.md && test -f docs/RELEASE.md && test -f docs/configuration.md',
+        ],
+        success_criteria: [
+          'Docs and release assets exist locally and remain follow-up scope until later requests complete them.',
+        ],
+      },
+      blocker_criteria: buildDod011BlockerCriteria(),
+      downstream_dod: [
+        {
+          dod_id: 'DOD-012',
+          status: 'follow_up',
+          rationale: 'Documentation and release execution stays outside the done boundary for this task.',
+        },
+        {
+          dod_id: 'DOD-013',
+          status: 'supporting',
+          rationale: 'Single-source release discipline depends on this package but is not completed here.',
+        },
+      ],
+      depends_on: ['WP-7'],
+      blocks: [],
+    },
+  ];
+}
+
+function buildDod011DependencyGraph(workPackages) {
+  return {
+    nodes: workPackages.map((workPackage) => ({
+      id: workPackage.id,
+      phase: workPackage.phase,
+      sequence: workPackage.sequence,
+      depends_on: [...workPackage.depends_on],
+      blocks: [...workPackage.blocks],
+    })),
+    edges: workPackages.flatMap((workPackage) =>
+      workPackage.depends_on.map((dependencyId) => ({
+        from: dependencyId,
+        to: workPackage.id,
+      }))
+    ),
+    topological_order: workPackages.map((workPackage) => workPackage.id),
+  };
+}
+
+function buildDod011NoGoBoundary() {
+  return {
+    status: 'pass',
+    violation_count: 0,
+    criteria: [
+      {
+        criterion_id: 'user_home_mutation',
+        status: 'pass',
+        boundary: 'No user-home files or directories are modified.',
+      },
+      {
+        criterion_id: 'external_codex_install_cache_reload',
+        status: 'pass',
+        boundary: 'No external Codex install, cache refresh, or reload command is required.',
+      },
+      {
+        criterion_id: 'symlink_creation',
+        status: 'pass',
+        boundary: 'No symlink creation is needed for validation.',
+      },
+      {
+        criterion_id: 'plugin_cache_mutation',
+        status: 'pass',
+        boundary: 'No plugin cache mutation or rescan is performed.',
+      },
+      {
+        criterion_id: 'claude_hooks_direct_edit',
+        status: 'pass',
+        boundary: 'Validation never edits user-scoped .claude hooks.',
+      },
+      {
+        criterion_id: 'objective_md_direct_edit',
+        status: 'pass',
+        boundary: 'objective.md remains a read-only reference input.',
+      },
+    ],
+  };
+}
+
+function buildDod011PredecessorEvidenceRefs(parseFailures) {
+  return ['DOD-009', 'DOD-010'].map((dodId) => {
+    const registryEntry = getSharedDodEvidenceRegistryEntryByDodId(dodId);
+    const registryValidation = registryEntry
+      ? validateSharedDodEvidenceRegistryEntry(registryEntry)
+      : { status: 'fail', issues: [`Missing shared DOD evidence registry entry for ${dodId}.`] };
+    const evidencePath = registryEntry?.request_evidence_path ?? null;
+    const evidenceArtifact = evidencePath
+      ? collectJsonArtifact(join(repoRoot, evidencePath), readJsonFromAbsolutePath, parseFailures)
+      : { value: null, error: 'missing request evidence path' };
+
+    return {
+      dod_id: dodId,
+      request_id: registryEntry?.request_id ?? null,
+      agi_id: registryEntry?.agi_id ?? null,
+      sprint: registryEntry?.sprint ?? null,
+      request_evidence_path: evidencePath,
+      generator_script_path: registryEntry?.generator_script_path ?? null,
+      validator_export_name: getSharedDodEvidenceValidatorExportName(
+        registryEntry?.validator_linkage,
+      ),
+      shared_dod_registry_linkage_status: registryValidation.status,
+      request_evidence_status: evidenceArtifact.value?.status ?? null,
+      relationship: 'downstream-planning-input',
+      repository_local_only: true,
+    };
+  });
+}
+
+function buildDod011FollowUpScope() {
+  return [
+    {
+      dod_id: 'DOD-012',
+      status: 'follow_up',
+      reason: 'Documentation and release integration remains outside the DOD-011 done boundary.',
+    },
+    {
+      dod_id: 'DOD-013',
+      status: 'supporting',
+      reason: 'Single-source drift control remains a downstream dependency instead of a completed scope item.',
+    },
+  ];
+}
+
+function buildDod011ValidationCommands(workPackages) {
+  const commands = [];
+  const addCommand = (command, scope) => {
+    if (commands.some((entry) => entry.command === command)) {
+      return;
+    }
+    commands.push({
+      command,
+      scope,
+      repository_local_only: true,
+    });
+  };
+
+  addCommand(
+    'node scripts/generate-dod-011-migration-work-package-breakdown.mjs <output-path>',
+    'artifact-generation',
+  );
+  addCommand(
+    `node --input-type=module -e "import { readFileSync } from 'node:fs'; import { assertDod011RequestEvidence } from './scripts/lib/codex-plugin-discovery-smoke.mjs'; assertDod011RequestEvidence(JSON.parse(readFileSync('<output-path>','utf8')));"`,
+    'artifact-assertion',
+  );
+  for (const workPackage of workPackages) {
+    for (const command of normalizeArray(workPackage.validation?.commands)) {
+      addCommand(command, workPackage.id);
+    }
+  }
+  addCommand('npm test', 'full-smoke');
+
+  return commands;
+}
+
+function buildDod011SourceDocuments() {
+  const sourceDocuments = [
+    {
+      path: dod011ObjectiveDetailRelativePath,
+      kind: 'objective-detail',
+      exists: readTextIfExists(dod011ObjectiveDetailAbsolutePath).length > 0,
+    },
+    {
+      path: dod011PlanRelativePath,
+      kind: 'plan',
+      exists: readTextIfExists(dod011PlanAbsolutePath).length > 0,
+    },
+    {
+      path: dod011Task01SpecRelativePath,
+      kind: 'upstream-spec',
+      exists: readTextIfExists(dod011Task01SpecAbsolutePath).length > 0,
+    },
+    {
+      path: dod011Task02SpecRelativePath,
+      kind: 'task-spec',
+      exists: readTextIfExists(dod011Task02SpecAbsolutePath).length > 0,
+    },
+    {
+      path: dod011ArchitectureDecisionRelativePath,
+      kind: 'architecture-decision',
+      exists: readTextIfExists(dod011ArchitectureDecisionAbsolutePath).length > 0,
+    },
+  ];
+
+  return {
+    status: sourceDocuments.every((document) => document.exists) ? 'pass' : 'fail',
+    documents: sourceDocuments,
+  };
+}
+
+function assertDod011ValidationCommands(validationCommands) {
+  assert.ok(Array.isArray(validationCommands));
+  assert.ok(validationCommands.length > 0);
+
+  for (const entry of validationCommands) {
+    const command =
+      typeof entry === 'string'
+        ? entry
+        : entry && typeof entry === 'object'
+          ? entry.command
+          : null;
+
+    assert.equal(typeof command, 'string');
+    assert.ok(command.length > 0);
+    assert.doesNotMatch(command, dod011ValidationCommandForbiddenPattern);
+  }
+}
+
+function assertDod011WorkPackageShape(workPackage) {
+  assert.equal(typeof workPackage?.id, 'string');
+  assert.equal(typeof workPackage?.title, 'string');
+  assert.equal(typeof workPackage?.phase, 'string');
+  assert.equal(typeof workPackage?.sequence, 'number');
+  assert.ok(Array.isArray(workPackage?.inputs));
+  assert.ok(Array.isArray(workPackage?.outputs));
+  assert.ok(workPackage?.validation && typeof workPackage.validation === 'object');
+  assert.ok(Array.isArray(workPackage?.blocker_criteria));
+  assert.ok(Array.isArray(workPackage?.downstream_dod));
+  assert.ok(Array.isArray(workPackage?.depends_on));
+  assert.ok(Array.isArray(workPackage?.blocks));
+
+  for (const criterion of workPackage.blocker_criteria) {
+    assert.ok(dod011RequiredBlockerTypes.includes(criterion?.blocker_type));
+    assert.equal(criterion?.status, 'block');
+  }
+
+  const blockerTypes = workPackage.blocker_criteria.map((criterion) => criterion.blocker_type);
+  assert.deepEqual(blockerTypes, [...dod011RequiredBlockerTypes]);
+  assertDod011ValidationCommands(workPackage.validation.commands);
+
+  for (const downstream of workPackage.downstream_dod) {
+    assert.equal(typeof downstream?.dod_id, 'string');
+    assert.equal(typeof downstream?.status, 'string');
+    if (['DOD-012', 'DOD-013'].includes(downstream.dod_id)) {
+      assert.ok(['follow_up', 'supporting'].includes(downstream.status));
+      assert.ok(!['completed', 'done', 'accepted'].includes(downstream.status));
+    }
+  }
+}
+
+export function buildDod011RequestEvidence() {
+  const parseFailures = [];
+  const requestMetadata = collectJsonArtifact(
+    dod011Req919RequestMetadataAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const planIds = collectJsonArtifact(
+    dod011PlanIdsAbsolutePath,
+    readJsonFromAbsolutePath,
+    parseFailures,
+  );
+  const requestSnapshot = buildReq919RequestMetadataSnapshot(requestMetadata.value);
+  const workPackages = buildDod011WorkPackages();
+  const dependencyGraph = buildDod011DependencyGraph(workPackages);
+  const validationCommands = buildDod011ValidationCommands(workPackages);
+  const noGoBoundary = buildDod011NoGoBoundary();
+  const predecessorEvidenceRefs = buildDod011PredecessorEvidenceRefs(parseFailures);
+  const followUpScope = buildDod011FollowUpScope();
+  const sourceDocuments = buildDod011SourceDocuments();
+  const sanitizedParseFailures = sanitizeParseFailures(parseFailures);
+  const status =
+    sanitizedParseFailures.length === 0 &&
+    predecessorEvidenceRefs.every(
+      (entry) =>
+        entry.shared_dod_registry_linkage_status === 'pass' &&
+        ['pass', 'accepted'].includes(entry.request_evidence_status),
+    ) &&
+    sourceDocuments.status === 'pass'
+      ? 'pass'
+      : 'fail';
+
+  return {
+    artifact_id: 'REQ-919-DOD-011-migration-work-package-breakdown',
+    request_id: requestSnapshot.request_id ?? 'REQ-919',
+    agi_id: requestSnapshot.agi_id ?? 'AGI-039',
+    sprint: requestSnapshot.sprint ?? 13,
+    task_id: '02',
+    dod_id: requestSnapshot.dod_id ?? 'DOD-011',
+    plan_id: requestSnapshot.plan_id ?? 'PLN-743',
+    format_version: '1.0.0',
+    generated_at:
+      requestMetadata.value?.updated_at ??
+      requestMetadata.value?.created_at ??
+      '2026-05-20T04:52:57.000Z',
+    request_evidence_path: dod011RequestEvidenceRelativePath,
+    generator_script_path: dod011GeneratorScriptRelativePath,
+    status,
+    repository_local_only: true,
+    work_packages: workPackages,
+    dependency_graph: dependencyGraph,
+    validation_commands: validationCommands,
+    no_go_boundary: noGoBoundary,
+    predecessor_evidence_refs: predecessorEvidenceRefs,
+    follow_up_scope: followUpScope,
+    source_documents: sourceDocuments,
+    request_metadata_snapshot: requestSnapshot,
+    pac_summary: normalizeArray(planIds.value).map((entry) => ({
+      id: entry?.id ?? null,
+      grade: entry?.grade ?? null,
+      tags: normalizeArray(entry?.tags),
+    })),
+    input_paths_read: [
+      dod011Req919RequestMetadataRelativePath,
+      dod011PlanRelativePath,
+      dod011PlanIdsRelativePath,
+      dod011Task01SpecRelativePath,
+      dod011Task02SpecRelativePath,
+      dod011ArchitectureDecisionRelativePath,
+      dod011ObjectiveDetailRelativePath,
+      dod009RequestEvidenceRelativePath,
+      dod010BlockerFreeMigrationReportRelativePath,
+      'scripts/lib/codex-plugin-discovery-smoke.mjs',
+      dod011GeneratorScriptRelativePath,
+      'tests/smoke.test.mjs',
+    ],
+    allowed_output_paths: [dod011RequestEvidenceRelativePath],
+    parse_error_count: sanitizedParseFailures.length,
+    parse_failures: sanitizedParseFailures,
+    evidence_lifecycle: {
+      status,
+      request_metadata_loaded: requestMetadata.error === null,
+      plan_ids_loaded: planIds.error === null,
+      source_documents_loaded: sourceDocuments.status === 'pass',
+      predecessor_linkage_pass: predecessorEvidenceRefs.every(
+        (entry) => entry.shared_dod_registry_linkage_status === 'pass',
+      ),
+      work_package_contract_pass: true,
+      dependency_graph_pass: true,
+      no_go_boundary_pass: noGoBoundary.status === 'pass',
+      follow_up_scope_pass: followUpScope.every((entry) =>
+        ['follow_up', 'supporting'].includes(entry.status)
+      ),
+    },
+  };
+}
+
+export function assertDod011RequestEvidence(evidence) {
+  assert.equal(evidence.artifact_id, 'REQ-919-DOD-011-migration-work-package-breakdown');
+  assert.equal(evidence.request_id, 'REQ-919');
+  assert.equal(evidence.agi_id, 'AGI-039');
+  assert.equal(evidence.sprint, 13);
+  assert.equal(evidence.task_id, '02');
+  assert.equal(evidence.dod_id, 'DOD-011');
+  assert.equal(evidence.plan_id, 'PLN-743');
+  assert.equal(evidence.format_version, '1.0.0');
+  assert.equal(evidence.request_evidence_path, dod011RequestEvidenceRelativePath);
+  assert.equal(evidence.generator_script_path, dod011GeneratorScriptRelativePath);
+  assert.equal(evidence.repository_local_only, true);
+  assert.equal(evidence.status, 'pass');
+  assert.equal(evidence.parse_error_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.work_packages).map((workPackage) => workPackage.id),
+    [...dod011RequiredPackageIds],
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.work_packages).map((workPackage) => workPackage.sequence),
+    [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  assert.deepEqual(
+    [...new Set(normalizeArray(evidence.work_packages).map((workPackage) => workPackage.phase))],
+    [...dod011RequiredPhaseOrder],
+  );
+  normalizeArray(evidence.work_packages).forEach(assertDod011WorkPackageShape);
+  assert.ok(evidence.dependency_graph && typeof evidence.dependency_graph === 'object');
+  assert.deepEqual(
+    normalizeArray(evidence.dependency_graph.nodes).map((node) => node.id),
+    [...dod011RequiredPackageIds],
+  );
+  assert.deepEqual(
+    evidence.dependency_graph.topological_order,
+    [...dod011RequiredPackageIds],
+  );
+  for (const edge of normalizeArray(evidence.dependency_graph.edges)) {
+    assert.equal(typeof edge?.from, 'string');
+    assert.equal(typeof edge?.to, 'string');
+    const fromIndex = dod011RequiredPackageIds.indexOf(edge.from);
+    const toIndex = dod011RequiredPackageIds.indexOf(edge.to);
+    assert.ok(fromIndex >= 0);
+    assert.ok(toIndex >= 0);
+    assert.ok(fromIndex < toIndex);
+  }
+  assertDod011ValidationCommands(evidence.validation_commands);
+  assert.equal(evidence.no_go_boundary?.status, 'pass');
+  assert.equal(evidence.no_go_boundary?.violation_count, 0);
+  assert.deepEqual(
+    normalizeArray(evidence.no_go_boundary?.criteria).map((criterion) => criterion.criterion_id),
+    [...dod011RequiredNoGoBoundaryIds],
+  );
+  assert.ok(
+    normalizeArray(evidence.no_go_boundary?.criteria).every((criterion) => criterion.status === 'pass'),
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.predecessor_evidence_refs).map((entry) => entry.dod_id),
+    ['DOD-009', 'DOD-010'],
+  );
+  assert.ok(
+    normalizeArray(evidence.predecessor_evidence_refs).every(
+      (entry) =>
+        entry.shared_dod_registry_linkage_status === 'pass' &&
+        typeof entry.request_evidence_path === 'string' &&
+        entry.request_evidence_path.startsWith('.gran-maestro/requests/REQ-') &&
+        ['pass', 'accepted'].includes(entry.request_evidence_status),
+    ),
+  );
+  assert.deepEqual(
+    normalizeArray(evidence.follow_up_scope).map((entry) => entry.dod_id),
+    ['DOD-012', 'DOD-013'],
+  );
+  assert.ok(
+    normalizeArray(evidence.follow_up_scope).every((entry) =>
+      ['follow_up', 'supporting'].includes(entry.status)
+    ),
+  );
+  assert.ok(
+    normalizeArray(evidence.follow_up_scope).every((entry) =>
+      !['completed', 'done', 'accepted'].includes(entry.status)
+    ),
+  );
+  assert.equal(evidence.source_documents?.status, 'pass');
+  assert.equal(
+    normalizeArray(evidence.source_documents?.documents).every((document) => document.exists === true),
+    true,
+  );
+  assert.deepEqual(evidence.allowed_output_paths, [dod011RequestEvidenceRelativePath]);
+  assert.ok(Array.isArray(evidence.pac_summary));
+  assert.equal(evidence.evidence_lifecycle?.status, 'pass');
+  assert.equal(evidence.evidence_lifecycle?.request_metadata_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.plan_ids_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.source_documents_loaded, true);
+  assert.equal(evidence.evidence_lifecycle?.predecessor_linkage_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.work_package_contract_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.dependency_graph_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.no_go_boundary_pass, true);
+  assert.equal(evidence.evidence_lifecycle?.follow_up_scope_pass, true);
 }
 
 function buildDod009ExcludedSurfaces() {
