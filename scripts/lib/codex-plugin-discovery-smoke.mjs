@@ -182,6 +182,8 @@ export const sprint4IntegrationContextPath = join(
 
 export const generatedManifestPath = '.codex-plugin/plugin.json';
 export const generatedMarketplacePath = '.agents/plugins/marketplace.json';
+export const rootMarketplacePath = 'marketplace.json';
+export const codexMarketplacePluginPath = './plugins/mst';
 export const sourceManifestPath = '.claude-plugin/plugin.json';
 export const sourceMarketplacePath = '.claude-plugin/marketplace.json';
 export const sourceHookConfigPath = 'hooks/hooks.json';
@@ -221,6 +223,7 @@ export const changedFilesChecked = [
 export const generatedAssetBaselinePaths = [
   generatedManifestPath,
   generatedMarketplacePath,
+  rootMarketplacePath,
 ];
 
 export const validationEntrypoints = [
@@ -1006,7 +1009,6 @@ export const manifestFields = [
   'description',
   'keywords',
   'skills',
-  'hooks',
 ];
 
 export const marketplaceFields = [
@@ -1773,7 +1775,7 @@ function buildSkillProjectionCrossFileConsistency({
     {
       name: 'generated_marketplace_source_root',
       actual: generatedMarketplace?.plugins?.[0]?.source?.path ?? null,
-      expected: './',
+      expected: codexMarketplacePluginPath,
     },
     {
       name: 'skill_inventory_count',
@@ -2346,7 +2348,7 @@ function buildRoleMappingCrossFileConsistency({
     {
       name: 'marketplace_source_root',
       actual: generatedMarketplace?.plugins?.[0]?.source?.path ?? null,
-      expected: './',
+      expected: codexMarketplacePluginPath,
     },
     {
       name: 'skill_evidence_path',
@@ -4786,7 +4788,7 @@ function buildDod012NoGoBoundary() {
     criteria: [
       { criterion_id: 'user_home_mutation', status: 'pass', boundary: 'No user-home files or directories are modified.' },
       { criterion_id: 'codex_config_toml_mutation', status: 'pass', boundary: '~/.codex/config.toml remains user-owned and untouched.' },
-      { criterion_id: 'external_codex_install_cache_reload', status: 'pass', boundary: 'No external Codex install, cache refresh, or reload is executed by validation.' },
+      { criterion_id: 'external_codex_install_cache_reload', status: 'pass', boundary: 'No user-owned Codex install, cache refresh, or reload is executed by validation; Codex install smoke uses a temporary CODEX_HOME only.' },
       { criterion_id: 'symlink_creation', status: 'pass', boundary: 'Validation creates no symlinks.' },
       { criterion_id: 'plugin_cache_mutation', status: 'pass', boundary: 'Validation does not mutate plugin cache directories.' },
       { criterion_id: 'claude_hooks_direct_edit', status: 'pass', boundary: 'Validation does not directly edit .claude/hooks.' },
@@ -4805,6 +4807,11 @@ function buildDod012ValidationCommands() {
     {
       command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod012DocsReleaseIntegration } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod012DocsReleaseIntegration(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
       scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'node scripts/codex-plugin-local-install-smoke.mjs',
+      scope: 'temporary-codex-home-install-smoke',
       repository_local_only: true,
     },
     {
@@ -5162,6 +5169,11 @@ function buildDod013ValidationCommands() {
     {
       command: 'node --input-type=module -e "import { readFileSync } from \'node:fs\'; import { assertDod013SingleSourceDriftValidation } from \'./scripts/lib/codex-plugin-discovery-smoke.mjs\'; assertDod013SingleSourceDriftValidation(JSON.parse(readFileSync(\'<output-path>\',\'utf8\')));"',
       scope: 'artifact-assertion',
+      repository_local_only: true,
+    },
+    {
+      command: 'node scripts/codex-plugin-git-source-readiness.mjs',
+      scope: 'git-source-publish-readiness',
       repository_local_only: true,
     },
     {
@@ -6856,6 +6868,87 @@ function canonicalHookCommands(hookConfig) {
   )].sort();
 }
 
+function validateCodexManifestSchema(manifest) {
+  const allowedKeys = new Set([
+    'id',
+    'name',
+    'version',
+    'description',
+    'skills',
+    'apps',
+    'mcpServers',
+    'interface',
+    'author',
+    'homepage',
+    'repository',
+    'license',
+    'keywords',
+  ]);
+  const requiredTopLevelStrings = ['name', 'version', 'description', 'skills'];
+  const requiredInterfaceStrings = [
+    'displayName',
+    'shortDescription',
+    'longDescription',
+    'developerName',
+    'category',
+  ];
+  const violations = [];
+
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    violations.push({ field: '$', code: 'manifest_not_object' });
+    return {
+      status: 'fail',
+      violation_count: violations.length,
+      violations,
+      hookless: false,
+      interface_complete: false,
+    };
+  }
+
+  for (const key of Object.keys(manifest).sort()) {
+    if (!allowedKeys.has(key)) {
+      violations.push({ field: key, code: 'unsupported_field' });
+    }
+  }
+
+  for (const field of requiredTopLevelStrings) {
+    if (typeof manifest[field] !== 'string' || manifest[field].trim() === '') {
+      violations.push({ field, code: 'missing_required_string' });
+    }
+  }
+
+  if (manifest.skills !== './skills/') {
+    violations.push({ field: 'skills', code: 'invalid_skills_path', expected: './skills/', actual: manifest.skills ?? null });
+  }
+
+  const iface = manifest.interface;
+  if (!iface || typeof iface !== 'object' || Array.isArray(iface)) {
+    violations.push({ field: 'interface', code: 'missing_interface_object' });
+  } else {
+    for (const field of requiredInterfaceStrings) {
+      if (typeof iface[field] !== 'string' || iface[field].trim() === '') {
+        violations.push({ field: `interface.${field}`, code: 'missing_required_string' });
+      }
+    }
+    if (!Array.isArray(iface.capabilities) || iface.capabilities.some((value) => typeof value !== 'string' || value.trim() === '')) {
+      violations.push({ field: 'interface.capabilities', code: 'invalid_capabilities' });
+    }
+    if (!Array.isArray(iface.defaultPrompt) || iface.defaultPrompt.length === 0) {
+      violations.push({ field: 'interface.defaultPrompt', code: 'missing_default_prompt' });
+    }
+  }
+
+  return {
+    status: violations.length === 0 ? 'pass' : 'fail',
+    violation_count: violations.length,
+    violations,
+    hookless: manifest.hooks === undefined,
+    interface_complete: Boolean(iface) && requiredInterfaceStrings.every((field) =>
+      typeof iface?.[field] === 'string' && iface[field].trim() !== '',
+    ),
+  };
+}
+
 function buildDiscoveryResults(assets) {
   return {
     status: assets.every((asset) => asset.exists && asset.parse_ok) ? 'pass' : 'fail',
@@ -6995,7 +7088,6 @@ export function buildCodexSkillProjectionEvidence() {
     readJsonFromRepo,
     parseFailures,
   );
-
   const sourceSkillPaths = listSkillSourcePaths();
   const sourceSkillInventory = sourceSkillPaths.map((path) => {
     try {
@@ -8105,6 +8197,11 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     readJsonFromRepo,
     parseFailures,
   );
+  const rootMarketplace = collectJsonArtifact(
+    rootMarketplacePath,
+    readJsonFromRepo,
+    parseFailures,
+  );
 
   const discoveryAssets = [
     {
@@ -8119,6 +8216,12 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       parse_ok: generatedMarketplace.error === null,
       error: generatedMarketplace.error,
     },
+    {
+      path: rootMarketplacePath,
+      exists: existsSync(join(repoRoot, rootMarketplacePath)),
+      parse_ok: rootMarketplace.error === null,
+      error: rootMarketplace.error,
+    },
   ];
 
   const manifestExpectation = sourceManifest.value
@@ -8129,12 +8232,10 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     sourceMarketplace.value?.plugins?.[
       parityEvidence.value?.component_mapping_summary?.marketplace_parity?.source_plugin_entry_index ?? 0
     ] ?? {};
-  const generatedMarketplaceSourceExpectation =
-    parityEvidence.value?.component_mapping_summary?.marketplace_parity?.field_mapping?.source
-      ?.generated_value ?? {
-      source: 'local',
-      path: './',
-    };
+  const generatedMarketplaceSourceExpectation = {
+    source: 'local',
+    path: codexMarketplacePluginPath,
+  };
   const marketplaceExpectation = {
     name: sourceMarketplacePluginEntry.name,
     version: sourceMarketplacePluginEntry.version,
@@ -8148,6 +8249,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     manifestExpectation,
     manifestFields,
   );
+  const codexManifestSchema = validateCodexManifestSchema(generatedManifest.value);
   const generatedMarketplacePluginEntry =
     generatedMarketplace.value?.plugins?.[
       parityEvidence.value?.component_mapping_summary?.marketplace_parity?.generated_plugin_entry_index ?? 0
@@ -8232,6 +8334,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     status:
       discoveryResults.status === 'pass' &&
       parseFailures.length === 0 &&
+      codexManifestSchema.status === 'pass' &&
       manifestComparison.drift_count + marketplaceComparison.drift_count === 0 &&
       unsupportedBlockers.length === 0
         ? 'pass'
@@ -8259,6 +8362,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       sourceHookConfigPath,
       generatedManifestPath,
       generatedMarketplacePath,
+      rootMarketplacePath,
       sprint4IntegrationContextPath,
     ],
     sprint4_forced_wire: {
@@ -8298,6 +8402,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
     },
     generated_manifest_path: generatedManifestPath,
     generated_marketplace_path: generatedMarketplacePath,
+    root_marketplace_path: rootMarketplacePath,
     dod_004_install_fallback_reproducibility: {
       ...req888Dod004Metadata,
       status: dod004Status,
@@ -8399,6 +8504,7 @@ export function buildCodexPluginDiscoverySmokeEvidence() {
       },
     },
     parse_error_count: parseFailures.length,
+    codex_manifest_schema: codexManifestSchema,
     generated_drift_count: manifestComparison.drift_count + marketplaceComparison.drift_count,
     unsupported_blocker_count: unsupportedBlockers.length,
     unsupported_blockers: unsupportedBlockers,
@@ -9181,7 +9287,11 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
   );
   assert.equal(evidence.generated_manifest_path, generatedManifestPath);
   assert.equal(evidence.generated_marketplace_path, generatedMarketplacePath);
+  assert.equal(evidence.root_marketplace_path, rootMarketplacePath);
   assert.equal(evidence.parse_error_count, 0);
+  assert.equal(evidence.codex_manifest_schema.status, 'pass');
+  assert.equal(evidence.codex_manifest_schema.hookless, true);
+  assert.equal(evidence.codex_manifest_schema.interface_complete, true);
   assert.equal(evidence.generated_drift_count, 0);
   assert.equal(evidence.unsupported_blocker_count, 0);
   assert.equal(evidence.discovery_results.status, 'pass');
@@ -9282,7 +9392,7 @@ export function assertCodexPluginDiscoverySmokeEvidence(evidence) {
   assert.deepEqual(evidence.changed_files_checked, changedFilesChecked);
   assert.deepEqual(
     evidence.discovery_results.assets.map((asset) => asset.path),
-    [generatedManifestPath, generatedMarketplacePath],
+    [generatedManifestPath, generatedMarketplacePath, rootMarketplacePath],
   );
   assert.ok(evidence.input_paths_read.includes(inventoryArtifactPath));
   assert.ok(evidence.input_paths_read.includes(parityEvidencePath));

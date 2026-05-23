@@ -90,6 +90,7 @@ import {
   generatedAssetBaselinePaths,
   generatedManifestPath,
   generatedMarketplacePath,
+  rootMarketplacePath,
   integrationEvidencePath,
   inventoryArtifactPath,
   orchestrationRoot,
@@ -873,11 +874,26 @@ test('plugin manifest uses canonical hooks registration', () => {
   );
 });
 
+test('codex plugin manifest is hookless and exposes required interface metadata', () => {
+  const plugin = JSON.parse(readRepoFile('.codex-plugin/plugin.json'));
+
+  assert.equal(plugin.hooks, undefined);
+  assert.equal(plugin.skills, './skills/');
+  assert.equal(plugin.interface.displayName, 'Gran Maestro');
+  assert.equal(plugin.interface.category, 'Productivity');
+  assert.ok(Array.isArray(plugin.interface.capabilities));
+  assert.ok(plugin.interface.capabilities.includes('Skills'));
+  assert.ok(Array.isArray(plugin.interface.defaultPrompt));
+  assert.ok(plugin.interface.defaultPrompt.length > 0);
+});
+
 test('codex plugin discovery smoke finds generated assets without parse errors', () => {
   const evidence = buildCodexPluginDiscoverySmokeEvidence();
 
   assert.equal(evidence.status, 'pass');
   assert.equal(evidence.discovery_results.status, 'pass');
+  assert.equal(evidence.codex_manifest_schema.status, 'pass');
+  assert.equal(evidence.codex_manifest_schema.hookless, true);
   assert.equal(evidence.parse_error_count, 0);
   assert.deepEqual(evidence.discovery_results.assets, [
     {
@@ -888,6 +904,12 @@ test('codex plugin discovery smoke finds generated assets without parse errors',
     },
     {
       path: generatedMarketplacePath,
+      exists: true,
+      parse_ok: true,
+      error: null,
+    },
+    {
+      path: rootMarketplacePath,
       exists: true,
       parse_ok: true,
       error: null,
@@ -2709,6 +2731,10 @@ test('DOD-012 persisted request evidence keeps validation repository-local and D
   assert.equal(evidence.no_go_boundary.status, 'pass');
   assert.equal(evidence.no_go_boundary.violation_count, 0);
   assert.ok(evidence.validation_commands.every((entry) => entry.repository_local_only === true));
+  assert.ok(evidence.validation_commands.some((entry) =>
+    entry.command === 'node scripts/codex-plugin-local-install-smoke.mjs' &&
+    entry.scope === 'temporary-codex-home-install-smoke',
+  ));
   assert.ok(evidence.validation_commands.every((entry) => !/~\/|\/Users\/|\.claude\/hooks|objective\.md|plugin cache|ln -s/u.test(entry.command)));
   assert.deepEqual(evidence.follow_up_scope.map((entry) => entry.dod_id), ['DOD-013']);
   assert.ok(evidence.follow_up_scope.every((entry) => ['follow_up', 'supporting'].includes(entry.status)));
@@ -2753,6 +2779,10 @@ test('DOD-013 persisted request evidence keeps validation repository-local', () 
   assert.equal(evidence.no_go_boundary.status, 'pass');
   assert.equal(evidence.no_go_boundary.violation_count, 0);
   assert.ok(evidence.validation_commands.every((entry) => entry.repository_local_only === true));
+  assert.ok(evidence.validation_commands.some((entry) =>
+    entry.command === 'node scripts/codex-plugin-git-source-readiness.mjs' &&
+    entry.scope === 'git-source-publish-readiness',
+  ));
   assert.ok(evidence.validation_commands.every((entry) => !/~\/|\/Users\/|\.claude\/hooks|objective\.md|plugin cache|ln -s/u.test(entry.command)));
   assert.equal(evidence.codex_only_fork_scan.fork_count, 0);
 });

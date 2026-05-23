@@ -43,6 +43,13 @@ Text-only agreement leaves gaps unchecked — screens are visualized instantly w
 /plugin install mst@gran-maestro
 ```
 
+To register the same git repository as a Codex CLI marketplace:
+
+```bash
+codex plugin marketplace add myrtlepn/gran-maestro
+codex plugin add mst@gran-maestro
+```
+
 ```
 # 1. Expand multiple requests as plans
 /mst:plan Improve login screen
@@ -60,13 +67,13 @@ Detailed installation guide: [docs/quick-start.en.md](docs/quick-start.en.md)
 
 ### Codex plugin migration boundary
 
-Gran Maestro's canonical distribution path is the Claude Code plugin. Codex plugin assets are validated as repository-local generated migration artifacts. If you need to install, update, or remove them in a real Codex environment, run the Codex/user-owned plugin workflow explicitly; DOD-012 validation never mutates `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
+Gran Maestro's canonical distribution path is the Claude Code plugin. Codex plugin assets are validated as repository-local generated migration artifacts. For Codex, this repository can be registered directly as the marketplace source: root `marketplace.json` and `.agents/plugins/marketplace.json` point the `mst` plugin at `./plugins/mst`, which exposes the repository root `.codex-plugin/plugin.json` and skills. If you need to install, update, or remove it in a real Codex environment, run the Codex/user-owned plugin workflow explicitly; DOD-012 validation never mutates `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
 
-- Install: inspect the repository-local generated Codex plugin assets, then explicitly load them through the user-owned Codex plugin workflow.
+- Install: load the git source directly with `codex plugin marketplace add myrtlepn/gran-maestro`, then run `codex plugin add mst@gran-maestro`.
 - Update: run `npm test` and the DOD-012 evidence generator before updating the user environment separately.
 - Uninstall: remove user-owned Codex plugin registrations/caches manually. Gran Maestro validation does not execute uninstall commands.
-- Validate: use repository-local commands such as `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json` and `npm test`.
-- Single-source maintenance: after DOD-013, Codex migration validation requires zero Codex-only forks and zero generated drift. `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, and package/version files remain the canonical source, while `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json` and the 5-file version sync gate validate `.codex-plugin/plugin.json` plus `.agents/plugins/marketplace.json` as repository-local projections.
+- Validate: use repository-local commands and a temporary `CODEX_HOME`, such as `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json`, and `npm test`. After publishing the git source, run the same path with `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`.
+- Single-source maintenance: after DOD-013, Codex migration validation requires zero Codex-only forks and zero generated drift. `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, and package/version files remain the canonical source, while `node scripts/codex-plugin-git-source-readiness.mjs`, `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json`, and the 5-file version sync gate validate `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, root `marketplace.json`, and the `plugins/mst` projection as repository-local assets.
 
 ## What's New
 

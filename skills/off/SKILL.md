@@ -1,5 +1,5 @@
 ---
-name: off
+name: "off"
 description: "Maestro 모드를 비활성화합니다. 사용자가 '마에스트로 꺼', '지휘자 모드 끝'을 말하거나 /mst:off를 호출할 때 사용. 요청 취소에는 /mst:cancel을 사용."
 user-invocable: true
 argument-hint: "[--force]"

@@ -1,5 +1,5 @@
 ---
-name: on
+name: "on"
 description: "Maestro 모드를 활성화합니다. 사용자가 '마에스트로 켜', '마에스트로 시작', '지휘자 모드'를 말하거나 /mst:on을 호출할 때 사용. 새 요청 시작은 /mst:request를 사용 (자동 부트스트래핑 포함)."
 user-invocable: true
 argument-hint: ""

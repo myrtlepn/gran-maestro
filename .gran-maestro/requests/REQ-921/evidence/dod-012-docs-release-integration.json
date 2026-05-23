@@ -173,6 +173,11 @@
       "repository_local_only": true
     },
     {
+      "command": "node scripts/codex-plugin-local-install-smoke.mjs",
+      "scope": "temporary-codex-home-install-smoke",
+      "repository_local_only": true
+    },
+    {
       "command": "npm test",
       "scope": "full-smoke",
       "repository_local_only": true
@@ -224,7 +229,7 @@
       {
         "criterion_id": "external_codex_install_cache_reload",
         "status": "pass",
-        "boundary": "No external Codex install, cache refresh, or reload is executed by validation."
+        "boundary": "No user-owned Codex install, cache refresh, or reload is executed by validation; Codex install smoke uses a temporary CODEX_HOME only."
       },
       {
         "criterion_id": "symlink_creation",

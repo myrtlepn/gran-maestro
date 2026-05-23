@@ -1,0 +1,149 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(scriptDir, '..');
+const manifestPath = join(repoRoot, '.codex-plugin', 'plugin.json');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const marketplaceName = 'gran-maestro';
+const pluginName = manifest.name;
+const pluginSelector = `${pluginName}@${marketplaceName}`;
+const tempRoot = mkdtempSync(join(tmpdir(), 'mst-codex-home.'));
+const keepTemp = process.argv.includes('--keep-temp');
+const sourceIndex = process.argv.indexOf('--source');
+const marketplaceSource = sourceIndex === -1
+  ? repoRoot
+  : process.argv[sourceIndex + 1];
+
+if (sourceIndex !== -1 && !marketplaceSource) {
+  process.stderr.write('--source requires a local path, owner/repo, HTTPS Git URL, or SSH Git URL\n');
+  process.exit(2);
+}
+
+function runCodex(args) {
+  const result = spawnSync('codex', args, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      CODEX_HOME: tempRoot,
+    },
+    encoding: 'utf8',
+  });
+  return {
+    command: ['codex', ...args].join(' '),
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function commandPassed(result) {
+  return result.status === 0;
+}
+
+function readJsonIfExists(path) {
+  if (!existsSync(path)) {
+    return null;
+  }
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function listSkillNames(path) {
+  if (!existsSync(path)) {
+    return [];
+  }
+  return readdirSync(path, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+const commands = [
+  runCodex(['plugin', 'marketplace', 'add', marketplaceSource]),
+  runCodex(['plugin', 'marketplace', 'list']),
+  runCodex(['plugin', 'list', '--marketplace', marketplaceName]),
+  runCodex(['plugin', 'add', pluginSelector]),
+];
+
+const installedManifestPath = join(
+  tempRoot,
+  'plugins',
+  'cache',
+  marketplaceName,
+  pluginName,
+  manifest.version,
+  '.codex-plugin',
+  'plugin.json',
+);
+const installedSkillsPath = join(
+  tempRoot,
+  'plugins',
+  'cache',
+  marketplaceName,
+  pluginName,
+  manifest.version,
+  'skills',
+);
+const marketplaceListOutput = commands[1]?.stdout ?? '';
+const pluginListOutput = commands[2]?.stdout ?? '';
+const pluginAddOutput = commands[3]?.stdout ?? '';
+const installedManifest = readJsonIfExists(installedManifestPath);
+const sourceSkillNames = listSkillNames(join(repoRoot, 'skills'));
+const installedSkillNames = listSkillNames(installedSkillsPath);
+const manifestMatchesSource =
+  JSON.stringify(installedManifest) === JSON.stringify(manifest);
+const skillsMatchSource =
+  JSON.stringify(installedSkillNames) === JSON.stringify(sourceSkillNames);
+
+const evidence = {
+  artifact_id: 'codex-plugin-local-install-smoke',
+  status: commands.every(commandPassed) &&
+    marketplaceListOutput.includes(marketplaceName) &&
+    pluginListOutput.includes(pluginSelector) &&
+    pluginAddOutput.includes(`Added plugin \`${pluginName}\``) &&
+    existsSync(installedManifestPath) &&
+    existsSync(installedSkillsPath) &&
+    manifestMatchesSource &&
+    skillsMatchSource
+    ? 'pass'
+    : 'fail',
+  repo_root: repoRoot,
+  marketplace_source: marketplaceSource,
+  codex_home: tempRoot,
+  mutates_user_codex_home: false,
+  marketplace_name: marketplaceName,
+  plugin_selector: pluginSelector,
+  installed_manifest_path: installedManifestPath,
+  installed_skills_path: installedSkillsPath,
+  installed_manifest_matches_source: manifestMatchesSource,
+  source_skill_count: sourceSkillNames.length,
+  installed_skill_count: installedSkillNames.length,
+  installed_skills_match_source: skillsMatchSource,
+  missing_installed_skills: sourceSkillNames.filter((name) => !installedSkillNames.includes(name)),
+  extra_installed_skills: installedSkillNames.filter((name) => !sourceSkillNames.includes(name)),
+  commands,
+};
+
+const outputIndex = process.argv.indexOf('--output');
+if (outputIndex !== -1) {
+  const outputPath = process.argv[outputIndex + 1];
+  if (!outputPath) {
+    process.stderr.write('--output requires a path\n');
+    process.exitCode = 2;
+  } else {
+    writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+  }
+} else {
+  process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+}
+
+if (!keepTemp) {
+  rmSync(tempRoot, { recursive: true, force: true });
+}
+
+if (evidence.status !== 'pass') {
+  process.exitCode = 1;
+}

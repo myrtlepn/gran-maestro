@@ -15,5 +15,22 @@
     "claude-code"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "interface": {
+    "displayName": "Gran Maestro",
+    "shortDescription": "Plan-first AI orchestration for multi-agent development.",
+    "longDescription": "Gran Maestro coordinates planning, implementation, review, recovery, and acceptance workflows. In Codex it exposes MST skills and uses queue-driven runtime supervision instead of Claude Code hooks.",
+    "developerName": "myrtlepn",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills",
+      "Automation",
+      "Code"
+    ],
+    "defaultPrompt": [
+      "/mst:plan improve the login flow",
+      "/mst:request fix the dashboard error",
+      "/mst:list"
+    ],
+    "brandColor": "#2563EB"
+  }
 }

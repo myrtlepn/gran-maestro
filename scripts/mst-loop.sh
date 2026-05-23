@@ -13,14 +13,21 @@ set -euo pipefail
 MAX_ITERATIONS=100
 SLEEP_SECONDS=3
 DRY_RUN=0
+HOST="${MST_HOST:-headless}"
+EXECUTE=0
+RUNNER="${MST_SUPERVISOR_RUNNER:-}"
 
 usage() {
     cat <<'EOF'
-Usage: mst-loop.sh [--max-iterations N] [--sleep S] [--dry-run] [--help]
+Usage: mst-loop.sh [--max-iterations N] [--sleep S] [--host HOST] [--execute] [--runner CMD] [--dry-run] [--help]
 
 Options:
   --max-iterations N   Maximum loop iterations (default: 100)
   --sleep S            Seconds to sleep between iterations (default: 3)
+  --host HOST          Supervisor host for queue drain: headless, codex, claude
+                       (default: ${MST_HOST:-headless})
+  --execute            Execute queued work through the supervisor runner
+  --runner CMD         Supervisor runner command (default: $MST_SUPERVISOR_RUNNER)
   --dry-run            Print actions without calling the headless runner
   --help, -h           Show this help
 
@@ -53,6 +60,14 @@ while [[ $# -gt 0 ]]; do
         --sleep)
             if [[ $# -lt 2 ]]; then echo "error: --sleep needs a value" >&2; exit 1; fi
             SLEEP_SECONDS="$2"; shift 2 ;;
+        --host)
+            if [[ $# -lt 2 ]]; then echo "error: --host needs a value" >&2; exit 1; fi
+            HOST="$2"; shift 2 ;;
+        --execute)
+            EXECUTE=1; shift ;;
+        --runner)
+            if [[ $# -lt 2 ]]; then echo "error: --runner needs a value" >&2; exit 1; fi
+            RUNNER="$2"; shift 2 ;;
         --dry-run)
             DRY_RUN=1; shift ;;
         --help|-h)
@@ -121,7 +136,7 @@ trap on_mstloop_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "[mst-loop] starting (max=$MAX_ITERATIONS, sleep=${SLEEP_SECONDS}s, dry_run=$DRY_RUN)"
+echo "[mst-loop] starting (max=$MAX_ITERATIONS, sleep=${SLEEP_SECONDS}s, dry_run=$DRY_RUN, host=$HOST, execute=$EXECUTE)"
 
 for ((i=1; i<=MAX_ITERATIONS; i++)); do
     # queue count check — exit early if nothing to do
@@ -133,10 +148,21 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
 
     echo "[mst-loop] iteration $i/$MAX_ITERATIONS — queued=$COUNT"
 
+    DRAIN_ARGS=(queue drain-headless --host "$HOST")
+    if [[ "$EXECUTE" == "1" ]]; then
+        DRAIN_ARGS+=(--execute)
+    fi
+    if [[ -n "$RUNNER" ]]; then
+        DRAIN_ARGS+=(--runner "$RUNNER")
+    fi
+    DRAIN_ARGS+=(--json)
+
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[mst-loop] would run: python3 $MST_PY queue drain-headless --json"
+        printf '[mst-loop] would run: python3 %s' "$MST_PY"
+        printf ' %q' "${DRAIN_ARGS[@]}"
+        printf '\n'
     else
-        if ! python3 "$MST_PY" queue drain-headless --json; then
+        if ! python3 "$MST_PY" "${DRAIN_ARGS[@]}"; then
             echo "[mst-loop] headless runner failed at iteration $i — exiting" >&2
             exit 1
         fi

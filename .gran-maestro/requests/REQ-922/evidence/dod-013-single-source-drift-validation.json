@@ -224,6 +224,11 @@
       "repository_local_only": true
     },
     {
+      "command": "node scripts/codex-plugin-git-source-readiness.mjs",
+      "scope": "git-source-publish-readiness",
+      "repository_local_only": true
+    },
+    {
       "command": "npm test",
       "scope": "full-smoke",
       "repository_local_only": true
