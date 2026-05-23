@@ -374,3 +374,94 @@ def test_missing_canonical_identity_does_not_create_ppid_workflow_state(tmp_path
     assert payload["mutation_performed"] is False
     assert not _state_path(tmp_path).exists()
     assert not list((tmp_path / ".gran-maestro" / "tmp").glob("mst-state-*.json"))
+
+
+def test_root_mst_id_generates_canonical_workflow_session_for_top_level_plan(tmp_path):
+    _prepare_workspace(tmp_path)
+    root_mst_id = "PLN-893"
+
+    result = _run(
+        tmp_path,
+        "--active",
+        "true",
+        "--skill",
+        "mst:plan",
+        "--next-skill",
+        "mst:request",
+        "--next-source",
+        root_mst_id,
+        "--source-skill",
+        "mst:plan",
+        "--auto",
+        "true",
+        "--root-mst-id",
+        root_mst_id,
+        session_id=None,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    session_id = payload["mst_session_id"]
+    assert session_id.startswith("MST-PLN-893-")
+    assert payload["root_mst_id"] == root_mst_id
+    assert payload["workflow_active"] is True
+    assert payload["next_action"]["expected_skill"] == "mst:request"
+    assert payload["session_creation"]["created_new_session"] is True
+    assert payload["session_creation"]["root_artifact_created"] is True
+    assert payload["session_creation"]["root_mst_id"] == root_mst_id
+    assert _state_path(tmp_path, session_id=session_id).exists()
+    assert (tmp_path / ".gran-maestro" / "plans" / root_mst_id / "plan.json").exists()
+    assert (tmp_path / ".gran-maestro" / "sessions" / session_id / "session.json").exists()
+    assert not (tmp_path / ".gran-maestro" / "tmp" / f"mst-state-{PPID}.json").exists()
+
+
+def test_root_mst_id_merges_session_metadata_into_existing_plan_artifact(tmp_path):
+    _prepare_workspace(tmp_path)
+    root_mst_id = "PLN-894"
+    plan_path = tmp_path / ".gran-maestro" / "plans" / root_mst_id / "plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "id": root_mst_id,
+                "title": "기존 plan 본문",
+                "status": "active",
+                "linked_requests": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run(
+        tmp_path,
+        "--active",
+        "true",
+        "--skill",
+        "mst:plan",
+        "--next-skill",
+        "mst:request",
+        "--next-source",
+        root_mst_id,
+        "--source-skill",
+        "mst:plan",
+        "--auto",
+        "true",
+        "--root-mst-id",
+        root_mst_id,
+        session_id=None,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    session_id = payload["mst_session_id"]
+    plan_payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert plan_payload["title"] == "기존 plan 본문"
+    assert plan_payload["mst_session_id"] == session_id
+    assert plan_payload["root_mst_id"] == root_mst_id
+    assert payload["session_creation"]["created_new_session"] is True
+    assert payload["session_creation"]["root_artifact_created"] is False
+    assert _state_path(tmp_path, session_id=session_id).exists()
+    assert (tmp_path / ".gran-maestro" / "sessions" / session_id / "session.json").exists()

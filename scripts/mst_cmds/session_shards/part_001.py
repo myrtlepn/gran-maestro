@@ -328,6 +328,14 @@ def validate_mst_session_metadata_consistency(
     if isinstance(session_payload, dict):
         _validate_metadata_payload(parsed, session_payload, source="session")
     return parsed
+def _session_metadata_payload(base: Path, root_path: Path, parsed: StructuredMstSessionId) -> dict:
+    return {
+        **mst_session_metadata(parsed),
+        "root_artifact_path": str(root_path.relative_to(base)),
+        "schema_version": 1,
+    }
+
+
 def create_root_session_artifacts(
     base_dir: Path,
     root_mst_id: str,
@@ -356,11 +364,7 @@ def create_root_session_artifacts(
     root_data = dict(root_payload or {})
     root_data.setdefault("id", root)
     root_data.update(metadata)
-    session_data = {
-        **metadata,
-        "root_artifact_path": str(root_path.relative_to(base)),
-        "schema_version": 1,
-    }
+    session_data = _session_metadata_payload(base, root_path, parsed)
 
     created_paths: list[Path] = []
 
@@ -400,6 +404,94 @@ def create_root_session_artifacts(
         "root_mst_id": parsed.root_mst_id,
         "root_artifact_path": root_path,
         "session_metadata_path": session_path,
+        **metadata,
+    }
+
+
+def ensure_root_session_artifacts(
+    base_dir: Path,
+    root_mst_id: str,
+    *,
+    root_payload: dict | None = None,
+    started_at: datetime | None = None,
+    random_segment: str | None = None,
+) -> dict:
+    root = validate_root_mst_id(root_mst_id)
+    base = Path(base_dir)
+    root_path = root_artifact_metadata_path(base, root)
+    root_data = load_json_object(root_path)
+    if root_data is None:
+        created = create_root_session_artifacts(
+            base,
+            root,
+            root_payload=root_payload,
+            started_at=started_at,
+            random_segment=random_segment,
+        )
+        created["created_new_session"] = True
+        created["root_artifact_created"] = True
+        return created
+
+    existing_session_id = root_data.get("mst_session_id")
+    if isinstance(existing_session_id, str) and existing_session_id.strip():
+        parsed = validate_mst_session_id(existing_session_id.strip(), expected_root_mst_id=root)
+        session_path = session_metadata_path(base, parsed.mst_session_id)
+        if not session_path.exists():
+            _atomic_write_json(session_path, _session_metadata_payload(base, root_path, parsed))
+        validate_mst_session_metadata_consistency(
+            base,
+            parsed.mst_session_id,
+            require_root_metadata=True,
+            require_session_metadata=True,
+        )
+        return {
+            "mst_session_id": parsed.mst_session_id,
+            "root_mst_id": parsed.root_mst_id,
+            "root_artifact_path": root_path,
+            "session_metadata_path": session_path,
+            "created_new_session": False,
+            "root_artifact_created": False,
+            **mst_session_metadata(parsed),
+        }
+
+    mst_session_id = generate_mst_session_id(root, started_at=started_at, random_segment=random_segment)
+    parsed = validate_mst_session_id(mst_session_id, expected_root_mst_id=root, expected_started_at=started_at)
+    metadata = mst_session_metadata(parsed)
+    session_path = session_metadata_path(base, parsed.mst_session_id)
+    if session_path.exists():
+        raise RootSessionCreateError(f"session metadata already exists: {session_path}")
+
+    original_root_data = dict(root_data)
+    updated_root_data = dict(root_data)
+    updated_root_data.setdefault("id", root)
+    updated_root_data.update(metadata)
+    try:
+        _atomic_write_json(root_path, updated_root_data)
+        _atomic_write_json(session_path, _session_metadata_payload(base, root_path, parsed))
+        validate_mst_session_metadata_consistency(
+            base,
+            parsed.mst_session_id,
+            require_root_metadata=True,
+            require_session_metadata=True,
+        )
+    except Exception as exc:
+        _atomic_write_json(root_path, original_root_data)
+        try:
+            session_path.unlink()
+        except FileNotFoundError:
+            pass
+        _cleanup_empty_dirs(session_path.parent, base)
+        if isinstance(exc, RootSessionCreateError):
+            raise
+        raise RootSessionCreateError(str(exc)) from exc
+
+    return {
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "root_artifact_path": root_path,
+        "session_metadata_path": session_path,
+        "created_new_session": True,
+        "root_artifact_created": False,
         **metadata,
     }
 SESSION_WORKTREE_OUTCOME_KEY = "session_worktree_outcome"

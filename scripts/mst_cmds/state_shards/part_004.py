@@ -275,6 +275,7 @@ def register(subparsers):
     state_set_workflow.add_argument("--enqueue", type=_parse_bool_arg, default=False)
     state_set_workflow.add_argument("--agile-loop-active", dest="agile_loop_active", type=_parse_bool_arg)
     state_set_workflow.add_argument("--steering-disabled", dest="steering_disabled", type=_parse_bool_arg)
+    state_set_workflow.add_argument("--root-mst-id", dest="root_mst_id", default="")
 
     state_sub.add_parser("get")
     state_sub.add_parser("clear")

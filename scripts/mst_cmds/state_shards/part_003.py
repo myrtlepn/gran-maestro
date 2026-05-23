@@ -639,15 +639,66 @@ def migrate(args: argparse.Namespace) -> int:
     if args.verify:
         return _run_verify(base_dir)
     return _run_migrate_default(base_dir)
+def _ensure_workflow_session_id(args) -> tuple[str, dict | None]:
+    root_mst_id = str(getattr(args, "root_mst_id", "") or "").strip()
+    try:
+        return _common.require_mst_session_id_for_mutation("workflow state write"), None
+    except ValueError as exc:
+        if not root_mst_id or not _common.is_missing_canonical_session_error(exc):
+            raise
+
+    from scripts.mst_cmds import session as session_mod
+
+    created = session_mod.ensure_root_session_artifacts(
+        _common.BASE_DIR,
+        root_mst_id,
+        root_payload={"id": root_mst_id, "status": "active"},
+    )
+    session_id = str(created["mst_session_id"])
+    os.environ["MST_SESSION_ID"] = session_id
+    os.environ.setdefault(
+        "MST_CONTEXT_JSON",
+        json.dumps(_common.canonical_state_payload_fields(session_id), ensure_ascii=False, separators=(",", ":")),
+    )
+    return session_id, {
+        "created_new_session": bool(created.get("created_new_session", True)),
+        "root_artifact_created": bool(created.get("root_artifact_created", True)),
+        "root_mst_id": root_mst_id,
+        "session_metadata_path": str(created["session_metadata_path"]),
+        "root_artifact_path": str(created["root_artifact_path"]),
+    }
+
+
 def cmd_state_set_workflow(args):
     state_base_dir = _skill_state_base_dir()
     now = _workflow_state_timestamp()
 
     try:
         try:
-            session_id = _common.require_mst_session_id_for_mutation("workflow state write")
+            session_id, session_creation = _ensure_workflow_session_id(args)
         except ValueError as exc:
             if _common.is_session_identity_non_success_error(exc):
+                if not bool(getattr(args, "active", False)):
+                    print(json.dumps({
+                        "status": "partial",
+                        "code": "inactive_workflow_without_canonical_state",
+                        "message": str(exc),
+                        "mutation_performed": False,
+                        "workflow_state_written": False,
+                        "created_new_session": False,
+                    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+                    return 0
+                owner_injected = _inject_owner_metadata_if_missing(args)
+                if owner_injected:
+                    print(json.dumps({
+                        "status": "partial",
+                        "code": "owner_metadata_injected_without_workflow_state",
+                        "message": str(exc),
+                        "mutation_performed": True,
+                        "workflow_state_written": False,
+                        "created_new_session": False,
+                    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+                    return 0
                 return _common.emit_session_identity_non_success(
                     "workflow state write",
                     error=exc,
@@ -739,6 +790,10 @@ def cmd_state_set_workflow(args):
 
         payload["next_action"] = next_action
         payload.update(_common.canonical_state_payload_fields(session_id))
+        if session_creation:
+            payload["session_creation"] = session_creation
+        else:
+            payload.pop("session_creation", None)
         diagnostics = _common.legacy_session_diagnostics()
         if diagnostics:
             payload["legacy_diagnostics"] = diagnostics

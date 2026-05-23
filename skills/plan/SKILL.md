@@ -195,15 +195,6 @@ Parent session inheritance contract: child invocation, subprocess, and hook exec
 1. `{PROJECT_ROOT}/.gran-maestro/plans/` 디렉토리 확인, 없으면 생성
 2. PLN 번호 채번: **스크립트 우선** `python3 {PLUGIN_ROOT}/scripts/mst.py counter next --type pln` → PLN-NNN ID 사용. **Fallback**: `plans/PLN-*/plan.json` 스캔 → 최대 번호 `+1` (최초: `001`)
 3. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/` 디렉토리 생성
-3.5. `AUTO_MODE=true`이면 워크플로우 state를 즉시 기록한다 (non-blocking):
-
-   ```bash
-   python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
-     --active true --skill mst:plan --req "" --next-skill mst:request \
-     --next-source PLN-NNN --source-skill mst:plan --auto true \
-   || echo "[mst:plan] warning: failed to update workflow state" >&2
-   ```
-
 4. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/plan.json` 먼저 작성:
 
    > ⏱️ **타임스탬프 취득 (MANDATORY)**:
@@ -219,6 +210,16 @@ Parent session inheritance contract: child invocation, subprocess, and hook exec
      "created_at": "{TS — mst.py timestamp now 출력값}",
      "linked_requests": []
    }
+   ```
+
+4.5. `AUTO_MODE=true`이면 워크플로우 state를 즉시 기록한다 (non-blocking). 이 호출은 방금 작성한 `plan.json`에 canonical session metadata를 병합한다:
+
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
+     --active true --skill mst:plan --req "" --next-skill mst:request \
+     --next-source PLN-NNN --source-skill mst:plan --auto true \
+     --root-mst-id PLN-NNN \
+   || echo "[mst:plan] warning: failed to update workflow state" >&2
    ```
 
 5. `AUTO_MODE=true`이면 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/auto-decisions.md`를 즉시 초기화:
