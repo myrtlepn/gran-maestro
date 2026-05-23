@@ -4788,7 +4788,7 @@ function buildDod012NoGoBoundary() {
     criteria: [
       { criterion_id: 'user_home_mutation', status: 'pass', boundary: 'No user-home files or directories are modified.' },
       { criterion_id: 'codex_config_toml_mutation', status: 'pass', boundary: '~/.codex/config.toml remains user-owned and untouched.' },
-      { criterion_id: 'external_codex_install_cache_reload', status: 'pass', boundary: 'No user-owned Codex install, cache refresh, or reload is executed by validation; Codex install smoke uses a temporary CODEX_HOME only.' },
+      { criterion_id: 'external_plugin_install_cache_reload', status: 'pass', boundary: 'No user-owned Claude/Codex install, cache refresh, or reload is executed by validation; install smoke commands use temporary homes only.' },
       { criterion_id: 'symlink_creation', status: 'pass', boundary: 'Validation creates no symlinks.' },
       { criterion_id: 'plugin_cache_mutation', status: 'pass', boundary: 'Validation does not mutate plugin cache directories.' },
       { criterion_id: 'claude_hooks_direct_edit', status: 'pass', boundary: 'Validation does not directly edit .claude/hooks.' },
@@ -4812,6 +4812,11 @@ function buildDod012ValidationCommands() {
     {
       command: 'node scripts/codex-plugin-local-install-smoke.mjs',
       scope: 'temporary-codex-home-install-smoke',
+      repository_local_only: true,
+    },
+    {
+      command: 'node scripts/claude-plugin-local-install-smoke.mjs',
+      scope: 'temporary-claude-home-install-smoke',
       repository_local_only: true,
     },
     {

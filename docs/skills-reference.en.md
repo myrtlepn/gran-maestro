@@ -2,8 +2,17 @@
 
 # Gran Maestro Skill Reference
 
-This is the full reference for 27 skills provided by the Gran Maestro plugin.
+This is the full reference for 41 skills provided by the Gran Maestro plugin.
 Each skill is invoked with the `/mst:{name}` form.
+
+---
+
+## Codex plugin skill invocation boundary
+
+Claude Code and Codex install the same `skills/` source. Claude Code provides the `/mst:{name}` slash-command UX plus hooks and agents; Codex loads the same skill catalog as a hookless plugin surface and uses the same workflow documentation. Runtime load, update, and removal remain explicit user-owned Claude/Codex environment actions.
+
+- Validation commands: `node scripts/claude-plugin-local-install-smoke.mjs`, `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs <output>`, and `npm test`.
+- Forbidden boundary: validation does not mutate `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
 
 ---
 

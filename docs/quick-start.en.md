@@ -71,27 +71,31 @@ You can also open the `/plugin` UI and install directly from the **Discover** ta
 /plugin uninstall mst@gran-maestro
 ```
 
-### Codex plugin migration install, update, uninstall, and validation
+### Claude/Codex plugin install, update, uninstall, and validation
 
-Claude Code plugin installation is the canonical path. Codex plugin migration artifacts are repository-local parity validation targets, and real Codex user environments are managed explicitly by the user.
+Claude Code and Codex use the same git repository as the marketplace source. Claude Code registers skills, agents, and hooks; Codex registers the same skill source as a hookless plugin surface for the same plan → request → approve → review → accept workflow. Real user environments are managed explicitly through each CLI.
 
-1. **Prepare**: review repository-local artifacts such as `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, and `hooks/hooks.json`.
-2. **Install**: load the git source directly through Codex CLI.
+1. **Prepare**: review repository-local artifacts such as `.claude-plugin/`, `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, and `hooks/hooks.json`.
+2. **Install**: load the same git source in Claude Code and Codex CLI.
    ```bash
+   /plugin marketplace add myrtlepn/gran-maestro
+   /plugin install mst@gran-maestro
+
    codex plugin marketplace add myrtlepn/gran-maestro
    codex plugin add mst@gran-maestro
    ```
-   Gran Maestro validation does not automatically run install, cache refresh, or reload commands against the user's Codex environment.
+   Gran Maestro validation does not automatically run install, cache refresh, or reload commands against the user's Claude/Codex environment.
 3. **Update**: before release, run `npm test` and the DOD-012 generator below, then update the user environment separately.
-4. **Uninstall**: remove user-owned Codex plugin registrations and caches manually. Repository validation does not automatically execute uninstall or cache deletion commands.
+4. **Uninstall**: remove user-owned plugin registrations and caches manually. Repository validation does not automatically execute uninstall or cache deletion commands.
 5. **Validate**:
    ```bash
+   node scripts/claude-plugin-local-install-smoke.mjs
    node scripts/codex-plugin-local-install-smoke.mjs
    node scripts/codex-plugin-git-source-readiness.mjs
    node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
    npm test
    ```
-   After publishing the git source, validate the same install path with `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`.
+   After publishing the git source, validate the same install path with `node scripts/claude-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro` and `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`.
 
 ## Stitch MCP setup (optional)
 

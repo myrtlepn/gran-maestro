@@ -50,6 +50,8 @@ codex plugin marketplace add myrtlepn/gran-maestro
 codex plugin add mst@gran-maestro
 ```
 
+After installation, both runtimes use the same MST skill source. Claude Code registers hooks and agents as well; Codex exposes the hookless skill surface and uses queue-driven supervision for the same plan → request → approve → review → accept workflow.
+
 ```
 # 1. Expand multiple requests as plans
 /mst:plan Improve login screen
@@ -67,12 +69,12 @@ Detailed installation guide: [docs/quick-start.en.md](docs/quick-start.en.md)
 
 ### Codex plugin migration boundary
 
-Gran Maestro's canonical distribution path is the Claude Code plugin. Codex plugin assets are validated as repository-local generated migration artifacts. For Codex, this repository can be registered directly as the marketplace source: root `marketplace.json` and `.agents/plugins/marketplace.json` point the `mst` plugin at `./plugins/mst`, which exposes the repository root `.codex-plugin/plugin.json` and skills. If you need to install, update, or remove it in a real Codex environment, run the Codex/user-owned plugin workflow explicitly; DOD-012 validation never mutates `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
+Gran Maestro uses the same git repository as the marketplace source for Claude Code and Codex. Claude Code registers skills, agents, and hooks through `.claude-plugin/plugin.json`; Codex uses the root `marketplace.json` and `.agents/plugins/marketplace.json` `./plugins/mst` projection to expose the repository root `.codex-plugin/plugin.json`, skills, scripts, and templates. If you need to install, update, or remove it in a real user environment, run the relevant CLI/user-owned plugin workflow explicitly; validation commands never mutate `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin caches, symlinks, or `.claude/hooks`.
 
-- Install: load the git source directly with `codex plugin marketplace add myrtlepn/gran-maestro`, then run `codex plugin add mst@gran-maestro`.
+- Install: in Claude Code, run `/plugin marketplace add myrtlepn/gran-maestro` then `/plugin install mst@gran-maestro`; in Codex, load the same git source with `codex plugin marketplace add myrtlepn/gran-maestro`, then run `codex plugin add mst@gran-maestro`.
 - Update: run `npm test` and the DOD-012 evidence generator before updating the user environment separately.
 - Uninstall: remove user-owned Codex plugin registrations/caches manually. Gran Maestro validation does not execute uninstall commands.
-- Validate: use repository-local commands and a temporary `CODEX_HOME`, such as `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json`, and `npm test`. After publishing the git source, run the same path with `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`.
+- Validate: use repository-local commands and temporary homes, such as `node scripts/claude-plugin-local-install-smoke.mjs`, `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json`, and `npm test`. After publishing the git source, validate the same path with `node scripts/claude-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro` and `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`.
 - Single-source maintenance: after DOD-013, Codex migration validation requires zero Codex-only forks and zero generated drift. `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, and package/version files remain the canonical source, while `node scripts/codex-plugin-git-source-readiness.mjs`, `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json`, and the 5-file version sync gate validate `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, root `marketplace.json`, and the `plugins/mst` projection as repository-local assets.
 
 ## What's New

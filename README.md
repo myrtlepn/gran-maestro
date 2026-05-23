@@ -50,6 +50,8 @@ codex plugin marketplace add myrtlepn/gran-maestro
 codex plugin add mst@gran-maestro
 ```
 
+설치 후 두 런타임은 같은 MST skill source를 사용합니다. Claude Code는 hooks/agents까지 등록하고, Codex는 hookless skill surface와 queue-driven supervision으로 같은 plan → request → approve → review → accept 흐름을 제공합니다.
+
 ```
 # 1. plan으로 상세화 → request로 스펙 생성
 /mst:plan 로그인 화면 개선        # → PLN-001
@@ -67,12 +69,12 @@ codex plugin add mst@gran-maestro
 
 ### Codex plugin migration boundary
 
-Gran Maestro는 Claude Code plugin이 canonical 배포 경로이며, Codex plugin 산출물은 migration parity를 위한 repository-local generated asset으로 검증합니다. Codex에서는 이 repository를 그대로 marketplace source로 등록할 수 있도록 root `marketplace.json`과 `.agents/plugins/marketplace.json`가 `mst` plugin을 `./plugins/mst`로 가리키고, 해당 경로는 repo root의 `.codex-plugin/plugin.json`와 skills를 그대로 노출합니다. 사용자 환경에 설치·업데이트·삭제가 필요한 경우에는 Codex CLI 또는 사용자 소유 plugin manager에서 명시적으로 실행해야 하며, DOD-012 검증은 실제 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`를 수정하지 않습니다.
+Gran Maestro는 Claude Code와 Codex에서 같은 git 저장소를 marketplace source로 사용합니다. Claude Code는 `.claude-plugin/plugin.json`으로 skills/agents/hooks를 등록하고, Codex는 root `marketplace.json`과 `.agents/plugins/marketplace.json`의 `./plugins/mst` projection을 통해 repo root의 `.codex-plugin/plugin.json`, skills, scripts, templates를 그대로 노출합니다. 사용자 환경에 설치·업데이트·삭제가 필요한 경우에는 각 CLI 또는 사용자 소유 plugin manager에서 명시적으로 실행해야 하며, 검증 명령은 실제 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`를 수정하지 않습니다.
 
-- 설치: `codex plugin marketplace add myrtlepn/gran-maestro` 후 `codex plugin add mst@gran-maestro`로 git source를 그대로 로드합니다.
+- 설치: Claude Code는 `/plugin marketplace add myrtlepn/gran-maestro` 후 `/plugin install mst@gran-maestro`, Codex는 `codex plugin marketplace add myrtlepn/gran-maestro` 후 `codex plugin add mst@gran-maestro`로 같은 git source를 로드합니다.
 - 업데이트: 릴리스 전 `npm test`와 DOD-012 evidence로 docs/release coverage를 확인한 다음 사용자 환경에서 별도 업데이트합니다.
 - 삭제: 사용자 소유 Codex plugin 등록과 캐시를 사용자가 직접 제거합니다. Gran Maestro 검증은 삭제 명령을 자동 실행하지 않습니다.
-- 검증: `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json`, `npm test`처럼 repository-local fixture/evidence와 임시 `CODEX_HOME`만 사용합니다. git source publish 이후에는 `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`로 같은 경로를 검증합니다.
+- 검증: `node scripts/claude-plugin-local-install-smoke.mjs`, `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json`, `npm test`처럼 repository-local fixture/evidence와 임시 홈만 사용합니다. git source publish 이후에는 `node scripts/claude-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`와 `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`로 같은 경로를 검증합니다.
 - 단일 source 유지: DOD-013 이후 Codex migration 검증은 Codex-only fork 0개와 generated drift 0건을 요구하며, `.claude-plugin/plugin.json`, `skills/`, `agents/`, `hooks/`, `templates/defaults/`, package/version files를 canonical source로 유지합니다. `node scripts/codex-plugin-git-source-readiness.mjs`, `node scripts/generate-dod-013-single-source-drift-validation.mjs /tmp/dod-013-single-source-drift-validation-check.json`, 5-file version sync gate로 `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, root `marketplace.json`, `plugins/mst` projection을 repository-local로 확인합니다.
 
 ## What's New

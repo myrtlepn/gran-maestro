@@ -178,6 +178,11 @@
       "repository_local_only": true
     },
     {
+      "command": "node scripts/claude-plugin-local-install-smoke.mjs",
+      "scope": "temporary-claude-home-install-smoke",
+      "repository_local_only": true
+    },
+    {
       "command": "npm test",
       "scope": "full-smoke",
       "repository_local_only": true
@@ -227,9 +232,9 @@
         "boundary": "~/.codex/config.toml remains user-owned and untouched."
       },
       {
-        "criterion_id": "external_codex_install_cache_reload",
+        "criterion_id": "external_plugin_install_cache_reload",
         "status": "pass",
-        "boundary": "No user-owned Codex install, cache refresh, or reload is executed by validation; Codex install smoke uses a temporary CODEX_HOME only."
+        "boundary": "No user-owned Claude/Codex install, cache refresh, or reload is executed by validation; install smoke commands use temporary homes only."
       },
       {
         "criterion_id": "symlink_creation",

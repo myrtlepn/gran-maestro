@@ -71,27 +71,31 @@ Claude Code에서 (v1.0.33 이상 필요):
 /plugin uninstall mst@gran-maestro
 ```
 
-### Codex plugin migration 설치·업데이트·삭제·검증
+### Claude/Codex plugin 설치·업데이트·삭제·검증
 
-Claude Code plugin 설치가 canonical 경로입니다. Codex plugin migration 산출물은 repository-local parity 검증 대상이며, 실제 Codex 사용자 환경은 사용자가 명시적으로 관리합니다.
+Claude Code와 Codex는 같은 git 저장소를 marketplace source로 사용합니다. Claude Code는 skills/agents/hooks를 등록하고, Codex는 같은 skill source를 hookless plugin surface로 등록해 동일한 plan → request → approve → review → accept 흐름을 제공합니다. 실제 사용자 환경은 각 CLI에서 명시적으로 관리합니다.
 
-1. **설치 준비**: `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, `hooks/hooks.json` 같은 repository-local 산출물을 검토합니다.
-2. **설치**: Codex CLI에서 git source를 그대로 로드합니다.
+1. **설치 준비**: `.claude-plugin/`, `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, `hooks/hooks.json` 같은 repository-local 산출물을 검토합니다.
+2. **설치**: Claude Code와 Codex CLI에서 같은 git source를 로드합니다.
    ```bash
+   /plugin marketplace add myrtlepn/gran-maestro
+   /plugin install mst@gran-maestro
+
    codex plugin marketplace add myrtlepn/gran-maestro
    codex plugin add mst@gran-maestro
    ```
-   Gran Maestro 검증은 사용자 환경의 Codex install/cache refresh/reload를 자동 실행하지 않습니다.
+   Gran Maestro 검증은 사용자 환경의 Claude/Codex install/cache refresh/reload를 자동 실행하지 않습니다.
 3. **업데이트**: 릴리스 전 `npm test`와 아래 DOD-012 generator를 실행해 docs/release coverage를 확인한 뒤 사용자 환경 업데이트는 별도로 수행합니다.
-4. **삭제**: 사용자 소유 Codex plugin 등록과 캐시를 사용자가 직접 제거합니다. repository validation은 uninstall/cache 삭제 명령을 자동 실행하지 않습니다.
+4. **삭제**: 사용자 소유 plugin 등록과 캐시를 사용자가 직접 제거합니다. repository validation은 uninstall/cache 삭제 명령을 자동 실행하지 않습니다.
 5. **검증**:
    ```bash
+   node scripts/claude-plugin-local-install-smoke.mjs
    node scripts/codex-plugin-local-install-smoke.mjs
    node scripts/codex-plugin-git-source-readiness.mjs
    node scripts/generate-dod-012-docs-release-integration.mjs /tmp/dod-012-docs-release-integration-check.json
    npm test
    ```
-   git source publish 이후에는 `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`로 같은 설치 경로를 검증합니다.
+   git source publish 이후에는 `node scripts/claude-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`와 `node scripts/codex-plugin-local-install-smoke.mjs --source myrtlepn/gran-maestro`로 같은 설치 경로를 검증합니다.
 
 DOD-012 검증 중에는 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`, `objective.md`를 수정하지 않습니다.
 

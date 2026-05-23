@@ -2735,6 +2735,10 @@ test('DOD-012 persisted request evidence keeps validation repository-local and D
     entry.command === 'node scripts/codex-plugin-local-install-smoke.mjs' &&
     entry.scope === 'temporary-codex-home-install-smoke',
   ));
+  assert.ok(evidence.validation_commands.some((entry) =>
+    entry.command === 'node scripts/claude-plugin-local-install-smoke.mjs' &&
+    entry.scope === 'temporary-claude-home-install-smoke',
+  ));
   assert.ok(evidence.validation_commands.every((entry) => !/~\/|\/Users\/|\.claude\/hooks|objective\.md|plugin cache|ln -s/u.test(entry.command)));
   assert.deepEqual(evidence.follow_up_scope.map((entry) => entry.dod_id), ['DOD-013']);
   assert.ok(evidence.follow_up_scope.every((entry) => ['follow_up', 'supporting'].includes(entry.status)));
