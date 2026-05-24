@@ -165,6 +165,18 @@ def test_accept_skill_forbids_project_root_destructive_git_commands() -> None:
     assert violations == []
 
 
+def test_accept_skill_does_not_hardcode_master_base_fallback() -> None:
+    content = _accept_skill_text()
+
+    hardcoded_shell_fallback = "CONFIG_BASE_BRANCH:-" + "master"
+    hardcoded_doc_arrow = "→ `" + "master" + "`"
+    hardcoded_doc_sentence = "fallback: `config.worktree.base_branch` " + hardcoded_doc_arrow
+
+    assert hardcoded_shell_fallback not in content
+    assert hardcoded_doc_arrow not in content
+    assert hardcoded_doc_sentence not in content
+
+
 def test_accept_cleanup_records_worktree_failure_and_continues(tmp_path: Path) -> None:
     result = _run_cleanup_driver(
         tmp_path,

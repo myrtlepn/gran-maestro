@@ -21,8 +21,8 @@ def test_approve_req_branch_name_snapshot_uses_integration_worktree() -> None:
     content = _skill_text("approve")
 
     assert "--role integration" in content
-    assert 'branch-name --req REQ-NNN --base "$DETECTED_BASE" --role integration --agi "${AGI_ID:-}"' in content
-    assert 'branch-name --req REQ-NNN --task T01 --base "$DETECTED_BASE" --agi "${AGI_ID:-}"' in content
+    assert 'branch-name --req REQ-NNN --base "$SESSION_BASE_BRANCH" --role integration --agi "${AGI_ID:-}"' in content
+    assert 'branch-name --req REQ-NNN --task T01 --base "$SESSION_BASE_BRANCH" --agi "${AGI_ID:-}"' in content
     assert "INTEGRATION_WORKTREE" in content
     assert "git checkout -b \"$REQ_BRANCH\"" not in content
     assert "git checkout -b gran-maestro/REQ-NNN" not in content
@@ -47,7 +47,7 @@ def test_accept_squash_merge_snapshot_uses_accept_worktree() -> None:
     assert '--task T --agi "${AGI_ID:-}"' in content
     assert any("worktree create --path \"$ACCEPT_WORKTREE\"" in command for command in commands)
     assert any("git -C \"$ACCEPT_WORKTREE\" merge --squash \"${REQ_BRANCH}\"" == command for command in commands)
-    assert "git -C {PROJECT_ROOT} checkout master" not in content
+    assert ("git -C {PROJECT_ROOT} checkout " + "master") not in content
     assert "git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN" not in content
 
 

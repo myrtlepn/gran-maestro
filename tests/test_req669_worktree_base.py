@@ -178,7 +178,9 @@ def test_rejects_mst_temporary_branches_without_mutating_request(repo: Path, cap
     captured = capsys.readouterr()
 
     assert exit_code != 0
-    assert "gran-maestro" in captured.err or "다른 브랜치로 이동" in captured.err
+    assert "MST 임시 브랜치" in captured.err
+    assert "사용자 기준 브랜치" in captured.err
+    assert "master" not in captured.err
     request_data = json.loads(
         (repo / ".gran-maestro" / "requests" / "REQ-069" / "request.json").read_text(encoding="utf-8")
     )

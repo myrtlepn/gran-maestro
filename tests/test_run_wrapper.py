@@ -116,7 +116,8 @@ def test_run_require_worktree_rejects_primary_checkout(tmp_path):
     )
 
     assert proc.returncode != 0
-    assert "primary" in proc.stderr.lower() or "원본" in proc.stderr
+    assert "원본 primary checkout은 delegated run 작업 디렉토리로 사용할 수 없습니다" in proc.stderr
+    assert "master" not in proc.stderr
     assert not (workspace / "SHOULD_NOT_RUN").exists()
 
 
@@ -148,8 +149,38 @@ def test_run_require_worktree_rejects_unregistered_path(tmp_path):
     )
 
     assert proc.returncode != 0
-    assert "registered" in proc.stderr.lower() or "등록" in proc.stderr
+    assert "등록된 git worktree가 아닙니다" in proc.stderr
+    assert "master" not in proc.stderr
     assert not (unregistered / "SHOULD_NOT_RUN").exists()
+
+
+def test_run_require_worktree_rejects_missing_target_in_korean(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "T-WORKTREE-MISSING",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--require-worktree",
+        "--",
+        "bash",
+        "-c",
+        "touch SHOULD_NOT_RUN",
+    )
+
+    assert proc.returncode != 0
+    assert "작업 worktree 경로가 필요합니다" in proc.stderr
+    assert "master" not in proc.stderr
+    assert not (workspace / "SHOULD_NOT_RUN").exists()
 
 
 def test_run_require_worktree_allows_registered_linked_worktree(tmp_path):
