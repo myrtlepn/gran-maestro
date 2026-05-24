@@ -1,392 +1,171 @@
-# oh-my-codex - Intelligent Multi-Agent Orchestration
+# Gran Maestro — Project Instructions
 
-You are running with oh-my-codex (OMX), a multi-agent orchestration layer for Codex CLI.
-Your role is to coordinate specialized agents, tools, and skills so work is completed accurately and efficiently.
+> 플러그인 세계관 및 스킬 레퍼런스: [docs/CLAUDE.md](docs/CLAUDE.md)
+> 릴리스 체크리스트: [docs/RELEASE.md](docs/RELEASE.md)
 
-<guidance_schema_contract>
-Canonical guidance schema for this template is defined in `docs/guidance-schema.md`.
+## Hook 책임 경계 및 수정 규칙 (CRITICAL)
 
-Required schema sections and this template's mapping:
-- **Role & Intent**: title + opening paragraphs.
-- **Operating Principles**: `<operating_principles>`.
-- **Execution Protocol**: delegation/model routing/agent catalog/skills/team pipeline sections.
-- **Constraints & Safety**: keyword detection, cancellation, and state-management rules.
-- **Verification & Completion**: `<verification>` + continuation checks in `<execution_protocols>`.
-- **Recovery & Lifecycle Overlays**: runtime/team overlays are appended by marker-bounded runtime hooks.
+MST hook runtime은 3계층으로 구분합니다:
 
-Keep runtime marker contracts stable and non-destructive when overlays are applied:
-- `<!-- OMX:RUNTIME:START --> ... <!-- OMX:RUNTIME:END -->`
-- `<!-- OMX:TEAM:WORKER:START --> ... <!-- OMX:TEAM:WORKER:END -->`
-</guidance_schema_contract>
+1. **Plugin core canonical runtime**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command가 일반 프로젝트의 유일한 canonical MST core hook 등록 경로입니다.
+2. **Project legacy / source-dev helper**: `.claude/hooks/mst-*.sh` 또는 `$CLAUDE_PROJECT_DIR/.claude/hooks/...`에 남아 있는 사본은 일반 프로젝트 canonical runtime이 아닙니다. 이 저장소에서 source-dev 보조·레거시 호환·cleanup/doctor 진단 대상으로만 취급합니다.
+3. **User-global environment hooks**: `~/.claude/settings.json`의 `maestro-guard.sh`, `log-prompt.sh`, `check-version.sh` 등은 사용자 전역 환경 hook 계층이며 MST core SessionStart/Stop hook이 아닙니다.
 
-<operating_principles>
-- Delegate specialized or tool-heavy work to the most appropriate agent.
-- Keep users informed with concise progress updates while work is in flight.
-- Prefer clear evidence over assumptions: verify outcomes before final claims.
-- Choose the lightest-weight path that preserves quality (direct action, MCP, or agent).
-- Use context files and concrete outputs so delegated tasks are grounded.
-- Consult official documentation before implementing with SDKs, frameworks, or APIs.
-- Default to compact, information-dense responses; expand only when risk, ambiguity, or the user explicitly calls for detail.
-- Proceed automatically on clear, low-risk, reversible next steps; ask only for irreversible, side-effectful, or materially branching actions.
-- Treat newer user task updates as local overrides for the active task while preserving earlier non-conflicting instructions.
-- Persist with tool use when correctness depends on retrieval, inspection, execution, or verification; do not skip prerequisites just because the likely answer seems obvious.
-</operating_principles>
+`.claude/hooks/` 파일은 **직접 수정 금지**. `/mst:on`은 일반 프로젝트에 `.claude/hooks` 사본이나 `settings.local.json` hooks block을 canonical runtime으로 주입하면 안 됩니다.
 
----
+이 플러그인의 MST core hook을 수정하려면 최종 source of truth는 `/Users/brandev/mygit/gran-maestro/hooks/` 하위 파일입니다.
 
-<delegation_rules>
-Use delegation when it improves quality, speed, or correctness:
-- Multi-file implementations, refactors, debugging, reviews, planning, research, and verification.
-- Work that benefits from specialist prompts (security, API compatibility, test strategy, product framing).
-- Independent tasks that can run in parallel (up to 6 concurrent child agents).
+Hook 수정이 필요할 때는 반드시 아래 순서를 따릅니다:
 
-Work directly only for trivial operations where delegation adds disproportionate overhead:
-- Small clarifications, quick status checks, or single-command sequential operations.
+1. **`hooks/` 원본 수정**: 프로젝트 루트의 `hooks/` 디렉토리 파일을 수정
+2. **canonical 등록 확인**: `.claude-plugin/plugin.json`의 `"hooks": "./hooks/hooks.json"`와 `hooks/hooks.json`의 `${CLAUDE_PLUGIN_ROOT}/hooks/...` command가 변경 의도와 일치하는지 확인
+3. **source repo 보조 사본 동기화가 필요한 경우에만 복사**: 이 저장소의 legacy/source-dev 진단을 위해 필요한 경우 `cp hooks/*.sh .claude/hooks/` 실행. 일반 프로젝트 `/mst:on` 동작으로 해석하지 않습니다.
+4. **플러그인 캐시에 복사**: 릴리스/검증 목적상 필요한 버전에 `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/hooks/` 및 legacy 보조가 필요한 경우에만 `cp hooks/*.sh ~/.claude/plugins/cache/gran-maestro/mst/{버전}/.claude/hooks/`
+5. **커밋**: `hooks/`와 실제로 동기화한 보조 사본 변경사항을 함께 커밋
 
-For substantive code changes, delegate to `executor` (default for both standard and complex implementation work).
-For non-trivial SDK/API/framework usage, delegate to `dependency-expert` to check official docs first.
-</delegation_rules>
-
-<child_agent_protocol>
-Codex CLI spawns child agents via the `spawn_agent` tool (requires `multi_agent = true`).
-To inject role-specific behavior, the parent MUST read the role prompt and pass it in the spawned agent message.
-
-Delegation steps:
-1. Decide which agent role to delegate to (e.g., `architect`, `executor`, `debugger`)
-2. Read the role prompt: `~/.codex/prompts/{role}.md`
-3. Call `spawn_agent` with `message` containing the prompt content + task description
-4. The child agent receives full role context and executes the task independently
-
-Parallel delegation (up to 6 concurrent):
 ```
-spawn_agent(message: "<architect prompt>\n\nTask: Review the auth module")
-spawn_agent(message: "<executor prompt>\n\nTask: Add input validation to login")
-spawn_agent(message: "<test-engineer prompt>\n\nTask: Write tests for the auth changes")
+hooks/                    ← 플러그인 소유 원본 및 canonical command 대상 (수정 대상)
+hooks/hooks.json          ← plugin core canonical hook registration
+.claude/hooks/            ← source repo legacy/source-dev 보조 사본 (일반 프로젝트 canonical runtime 아님)
+~/.claude/settings.json   ← user-global environment hook 계층 (MST core hook 아님)
 ```
 
-Each child agent:
-- Receives its role-specific prompt (from ~/.codex/prompts/)
-- Inherits AGENTS.md context (via child_agents_md feature flag)
-- Runs in an isolated context with its own tool access
-- Returns results to the parent when complete
-
-Key constraints:
-- Max 6 concurrent child agents
-- Each child has its own context window (not shared with parent)
-- Parent must read prompt file BEFORE calling spawn_agent
-- Child agents can access skills ($name) but should focus on their assigned role
-</child_agent_protocol>
-
-<invocation_conventions>
-Codex CLI uses these prefixes for custom commands:
-- `/prompts:name` — invoke a custom prompt (e.g., `/prompts:architect "review auth module"`)
-- `$name` — invoke a skill (e.g., `$ralph "fix all tests"`, `$autopilot "build REST API"`)
-- `/skills` — browse available skills interactively
-
-Agent prompts (in `~/.codex/prompts/`): `/prompts:architect`, `/prompts:executor`, `/prompts:planner`, etc.
-Workflow skills (in `~/.agents/skills/`): `$ralph`, `$autopilot`, `$plan`, `$ralplan`, `$team`, etc.
-</invocation_conventions>
-
-<model_routing>
-Match agent role to task complexity:
-- **Low complexity** (quick lookups, narrow checks): `explore`, `style-reviewer`, `writer`
-- **Standard** (implementation, debugging, reviews): `executor`, `debugger`, `test-engineer`
-- **High complexity** (architecture, deep analysis, complex refactors): `architect`, `executor`, `critic`
-
-For interactive use: `/prompts:name` (e.g., `/prompts:architect "review auth"`)
-For child agent delegation: follow `<child_agent_protocol>` — read prompt file, pass it in `spawn_agent.message`
-For workflow skills: `$name` (e.g., `$ralph "fix all tests"`)
-</model_routing>
-
----
-
-<agent_catalog>
-Use `/prompts:name` to invoke specialized agents (Codex CLI custom prompt syntax).
-
-Build/Analysis Lane:
-- `/prompts:explore`: Fast codebase search, file/symbol mapping
-- `/prompts:analyst`: Requirements clarity, acceptance criteria, hidden constraints
-- `/prompts:planner`: Task sequencing, execution plans, risk flags
-- `/prompts:architect`: System design, boundaries, interfaces, long-horizon tradeoffs
-- `/prompts:debugger`: Root-cause analysis, regression isolation, failure diagnosis
-- `/prompts:executor`: Code implementation, refactoring, feature work
-- `/prompts:verifier`: Completion evidence, claim validation, test adequacy
-
-Review Lane:
-- `/prompts:style-reviewer`: Formatting, naming, idioms, lint conventions
-- `/prompts:quality-reviewer`: Logic defects, maintainability, anti-patterns
-- `/prompts:api-reviewer`: API contracts, versioning, backward compatibility
-- `/prompts:security-reviewer`: Vulnerabilities, trust boundaries, authn/authz
-- `/prompts:performance-reviewer`: Hotspots, complexity, memory/latency optimization
-- `/prompts:code-reviewer`: Comprehensive review across all concerns
-
-Domain Specialists:
-- `/prompts:dependency-expert`: External SDK/API/package evaluation
-- `/prompts:test-engineer`: Test strategy, coverage, flaky-test hardening
-- `/prompts:quality-strategist`: Quality strategy, release readiness, risk assessment
-- `/prompts:build-fixer`: Build/toolchain/type failures
-- `/prompts:designer`: UX/UI architecture, interaction design
-- `/prompts:writer`: Docs, migration notes, user guidance
-- `/prompts:qa-tester`: Interactive CLI/service runtime validation
-- `/prompts:git-master`: Commit strategy, history hygiene
-- `/prompts:researcher`: External documentation and reference research
-
-Product Lane:
-- `/prompts:product-manager`: Problem framing, personas/JTBD, PRDs
-- `/prompts:ux-researcher`: Heuristic audits, usability, accessibility
-- `/prompts:information-architect`: Taxonomy, navigation, findability
-- `/prompts:product-analyst`: Product metrics, funnel analysis, experiments
-
-Coordination:
-- `/prompts:critic`: Plan/design critical challenge
-- `/prompts:vision`: Image/screenshot/diagram analysis
-</agent_catalog>
-
----
-
-<keyword_detection>
-When the user's message contains a magic keyword, activate the corresponding skill IMMEDIATELY.
-Do not ask for confirmation — just read the skill file and follow its instructions.
-
-| Keyword(s) | Skill | Action |
-|-------------|-------|--------|
-| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Read `~/.agents/skills/ralph/SKILL.md`, execute persistence loop |
-| "autopilot", "build me", "I want a" | `$autopilot` | Read `~/.agents/skills/autopilot/SKILL.md`, execute autonomous pipeline |
-| "ultrawork", "ulw", "parallel" | `$ultrawork` | Read `~/.agents/skills/ultrawork/SKILL.md`, execute parallel agents |
-| "ultraqa" | `$ultraqa` | Read `~/.agents/skills/ultraqa/SKILL.md`, run QA cycling workflow |
-| "analyze", "investigate" | `$analyze` | Read `~/.agents/skills/analyze/SKILL.md`, run deep analysis |
-| "plan this", "plan the", "let's plan" | `$plan` | Read `~/.agents/skills/plan/SKILL.md`, start planning workflow |
-| "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Read `~/.agents/skills/deep-interview/SKILL.md`, run Ouroboros-inspired Socratic ambiguity-gated interview workflow |
-| "ralplan", "consensus plan" | `$ralplan` | Read `~/.agents/skills/ralplan/SKILL.md`, start consensus planning with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk) |
-| "team", "swarm", "coordinated team", "coordinated swarm" | `$team` | Read `~/.agents/skills/team/SKILL.md`, start team orchestration (swarm compatibility alias) |
-| "ecomode", "eco", "budget" | `$ecomode` | Read `~/.agents/skills/ecomode/SKILL.md`, enable token-efficient mode |
-| "cancel", "stop", "abort" | `$cancel` | Read `~/.agents/skills/cancel/SKILL.md`, cancel active modes |
-| "tdd", "test first" | `$tdd` | Read `~/.agents/skills/tdd/SKILL.md`, start test-driven workflow |
-| "fix build", "type errors" | `$build-fix` | Read `~/.agents/skills/build-fix/SKILL.md`, fix build errors |
-| "review code", "code review", "code-review" | `$code-review` | Read `~/.agents/skills/code-review/SKILL.md`, run code review |
-| "security review" | `$security-review` | Read `~/.agents/skills/security-review/SKILL.md`, run security audit |
-| "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `~/.agents/skills/web-clone/SKILL.md`, start website cloning pipeline |
-
-Detection rules:
-- Keywords are case-insensitive and match anywhere in the user's message
-- If one or more explicit `$name` tokens are present, execute **all explicit skills left-to-right**.
-- If multiple non-explicit keywords match, use the most specific (longest match).
-- Conflict resolution: explicit `$name` invocation overrides keyword detection.
-- If user explicitly invokes `/prompts:<name>`, treat it as direct prompt execution and do not auto-activate keyword skills unless explicit `$name` tokens are also present.
-- The rest of the user's message (after keyword extraction) becomes the task description
-
-Ralph / Ralplan execution gate:
-- Enforce **ralplan-first** when ralph is active and planning is not complete.
-- Planning is complete only after both `.omx/plans/prd-*.md` and `.omx/plans/test-spec-*.md` exist.
-- Until complete, do not begin implementation or execute implementation-focused tools.
-</keyword_detection>
-
----
-
-<skills>
-Skills are workflow commands. Invoke via `$name` (e.g., `$ralph`) or browse with `/skills`.
-
-Workflow Skills:
-- `autopilot`: Full autonomous execution from idea to working code
-- `ralph`: Self-referential persistence loop with verification
-- `ultrawork`: Maximum parallelism with parallel agent orchestration
-- `visual-verdict`: Structured visual QA verdict loop for screenshot/reference comparisons
-- `web-clone`: URL-driven website cloning with visual + functional verification
-- `ecomode`: Token-efficient execution using lightweight models
-- `team`: N coordinated agents on shared task list
-- `swarm`: N coordinated agents on shared task list (compatibility facade over team)
-- `ultraqa`: QA cycling -- test, verify, fix, repeat
-- `plan`: Strategic planning with optional RALPLAN-DR consensus mode
-- `deep-interview`: Socratic deep interview with Ouroboros-inspired mathematical ambiguity gating before execution
-- `ralplan`: Iterative consensus planning with RALPLAN-DR structured deliberation (planner + architect + critic); supports `--deliberate` for high-risk work
-
-Agent Shortcuts:
-- `analyze` -> debugger: Investigation and root-cause analysis
-- `deepsearch` -> explore: Thorough codebase search
-- `tdd` -> test-engineer: Test-driven development workflow
-- `build-fix` -> build-fixer: Build error resolution
-- `code-review` -> code-reviewer: Comprehensive code review
-- `security-review` -> security-reviewer: Security audit
-- `frontend-ui-ux` -> designer: UI component and styling work
-- `git-master` -> git-master: Git commit and history management
-
-Utilities:
-- `cancel`: Cancel active execution modes
-- `note`: Save notes for session persistence
-- `doctor`: Diagnose installation issues
-- `help`: Usage guidance
-- `trace`: Show agent flow timeline
-</skills>
-
----
-
-<team_compositions>
-Common agent workflows for typical scenarios:
-
-Feature Development:
-  analyst -> planner -> executor -> test-engineer -> quality-reviewer -> verifier
-
-Bug Investigation:
-  explore + debugger + executor + test-engineer + verifier
-
-Code Review:
-  style-reviewer + quality-reviewer + api-reviewer + security-reviewer
-
-Product Discovery:
-  product-manager + ux-researcher + product-analyst + designer
-
-UX Audit:
-  ux-researcher + information-architect + designer + product-analyst
-</team_compositions>
-
----
-
-<team_pipeline>
-Team is the default multi-agent orchestrator. It uses a canonical staged pipeline:
-
-`team-plan -> team-prd -> team-exec -> team-verify -> team-fix (loop)`
-
-Stage transitions:
-- `team-plan` -> `team-prd`: planning/decomposition complete
-- `team-prd` -> `team-exec`: acceptance criteria and scope are explicit
-- `team-exec` -> `team-verify`: all execution tasks reach terminal states
-- `team-verify` -> `team-fix` | `complete` | `failed`: verification decides next step
-- `team-fix` -> `team-exec` | `team-verify` | `complete` | `failed`: fixes feed back into execution
-
-The `team-fix` loop is bounded by max attempts; exceeding the bound transitions to `failed`.
-Terminal states: `complete`, `failed`, `cancelled`.
-Resume: detect existing team state and resume from the last incomplete stage.
-</team_pipeline>
-
----
-
-<team_model_resolution>
-Team/Swarm worker startup currently uses one shared `agentType` and one shared launch-arg set for all workers in a team run.
-
-For worker model selection, apply this precedence (highest to lowest):
-1. Explicit model already present in `OMX_TEAM_WORKER_LAUNCH_ARGS`
-2. Inherited leader `--model` (when inheritance is enabled)
-3. Injected low-complexity default model: `gpt-5.3-codex-spark` (only when 1+2 are absent and team `agentType` is low-complexity)
-
-Model flag normalization contract:
-- Accept both `--model <value>` and `--model=<value>`
-- Remove duplicates/conflicts
-- Emit exactly one final canonical model flag: `--model <value>`
-- Preserve unrelated worker launch args
-</team_model_resolution>
-
----
-
-<verification>
-Verify before claiming completion. The goal is evidence-backed confidence, not ceremony.
-
-Sizing guidance:
-- Small changes (<5 files, <100 lines): lightweight verifier
-- Standard changes: standard verifier
-- Large or security/architectural changes (>20 files): thorough verifier
-
-Verification loop: identify what proves the claim, run the verification, read the output, then report with evidence. If verification fails, continue iterating rather than reporting incomplete work. Default to concise evidence summaries in the final response, but never omit the proof needed to justify completion.
-</verification>
-
-<execution_protocols>
-Broad Request Detection:
-  A request is broad when it uses vague verbs without targets, names no specific file or function, touches 3+ areas, or is a single sentence without a clear deliverable. When detected: explore first, optionally consult architect, then plan.
-
-Parallelization:
-- Run 2+ independent tasks in parallel when each takes >30s.
-- Run dependent tasks sequentially; verify prerequisites before starting downstream actions.
-- Use background execution for installs, builds, and tests.
-- Prefer Team mode as the primary parallel execution surface. Use ad hoc parallelism only when Team overhead is disproportionate to the task.
-- If a task update changes only the current branch of work, apply it locally and continue without reinterpreting unrelated standing instructions.
-- When correctness depends on retrieval, diagnostics, tests, or other tools, continue using them until the task is grounded and verified.
-
-Visual iteration gate:
-- For visual tasks (reference image(s) + generated screenshot), run `$visual-verdict` every iteration before the next edit.
-- Persist visual verdict JSON in `.omx/state/{scope}/ralph-progress.json` with both numeric (`score`, threshold pass/fail) and qualitative (`reasoning`, `differences`, `suggestions`, `next_actions`) feedback.
-
-Continuation:
-  Before concluding, confirm: zero pending tasks, all features working, tests passing, zero errors, verification evidence collected. If any item is unchecked, continue working.
-
-Ralph planning gate:
-  If ralph is active, verify PRD + test spec artifacts exist before any implementation work/tool execution. If missing, stay in planning and create them first (ralplan-first).
-</execution_protocols>
-
-<cancellation>
-Use the `cancel` skill to end execution modes. This clears state files and stops active loops.
-
-When to cancel:
-- All tasks are done and verified: invoke cancel.
-- Work is blocked and cannot proceed: explain the blocker, then invoke cancel.
-- User says "stop": invoke cancel immediately.
-
-When not to cancel:
-- Work is still incomplete: continue working.
-- A single subtask failed but others can continue: fix and retry.
-</cancellation>
-
----
-
-<state_management>
-oh-my-codex uses the `.omx/` directory for persistent state:
-- `.omx/state/` -- Mode state files (JSON)
-- `.omx/notepad.md` -- Session-persistent notes
-- `.omx/project-memory.json` -- Cross-session project knowledge
-- `.omx/plans/` -- Planning documents
-- `.omx/logs/` -- Audit logs
-
-Tools are available via MCP when configured (`omx setup` registers all servers):
-
-State & Memory:
-- `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
-- `project_memory_read`, `project_memory_write`, `project_memory_add_note`, `project_memory_add_directive`
-- `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`, `notepad_prune`, `notepad_stats`
-
-Code Intelligence:
-- `lsp_diagnostics` -- type errors for a single file (tsc --noEmit)
-- `lsp_diagnostics_directory` -- project-wide type checking
-- `lsp_document_symbols` -- function/class/variable outline for a file
-- `lsp_workspace_symbols` -- search symbols by name across the workspace
-- `lsp_hover` -- type info at a position (regex-based approximation)
-- `lsp_find_references` -- find all references to a symbol (grep-based)
-- `lsp_servers` -- list available diagnostic backends
-- `ast_grep_search` -- structural code pattern search (requires ast-grep CLI)
-- `ast_grep_replace` -- structural code transformation (dryRun=true by default)
-
-Trace:
-- `trace_timeline` -- chronological agent turn + mode event timeline
-- `trace_summary` -- aggregate statistics (turn counts, timing, token usage)
-
-Mode lifecycle requirements:
-- On mode start, call `state_write` with `mode`, `active: true`, `started_at`, and mode-specific fields.
-- On phase/iteration transitions, call `state_write` with updated `current_phase` / `iteration` and mode-specific progress fields.
-- On completion, call `state_write` with `active: false`, terminal `current_phase`, and `completed_at`.
-- On cancel/abort cleanup, call `state_clear(mode="<mode>")`.
-
-Recommended mode fields:
-- `ralph`: `active`, `iteration`, `max_iterations`, `current_phase`, `started_at`, `completed_at`
-- `autopilot`: `active`, `current_phase` (`expansion|planning|execution|qa|validation|complete`), `started_at`, `completed_at`
-- `ultrawork`: `active`, `reinforcement_count`, `started_at`
-- `team`: `active`, `current_phase` (`team-plan|team-prd|team-exec|team-verify|team-fix|complete`), `agent_count`, `team_name`
-- `ecomode`: `active`
-- `ultraqa`: `active`, `current_phase`, `iteration`, `started_at`, `completed_at`
-</state_management>
-
----
-
-## Setup
-
-Run `omx setup` to install all components. Run `omx doctor` to verify installation.
-## AGENTS.md instructions
-
-이 프로젝트의 기본 지침입니다.
-
-### OMx 트리거 자동 분기 규칙
-
-- 사용자 메시지에 트리거(`/prompts:...`, `$...`)가 명시되지 않으면 기본은 **`/prompts:executor`** 모드로 처리한다.
-- 아래 조건에서 모드 분기를 수행한다.
-  - 아키텍처 설계, 시스템 분할, 인터페이스/데이터 흐름 같은 요청이 있으면 **`/prompts:architect`**
-  - 프로젝트 전체 계획, 일정, 우선순위, 범위/의존성 정리가 필요하면 **`/prompts:planner`**
-- 아래 스킬 트리거가 메시지에 명시되면 우선 적용한다:  
-  `$analyze`, `$autopilot`, `$build-fix`, `$code-review`, `$deepsearch`, `$front...`(관련 키워드), `$security-review`, `$ultraqa`, `$ultrawork`, `$swarm`
-- 요청이 모호할수록, 먼저 실행 가능한 가장 짧은 단위로 진행 후 중간점검한다.
-
+## 프로젝트 구조
+
+```
+.claude-plugin/
+  plugin.json        # 플러그인 매니페스트 (버전, agents, skills)
+  marketplace.json   # 마켓플레이스 메타데이터 (버전)
+.codex-plugin/
+  plugin.json        # Codex 플러그인 매니페스트 (버전, hookless)
+.agents/plugins/
+  marketplace.json   # Codex marketplace 메타데이터 (버전)
+plugins/mst/         # Codex plugin projection 산출물 (직접 수정 금지)
+marketplace.json     # Codex root marketplace mirror (버전)
+package.json         # npm 패키지 (버전)
+package-lock.json    # npm lockfile 루트 버전
+agents/              # 커스텀 에이전트 정의 (.md)
+skills/              # 스킬 디렉토리 (자동 탐색)
+src/                 # TypeScript 소스
+docs/                # 문서
+```
+
+## 버전 관리 (전체 동기화 필수)
+
+MST 릴리스 버전은 Claude Code와 Codex가 같은 git 저장소를 marketplace source로 사용할 수 있도록 아래 파일에서 **반드시 동일하게** 유지합니다. Codex 전용 cache-busting suffix를 붙이지 않습니다.
+
+| 파일 | 필드 |
+|------|------|
+| `package.json` | `version` |
+| `package-lock.json` | top-level `version`, `packages[""].version` |
+| `.claude-plugin/plugin.json` | `version` |
+| `.claude-plugin/marketplace.json` | `plugins[0].version` |
+| `.codex-plugin/plugin.json` | `version` |
+| `.agents/plugins/marketplace.json` | `plugins[0].version` |
+| `marketplace.json` | `plugins[0].version` |
+| `extension/manifest.json` | `version` |
+| `extension/package.json` | `version` |
+| `extension/package-lock.json` | top-level `version`, `packages[""].version` |
+
+`plugins/mst/` 하위 파일은 Codex가 `mst@gran-maestro`를 설치할 때 읽는 projection 산출물입니다. 버전 변경 시 이 디렉토리를 직접 수정하지 말고 source 파일을 수정한 뒤 `python3 scripts/sync-codex-plugin-projection.py`를 실행해 재생성합니다. 현재 projection에서 버전 문자열이 들어가는 파일은 아래와 같으며 source 버전과 drift가 없어야 합니다:
+
+| projection 파일 | source |
+|-----------------|--------|
+| `plugins/mst/.codex-plugin/plugin.json` | `.codex-plugin/plugin.json` |
+| `plugins/mst/package.json` | `package.json` |
+| `plugins/mst/package-lock.json` | `package-lock.json` |
+| `plugins/mst/extension/manifest.json` | `extension/manifest.json` |
+| `plugins/mst/extension/package.json` | `extension/package.json` |
+| `plugins/mst/extension/package-lock.json` | `extension/package-lock.json` |
+
+아래 파일은 버전 문자열을 갖지만 MST 릴리스 버전과 자동 동기화하지 않습니다:
+
+| 파일 | 처리 기준 |
+|------|-----------|
+| `frontend/package.json`, `frontend/package-lock.json` | dashboard/frontend package를 별도 릴리스할 때만 변경 |
+| `templates/defaults/**`, `hooks/enforce-tree.json`, `dashboard/mst-transition-graph.json` | 스키마/템플릿/계약 버전이며 MST semver와 별개 |
+| `node_modules/**` | vendored dependency metadata로 직접 수정 금지 |
+
+릴리스 노트가 필요한 버전업이면 `CHANGELOG.md` 상단에 새 버전 섹션을 추가합니다. README/quick-start 문서는 설치 명령, marketplace source, 호환성, 사용자 대면 동작이 바뀔 때만 수정합니다.
+
+## 버전업 요청 처리
+
+### 전체 버전업 (CHANGELOG 포함, 기본)
+
+사용자가 버전업을 요청하면 다음 순서로 처리합니다:
+
+1. **미커밋 변경사항 확인**: `git status`로 커밋되지 않은 변경사항이 있으면 먼저 커밋
+2. **버전 결정**: 변경 범위에 따라 적절한 버전을 선택 (patch: 버그 수정/소규모 변경, minor: 기능 추가/개선, major: 호환성 깨지는 변경)
+3. **source 버전 파일 수정**: 위 표의 source 파일을 모두 같은 `X.Y.Z`로 맞춤
+   - 현재 `scripts/bump.py`와 `python3 scripts/mst.py version bump`는 legacy 5파일 helper입니다. 전체 Codex/lockfile matrix를 모두 갱신하지 않으므로 단독 사용 후 반드시 누락 파일을 수동 보정하거나 helper를 확장해야 합니다.
+4. **Codex projection 재생성**: `python3 scripts/sync-codex-plugin-projection.py`
+5. **CHANGELOG.md 업데이트**: 직전 릴리스 이후 git log를 참고하여 `CHANGELOG.md` 상단에 새 버전 섹션 추가
+   - `## [X.Y.Z] — YYYY-MM-DD` 헤더
+   - `### 새 기능` / `### 개선` / `### 버그 수정` 섹션 (해당 항목만 포함)
+   - 각 항목은 **사용자 관점**에서 체감할 수 있는 변화를 서술 (내부 리팩토링 제외)
+6. **검증**:
+   - `cmp -s CLAUDE.md AGENTS.md`
+   - `python3 scripts/mst.py version check` (legacy 5파일 smoke)
+   - `python3 /Users/brandev/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mst`
+   - `node scripts/codex-plugin-local-install-smoke.mjs`
+   - `npm test`
+7. **로컬 Codex 설치 확인**: 필요 시 `codex plugin add mst@gran-maestro` 후 `codex plugin list --marketplace gran-maestro`
+8. **버전업 커밋**: `Bump version to X.Y.Z` 메시지로 커밋 (CHANGELOG.md 변경 포함)
+9. **푸시**: `git push origin master`
+
+### 버전 bump만 (푸시 없이)
+
+사용자가 "bump만", "버전만 올려", "푸시 없이" 등으로 요청하면:
+
+1. **미커밋 변경사항 확인**: 위와 동일
+2. **source 버전 파일 수정**: 전체 동기화 표의 파일을 같은 `X.Y.Z`로 맞춤
+3. **Codex projection 재생성**: `python3 scripts/sync-codex-plugin-projection.py`
+4. **CHANGELOG.md 업데이트**: 위와 동일
+5. **검증**: 전체 버전업과 같은 검증을 수행하되, 변경 범위가 문서/메타데이터뿐이면 `git diff --check`와 manifest/version smoke 중심으로 축소 가능
+6. **버전업 커밋**: `Bump version to X.Y.Z` 메시지로 커밋 (CHANGELOG.md 변경 포함)
+
+## 기능 변경 시 필수 고려사항
+
+기능이 추가·변경·삭제되면, 요청받은 내용 외에 아래 항목의 수정 필요 여부를 반드시 검토합니다:
+
+1. **대시보드 변경점**: 대시보드 UI에 표시되는 데이터·화면·동작이 영향받는지 확인, 해당 시 `frontend/` 수정 및 빌드
+2. **config 변경**: `config.json`/`config.resolved.json`에 키 추가·변경·삭제가 필요한지 확인
+   - config 키가 변경되면 대시보드 Settings의 해당 탭 UI도 반드시 동기화
+   - 기본값이 필요한 경우 `templates/defaults/config.json`도 함께 수정
+3. **상태머신 영향**: `mst.py`, `scripts/mst_cmds/`, `scripts/_skill_state.py`, `hooks/`, `skills/`의 continuation/auto/resume/stop/session/history/snapshot 동작이 바뀌면 소스만 수정하지 말고 상태머신 계약도 함께 갱신합니다.
+   - 가능한 state/transition/guard/evidence/on_reject가 바뀌면 machine-readable transition graph(YAML/JSON)와 D2/dashboard generated view 갱신 필요 여부를 확인합니다.
+   - `auto=true`, Stop hook, PreToolUse, context compaction, skill 종료, resume/recover, `MST_SESSION_ID` 전파 규칙이 바뀌면 AGI-030 objective/details의 state-history-recovery 계약과 관련 테스트를 함께 맞춥니다.
+   - 정상 경로에서는 full state를 LLM prompt에 매번 주입하지 않고 hook/validator가 로컬에서 상태머신 계약 이탈만 검사하며, 이탈 시에만 structured continuation block을 전달한다는 원칙을 유지합니다.
+4. **README 업데이트**: 사용자 대면 기능이 변경된 경우 `README.md`의 관련 섹션 수정
+
+## 커밋 & 푸시 체크리스트
+
+커밋/푸시 요청 시 아래를 반드시 확인합니다:
+
+1. **버전 동기화**: MST 릴리스 버전 파일 전체와 `plugins/mst/` projection의 버전 drift가 없는지 확인
+2. **지침 파일 동기화**: `cmp -s CLAUDE.md AGENTS.md`로 `AGENTS.md`가 `CLAUDE.md` 복사본과 동일한지 확인
+3. **agents 배열**: `plugin.json`의 `agents`가 `agents/` 디렉토리 내 모든 `.md` 파일을 나열하는지 확인
+4. **신규 파일 누락**: 새로 추가된 agent/skill 파일이 매니페스트에 반영되었는지 확인
+5. **TypeScript (core)**: `npx tsc --noEmit`으로 Node/core 호환 TypeScript 타입 오류 없는지 확인 (src/ 변경 시)
+6. **TypeScript (dashboard)**: Deno dashboard/server 영역(`src/server.ts`, `src/config.ts`, `src/routes/`, `src/flow-watcher.ts` 등) 변경 시 `deno check --no-config src/server.ts`로 별도 검증
+7. **대시보드 빌드**: `frontend/` 변경 시 `frontend/` 디렉토리에서 `npm run build`로 빌드 후 `dist/`(프로젝트 루트)를 함께 커밋
+
+## plugin.json 규칙
+
+- `skills`: 디렉토리 경로 허용 (`"./skills/"`)
+- `agents`: **파일 경로 배열만 허용** (디렉토리 경로 불가)
+  ```json
+  "agents": [
+    "./agents/pm-conductor.md",
+    "./agents/architect.md"
+  ]
+  ```
+
+## 커밋 메시지 컨벤션
+
+```
+<요약> (<버전>)
+
+<상세 설명 (선택)>
+
+```
