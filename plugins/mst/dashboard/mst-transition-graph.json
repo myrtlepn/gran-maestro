@@ -1,0 +1,188 @@
+{
+  "covered_states": [
+    "active",
+    "blocked",
+    "cancelled",
+    "completed",
+    "failed",
+    "inspecting"
+  ],
+  "covered_transitions": [
+    "continue.queued_action",
+    "continue.rehydrate_retry",
+    "guard.inspect_only_verification",
+    "terminal.completed",
+    "terminal.repeat_failure_limit",
+    "terminal.security_confirmation_required",
+    "terminal.state_inconsistency"
+  ],
+  "edges": [
+    {
+      "auto_allowed": true,
+      "id": "continue.queued_action:active->active",
+      "label": "continue.queued_action",
+      "source": "active",
+      "target": "active",
+      "transition": "continue.queued_action",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": true,
+      "id": "continue.rehydrate_retry:active->active",
+      "label": "continue.rehydrate_retry",
+      "source": "active",
+      "target": "active",
+      "transition": "continue.rehydrate_retry",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": true,
+      "id": "continue.rehydrate_retry:inspecting->active",
+      "label": "continue.rehydrate_retry",
+      "source": "inspecting",
+      "target": "active",
+      "transition": "continue.rehydrate_retry",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": true,
+      "id": "guard.inspect_only_verification:active->inspecting",
+      "label": "guard.inspect_only_verification",
+      "source": "active",
+      "target": "inspecting",
+      "transition": "guard.inspect_only_verification",
+      "write_allowed": false
+    },
+    {
+      "auto_allowed": true,
+      "id": "guard.inspect_only_verification:inspecting->inspecting",
+      "label": "guard.inspect_only_verification",
+      "source": "inspecting",
+      "target": "inspecting",
+      "transition": "guard.inspect_only_verification",
+      "write_allowed": false
+    },
+    {
+      "auto_allowed": true,
+      "id": "terminal.completed:active->completed",
+      "label": "terminal.completed",
+      "source": "active",
+      "target": "completed",
+      "transition": "terminal.completed",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.repeat_failure_limit:active->failed",
+      "label": "terminal.repeat_failure_limit",
+      "source": "active",
+      "target": "failed",
+      "transition": "terminal.repeat_failure_limit",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.repeat_failure_limit:inspecting->failed",
+      "label": "terminal.repeat_failure_limit",
+      "source": "inspecting",
+      "target": "failed",
+      "transition": "terminal.repeat_failure_limit",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.repeat_failure_limit:blocked->failed",
+      "label": "terminal.repeat_failure_limit",
+      "source": "blocked",
+      "target": "failed",
+      "transition": "terminal.repeat_failure_limit",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.security_confirmation_required:active->blocked",
+      "label": "terminal.security_confirmation_required",
+      "source": "active",
+      "target": "blocked",
+      "transition": "terminal.security_confirmation_required",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.security_confirmation_required:inspecting->blocked",
+      "label": "terminal.security_confirmation_required",
+      "source": "inspecting",
+      "target": "blocked",
+      "transition": "terminal.security_confirmation_required",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.state_inconsistency:active->failed",
+      "label": "terminal.state_inconsistency",
+      "source": "active",
+      "target": "failed",
+      "transition": "terminal.state_inconsistency",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.state_inconsistency:inspecting->failed",
+      "label": "terminal.state_inconsistency",
+      "source": "inspecting",
+      "target": "failed",
+      "transition": "terminal.state_inconsistency",
+      "write_allowed": true
+    },
+    {
+      "auto_allowed": false,
+      "id": "terminal.state_inconsistency:blocked->failed",
+      "label": "terminal.state_inconsistency",
+      "source": "blocked",
+      "target": "failed",
+      "transition": "terminal.state_inconsistency",
+      "write_allowed": true
+    }
+  ],
+  "generated_at": "2026-05-20T00:00:00Z",
+  "kind": "mst-transition-graph-view",
+  "nodes": [
+    {
+      "id": "active",
+      "label": "active",
+      "terminal": false
+    },
+    {
+      "id": "blocked",
+      "label": "blocked",
+      "terminal": false
+    },
+    {
+      "id": "cancelled",
+      "label": "cancelled",
+      "terminal": true
+    },
+    {
+      "id": "completed",
+      "label": "completed",
+      "terminal": true
+    },
+    {
+      "id": "failed",
+      "label": "failed",
+      "terminal": true
+    },
+    {
+      "id": "inspecting",
+      "label": "inspecting",
+      "terminal": false
+    }
+  ],
+  "schema_version": 1,
+  "source_graph": {
+    "hash": "ba8a9e4bc917a95570929c61d759b5250f225d5d51502cd80b412247ab657ea9",
+    "id": "mst-transition-graph",
+    "version": "2026-05-05.dod016-contract"
+  },
+  "source_graph_path": "templates/state-machine/mst-transition-graph.json"
+}

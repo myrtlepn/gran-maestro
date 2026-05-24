@@ -1,0 +1,78 @@
+def register(subparsers):
+    sub = subparsers
+    worktree = sub.add_parser("worktree")
+    worktree_sub = worktree.add_subparsers(dest="subcommand")
+
+    worktree_create = worktree_sub.add_parser("create")
+    worktree_create.add_argument("--path", required=True)
+    worktree_create.add_argument("--branch", required=True)
+    worktree_create.add_argument("--base", default="master")
+
+    worktree_remove = worktree_sub.add_parser("remove")
+    worktree_remove.add_argument("--path", required=True)
+    worktree_remove.add_argument("--force", action="store_true")
+
+    worktree_resolve_base = worktree_sub.add_parser("resolve-base")
+    worktree_resolve_base.add_argument("--req")
+    worktree_resolve_base.add_argument("--json", action="store_true")
+
+    worktree_is_protected = worktree_sub.add_parser("is-protected")
+    worktree_is_protected.add_argument("--branch")
+    worktree_is_protected.add_argument("--json", action="store_true")
+
+    worktree_slug = worktree_sub.add_parser("slug")
+    worktree_slug.add_argument("base")
+
+    worktree_branch_name = worktree_sub.add_parser("branch-name")
+    worktree_branch_name.add_argument("--req", required=True)
+    worktree_branch_name.add_argument("--base", required=True)
+    worktree_branch_name.add_argument("--task")
+    worktree_branch_name.add_argument("--role")
+    worktree_branch_name.add_argument("--agi")
+
+    worktree_path = worktree_sub.add_parser("path")
+    worktree_path.add_argument("--req", required=True)
+    worktree_path.add_argument("--role", required=True)
+    worktree_path.add_argument("--agi")
+
+    worktree_check_boundary = worktree_sub.add_parser("check-boundary")
+    worktree_check_boundary.add_argument("--req", required=True)
+    worktree_check_boundary.add_argument("--phase", choices=["entry", "exit"], required=True)
+    worktree_check_boundary.add_argument("--task-id")
+    worktree_check_boundary.add_argument("--ppid", type=int)
+
+    worktree_detect_orphans = worktree_sub.add_parser("detect-orphans")
+    worktree_detect_orphans.add_argument("--clean", action="store_true")
+    worktree_detect_orphans.add_argument("--json", action="store_true")
+    worktree_detect_orphans.add_argument("--scope", default=None)
+    worktree_detect_orphans.add_argument("--prefix", default=None)
+
+    worktree_classify_collision = worktree_sub.add_parser("classify-collision")
+    worktree_classify_collision.add_argument("--path", required=True)
+    worktree_classify_collision.add_argument("--branch", required=True)
+    worktree_classify_collision.add_argument("--json", action="store_true")
+
+    worktree_archive_retention = worktree_sub.add_parser("archive-retention")
+    worktree_archive_retention.add_argument("--days", type=int)
+    worktree_archive_retention.add_argument("--count", type=int)
+    worktree_archive_retention.add_argument("--no-days", action="store_true")
+    worktree_archive_retention.add_argument("--no-count", action="store_true")
+    worktree_archive_retention.add_argument("--apply", action="store_true")
+    worktree_archive_retention.add_argument("--json", action="store_true")
+
+    worktree_migrate_cleaned_meta = worktree_sub.add_parser("migrate-cleaned-meta")
+    worktree_migrate_cleaned_meta.add_argument("--json", action="store_true")
+
+    worktree_migrate_archive = worktree_sub.add_parser("migrate-archive")
+    worktree_migrate_archive.add_argument("--dry-run", action="store_true")
+    worktree_migrate_archive.add_argument("--apply", action="store_true")
+    worktree_migrate_archive.add_argument("--delete", action="store_true")
+    worktree_migrate_archive.add_argument("--json", action="store_true")
+
+    _register_worktree_dispatch("path", cmd_worktree_path)
+    _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
+    _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)
+    _register_worktree_dispatch("classify-collision", cmd_worktree_classify_collision)
+    _register_worktree_dispatch("archive-retention", cmd_worktree_archive_retention)
+    _register_worktree_dispatch("migrate-cleaned-meta", cmd_worktree_migrate_cleaned_meta)
+    _register_worktree_dispatch("migrate-archive", cmd_worktree_migrate_archive)

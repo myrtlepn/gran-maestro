@@ -72,12 +72,14 @@ esac
 case "$script_dir" in
   *'${CLAUDE_PLUGIN_ROOT}'*)
     printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
+    emit_approve_json "unexpected hook execution path; stop hook fail-open without mutation"
     exit 0
     ;;
 esac
 
 if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
   printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
+  emit_approve_json "missing hook bootstrap files; stop hook fail-open without mutation"
   exit 0
 fi
 

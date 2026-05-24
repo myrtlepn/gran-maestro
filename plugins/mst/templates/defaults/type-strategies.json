@@ -1,0 +1,68 @@
+{
+  "code": {
+    "template": "templates/impl-request.md",
+    "worktree_policy": "required",
+    "review_mode": "code",
+    "accept_mode": "squash-merge"
+  },
+  "doc": {
+    "template": "templates/doc-request.md",
+    "worktree_policy": "skip",
+    "review_mode": "fulltext",
+    "accept_mode": "file-placement",
+    "sub_types": {
+      "tutorial": {
+        "verification": "execution",
+        "checklist": [
+          "step_runnable",
+          "prerequisites_stated",
+          "outcome_visible"
+        ]
+      },
+      "howto": {
+        "verification": "goal_achievement",
+        "checklist": [
+          "problem_stated",
+          "solution_works",
+          "edge_cases_noted"
+        ]
+      },
+      "reference": {
+        "verification": "code_accuracy",
+        "checklist": [
+          "signatures_match",
+          "types_correct",
+          "examples_run"
+        ],
+        "template_override": "templates/doc-request-reference.md"
+      },
+      "explanation": {
+        "verification": "source_factcheck",
+        "checklist": [
+          "claims_sourced",
+          "no_stale_info",
+          "context_complete"
+        ]
+      },
+      "adr": {
+        "verification": "structural_completeness",
+        "checklist": [
+          "status",
+          "context",
+          "decision",
+          "consequences"
+        ],
+        "template_override": "templates/doc-request-decision.md"
+      },
+      "operational": {
+        "verification": "auto_extraction",
+        "checklist": [
+          "git_log_current",
+          "commands_valid",
+          "rollback_defined"
+        ],
+        "template_override": "templates/doc-request-ops.md"
+      }
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CaptureMeta",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "status",
+    "created_at",
+    "url",
+    "memo",
+    "tags",
+    "mode"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^CAP-[0-9]{3,}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "selected", "consumed", "done", "archived"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "url": {
+      "type": "string"
+    },
+    "selector": {
+      "type": ["string", "null"]
+    },
+    "rect": {
+      "type": ["object", "null"],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "required": ["x", "y", "width", "height"],
+      "additionalProperties": false
+    },
+    "screenshot_path": {
+      "type": ["string", "null"]
+    },
+    "memo": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "html_snapshot": {
+      "type": ["string", "null"]
+    },
+    "css_path": {
+      "type": ["string", "null"]
+    },
+    "component_name": {
+      "type": ["string", "null"]
+    },
+    "source_path": {
+      "type": ["string", "null"]
+    },
+    "linked_plan": {
+      "type": ["string", "null"]
+    },
+    "linked_request": {
+      "type": ["string", "null"]
+    },
+    "ttl_expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "ttl_warned_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "consumed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["immediate", "batch"]
+    }
+  }
+}

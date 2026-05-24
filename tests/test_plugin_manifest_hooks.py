@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_JSON = REPO_ROOT / ".claude-plugin" / "plugin.json"
 HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 CODEX_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.codex.json"
+CODEX_PLUGIN_SOURCE = REPO_ROOT / "plugins" / "mst"
 EXPECTED_HOOK_EVENTS = {
     "SessionStart",
     "PreToolUse",
@@ -93,6 +94,28 @@ def test_codex_hook_fixture_manifest_has_zero_duplicate_registration_commands() 
     }
 
     assert canonical_tuples.isdisjoint(codex_tuples)
+
+
+def test_codex_plugin_source_is_runtime_projection_without_claude_hooks() -> None:
+    assert CODEX_PLUGIN_SOURCE.exists()
+    assert CODEX_PLUGIN_SOURCE.is_dir()
+    assert not CODEX_PLUGIN_SOURCE.is_symlink()
+    assert (CODEX_PLUGIN_SOURCE / ".codex-plugin" / "plugin.json").exists()
+    assert (CODEX_PLUGIN_SOURCE / "skills").exists()
+    assert (CODEX_PLUGIN_SOURCE / "scripts" / "mst.py").exists()
+    assert (CODEX_PLUGIN_SOURCE / "hooks" / "enforce-tree.json").exists()
+
+    blocked_paths = [
+        ".claude",
+        ".claude-plugin",
+        "hooks/hooks.json",
+        "hooks/mst-auto-chain-context.sh",
+        "hooks/mst-pre-tool-use.sh",
+        "hooks/mst-session-init.sh",
+        "hooks/mst-stop-hook.sh",
+    ]
+    present = [path for path in blocked_paths if (CODEX_PLUGIN_SOURCE / path).exists()]
+    assert present == []
 
 
 def main() -> int:

@@ -121,3 +121,54 @@ def test_timeout_race_suppresses_late_stdout_and_duplicate_emit(tmp_path: Path) 
     payload = _strict_stdout(result)
     assert payload == {"decision": "approve", "reason": "hook judge timeout (>5ms) fail-open"}
     assert "late child output" not in result.stdout
+
+
+def test_unexpected_execution_path_emits_strict_fail_open_json(tmp_path: Path) -> None:
+    broken_dir = tmp_path / "${CLAUDE_PLUGIN_ROOT}" / "hooks"
+    broken_dir.mkdir(parents=True)
+    broken_hook = broken_dir / "mst-stop-hook.sh"
+    broken_hook.write_text(STOP_HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(broken_hook)],
+        input="",
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        timeout=5.0,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    payload = _strict_stdout(result)
+    assert payload["decision"] == "approve"
+    assert payload["reason"] in {
+        "unexpected hook execution path; stop hook fail-open without mutation",
+        "missing hook bootstrap files; stop hook fail-open without mutation",
+    }
+
+
+def test_missing_bootstrap_emits_strict_fail_open_json(tmp_path: Path) -> None:
+    broken_dir = tmp_path / "hooks"
+    broken_dir.mkdir(parents=True)
+    broken_hook = broken_dir / "mst-stop-hook.sh"
+    broken_hook.write_text(STOP_HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(broken_hook)],
+        input="",
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        timeout=5.0,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    payload = _strict_stdout(result)
+    assert payload == {
+        "decision": "approve",
+        "reason": "missing hook bootstrap files; stop hook fail-open without mutation",
+    }

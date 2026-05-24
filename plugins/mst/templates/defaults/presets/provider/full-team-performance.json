@@ -1,0 +1,179 @@
+{
+  "models": {
+    "roles": {
+      "pm_conductor": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "architect": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "developer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ],
+      "developer_claude": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "reviewer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ]
+    }
+  },
+  "ideation": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "premium"
+      }
+    }
+  },
+  "discussion": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "premium"
+      }
+    }
+  },
+  "debug": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "premium"
+      }
+    }
+  },
+  "explore": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "prereview": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "premium"
+      }
+    }
+  },
+  "code_review": {
+    "agents": 2,
+    "agent_roster": [
+      "codex",
+      "gemini"
+    ]
+  },
+  "plan_review": {
+    "enabled": true,
+    "parallel": true,
+    "roles": {
+      "architect": {
+        "tier": "premium"
+      },
+      "devils_advocate": {
+        "tier": "premium"
+      },
+      "completeness": {
+        "tier": "premium"
+      },
+      "ux_reviewer": {
+        "tier": "premium"
+      }
+    }
+  },
+  "phase1_exploration": {
+    "roles": {
+      "symbol_tracing": {
+        "agent": "codex",
+        "enabled": true,
+        "tier": "premium"
+      },
+      "broad_scan": {
+        "agent": "gemini",
+        "enabled": true,
+        "tier": "premium"
+      }
+    }
+  },
+  "review": {
+    "roles": {
+      "code_reviewer": {
+        "tier": "premium"
+      },
+      "arch_reviewer": {
+        "tier": "premium"
+      },
+      "ui_reviewer": {
+        "tier": "premium"
+      }
+    }
+  },
+  "workflow": {
+    "default_agent": "codex-dev"
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "codex-dev": ["backend", "skill", "test", "infra"],
+    "gemini-dev": ["frontend", "ui"],
+    "claude-dev": ["docs", "config"]
+  }
+}

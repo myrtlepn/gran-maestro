@@ -1,0 +1,14 @@
+{
+  "id": "",
+  "title": "",
+  "original_request": "",
+  "status": "phase1_analysis",
+  "current_phase": 1,
+  "created_at": "",
+  "auto_approve": false,
+  "tasks": [],
+  "dependencies": { "blockedBy": [], "relatedTo": [], "blocks": [] },
+  "stitch_screens": [],
+  "pre_check_retries": 0,
+  "codex_fallback_retries": 0
+}

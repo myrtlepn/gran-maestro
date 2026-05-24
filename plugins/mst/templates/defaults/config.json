@@ -1,0 +1,766 @@
+{
+  "version": "1.0.0",
+  "plugin_name": "gran-maestro",
+  "branding": {
+    "name": "Gran Maestro",
+    "tagline": "I am the Maestro — I conduct, I don't code."
+  },
+  "server": {
+    "port": 3847,
+    "host": "127.0.0.1"
+  },
+  "workflow": {
+    "max_feedback_rounds": 5,
+    "auto_approve_spec": false,
+    "auto_accept_result": true,
+    "default_agent": "codex-dev",
+    "arch_gate_threshold": 0.7,
+    "high_pass_guard": {
+      "enabled": true,
+      "confidence_supporting_only": true,
+      "require_external_execution_evidence": true,
+      "require_independent_judgement": true,
+      "block_self_report_only_pass": true,
+      "plan_bypass_requires_explicit_rationale": true,
+      "reason_tokens": {
+        "self_report_only_block": "SELF_REPORT_ONLY_BLOCK",
+        "external_evidence_missing": "EXTERNAL_EVIDENCE_MISSING",
+        "independent_judgement_required": "INDEPENDENT_JUDGEMENT_REQUIRED",
+        "risk_signal_review_required": "RISK_SIGNAL_REVIEW_REQUIRED"
+      }
+    },
+    "spec_prereview": true,
+    "spec_prereview_max_iterations": 3,
+    "spec_prereview_escalation_trigger": "major",
+    "spec_prereview_minor_escalation_threshold": 3,
+    "auto_approve_on_unblock": false,
+    "auto_accept_guard": {
+      "single_source_of_truth": "workflow.auto_accept_guard",
+      "allow_when": [
+        "review_summary.status == passed",
+        "workflow.auto_accept_result == true",
+        "review_issues_summary.auto_accept_guard.blocked == false"
+      ],
+      "block_when": [
+        "review_issues_summary.auto_accept_guard.skipped_minor_count > 0",
+        "review_issues_summary.auto_accept_guard.protection_flags_count > 0"
+      ]
+    }
+  },
+  "intent_verification": {
+    "enabled": true,
+    "max_iterations": 5
+  },
+  "harness": {
+    "dynamic_complexity": {
+      "enabled": false,
+      "skip_prereview_for_simple": true,
+      "skip_design_wing_for_docs": true,
+      "single_reviewer_threshold": "simple",
+      "complexity_rules": {
+        "simple": { "max_ac": 2, "max_files": 1 },
+        "standard": { "max_ac": 5, "max_files": 5 },
+        "complex": { "min_ac": 6 }
+      }
+    }
+  },
+  "agile": {
+    "steering_every": 3,
+    "drift_threshold": 80,
+    "drift_count_trigger": 2,
+    "no_diff_count_trigger": 2,
+    "intent_redirect_max_retries": 3,
+    "convergence_threshold_abs": 0.12,
+    "convergence_threshold_trend": 0.18,
+    "soft_limit_small": 8,
+    "soft_limit_large": 12,
+    "round_history_max_summary_lines": 50,
+    "coverage_threshold": 0.85,
+    "completion_preview": {
+      "enabled": true,
+      "max_rounds_auto": 2,
+      "regression_max": 2
+    },
+    "evidence_gate": {
+      "enabled": true,
+      "required_globs": []
+    },
+    "drift": {
+      "enabled": true,
+      "threshold": 0.7,
+      "warn_streak_limit": 2
+    },
+    "recall": {
+      "enabled": true,
+      "cooldown_ratio": 0.1,
+      "cooldown_floor": 1,
+      "cooldown_ceiling": 4,
+      "cap_ratio": 0.1,
+      "cap_floor": 3,
+      "cap_ceiling": 6,
+      "level3_cooldown_multiplier": 2,
+      "patch_budget_max": 3,
+      "patch_budget_ratio": 0.2
+    },
+    "unlock": {
+      "enabled": true,
+      "reason_min_length": 20,
+      "reason_max_length": 500,
+      "forbidden_patterns": [
+        "lgtm",
+        "ok",
+        "fix"
+      ]
+    },
+    "integration_review_depth": 3,
+    "new_island_threshold": 0.20,
+    "foundational_streak_max": 2,
+    "dispatch": {
+      "enabled": false,
+      "default_mode": "inline"
+    },
+    "integration_wire_streak_max": 3,
+    "llm_steering_gate_enabled": true,
+    "adversarial_review": {
+      "enabled": true,
+      "perspectives": {
+        "edge": {
+          "enabled": true
+        },
+        "flow": {
+          "enabled": true
+        },
+        "integration": {
+          "enabled": true
+        },
+        "persona": {
+          "enabled": false
+        },
+        "nfr": {
+          "enabled": false
+        }
+      },
+      "agents": {
+        "codex": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "gemini": {
+          "count": 0,
+          "tier": "premium"
+        },
+        "claude": {
+          "count": 0,
+          "tier": "economy"
+        }
+      },
+      "max_rounds": 3,
+      "auto_apply_severity_threshold": "critical",
+      "parallel_in_auto_mode": true
+    },
+    "retrospective": {
+      "enabled": true,
+      "max_fix_sprint_depth": 2,
+      "agents": {
+        "codex": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "gemini": {
+          "count": 1,
+          "tier": "premium"
+        },
+        "claude": {
+          "count": 0,
+          "tier": "economy"
+        }
+      }
+    }
+  },
+  "concurrency": {
+    "max_parallel_tasks": 5,
+    "max_parallel_reviews": 3,
+    "batch_max_parallel_reqs": 1,
+    "queue_strategy": "fifo"
+  },
+  "timeouts": {
+    "cli_default_ms": 300000,
+    "cli_large_task_ms": 1800000,
+    "pre_check_ms": 120000,
+    "merge_ms": 600000,
+    "user_approval_ms": null,
+    "dashboard_health_check_ms": 10000,
+    "wait_files_ms": 600000
+  },
+  "worktree": {
+    "root_directory": ".gran-maestro/worktrees",
+    "max_active": 10,
+    "base_branch": "main",
+    "protected_branches": ["main", "master", "release/*"],
+    "stale_timeout_hours": 24,
+    "auto_cleanup_on_cancel": true,
+    "archive_retention_days": 30,
+    "archive_retention_count": 100
+  },
+  "retry": {
+    "max_cli_retries": 2,
+    "max_fallback_depth": 1,
+    "backoff_base_ms": 1000
+  },
+  "delegation": {
+    "codex_sandbox": "workspace-write",
+    "monitor_interval_ms": 180000,
+    "monitor_tail_lines": 50,
+    "monitor_anomaly_patterns": ["ENOTFOUND", "ECONNREFUSED", "stdin", "SIGTERM", "OOM", "killed"]
+  },
+  "history": {
+    "retention_days": 30,
+    "auto_archive": true
+  },
+  "hook": {
+    "judge_timeout_ms": 500
+  },
+  "archive": {
+    "max_active_sessions": {
+      "default": 200,
+      "req": 200,
+      "idn": 200,
+      "pln": 200,
+      "des": 200
+    },
+    "archive_retention_days": 90,
+    "auto_archive_on_create": true,
+    "auto_archive_on_complete": true,
+    "archive_directory": ".gran-maestro/archive"
+  },
+  "gardening": {
+    "auto_archive": {
+      "enabled": false,
+      "trigger": "session_init",
+      "thresholds": {
+        "req_stale_days": 14,
+        "plan_stale_days": 30,
+        "plan_active_stale_days": 14
+      },
+      "target_status_map": {
+        "req_phase1_analysis": "cancelled",
+        "req_spec_ready": "cancelled",
+        "req_pending_dependency": "cancelled",
+        "plan_active": "cancelled",
+        "plan_in_progress": "cancelled"
+      },
+      "dry_run": true,
+      "log_file": ".gran-maestro/gardening/auto-archive.ndjson",
+      "session_init_guard_seconds": 86400
+    }
+  },
+  "notifications": {
+    "terminal": true,
+    "dashboard": true
+  },
+  "realtime": {
+    "protocol": "sse",
+    "debounce_ms": 100
+  },
+  "debug": {
+    "enabled": false,
+    "log_level": "info",
+    "log_prompts": false,
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "explore": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "discussion": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "economy"
+      }
+    },
+    "response_char_limit": 2000,
+    "critique_char_limit": 2000,
+    "default_max_rounds": 5,
+    "max_rounds_upper_limit": 10
+  },
+  "ideation": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "economy"
+      }
+    },
+    "opinion_char_limit": 2000,
+    "critique_char_limit": 2000
+  },
+  "collaborative_debug": {
+    "finding_char_limit": 3000,
+    "merge_wait_ms": 600000,
+    "auto_trigger_from_request": true
+  },
+  "prereview": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 1,
+        "tier": "economy"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "codex": {
+        "premium": "gpt-5.4",
+        "economy": "gpt-5.3-codex-spark",
+        "default_tier": "premium"
+      },
+      "gemini": {
+        "premium": "gemini-3.1-pro-preview",
+        "economy": "gemini-3-flash-preview",
+        "default_tier": "premium"
+      },
+      "claude": {
+        "premium": "opus",
+        "economy": "sonnet",
+        "default_tier": "economy"
+      }
+    },
+    "roles": {
+      "pm_conductor": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "architect": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "developer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ],
+      "developer_claude": {
+        "provider": "claude",
+        "tier": "premium"
+      },
+      "reviewer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ]
+    }
+  },
+  "code_review": {
+    "enabled": true,
+    "agents": 1,
+    "agent_roster": [
+      "codex",
+      "gemini"
+    ],
+    "parallel": true,
+    "use_native_review": false,
+    "native_review_prompt": ""
+  },
+  "fact_check": {
+    "max_verification_rounds": 3,
+    "agent": {
+      "provider": "claude",
+      "tier": "economy"
+    }
+  },
+  "reference": {
+    "cache_ttl_days": 2,
+    "cutoff_threshold_months": 0.5,
+    "auto_search": true,
+    "max_searches_per_step": 5,
+    "llm_auto_trigger": true,
+    "auto_fact_check": true,
+    "keywords_whitelist": [
+      "library",
+      "framework",
+      "api",
+      "sdk",
+      "protocol",
+      "version",
+      "dependency",
+      "config",
+      "pattern",
+      "best practice",
+      "standard",
+      "migration",
+      "deprecation",
+      "breaking change",
+      "release",
+      "update",
+      "react",
+      "next.js",
+      "typescript",
+      "python",
+      "node",
+      "라이브러리",
+      "프레임워크",
+      "의존성",
+      "버전",
+      "설정",
+      "마이그레이션",
+      "업데이트",
+      "릴리스",
+      "패치"
+    ]
+  },
+  "cleanup": {
+    "ideation_keep_count": 10,
+    "discussion_keep_count": 10,
+    "debug_keep_count": 10,
+    "plan_keep_count": 10,
+    "request_keep_count": 10,
+    "old_request_threshold_hours": 24
+  },
+  "stitch": {
+    "enabled": true,
+    "auto_detect": true,
+    "auto_trigger": false,
+    "project_id": null,
+    "model_id": "GEMINI_3_PRO",
+    "failure_policy": "skip",
+    "ui_keywords": {
+      "whitelist": [
+        "화면",
+        "페이지",
+        "UI",
+        "레이아웃",
+        "컴포넌트",
+        "모달",
+        "폼",
+        "버튼",
+        "스크린",
+        "디자인",
+        "목업",
+        "시안",
+        "screen",
+        "layout",
+        "component",
+        "modal"
+      ],
+      "blacklist": [
+        "API",
+        "DB",
+        "데이터베이스",
+        "테스트",
+        "배포",
+        "알고리즘",
+        "스키마",
+        "백엔드"
+      ]
+    }
+  },
+  "plan_review": {
+    "enabled": true,
+    "parallel": true,
+    "max_iterations": 2,
+    "escalation_trigger": "major",
+    "minor_escalation_threshold": 3,
+    "roles": {
+      "architect": {
+        "enabled": true,
+        "agent": "codex",
+        "tier": "premium"
+      },
+      "devils_advocate": {
+        "enabled": true,
+        "agent": "gemini",
+        "tier": "premium"
+      },
+      "completeness": {
+        "enabled": true,
+        "agent": "codex",
+        "tier": "premium"
+      },
+      "ux_reviewer": {
+        "enabled": true,
+        "agent": "gemini",
+        "tier": "premium"
+      }
+    }
+  },
+  "review": {
+    "auto_review": true,
+    "max_iterations": 10,
+    "cross_validation": {
+      "enabled": true,
+      "min_reviewers": 2,
+      "line_proximity": 15
+    },
+    "severity_auto_fix": {
+      "enabled": true,
+      "minor_skip_threshold": 3,
+      "pm_direct_fix_enabled": true,
+      "pm_direct_fix_max_files": 1,
+      "pm_direct_fix_max_diff_lines": 20,
+      "security_override_keywords": [
+        "인증",
+        "인가",
+        "인젝션",
+        "시크릿",
+        "XSS",
+        "CSRF",
+        "SQL injection",
+        "권한 우회",
+        "authentication",
+        "authorization",
+        "injection",
+        "secret",
+        "token",
+        "경로 탐색",
+        "path traversal",
+        "코드 인젝션",
+        "code injection",
+        "자격 증명",
+        "API 키"
+      ]
+    },
+    "roles": {
+      "code_reviewer": {
+        "agent": "codex",
+        "tier": "premium"
+      },
+      "arch_reviewer": {
+        "agent": "gemini",
+        "tier": "premium"
+      },
+      "ui_reviewer": {
+        "agent": "gemini",
+        "tier": "premium"
+      },
+      "browser_tester": {
+        "agent": "claude",
+        "tier": "economy"
+      },
+      "intent_fidelity": {
+        "agent": "claude",
+        "tier": "premium"
+      },
+      "impact_reviewer": {
+        "enabled": true,
+        "agent": "codex",
+        "tier": "premium",
+        "enhanced_analysis": true
+      },
+      "adversarial_reviewer": {
+        "enabled": false,
+        "agent": "codex",
+        "tier": "premium",
+        "trigger": "auto",
+        "auto_conditions": {
+          "min_changed_files": 3,
+          "sensitive_dirs": ["auth", "db", "migrations", "payments", "secrets"],
+          "min_diff_lines": 50
+        },
+        "attack_surfaces": [
+          "auth_permissions",
+          "data_integrity",
+          "rollback_safety",
+          "race_conditions",
+          "null_timeout",
+          "version_skew",
+          "observability"
+        ],
+        "max_findings": 5,
+        "confidence_threshold": 0.5,
+        "non_blocking": true,
+        "max_retries": 1
+      }
+    }
+  },
+  "loop_conditions": {
+    "presets": [
+      {
+        "id": "default_pass",
+        "label": "기존 검증 통과 (기본값)",
+        "description": "AC 통과 + max_iterations 도달 시 종료"
+      },
+      {
+        "id": "convergence",
+        "label": "연속 무변경 수렴",
+        "description": "이전 iteration과 비교해 새로운 gap/diff가 없으면 종료"
+      },
+      {
+        "id": "fixed_n",
+        "label": "고정 N회 반복",
+        "description": "지정한 횟수만큼 반복 후 종료",
+        "requires_param": "n"
+      }
+    ]
+  },
+  "plan_qa_presets": {
+    "test_strategy": "apply-80",
+    "loop_exit": "default_pass",
+    "loop_exit_n": 3
+  },
+  "test_enforcement": {
+    "enabled": true,
+    "backend_tdd": true,
+    "web_execution_test": true,
+    "exempt_patterns": [
+      "*.md",
+      "*.json",
+      "*.yml",
+      "*.yaml",
+      "*.txt",
+      "*.css"
+    ],
+    "require_exemption_reason": true
+  },
+  "d3": {
+    "enabled": true,
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    },
+    "cynefin_skip": [
+      "simple",
+      "chaotic"
+    ],
+    "light_mode": true,
+    "ambiguity_threshold": 0.2,
+    "sprint_plan_threshold": 0.15,
+    "objective_detail_threshold": 0.1,
+    "drift_matching_threshold_aligned": 0.8,
+    "drift_matching_threshold_warning": 0.5,
+    "max_escalation_retries": 3
+  },
+  "recall": {
+    "auto_manifest_enabled": true,
+    "level2_operations": [
+      "dod_add",
+      "dod_remove",
+      "dod_reorder",
+      "dod_merge",
+      "dod_refine"
+    ],
+    "level3_requires_approval": true
+  },
+  "pac_trace": {
+    "enabled": true,
+    "blocking": true,
+    "scope_creep_warning": true
+  },
+  "intent_fidelity": {
+    "enabled": true,
+    "mode": "blocking",
+    "should_warning_log": true,
+    "should_escalation_threshold": 3,
+    "exclude_dirs": [
+      "reference",
+      "research",
+      "old"
+    ]
+  },
+  "phase1_exploration": {
+    "roles": {
+      "symbol_tracing": {
+        "agent": "codex",
+        "enabled": true,
+        "tier": "premium"
+      },
+      "broad_scan": {
+        "agent": "gemini",
+        "enabled": true,
+        "tier": "premium"
+      }
+    }
+  },
+  "auto_mode": {
+    "agile": false,
+    "plan": false,
+    "request": false,
+    "review": false,
+    "confidence_threshold": 0.7,
+    "max_review_iterations": 3
+  },
+  "agent_assignments": {
+    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "codex-dev": ["backend", "skill", "test", "infra"],
+    "claude-dev": ["docs", "config"],
+    "gemini-dev": ["frontend", "ui"]
+  },
+  "omx": {
+    "enabled": false,
+    "autopilot": false
+  },
+  "prompt_builder": {
+    "enabled": true,
+    "fallback_on_error": true,
+    "metrics_path": ".gran-maestro/metrics/prompt-builder.ndjson",
+    "max_inline_ask_chars": 200
+  }
+}

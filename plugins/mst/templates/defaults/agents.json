@@ -1,0 +1,31 @@
+{
+  "_config_ref": "모델/provider 설정은 config.json의 models 섹션을 참조",
+  "execution_agents": {
+    "primary_dev": {
+      "role": "developer",
+      "agent_category": "execution",
+      "capabilities": ["code", "refactor", "test"],
+      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+    },
+    "fallback_dev": {
+      "role": "developer",
+      "agent_category": "execution",
+      "capabilities": ["frontend", "docs", "large-context"],
+      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+    }
+  },
+  "review_agents": {
+    "primary_reviewer": {
+      "role": "reviewer",
+      "agent_category": "review",
+      "capabilities": ["code-review", "accuracy"],
+      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+    },
+    "fallback_reviewer": {
+      "role": "reviewer",
+      "agent_category": "review",
+      "capabilities": ["review", "consistency", "large-context"],
+      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+    }
+  }
+}
