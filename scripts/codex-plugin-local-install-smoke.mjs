@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,8 @@ const marketplaceName = 'gran-maestro';
 const pluginName = manifest.name;
 const pluginSelector = `${pluginName}@${marketplaceName}`;
 const tempRoot = mkdtempSync(join(tmpdir(), 'mst-codex-home.'));
+const runtimeProjectRoot = join(tempRoot, 'runtime-project');
+mkdirSync(join(runtimeProjectRoot, '.gran-maestro'), { recursive: true });
 const keepTemp = process.argv.includes('--keep-temp');
 const sourceIndex = process.argv.indexOf('--source');
 const marketplaceSource = sourceIndex === -1
@@ -87,6 +89,8 @@ const installedSkillsPath = join(
 );
 const installedScriptsPath = join(installedRoot, 'scripts', 'mst.py');
 const installedEnforceTreePath = join(installedRoot, 'hooks', 'enforce-tree.json');
+const installedHookHelperPath = join(installedRoot, 'hooks', 'lib', 'pre_tool_use_fast.py');
+const installedHookHelperShardsPath = join(installedRoot, 'hooks', 'lib', 'pre_tool_use_fast_shards');
 const installedConfigPath = join(tempRoot, 'config.toml');
 const blockedClaudeSurfacePaths = [
   '.claude',
@@ -115,6 +119,17 @@ const presentBlockedClaudeSurfacePaths = blockedClaudeSurfacePaths.filter((path)
 const codexConfigTrustedClaudeHooks =
   installedConfigToml.includes(`${pluginSelector}:hooks/hooks.json`) ||
   installedConfigToml.includes('${CLAUDE_PLUGIN_ROOT}');
+const installedMstTimestampCommand = spawnSync('python3', [installedScriptsPath, 'timestamp', 'now'], {
+  cwd: runtimeProjectRoot,
+  env: {
+    ...process.env,
+    CODEX_HOME: tempRoot,
+  },
+  encoding: 'utf8',
+});
+const installedMstTimestampPassed =
+  installedMstTimestampCommand.status === 0 &&
+  /^\d{4}-\d{2}-\d{2}T/.test(installedMstTimestampCommand.stdout.trim());
 
 const evidence = {
   artifact_id: 'codex-plugin-local-install-smoke',
@@ -126,16 +141,20 @@ const evidence = {
     existsSync(installedSkillsPath) &&
     existsSync(installedScriptsPath) &&
     existsSync(installedEnforceTreePath) &&
+    existsSync(installedHookHelperPath) &&
+    existsSync(installedHookHelperShardsPath) &&
     manifestMatchesSource &&
     skillsMatchSource &&
     !installedManifestHasHooks &&
     presentBlockedClaudeSurfacePaths.length === 0 &&
-    !codexConfigTrustedClaudeHooks
+    !codexConfigTrustedClaudeHooks &&
+    installedMstTimestampPassed
     ? 'pass'
     : 'fail',
   repo_root: repoRoot,
   marketplace_source: marketplaceSource,
   codex_home: tempRoot,
+  runtime_project_root: runtimeProjectRoot,
   mutates_user_codex_home: false,
   marketplace_name: marketplaceName,
   plugin_selector: pluginSelector,
@@ -144,6 +163,15 @@ const evidence = {
   installed_skills_path: installedSkillsPath,
   installed_scripts_path: installedScriptsPath,
   installed_enforce_tree_path: installedEnforceTreePath,
+  installed_hook_helper_path: installedHookHelperPath,
+  installed_hook_helper_shards_path: installedHookHelperShardsPath,
+  installed_mst_timestamp_command: {
+    command: ['python3', installedScriptsPath, 'timestamp', 'now'].join(' '),
+    status: installedMstTimestampCommand.status,
+    stdout: installedMstTimestampCommand.stdout,
+    stderr: installedMstTimestampCommand.stderr,
+  },
+  installed_mst_timestamp_passed: installedMstTimestampPassed,
   installed_manifest_matches_source: manifestMatchesSource,
   installed_manifest_has_hooks: installedManifestHasHooks,
   source_skill_count: sourceSkillNames.length,

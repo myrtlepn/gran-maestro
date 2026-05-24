@@ -33,13 +33,16 @@ EXTENSION_PATHS = [
     "package-lock.json",
 ]
 
-HOOK_FILES = [
-    "enforce-tree.json",
-    "stop-agile-gate-reasons.json",
+HOOK_PATHS = [
+    Path("enforce-tree.json"),
+    Path("stop-agile-gate-reasons.json"),
+    Path("lib/pre_tool_use_fast.py"),
+    Path("lib/pre_tool_use_fast_shards"),
 ]
 
 
 def copy_path(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
         ignore = shutil.ignore_patterns("node_modules", ".omc", "__pycache__", ".pytest_cache")
         if source.name == "scripts":
@@ -53,7 +56,6 @@ def copy_path(source: Path, target: Path) -> None:
             )
         shutil.copytree(source, target, symlinks=False, ignore=ignore)
     else:
-        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
 
@@ -81,8 +83,8 @@ def main() -> int:
 
     hooks_root = PROJECTION_ROOT / "hooks"
     hooks_root.mkdir()
-    for filename in HOOK_FILES:
-        copy_path(REPO_ROOT / "hooks" / filename, hooks_root / filename)
+    for rel in HOOK_PATHS:
+        copy_path(REPO_ROOT / "hooks" / rel, hooks_root / rel)
 
     print(f"Synced Codex plugin projection: {PROJECTION_ROOT}")
     return 0

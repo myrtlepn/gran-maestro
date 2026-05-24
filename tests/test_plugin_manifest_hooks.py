@@ -104,6 +104,8 @@ def test_codex_plugin_source_is_runtime_projection_without_claude_hooks() -> Non
     assert (CODEX_PLUGIN_SOURCE / "skills").exists()
     assert (CODEX_PLUGIN_SOURCE / "scripts" / "mst.py").exists()
     assert (CODEX_PLUGIN_SOURCE / "hooks" / "enforce-tree.json").exists()
+    assert (CODEX_PLUGIN_SOURCE / "hooks" / "lib" / "pre_tool_use_fast.py").exists()
+    assert (CODEX_PLUGIN_SOURCE / "hooks" / "lib" / "pre_tool_use_fast_shards").is_dir()
 
     blocked_paths = [
         ".claude",
@@ -125,6 +127,8 @@ def main() -> int:
     print("PASS test_plugin_manifest_hooks_file_exposes_expected_events")
     test_canonical_hook_commands_use_plugin_root_only()
     print("PASS test_canonical_hook_commands_use_plugin_root_only")
+    test_codex_plugin_source_is_runtime_projection_without_claude_hooks()
+    print("PASS test_codex_plugin_source_is_runtime_projection_without_claude_hooks")
     return 0
 
 
