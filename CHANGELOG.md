@@ -6,9 +6,23 @@
 
 ## [Unreleased]
 
+---
+
+## [0.61.0] — 2026-05-25
+
+### 새 기능
+
+- **사용자 기준 브랜치 기반 worktree 수락 경계 강화**: MST workflow가 `master` 고정값 대신 workflow 시작 시점의 사용자 기준 브랜치와 SHA를 original base evidence로 보존합니다. MST 임시 브랜치(`gran-maestro/**`)는 original base로 인정하지 않으며, 최종 반영은 session branch에서 원본 checkout으로 `ff-only` 검증을 통과한 경우에만 수행합니다.
+- **Codex delegated run worktree guard 추가**: `mst.py run --require-worktree --worktree-dir ...` 경로에서 primary checkout과 git에 등록되지 않은 경로를 subprocess 실행 전에 차단합니다. Codex/approve 스킬의 dispatch 예시도 새 guard 옵션을 사용하도록 맞췄습니다.
+
 ### 개선
 
 - **Codex plugin migration 문서·릴리스 검증 통합**: README, Quick Start, configuration, hook setup, skills reference, release checklist가 Codex plugin 설치·업데이트·삭제·검증 절차와 repository-local validation boundary를 함께 안내합니다. DOD-012 evidence와 smoke validation으로 사용자 홈 설정, Codex cache, `.claude/hooks`를 건드리지 않고 릴리스 준비 상태를 확인할 수 있습니다.
+- **한국어 차단/진단 메시지 정리**: MST 임시 브랜치, protected branch, Codex worktree guard 차단 메시지가 “사용자 기준 브랜치”와 worktree 경계 용어를 일관되게 안내하도록 회귀 테스트를 보강했습니다.
+
+### 버그 수정
+
+- **accept 단계의 `master` fallback 제거**: child/request accept 문서의 `CONFIG_BASE_BRANCH:-master` fallback을 제거하고, `request.json.detected_base` 또는 명시된 `config.worktree.base_branch`가 없으면 중단하도록 안내합니다. 원본 `PROJECT_ROOT`에서 destructive git 명령이 재유입되지 않도록 snapshot/static 테스트도 갱신했습니다.
 
 ---
 

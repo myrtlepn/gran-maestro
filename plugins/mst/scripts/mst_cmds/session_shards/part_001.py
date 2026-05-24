@@ -504,6 +504,7 @@ def session_worktree_branch_name(mst_session_id: str) -> str:
 def session_worktree_path(project_root: Path, mst_session_id: str) -> Path:
     parsed = validate_mst_session_id(mst_session_id)
     return _common.worktrees_dir(Path(project_root)) / "sessions" / parsed.mst_session_id
+MST_TEMP_ORIGINAL_BASE_BRANCH_RE = re.compile(r"^gran-maestro/.+$")
 def _git_stdout(project_root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -558,9 +559,57 @@ def _string_or_none(value: object) -> str | None:
         return None
     text = value.strip()
     return text or None
+def _is_mst_temporary_original_base_branch(branch: str | None) -> bool:
+    text = _string_or_none(branch)
+    return bool(text and MST_TEMP_ORIGINAL_BASE_BRANCH_RE.fullmatch(text))
+def _git_absolute_dir(project_root: Path, *args: str) -> str | None:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    path_text = result.stdout.strip()
+    if not path_text:
+        return None
+    path_value = Path(path_text)
+    if not path_value.is_absolute():
+        path_value = (project_root / path_value).resolve(strict=False)
+    return str(path_value.resolve(strict=False))
+def _original_checkout_identity(project_root: Path) -> dict[str, str | None]:
+    project_root_value = str(Path(project_root).resolve(strict=False))
+    return {
+        "original_checkout_path": project_root_value,
+        "parent_project_root": project_root_value,
+        "original_checkout_common_dir": _git_absolute_dir(project_root, "rev-parse", "--git-common-dir"),
+        "original_checkout_git_dir": _git_absolute_dir(project_root, "rev-parse", "--absolute-git-dir"),
+    }
 def _session_worktree_base_snapshot(project_root: Path) -> dict[str, str | None]:
-    base_sha = _git_stdout(project_root, "rev-parse", "HEAD")
+    head_result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    base_sha = head_result.stdout.strip() if head_result.returncode == 0 else None
     base_branch = _try_git_stdout(project_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if base_sha is None:
+        return {
+            "base_branch": None,
+            "base_sha": None,
+            "base_ref_type": "unborn_branch" if base_branch else "head_unavailable",
+            "git_error": head_result.stderr.strip() or head_result.stdout.strip() or "HEAD를 확인할 수 없습니다",
+            "blocked_base_branch": base_branch,
+        }
+    if _is_mst_temporary_original_base_branch(base_branch):
+        return {
+            "base_branch": None,
+            "base_sha": base_sha,
+            "base_ref_type": "mst_temp_branch",
+            "blocked_base_branch": base_branch,
+        }
     if base_branch:
         return {
             "base_branch": base_branch,
@@ -578,6 +627,8 @@ def _session_worktree_reason_action(outcome: str) -> tuple[str, str]:
         "reused_existing": ("session_worktree_reused", "use_session_worktree"),
         "resume_preserved": ("session_worktree_resumed", "use_session_worktree"),
         "blocked_detached_head": ("detached_head", "attach_original_checkout_to_branch_before_session_worktree"),
+        "blocked_unborn_branch": ("unborn_branch", "create_initial_commit_or_checkout_user_branch_before_session_worktree"),
+        "blocked_mst_temp_original_base": ("mst_temp_original_base", "checkout_user_branch_before_session_worktree"),
         "blocked_branch_collision": ("session_worktree_branch_collision", "resolve_session_worktree_branch_collision"),
         "blocked_path_collision": ("session_worktree_path_collision", "resolve_session_worktree_path_collision"),
         "blocked_missing_worktree": ("session_worktree_missing", "repair_or_remove_stale_session_metadata"),
@@ -600,6 +651,10 @@ def _session_worktree_payload(
     outcome: str,
     existing_payload: dict | None = None,
     diagnostic: dict | None = None,
+    original_checkout_path: str | None = None,
+    parent_project_root: str | None = None,
+    original_checkout_common_dir: str | None = None,
+    original_checkout_git_dir: str | None = None,
 ) -> dict:
     payload = dict(existing_payload or {})
     payload.update(mst_session_metadata(parsed))
@@ -615,6 +670,14 @@ def _session_worktree_payload(
     payload["state"] = state
     payload["outcome"] = outcome
     payload[SESSION_WORKTREE_OUTCOME_KEY] = outcome
+    if original_checkout_path:
+        payload["original_checkout_path"] = original_checkout_path
+    if parent_project_root:
+        payload["parent_project_root"] = parent_project_root
+    if original_checkout_common_dir:
+        payload["original_checkout_common_dir"] = original_checkout_common_dir
+    if original_checkout_git_dir:
+        payload["original_checkout_git_dir"] = original_checkout_git_dir
     reason, action = _session_worktree_reason_action(outcome)
     payload["reason"] = reason
     payload["action"] = action
@@ -651,8 +714,13 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
     created_at = _string_or_none((existing_payload or {}).get("created_at")) or created_at_now
     snapshot = _session_worktree_base_snapshot(project_root)
     base_branch = _string_or_none(snapshot["base_branch"])
-    base_sha = str(snapshot["base_sha"] or "")
+    base_sha = _string_or_none(snapshot["base_sha"])
     base_ref_type = str(snapshot["base_ref_type"] or "detached_head")
+    original_checkout_identity = _original_checkout_identity(project_root)
+    original_checkout_path = _string_or_none((existing_payload or {}).get("original_checkout_path")) or _string_or_none((existing_payload or {}).get("parent_project_root")) or _string_or_none(original_checkout_identity.get("original_checkout_path"))
+    parent_project_root = _string_or_none((existing_payload or {}).get("parent_project_root")) or _string_or_none(original_checkout_identity.get("parent_project_root"))
+    original_checkout_common_dir = _string_or_none((existing_payload or {}).get("original_checkout_common_dir")) or _string_or_none(original_checkout_identity.get("original_checkout_common_dir"))
+    original_checkout_git_dir = _string_or_none((existing_payload or {}).get("original_checkout_git_dir")) or _string_or_none(original_checkout_identity.get("original_checkout_git_dir"))
     entries = _git_worktree_entries(project_root)
     path_entry = next((entry for entry in entries if entry.get("worktree") == str(worktree_path)), None)
     branch_entry = next((entry for entry in entries if entry.get("branch") == session_branch_ref), None)
@@ -681,6 +749,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                     state="active",
                     outcome="resume_preserved",
                     existing_payload=existing_payload,
+                    original_checkout_path=original_checkout_path,
+                    parent_project_root=parent_project_root,
+                    original_checkout_common_dir=original_checkout_common_dir,
+                    original_checkout_git_dir=original_checkout_git_dir,
                 ),
             )
         return _write_session_worktree_payload(
@@ -701,6 +773,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                     "expected_branch": session_branch,
                     "expected_path": str(worktree_path),
                 },
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -725,6 +801,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                     "existing_branch": existing_payload.get("session_branch"),
                     "existing_path": existing_payload.get("session_worktree_path"),
                 },
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -742,7 +822,54 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="active",
                 outcome="reused_existing",
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
+        )
+
+    if base_ref_type == "mst_temp_branch":
+        return _session_worktree_payload(
+            parsed,
+            project_root=project_root,
+            session_branch=session_branch,
+            worktree_path=worktree_path,
+            base_branch=None,
+            base_sha=base_sha or "",
+            base_ref_type=base_ref_type,
+            created_at=created_at,
+            state="blocked",
+            outcome="blocked_mst_temp_original_base",
+            diagnostic={
+                "blocked_base_branch": snapshot.get("blocked_base_branch"),
+            },
+            original_checkout_path=original_checkout_path,
+            parent_project_root=parent_project_root,
+            original_checkout_common_dir=original_checkout_common_dir,
+            original_checkout_git_dir=original_checkout_git_dir,
+        )
+
+    if base_ref_type == "unborn_branch":
+        return _session_worktree_payload(
+            parsed,
+            project_root=project_root,
+            session_branch=session_branch,
+            worktree_path=worktree_path,
+            base_branch=None,
+            base_sha="",
+            base_ref_type=base_ref_type,
+            created_at=created_at,
+            state="blocked",
+            outcome="blocked_unborn_branch",
+            diagnostic={
+                "git_error": snapshot.get("git_error"),
+                "blocked_base_branch": snapshot.get("blocked_base_branch"),
+            },
+            original_checkout_path=original_checkout_path,
+            parent_project_root=parent_project_root,
+            original_checkout_common_dir=original_checkout_common_dir,
+            original_checkout_git_dir=original_checkout_git_dir,
         )
 
     if base_ref_type != "branch":
@@ -760,6 +887,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 state="blocked",
                 outcome="blocked_detached_head",
                 diagnostic={"worktree_creation": "skipped_detached_head"},
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -781,6 +912,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                     "existing_path_entry": path_entry,
                     "existing_branch_entry": branch_entry,
                 },
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -799,6 +934,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 state="blocked",
                 outcome="blocked_path_collision",
                 diagnostic={"existing_path": str(worktree_path)},
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -817,6 +956,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 state="blocked",
                 outcome="blocked_branch_collision",
                 diagnostic={"existing_branch": session_branch},
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -845,6 +988,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                     "stderr": result.stderr.strip(),
                     "stdout": result.stdout.strip(),
                 },
+                original_checkout_path=original_checkout_path,
+                parent_project_root=parent_project_root,
+                original_checkout_common_dir=original_checkout_common_dir,
+                original_checkout_git_dir=original_checkout_git_dir,
             ),
         )
 
@@ -861,6 +1008,10 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             created_at=created_at,
             state="active",
             outcome="created",
+            original_checkout_path=original_checkout_path,
+            parent_project_root=parent_project_root,
+            original_checkout_common_dir=original_checkout_common_dir,
+            original_checkout_git_dir=original_checkout_git_dir,
         ),
     )
 SESSION_MERGE_SCOPE_CHILD_CALLERS = frozenset(
@@ -1016,6 +1167,10 @@ def _resolve_merge_scope_session_context(
     worktree_path = _string_or_none(payload.get("session_worktree_path"))
     original_base_branch = _string_or_none(payload.get("base_branch"))
     original_base_sha = _string_or_none(payload.get("base_sha"))
+    original_checkout_path = _string_or_none(payload.get("original_checkout_path"))
+    parent_project_root = _string_or_none(payload.get("parent_project_root"))
+    original_checkout_common_dir = _string_or_none(payload.get("original_checkout_common_dir"))
+    original_checkout_git_dir = _string_or_none(payload.get("original_checkout_git_dir"))
     expected_branch = session_worktree_branch_name(parsed.mst_session_id)
     expected_path = str(session_worktree_path(project_root, parsed.mst_session_id).resolve(strict=False))
     if state not in SESSION_WORKTREE_ACTIVE_STATES:
@@ -1077,6 +1232,10 @@ def _resolve_merge_scope_session_context(
         "session_worktree_path": worktree_path,
         "original_base_branch": original_base_branch,
         "original_base_sha": original_base_sha,
+        "original_checkout_path": original_checkout_path,
+        "parent_project_root": parent_project_root,
+        "original_checkout_common_dir": original_checkout_common_dir,
+        "original_checkout_git_dir": original_checkout_git_dir,
         "session_metadata_path": str(session_path),
     }, None
 def _merge_scope_git_stdout(path: Path, *args: str) -> tuple[bool, str]:
@@ -1089,6 +1248,16 @@ def _merge_scope_git_stdout(path: Path, *args: str) -> tuple[bool, str]:
     if result.returncode != 0:
         return False, result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
     return True, result.stdout.strip()
+def _filter_internal_status_lines(status_output: str) -> list[str]:
+    filtered: list[str] = []
+    for raw_line in status_output.splitlines():
+        line = raw_line.rstrip()
+        if len(line) >= 4:
+            path_text = line[3:].strip().strip('"')
+            if path_text == ".gran-maestro" or path_text.startswith(".gran-maestro/"):
+                continue
+        filtered.append(line)
+    return filtered
 def _merge_scope_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -1122,6 +1291,13 @@ def _final_merge_blocked_payload(
         evidence=evidence,
         required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
     )
+def _merge_scope_repo_identity(project_root: Path) -> dict[str, str | None]:
+    project_root_value = str(Path(project_root).resolve(strict=False))
+    return {
+        "project_root": project_root_value,
+        "common_dir": _git_absolute_dir(project_root, "rev-parse", "--git-common-dir"),
+        "git_dir": _git_absolute_dir(project_root, "rev-parse", "--absolute-git-dir"),
+    }
 def _resolve_final_merge_scope(
     project_root: Path,
     *,
@@ -1142,6 +1318,29 @@ def _resolve_final_merge_scope(
             evidence={"session_worktree_path": str(session_worktree)},
         )
 
+    ok_session_branch, current_session_branch = _merge_scope_git_stdout(session_worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if not ok_session_branch:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="stale_session_branch_checkout",
+            action="checkout_recorded_session_branch_before_final_merge",
+            evidence={"git_error": current_session_branch},
+        )
+    if current_session_branch != session_context["session_branch"]:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="stale_session_branch_checkout",
+            action="checkout_recorded_session_branch_before_final_merge",
+            evidence={
+                "expected_session_branch": session_context["session_branch"],
+                "current_session_branch": current_session_branch,
+            },
+        )
+
     ok_status, status_output = _merge_scope_git_stdout(session_worktree, "status", "--porcelain")
     if not ok_status:
         return _final_merge_blocked_payload(
@@ -1152,14 +1351,15 @@ def _resolve_final_merge_scope(
             action="inspect_session_worktree_before_final_merge",
             evidence={"git_error": status_output},
         )
-    if status_output:
+    session_status_lines = _filter_internal_status_lines(status_output)
+    if session_status_lines:
         return _final_merge_blocked_payload(
             caller,
             requested_target,
             session_context,
             reason="dirty_session_branch",
             action="clean_session_branch_before_final_merge",
-            evidence={"git_status": status_output.splitlines()},
+            evidence={"git_status": session_status_lines},
         )
 
     ok_unmerged, unmerged_output = _merge_scope_git_stdout(session_worktree, "diff", "--name-only", "--diff-filter=U")
@@ -1203,7 +1403,114 @@ def _resolve_final_merge_scope(
             evidence=evidence_payload,
         )
 
-    ok_base_sha, current_base_sha = _merge_scope_git_stdout(project_root, "rev-parse", session_context["original_base_branch"])
+    recorded_original_checkout_path = _string_or_none(session_context.get("original_checkout_path"))
+    recorded_parent_project_root = _string_or_none(session_context.get("parent_project_root"))
+    recorded_original_checkout_common_dir = _string_or_none(session_context.get("original_checkout_common_dir"))
+    recorded_original_checkout_git_dir = _string_or_none(session_context.get("original_checkout_git_dir"))
+    if (
+        (not recorded_original_checkout_path and not recorded_parent_project_root)
+        or not recorded_original_checkout_common_dir
+        or not recorded_original_checkout_git_dir
+    ):
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="missing_original_checkout_identity_evidence",
+            action="recreate_session_from_original_checkout",
+            evidence={
+                "recorded_original_checkout_path": recorded_original_checkout_path,
+                "recorded_parent_project_root": recorded_parent_project_root,
+                "recorded_original_checkout_common_dir": recorded_original_checkout_common_dir,
+                "recorded_original_checkout_git_dir": recorded_original_checkout_git_dir,
+            },
+        )
+
+    current_identity = _merge_scope_repo_identity(project_root)
+    if (
+        (recorded_original_checkout_path and current_identity["project_root"] != recorded_original_checkout_path)
+        or (recorded_parent_project_root and current_identity["project_root"] != recorded_parent_project_root)
+        or current_identity["common_dir"] != recorded_original_checkout_common_dir
+        or current_identity["git_dir"] != recorded_original_checkout_git_dir
+    ):
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="wrong_original_checkout_identity",
+            action="run_final_merge_from_recorded_original_checkout",
+            evidence={
+                "recorded_original_checkout_path": recorded_original_checkout_path,
+                "recorded_parent_project_root": recorded_parent_project_root,
+                "recorded_original_checkout_common_dir": recorded_original_checkout_common_dir,
+                "recorded_original_checkout_git_dir": recorded_original_checkout_git_dir,
+                "current_original_checkout_path": current_identity["project_root"],
+                "current_original_checkout_common_dir": current_identity["common_dir"],
+                "current_original_checkout_git_dir": current_identity["git_dir"],
+            },
+        )
+
+    ok_original_branch, current_original_branch = _merge_scope_git_stdout(project_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if not ok_original_branch:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="detached_original_checkout",
+            action="checkout_recorded_original_base_branch_before_final_merge",
+            evidence={"git_error": current_original_branch},
+        )
+    if current_original_branch != session_context["original_base_branch"]:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="original_base_branch_mismatch",
+            action="checkout_recorded_original_base_branch_before_final_merge",
+            evidence={
+                "expected_original_base_branch": session_context["original_base_branch"],
+                "current_original_branch": current_original_branch,
+            },
+        )
+
+    ok_original_status, original_status_output = _merge_scope_git_stdout(project_root, "status", "--porcelain")
+    if not ok_original_status:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="original_checkout_status_failed",
+            action="inspect_original_checkout_before_final_merge",
+            evidence={"git_error": original_status_output},
+        )
+    original_status_lines = _filter_internal_status_lines(original_status_output)
+    if original_status_lines:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="dirty_original_checkout",
+            action="clean_original_checkout_before_final_merge",
+            evidence={"git_status": original_status_lines},
+        )
+
+    ok_original_branch_sha, current_original_branch_sha = _merge_scope_git_stdout(
+        project_root,
+        "rev-parse",
+        "--verify",
+        f"refs/heads/{session_context['original_base_branch']}",
+    )
+    if not ok_original_branch_sha:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="original_base_missing",
+            action="inspect_original_base_reference",
+            evidence={"git_error": current_original_branch_sha},
+        )
+
+    ok_base_sha, current_base_sha = _merge_scope_git_stdout(project_root, "rev-parse", "--verify", "HEAD")
     if not ok_base_sha:
         return _final_merge_blocked_payload(
             caller,
@@ -1224,6 +1531,61 @@ def _resolve_final_merge_scope(
                 **evidence_payload,
                 "expected_original_base_sha": session_context["original_base_sha"],
                 "current_original_base_sha": current_base_sha,
+                "current_original_branch_sha": current_original_branch_sha,
+            },
+        )
+
+    ok_session_branch_sha, session_branch_sha = _merge_scope_git_stdout(
+        project_root,
+        "rev-parse",
+        "--verify",
+        f"refs/heads/{session_context['session_branch']}",
+    )
+    if not ok_session_branch_sha:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="session_branch_missing",
+            action="restore_canonical_session_branch_before_final_merge",
+            evidence={"git_error": session_branch_sha},
+        )
+
+    ff_result = subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            current_base_sha,
+            f"refs/heads/{session_context['session_branch']}",
+        ],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if ff_result.returncode == 1:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="non_fast_forward_original_reflection",
+            action="rebase_or_recreate_session_before_final_merge",
+            evidence={
+                "expected_original_base_sha": session_context["original_base_sha"],
+                "current_original_base_sha": current_base_sha,
+                "session_branch_sha": session_branch_sha,
+            },
+        )
+    if ff_result.returncode != 0:
+        return _final_merge_blocked_payload(
+            caller,
+            requested_target,
+            session_context,
+            reason="fast_forward_precheck_failed",
+            action="inspect_fast_forward_precheck_before_final_merge",
+            evidence={
+                "git_error": ff_result.stderr.strip() or ff_result.stdout.strip(),
+                "session_branch_sha": session_branch_sha,
             },
         )
 
@@ -1238,7 +1600,11 @@ def _resolve_final_merge_scope(
         session_branch=session_context["session_branch"],
         original_base_branch=session_context["original_base_branch"],
         original_base_sha=session_context["original_base_sha"],
-        evidence={**evidence_payload, "current_original_base_sha": current_base_sha},
+        evidence={
+            **evidence_payload,
+            "current_original_base_sha": current_base_sha,
+            "session_branch_sha": session_branch_sha,
+        },
         required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
     )
 SESSION_START_LEGACY_DIAGNOSTIC_FIELDS = (
@@ -2028,6 +2394,133 @@ def resolve_session_merge_scope(
         original_base_sha=session_context["original_base_sha"],
         reason="unsupported_caller",
         action="inspect_merge_scope_truth_table",
+    )
+def perform_session_original_ff_only_merge(
+    project_root: Path,
+    *,
+    caller: str,
+    mst_session_id: str | None = None,
+    evidence: dict | None = None,
+) -> dict:
+    project_root = Path(project_root).resolve(strict=False)
+    authorization = resolve_session_merge_scope(
+        project_root,
+        caller=caller,
+        requested_target="session_to_original",
+        mst_session_id=mst_session_id,
+        evidence=evidence,
+    )
+    if not authorization.get("ok"):
+        return authorization
+
+    evidence_payload = dict(authorization.get("evidence") or {})
+    session_branch = _string_or_none(authorization.get("session_branch"))
+    original_base_branch = _string_or_none(authorization.get("original_base_branch"))
+    original_base_sha = _string_or_none(authorization.get("original_base_sha"))
+    expected_original_sha = _string_or_none(evidence_payload.get("current_original_base_sha"))
+    expected_session_sha = _string_or_none(evidence_payload.get("session_branch_sha"))
+    if not session_branch or not original_base_branch or not original_base_sha or not expected_original_sha or not expected_session_sha:
+        session_context = {
+            "session_branch": session_branch,
+            "original_base_branch": original_base_branch,
+            "original_base_sha": original_base_sha,
+        }
+        return _final_merge_blocked_payload(
+            caller,
+            "session_to_original",
+            session_context,
+            reason="missing_ff_only_merge_evidence",
+            action="rerun_final_merge_validation",
+            evidence=evidence_payload,
+        )
+
+    ok_current_sha, current_original_sha = _merge_scope_git_stdout(project_root, "rev-parse", "--verify", "HEAD")
+    if not ok_current_sha or current_original_sha != expected_original_sha:
+        session_context = {
+            "session_branch": session_branch,
+            "original_base_branch": original_base_branch,
+            "original_base_sha": original_base_sha,
+        }
+        return _final_merge_blocked_payload(
+            caller,
+            "session_to_original",
+            session_context,
+            reason="original_reflection_race_detected",
+            action="rerun_final_merge_validation",
+            evidence={
+                **evidence_payload,
+                "expected_original_base_sha": expected_original_sha,
+                "current_original_base_sha": current_original_sha if ok_current_sha else None,
+            },
+        )
+
+    ok_current_session_sha, current_session_sha = _merge_scope_git_stdout(
+        project_root,
+        "rev-parse",
+        "--verify",
+        f"refs/heads/{session_branch}",
+    )
+    if not ok_current_session_sha or current_session_sha != expected_session_sha:
+        session_context = {
+            "session_branch": session_branch,
+            "original_base_branch": original_base_branch,
+            "original_base_sha": original_base_sha,
+        }
+        return _final_merge_blocked_payload(
+            caller,
+            "session_to_original",
+            session_context,
+            reason="original_reflection_race_detected",
+            action="rerun_final_merge_validation",
+            evidence={
+                **evidence_payload,
+                "expected_session_branch_sha": expected_session_sha,
+                "current_session_branch_sha": current_session_sha if ok_current_session_sha else None,
+            },
+        )
+
+    merge_result = subprocess.run(
+        ["git", "merge", "--ff-only", session_branch],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+    )
+    if merge_result.returncode != 0:
+        session_context = {
+            "session_branch": session_branch,
+            "original_base_branch": original_base_branch,
+            "original_base_sha": original_base_sha,
+        }
+        return _final_merge_blocked_payload(
+            caller,
+            "session_to_original",
+            session_context,
+            reason="ff_only_merge_failed",
+            action="inspect_ff_only_merge_failure",
+            evidence={
+                **evidence_payload,
+                "git_error": merge_result.stderr.strip() or merge_result.stdout.strip(),
+            },
+        )
+
+    _, merged_original_sha = _merge_scope_git_stdout(project_root, "rev-parse", "--verify", "HEAD")
+    return _merge_scope_payload(
+        ok=True,
+        caller=caller,
+        requested_target="session_to_original",
+        merge_state="final_reflected_ff_only",
+        child_to_session=False,
+        session_to_original=True,
+        target_branch=original_base_branch,
+        session_branch=session_branch,
+        original_base_branch=original_base_branch,
+        original_base_sha=original_base_sha,
+        evidence={
+            **evidence_payload,
+            "merged_original_base_sha": merged_original_sha,
+            "ff_only": True,
+        },
+        required_evidence=SESSION_FINAL_MERGE_REQUIRED_EVIDENCE,
     )
 ZERO_HISTORY_HASH = "0" * 64
 def _utc_now_history() -> str:

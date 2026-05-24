@@ -180,7 +180,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
    - **base/브랜치 변수 준비 (MANDATORY)**:
      - DOD-005 기준으로 child/request accept의 merge target은 `request.json.detected_base`가 가리키는 session branch 또는 session-derived integration branch다.
      - `request.json.detected_base`가 있으면 해당 값을 최우선 base로 사용한다.
-     - `request.json.detected_base`가 없으면 fallback: `config.worktree.base_branch` → `master` 순서로 사용한다.
+     - `request.json.detected_base`가 없으면 legacy 호환을 위해 명시된 `config.worktree.base_branch`만 사용할 수 있다. 둘 다 없으면 사용자 기준 session branch evidence가 누락된 것으로 보고 중단한다.
      - `original_base_branch`와 `original_base_sha`는 final original merge evidence다. 이 Step 3에서는 reference로만 보존하며 child/request accept가 original base branch로 직접 merge하지 않는다.
      - branch name은 `worktree branch-name` helper로만 산출하며, AGI_ID가 있으면 `gran-maestro/{base_slug}/{AGI_ID}/...` 형식을 사용한다.
      - accept worktree 생성 실패 시 감지 base와 실제 git 상태가 불일치한 것으로 보고 명시적 오류를 출력한 뒤 중단한다.
@@ -189,7 +189,11 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      DETECTED_BASE=$(python3 -c 'import json, sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(str(data.get("detected_base") or "").strip())' "$REQUEST_JSON")
      CONFIG_BASE_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get worktree.base_branch 2>/dev/null || true)
      CONFIG_BASE_BRANCH=$(printf "%s" "$CONFIG_BASE_BRANCH" | head -n 1 | xargs)
-     BASE_BRANCH="${DETECTED_BASE:-${CONFIG_BASE_BRANCH:-master}}"
+     BASE_BRANCH="${DETECTED_BASE:-$CONFIG_BASE_BRANCH}"
+     if [ -z "$BASE_BRANCH" ]; then
+       echo "[accept] Error: request.json.detected_base가 없고 config.worktree.base_branch도 비어 있습니다. /mst:approve에서 사용자 기준 session branch를 다시 감지하세요." >&2
+       exit 1
+     fi
      REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --role integration --agi "${AGI_ID:-}")
      TASK_BRANCH_PREFIX=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --task T --agi "${AGI_ID:-}")
      echo "[accept] squash base: ${BASE_BRANCH}"
@@ -223,7 +227,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      4. `git log` 실행 실패, 커밋 히스토리 부재, 또는 분석 대상에서 일관된 패턴을 추출할 수 없는 경우 subject 폴백은 `[REQ-NNN] {REQ 제목}`으로 고정한다.
      5. 감지 결과로 `{DETECTED_SUBJECT}`를 만들고, 예를 들어 `[REQ-NNN] 한국어 설명 (파일목록)`이 우세하면 동일한 접두사/언어/괄호 부록 구조를 유지한다.
      ```bash
-     git -C {PROJECT_ROOT} commit -m "{DETECTED_SUBJECT}
+     git -C "$ACCEPT_WORKTREE" commit -m "{DETECTED_SUBJECT}
 
      Base branch: ${BASE_BRANCH}
 

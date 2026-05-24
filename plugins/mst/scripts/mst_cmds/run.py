@@ -73,6 +73,71 @@ def _wrapper_timeout_sec(args) -> int | None:
     return value if value > 0 else None
 
 
+def _git_output(cwd: Path, *args: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout.strip() or result.stderr.strip()
+    return result.returncode == 0, output
+
+
+def _absolute_git_path(base: Path, path_text: str) -> Path:
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = (base / path).resolve(strict=False)
+    return path.resolve(strict=False)
+
+
+def _parse_command_worktree_dir(command: list[str]) -> str | None:
+    for index, token in enumerate(command):
+        if token in {"-C", "--worktree-dir", "--cwd"} and index + 1 < len(command):
+            return command[index + 1]
+        if token.startswith("-C") and len(token) > 2:
+            return token[2:]
+        if token.startswith("--cwd="):
+            return token.split("=", 1)[1]
+    return None
+
+
+def _git_worktree_roots(repo_root: Path) -> set[Path]:
+    ok, output = _git_output(repo_root, "worktree", "list", "--porcelain")
+    if not ok:
+        return set()
+    roots: set[Path] = set()
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            roots.add(Path(line[len("worktree "):]).resolve(strict=False))
+    return roots
+
+
+def _validate_required_worktree(target_value: str | None) -> tuple[bool, str, Path | None]:
+    if not target_value or not str(target_value).strip():
+        return False, "작업 worktree 경로가 필요합니다 (--worktree-dir 또는 Codex -C).", None
+
+    target_path = Path(str(target_value)).expanduser().resolve(strict=False)
+    ok_root, root_output = _git_output(target_path, "rev-parse", "--show-toplevel")
+    if not ok_root or not root_output:
+        return False, f"등록된 git worktree가 아닙니다: {target_path}", target_path
+
+    worktree_root = Path(root_output).resolve(strict=False)
+    ok_common, common_output = _git_output(worktree_root, "rev-parse", "--git-common-dir")
+    if not ok_common or not common_output:
+        return False, f"worktree git metadata를 확인할 수 없습니다: {worktree_root}", worktree_root
+
+    common_dir = _absolute_git_path(worktree_root, common_output)
+    primary_root = common_dir.parent.resolve(strict=False)
+    if worktree_root == primary_root:
+        return False, f"원본 primary checkout은 delegated run 작업 디렉토리로 사용할 수 없습니다: {worktree_root}", worktree_root
+
+    if worktree_root not in _git_worktree_roots(worktree_root):
+        return False, f"git worktree list에 등록되지 않은 경로입니다: {worktree_root}", worktree_root
+
+    return True, "registered linked worktree", worktree_root
+
+
 def _started_by_pid() -> int:
     return resolve_started_by_pid()
 
@@ -97,6 +162,7 @@ def _register_state(
     running_log_path: Path,
     stdout_log_path: Path,
     stderr_log_path: Path,
+    worktree_dir: Path | None = None,
 ) -> str:
     now = _now_iso()
     pid = os.getpid()
@@ -120,7 +186,7 @@ def _register_state(
             getattr(args, "label", None),
         ),
         "model": str(args.model).strip(),
-        "worktree_dir": str(Path.cwd()),
+        "worktree_dir": str((worktree_dir or Path.cwd()).resolve(strict=False)),
         "parent_session_id": _parent_session_id(
             raw_context,
             session_id,
@@ -401,6 +467,15 @@ def cmd_run(args):
         print("Error: missing CLI command after '--'", file=sys.stderr)
         return 2
 
+    command_worktree_dir = str(getattr(args, "worktree_dir", "") or "").strip() or _parse_command_worktree_dir(command)
+    effective_worktree_dir = Path(command_worktree_dir).expanduser().resolve(strict=False) if command_worktree_dir else Path.cwd()
+    if getattr(args, "require_worktree", False):
+        ok_worktree, guard_message, guard_worktree = _validate_required_worktree(command_worktree_dir)
+        if not ok_worktree:
+            print(f"Error: worktree guard failed: {guard_message}", file=sys.stderr)
+            return 2
+        effective_worktree_dir = guard_worktree or effective_worktree_dir
+
     heartbeat_interval = _heartbeat_interval(args)
     timeout_sec = _wrapper_timeout_sec(args)
     state_lock = threading.Lock()
@@ -417,6 +492,7 @@ def cmd_run(args):
         running_log_path=running_log_path,
         stdout_log_path=stdout_log_path,
         stderr_log_path=stderr_log_path,
+        worktree_dir=effective_worktree_dir,
     )
 
     def heartbeat_loop() -> None:
@@ -580,4 +656,6 @@ def register(subparsers):
     run.add_argument("--parent-session-id")
     run.add_argument("--fallback-from")
     run.add_argument("--context-file", action="append")
+    run.add_argument("--require-worktree", action="store_true")
+    run.add_argument("--worktree-dir")
     run.add_argument("cli_command", nargs=argparse.REMAINDER)
