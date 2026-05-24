@@ -72,6 +72,8 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
      --provider codex \
      --model "$MODEL" \
      --log-dir "{task_dir}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "{prompt}"
 
    # --prompt-file
@@ -80,6 +82,8 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
      --provider codex \
      --model "$MODEL" \
      --log-dir "{task_dir}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})"
 
    # --trace 모드
@@ -89,6 +93,8 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
      --model "$MODEL" \
      --log-dir "{task_dir}" \
      --trace "{REQ-ID}/{TASK-NUM}/{label}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- codex exec ${SANDBOX_ARGS} -m "$MODEL" -C {working_dir} "$(cat {prompt_file})"
    ```
 8. **결과 처리**: `--trace` → Trace 문서 자동 생성 후 exit code만 반환; `--output` → 파일 저장; 둘 다 없음 → 결과 표시
@@ -108,6 +114,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py run \
   --model gpt-5.3-codex \
   --log-dir .gran-maestro/requests/REQ-001/tasks/01 \
   --trace REQ-001/01/phase2-impl \
+  --require-worktree \
+  --worktree-dir {worktree} \
   -- codex exec --full-auto -m gpt-5.3-codex -C {worktree} "$(cat {prompt_file})"
 ```
 

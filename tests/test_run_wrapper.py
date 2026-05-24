@@ -66,6 +66,125 @@ def _run_mst_with_session_env(
     )
 
 
+def _git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _init_workspace_repo(tmp_path: Path) -> Path:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / ".gran-maestro").mkdir(parents=True)
+    _git(workspace, "init")
+    _git(workspace, "config", "user.email", "tester@example.com")
+    _git(workspace, "config", "user.name", "Test User")
+    _git(workspace, "commit", "--allow-empty", "-m", "initial commit")
+    _git(workspace, "branch", "-M", "main")
+    return workspace
+
+
+def test_run_require_worktree_rejects_primary_checkout(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "T-WORKTREE-PRIMARY",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--require-worktree",
+        "--worktree-dir",
+        str(workspace),
+        "--",
+        "bash",
+        "-c",
+        "touch SHOULD_NOT_RUN",
+    )
+
+    assert proc.returncode != 0
+    assert "primary" in proc.stderr.lower() or "원본" in proc.stderr
+    assert not (workspace / "SHOULD_NOT_RUN").exists()
+
+
+def test_run_require_worktree_rejects_unregistered_path(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    unregistered = tmp_path / "unregistered"
+    unregistered.mkdir()
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "T-WORKTREE-UNREGISTERED",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--require-worktree",
+        "--worktree-dir",
+        str(unregistered),
+        "--",
+        "bash",
+        "-c",
+        "touch SHOULD_NOT_RUN",
+    )
+
+    assert proc.returncode != 0
+    assert "registered" in proc.stderr.lower() or "등록" in proc.stderr
+    assert not (unregistered / "SHOULD_NOT_RUN").exists()
+
+
+def test_run_require_worktree_allows_registered_linked_worktree(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    linked_worktree = tmp_path / "linked-worktree"
+    _git(workspace, "worktree", "add", "-b", "feature/linked-worktree", str(linked_worktree), "main")
+    log_dir = tmp_path / "task"
+    log_dir.mkdir()
+
+    proc = _run_mst(
+        workspace,
+        "run",
+        "--task-id",
+        "T-WORKTREE-LINKED",
+        "--provider",
+        "codex",
+        "--model",
+        "test-model",
+        "--log-dir",
+        str(log_dir),
+        "--require-worktree",
+        "--worktree-dir",
+        str(linked_worktree),
+        "--",
+        "bash",
+        "-c",
+        "echo linked-ok",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "linked-ok" in (log_dir / "running.log").read_text(encoding="utf-8")
+    state = json.loads((workspace / ".gran-maestro" / "run" / "T-WORKTREE-LINKED.json").read_text(encoding="utf-8"))
+    assert state["worktree_dir"] == str(linked_worktree.resolve())
+
+
 def test_run_basic_tee_and_state(tmp_path):
     """AC-001: stdout/stderr tee + run/{task_id}.json 생성 + 종료 필드 기록"""
     workspace = tmp_path / "ws"
@@ -329,7 +448,8 @@ def test_trace_file_generation(tmp_path):
     content = trace_files[0].read_text(encoding="utf-8")
     assert "task_id: T-TRACE" in content, f"task_id 누락: {content[:200]}"
     assert "exit_code: 0" in content, f"exit_code 누락: {content[:200]}"
-    assert "trace_label: REQ-TEST/01/unit-test" in content, f"trace_label 누락: {content[:200]}"
+    assert "trace_label: unit-test" in content, f"trace_label 누락: {content[:200]}"
+    assert "trace_label_original_redacted: REQ-TEST/01/unit-test" in content, f"trace_label 원본 누락: {content[:200]}"
     assert "provider: codex" in content
 
 
