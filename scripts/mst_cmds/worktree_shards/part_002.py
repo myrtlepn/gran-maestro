@@ -431,6 +431,15 @@ def cmd_worktree_resolve_base(args):
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    if is_mst_temporary_original_base_branch(detected_base):
+        print(
+            "Error: 현재 브랜치는 MST 임시 브랜치입니다. "
+            f"base={detected_base!r}. "
+            "사용자 기준 브랜치로 이동한 뒤 /mst:approve를 다시 실행하세요.",
+            file=sys.stderr,
+        )
+        return 2
+
     protected_patterns = _load_protected_branches()
     matched_pattern = matching_protected_pattern(detected_base, protected_patterns)
     if matched_pattern is not None:

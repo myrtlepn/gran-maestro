@@ -120,6 +120,14 @@ def _set_repo_context(repo_root: Path, monkeypatch, *, cwd: Path | None = None) 
     monkeypatch.chdir(cwd or repo_root)
 
 
+def _checkout_feature_branch_with_commit(repo_root: Path, branch: str = "feature/original-base") -> str:
+    _git(repo_root, "checkout", "-b", branch)
+    (repo_root / "feature-base.txt").write_text(f"{branch}\n", encoding="utf-8")
+    _git(repo_root, "add", "feature-base.txt")
+    _git(repo_root, "commit", "-m", "feature base commit")
+    return branch
+
+
 def _create_child_branch(
     tmp_path: Path,
     repo_root: Path,
@@ -210,6 +218,80 @@ def test_child_accept_merges_to_session_only(
     assert request_data["detected_base"] == session_payload["session_branch"]
     assert request_data["original_base_branch"] == original_base_branch
     assert request_data["original_base_sha"] == original_base_sha
+
+
+def test_feature_branch_session_contract_preserves_original_base_and_child_request_context(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    repo_root = _init_repo(tmp_path)
+    feature_branch = _checkout_feature_branch_with_commit(repo_root)
+    feature_sha = _git(repo_root, "rev-parse", "HEAD")
+    master_sha = _git(repo_root, "rev-parse", "master")
+    request_path = _seed_request(repo_root)
+    session_payload = ensure_session_worktree_contract(repo_root, MST_SESSION_ID)
+
+    assert session_payload["state"] == "active"
+    assert session_payload["base_branch"] == feature_branch
+    assert session_payload["base_sha"] == feature_sha
+    assert session_payload["base_sha"] != master_sha
+
+    _set_repo_context(repo_root, monkeypatch)
+    monkeypatch.setenv("MST_SESSION_ID", MST_SESSION_ID)
+
+    exit_code = cmd_worktree_resolve_base(argparse.Namespace(req=REQ_ID, json=True))
+    captured = capsys.readouterr()
+
+    assert exit_code == 0, captured.err
+    payload = json.loads(captured.out)
+    assert payload["base"] == session_payload["session_branch"]
+    assert payload["original_base_branch"] == feature_branch
+    assert payload["original_base_sha"] == feature_sha
+    request_data = _read_json(request_path)
+    assert request_data["detected_base"] == session_payload["session_branch"]
+    assert request_data["original_base_branch"] == feature_branch
+    assert request_data["original_base_sha"] == feature_sha
+
+
+@pytest.mark.parametrize(
+    "temp_branch",
+    [
+        "gran-maestro/session/MST-AGI-038-20260515T010203004Z-abc12345",
+        "gran-maestro/feature-x/REQ-870",
+    ],
+)
+def test_session_worktree_contract_rejects_mst_temp_original_base(tmp_path: Path, temp_branch: str) -> None:
+    repo_root = _init_repo(tmp_path)
+    _git(repo_root, "checkout", "-b", temp_branch)
+
+    payload = ensure_session_worktree_contract(repo_root, MST_SESSION_ID)
+
+    assert payload["state"] == "blocked"
+    assert payload["outcome"] != "created"
+    assert payload["outcome"] != "reused_existing"
+    assert payload["outcome"] != "resume_preserved"
+    assert not Path(str(payload["session_worktree_path"])).exists()
+
+
+def test_session_worktree_contract_returns_structured_block_for_unborn_original_base(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo-unborn"
+    repo_root.mkdir()
+    (repo_root / ".gran-maestro" / "worktrees").mkdir(parents=True, exist_ok=True)
+
+    assert _run_git(repo_root, "init").returncode == 0
+    assert _run_git(repo_root, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(repo_root, "config", "user.name", "Test User").returncode == 0
+
+    try:
+        payload = ensure_session_worktree_contract(repo_root, MST_SESSION_ID)
+    except Exception as exc:  # pragma: no cover - explicit regression guard
+        pytest.fail(f"expected structured blocked payload for unborn original base, got exception: {exc}")
+
+    assert payload["state"] == "blocked"
+    assert payload["outcome"].startswith("blocked_")
+    assert payload.get("base_branch") in (None, "")
+    assert not Path(str(payload["session_worktree_path"])).exists()
 
 
 def test_merge_scope_truth_table_runtime(

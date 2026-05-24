@@ -30,6 +30,7 @@ from scripts.mst_cmds.session import (
     validate_mst_session_id,
 )
 FALLBACK_PROTECTED_BRANCHES = ["main", "master", "release/*"]
+MST_TEMP_ORIGINAL_BASE_BRANCH_RE = re.compile(r"^gran-maestro/.+$")
 MST_WORKTREE_HOOK_COMMAND_RE = re.compile(
     r"(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]+\))/\.claude/hooks/"
     r"mst-(stop-hook|session-init|pre-tool-use|auto-chain-context)\.sh"
@@ -82,6 +83,9 @@ def _load_protected_branches() -> list[str]:
         if isinstance(patterns, list) and all(isinstance(item, str) for item in patterns):
             return list(patterns)
     return list(FALLBACK_PROTECTED_BRANCHES)
+def is_mst_temporary_original_base_branch(branch: str | None) -> bool:
+    text = str(branch or "").strip()
+    return bool(text and MST_TEMP_ORIGINAL_BASE_BRANCH_RE.fullmatch(text))
 def current_head_branch(project_root: Path | None = None) -> str:
     if project_root is None:
         project_root = _project_root()
@@ -100,6 +104,18 @@ def current_head_branch(project_root: Path | None = None) -> str:
     branch = result.stdout.strip()
     if not branch:
         raise RuntimeError("현재 브랜치를 확인할 수 없습니다")
+    head_result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+    )
+    if head_result.returncode != 0:
+        raise RuntimeError(
+            head_result.stderr.strip()
+            or head_result.stdout.strip()
+            or "unborn branch 상태이거나 HEAD를 확인할 수 없습니다"
+        )
     return branch
 def _persist_detected_base(
     req_id: str,
@@ -219,6 +235,17 @@ def _resolve_parent_session_context() -> tuple[dict | None, dict | None]:
         "base_branch": _coerce_nonempty_str(payload.get("base_branch")),
         "base_sha": _coerce_nonempty_str(payload.get("base_sha")),
     }
+    if is_mst_temporary_original_base_branch(parent_session["base_branch"]):
+        return None, _session_child_non_success(
+            "invalid_original_base_branch",
+            "repair_or_remove_conflicting_session_metadata",
+            details={"original_base_branch": parent_session["base_branch"]},
+        )
+    if not parent_session["base_branch"] or not parent_session["base_sha"]:
+        return None, _session_child_non_success(
+            "missing_original_base_evidence",
+            "ensure_session_worktree_contract_before_child_worktree",
+        )
     return parent_session, None
 def _is_mst_owned_worktree_hook_file(path: Path) -> bool:
     name = path.name

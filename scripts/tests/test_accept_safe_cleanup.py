@@ -8,6 +8,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACCEPT_SKILL = REPO_ROOT / "skills" / "accept" / "SKILL.md"
+PROJECT_ROOT_REF = r'(?:\{PROJECT_ROOT\}|\$PROJECT_ROOT|\$\{PROJECT_ROOT\}|"\$PROJECT_ROOT"|"\$\{PROJECT_ROOT\}")'
+FORBIDDEN_PROJECT_ROOT_DIRECT_PATTERNS = (
+    re.compile(rf"\bgit\s+-C\s+{PROJECT_ROOT_REF}\s+commit\b"),
+    re.compile(rf"\bgit\s+-C\s+{PROJECT_ROOT_REF}\s+checkout\b"),
+    re.compile(rf"\bgit\s+-C\s+{PROJECT_ROOT_REF}\s+merge\s+--squash\b"),
+    re.compile(rf"\bgit\s+-C\s+{PROJECT_ROOT_REF}\s+merge\s+--no-ff\b"),
+)
+FORBIDDEN_PROJECT_ROOT_CD_PATTERNS = (
+    re.compile(rf"\bcd\s+{PROJECT_ROOT_REF}(?:(?:\s*&&|\s*;)\s*|\s*\n(?:[^\n]*\n){{0,4}}?)git\s+commit\b", re.S),
+    re.compile(rf"\bcd\s+{PROJECT_ROOT_REF}(?:(?:\s*&&|\s*;)\s*|\s*\n(?:[^\n]*\n){{0,4}}?)git\s+checkout\b", re.S),
+    re.compile(rf"\bcd\s+{PROJECT_ROOT_REF}(?:(?:\s*&&|\s*;)\s*|\s*\n(?:[^\n]*\n){{0,4}}?)git\s+merge\s+--squash\b", re.S),
+    re.compile(rf"\bcd\s+{PROJECT_ROOT_REF}(?:(?:\s*&&|\s*;)\s*|\s*\n(?:[^\n]*\n){{0,4}}?)git\s+merge\s+--no-ff\b", re.S),
+)
 
 
 def _accept_skill_text() -> str:
@@ -28,6 +41,20 @@ def _cleanup_helper_block() -> str:
     )
     assert match is not None
     return match.group("body")
+
+
+def _bash_blocks(text: str) -> list[str]:
+    return re.findall(r"```bash\n(.*?)```", text, flags=re.S)
+
+
+def _forbidden_project_root_destructive_commands(text: str) -> list[str]:
+    violations: list[str] = []
+    for block_number, block in enumerate(_bash_blocks(text), start=1):
+        for pattern in (*FORBIDDEN_PROJECT_ROOT_DIRECT_PATTERNS, *FORBIDDEN_PROJECT_ROOT_CD_PATTERNS):
+            for match in pattern.finditer(block):
+                snippet = " ".join(match.group(0).split())
+                violations.append(f"bash-block-{block_number}:{snippet}")
+    return violations
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -130,6 +157,12 @@ def test_accept_step4_cleanup_commands_do_not_silence_failures() -> None:
 
     assert "record_clean_failed()" in step_4
     assert "clean_failed" in step_4
+
+
+def test_accept_skill_forbids_project_root_destructive_git_commands() -> None:
+    violations = _forbidden_project_root_destructive_commands(_accept_skill_text())
+
+    assert violations == []
 
 
 def test_accept_cleanup_records_worktree_failure_and_continues(tmp_path: Path) -> None:

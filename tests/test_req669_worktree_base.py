@@ -162,6 +162,94 @@ def test_ac007_detected_base_persisted_on_success(repo: Path) -> None:
     assert request_data.get("detected_base") == "feature/x"
 
 
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "gran-maestro/session/MST-AGI-038-20260515T010203004Z-abc12345",
+        "gran-maestro/feature-x/REQ-069",
+        "gran-maestro/feature-x/REQ-069-T01",
+        "gran-maestro/feature-x/REQ-069-accept",
+    ],
+)
+def test_rejects_mst_temporary_branches_without_mutating_request(repo: Path, capsys, branch: str) -> None:
+    assert _run_git(repo, "checkout", "-b", branch).returncode == 0
+
+    exit_code = worktree.cmd_worktree_resolve_base(argparse.Namespace(req="REQ-069", json=False))
+    captured = capsys.readouterr()
+
+    assert exit_code != 0
+    assert "gran-maestro" in captured.err or "다른 브랜치로 이동" in captured.err
+    request_data = json.loads(
+        (repo / ".gran-maestro" / "requests" / "REQ-069" / "request.json").read_text(encoding="utf-8")
+    )
+    assert "detected_base" not in request_data
+
+
+def test_detached_head_is_rejected_without_detected_base_mutation(repo: Path, capsys) -> None:
+    assert _run_git(repo, "checkout", "--detach").returncode == 0
+
+    exit_code = worktree.cmd_worktree_resolve_base(argparse.Namespace(req="REQ-069", json=False))
+    captured = capsys.readouterr()
+
+    assert exit_code != 0
+    assert "detached HEAD" in captured.err
+    request_data = json.loads(
+        (repo / ".gran-maestro" / "requests" / "REQ-069" / "request.json").read_text(encoding="utf-8")
+    )
+    assert "detected_base" not in request_data
+
+
+def test_unborn_branch_is_rejected_without_detected_base_mutation(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo_root = tmp_path / "repo-unborn"
+    repo_root.mkdir()
+
+    assert _run_git(repo_root, "init").returncode == 0
+    assert _run_git(repo_root, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(repo_root, "config", "user.name", "Test User").returncode == 0
+
+    gm_dir = repo_root / ".gran-maestro"
+    request_dir = gm_dir / "requests" / "REQ-069"
+    request_dir.mkdir(parents=True)
+    (request_dir / "request.json").write_text(
+        json.dumps({"id": "REQ-069"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (gm_dir / "config.resolved.json").write_text(
+        json.dumps(
+            {"worktree": {"protected_branches": ["main", "master", "release/*"]}},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", gm_dir)
+    monkeypatch.chdir(repo_root)
+
+    exit_code = worktree.cmd_worktree_resolve_base(argparse.Namespace(req="REQ-069", json=False))
+    captured = capsys.readouterr()
+
+    assert exit_code != 0
+    assert captured.err
+    request_data = json.loads((request_dir / "request.json").read_text(encoding="utf-8"))
+    assert "detected_base" not in request_data
+
+
+@pytest.mark.parametrize("branch", ["gran-maestro-feature", "feature/gran-maestro"])
+def test_gran_maestro_like_user_branches_are_not_false_positives(repo: Path, capsys, branch: str) -> None:
+    assert _run_git(repo, "checkout", "-b", branch).returncode == 0
+
+    exit_code = worktree.cmd_worktree_resolve_base(argparse.Namespace(req="REQ-069", json=False))
+    captured = capsys.readouterr()
+
+    assert exit_code == 0, captured.err
+    assert captured.out.strip() == branch
+    request_data = json.loads(
+        (repo / ".gran-maestro" / "requests" / "REQ-069" / "request.json").read_text(encoding="utf-8")
+    )
+    assert request_data["detected_base"] == branch
+
+
 def test_branch_name_cli_accepts_agi_namespace(capsys) -> None:
     exit_code = worktree.cmd_worktree_branch_name(
         argparse.Namespace(req="REQ-779", base="feature/x", task=None, role="integration", agi="AGI-026")

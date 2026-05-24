@@ -223,7 +223,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      4. `git log` 실행 실패, 커밋 히스토리 부재, 또는 분석 대상에서 일관된 패턴을 추출할 수 없는 경우 subject 폴백은 `[REQ-NNN] {REQ 제목}`으로 고정한다.
      5. 감지 결과로 `{DETECTED_SUBJECT}`를 만들고, 예를 들어 `[REQ-NNN] 한국어 설명 (파일목록)`이 우세하면 동일한 접두사/언어/괄호 부록 구조를 유지한다.
      ```bash
-     git -C {PROJECT_ROOT} commit -m "{DETECTED_SUBJECT}
+     git -C "$ACCEPT_WORKTREE" commit -m "{DETECTED_SUBJECT}
 
      Base branch: ${BASE_BRANCH}
 
