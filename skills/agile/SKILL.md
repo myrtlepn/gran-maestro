@@ -496,19 +496,19 @@ Skill(skill: "mst:plan", args: "-a {SELECTED_WORK_ITEM}
 
 ##### 2.2.3.a Dispatch 활성화 분기 (`config.agile.dispatch.enabled`)
 
-Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.enabled)` 값을 기준으로 분기한다.
+Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.enabled agile.dispatch.provider --json)` 값을 기준으로 분기한다. `agile.dispatch.provider` 미설정 시 `codex`로 간주한다.
 
 - `enabled == true`: `2.2.3.D dispatch 실행 경로` 수행
 - `enabled == false` 또는 키 미설정: inline 경로 수행 (기본값 `false`)
   - 위 `Skill(skill: "mst:plan", args: "-a ...")` 호출을 그대로 실행
   - **추가: inline 경로 경량 추적 마커 (MANDATORY)**: Sprint 시작 시 `{PROJECT_ROOT}/.gran-maestro/run/{AGI_ID}-S{NN}.json`에 아래 페이로드를 Write:
     ```json
-    {"task_id": "{AGI_ID}-S{NN}", "phase": "running", "provider": "claude", "model": "{resolved_model}", "started_at": "{ISO8601}", "last_heartbeat": "{ISO8601}", "inline": true}
+    {"task_id": "{AGI_ID}-S{NN}", "phase": "running", "provider": "{resolved_provider}", "model": "{resolved_model}", "started_at": "{ISO8601}", "last_heartbeat": "{ISO8601}", "inline": true}
     ```
   - Sprint 종료 시 동일 파일을 `phase: "done"` (성공) 또는 `phase: "failed"` (실패)와 `terminated_at`, `exit_code`, `last_heartbeat` 필드로 업데이트.
   - inline 경로는 `dispatch-result.json`을 **생성하지 않는다** (ADR-007 하위 호환 유지).
 
-##### 2.2.3.D Dispatch 실행 경로 (claude 단일 provider, MANDATORY)
+##### 2.2.3.D Dispatch 실행 경로 (provider-neutral, MANDATORY)
 
 0. Sprint prompt에는 아래 path-first context transfer contract를 반드시 포함한다. `templates/sprint-dispatch-prompt.md`를 조립할 때 이 블록을 그대로 채우고, path가 없으면 `N/A`로 숨기지 말고 명시적 상태값을 사용한다.
    ```text
@@ -535,26 +535,47 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
    - objective/spec/plan 원문 대량 삽입 금지. path-first contract를 전달하고 child가 직접 Read/inspection하게 한다.
 1. Sprint prompt 조립: `templates/sprint-dispatch-prompt.md` 기반으로 `sprint-prompt.md`를 생성하고, inline 경로와 동일한 N계층 컨텍스트를 채운다.
 2. worktree 생성: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
-3. managed Claude delegation dispatch 실행:
-   - 모델 resolve: `MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default 2>/dev/null || echo "sonnet")`
-   - canonical delegation call:
+3. provider별 managed delegation dispatch 실행:
+   - provider resolve: `PROVIDER=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.provider 2>/dev/null || echo "codex")`
+   - 모델 resolve: `MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model "$PROVIDER" default 2>/dev/null)`
+   - `PROVIDER=codex` canonical delegation call:
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py run \
+       --task-id "{AGI_ID}-S{NN}" \
+       --provider codex \
+       --model "$MODEL" \
+       --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
+       --trace {AGI_ID}/S{NN}/dispatch \
+       -- codex exec --full-auto -m "$MODEL" -C "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" "$(cat sprint-prompt.md)"
+     ```
+   - `PROVIDER=gemini` canonical delegation call:
+     ```bash
+     python3 {PLUGIN_ROOT}/scripts/mst.py run \
+       --task-id "{AGI_ID}-S{NN}" \
+       --provider gemini \
+       --model "$MODEL" \
+       --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
+       --trace {AGI_ID}/S{NN}/dispatch \
+       -- gemini -p "$(cat sprint-prompt.md)" --model "$MODEL" --approval-mode yolo --sandbox=false
+     ```
+   - `PROVIDER=claude` canonical delegation call:
      ```text
      Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")
      ```
-   - sprint dispatch lifecycle tuple: `sprint-prompt.md`, sprint worktree path, trace label, `{AGI_ID}-S{NN}`, sprint log dir는 같은 dispatch attempt에 속한다. caller는 `--prompt-file`, `--dir`, `--trace`를 명시하고, `/mst:claude` wrapper는 같은 경계에서 task/log/runtime evidence를 파생하거나 전달한다.
-   - `/mst:claude`는 `python3 {PLUGIN_ROOT}/scripts/mst.py run` lifecycle wrapper를 통해 다음 계약을 유지해야 한다:
+   - sprint dispatch lifecycle tuple: `sprint-prompt.md`, sprint worktree path, trace label, `{AGI_ID}-S{NN}`, sprint log dir는 같은 dispatch attempt에 속한다. Codex/Gemini는 `mst.py run` wrapper가 stdout/stderr/exit code를 직접 수집하고, Claude는 `/mst:claude` wrapper가 같은 경계에서 task/log/runtime evidence를 파생하거나 전달한다.
+   - 모든 provider는 `python3 {PLUGIN_ROOT}/scripts/mst.py run` lifecycle wrapper를 통해 다음 계약을 유지해야 한다:
      - `--task-id "{AGI_ID}-S{NN}"`
-     - `--provider claude`
+     - `--provider "$PROVIDER"`
      - `--model "$MODEL"`
      - `--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"`
      - prompt source: `sprint-prompt.md`
      - cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
    - lifecycle boundary mapping:
      - running log path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/running.log`
-     - trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/claude-*.md`
+     - trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/{provider}-*.md`
      - wrapper register/heartbeat state: `${baseDir}/run/{AGI_ID}-S{NN}.json`
    - wrapper가 위 artifact를 자동 기록하고, running log tee / trace path / session metadata / output-failure contract / exit code propagation을 공통 관리한다.
-4. 종료 신호 수신: Claude provider exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
+4. 종료 신호 수신: provider exit code를 확인 + `dispatch-result.json` 파일 존재 여부 확인.
 5. 실패 처리: 아래 `실패 처리 (MANDATORY)` 블록을 따른다.
 
 ###### Pre-dispatch HEAD 가드 (MANDATORY)

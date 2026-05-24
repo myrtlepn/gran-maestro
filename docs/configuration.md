@@ -171,6 +171,22 @@ Git worktree 생성 및 관리 설정입니다.
 
 ---
 
+## delegation / agile.dispatch
+
+Host와 provider를 분리해 위임 명령을 선택합니다. `host=auto`이면 `/mst:on`과 `mst.py host context`가 Codex 또는 Claude Code 런타임을 감지하고, provider는 실제 실행 CLI를 결정합니다.
+
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `delegation.host` | `"auto"` | 위임 명령 선택 기준 host (`auto` / `codex` / `claude` / `headless`) |
+| `delegation.default_provider` | `"codex"` | Assigned Agent가 모호할 때 사용할 기본 provider |
+| `delegation.provider_priority` | `["codex","gemini","claude"]` | fallback 또는 추천 순서 |
+| `delegation.native_codex_subagents.enabled` | `false` | Codex native subagent를 MST wrapper 대신 사용할지 여부 |
+| `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `gemini` / `claude`) |
+
+Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stderr/exit code를 수집합니다. Claude provider는 `/mst:claude` managed path를 통해서만 사용합니다.
+
+---
+
 ## history / archive
 
 요청 이력 보존 및 세션 아카이브 설정입니다.
@@ -193,16 +209,16 @@ Git worktree 생성 및 관리 설정입니다.
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `discussion.agents.codex` | `{ count: 1, tier: "premium" }` | Discussion Codex 에이전트 (0=제외) |
-| `discussion.agents.gemini` | `{ count: 1, tier: "premium" }` | Discussion Gemini 에이전트 (0=제외) |
-| `discussion.agents.claude` | `{ count: 1, tier: "economy" }` | Discussion Claude 에이전트 (0=제외) |
+| `discussion.agents.codex` | `{ count: 2, tier: "premium" }` | Discussion Codex 에이전트 (0=제외) |
+| `discussion.agents.gemini` | `{ count: 0, tier: "premium" }` | Discussion Gemini 에이전트 (0=제외) |
+| `discussion.agents.claude` | `{ count: 0, tier: "economy" }` | Discussion Claude 에이전트 (0=제외) |
 | `discussion.response_char_limit` | `2000` | Discussion 응답 글자 제한 |
 | `discussion.critique_char_limit` | `2000` | Discussion Critic 글자 제한 |
 | `discussion.default_max_rounds` | `5` | 기본 최대 라운드 수 |
 | `discussion.max_rounds_upper_limit` | `10` | 최대 라운드 상한 |
-| `ideation.agents.codex` | `{ count: 1, tier: "premium" }` | Ideation Codex 에이전트 (0=제외) |
-| `ideation.agents.gemini` | `{ count: 1, tier: "premium" }` | Ideation Gemini 에이전트 (0=제외) |
-| `ideation.agents.claude` | `{ count: 1, tier: "economy" }` | Ideation Claude 에이전트 (0=제외) |
+| `ideation.agents.codex` | `{ count: 2, tier: "premium" }` | Ideation Codex 에이전트 (0=제외) |
+| `ideation.agents.gemini` | `{ count: 0, tier: "premium" }` | Ideation Gemini 에이전트 (0=제외) |
+| `ideation.agents.claude` | `{ count: 0, tier: "economy" }` | Ideation Claude 에이전트 (0=제외) |
 | `ideation.opinion_char_limit` | `2000` | Ideation 의견 글자 제한 |
 | `ideation.critique_char_limit` | `2000` | Ideation Critic 글자 제한 |
 
@@ -231,13 +247,13 @@ Git worktree 생성 및 관리 설정입니다.
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `debug.agents.codex` | `{ count: 1, tier: "premium" }` | Debug 조사 Codex 에이전트 (0=제외) |
-| `debug.agents.gemini` | `{ count: 1, tier: "premium" }` | Debug 조사 Gemini 에이전트 (0=제외) |
-| `debug.agents.claude` | `{ count: 0 }` | Debug 조사 Claude 에이전트 (0=제외) |
+| `debug.agents.codex` | `{ count: 2, tier: "premium" }` | Debug 조사 Codex 에이전트 (0=제외) |
+| `debug.agents.gemini` | `{ count: 0, tier: "premium" }` | Debug 조사 Gemini 에이전트 (0=제외) |
+| `debug.agents.claude` | `{ count: 0, tier: "economy" }` | Debug 조사 Claude 에이전트 (0=제외) |
 
 참여자 규칙:
 - 총합: 1명 이상 6명 이하
-- 누락 시 기본값: `codex: 1`, `gemini: 1`, `claude: 0`
+- 누락 시 기본값: `codex: 2`, `gemini: 0`, `claude: 0`
 - `tier` 생략 시 해당 프로바이더의 `models.providers.<provider>.default_tier` 적용
 - 하위 호환: 정수값(`"codex": 1`)도 허용되며, `{ count: 1 }`으로 해석됩니다
 
@@ -249,9 +265,9 @@ Git worktree 생성 및 관리 설정입니다.
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `explore.agents.codex` | `{ count: 1, tier: "premium" }` | Explore Codex 에이전트 (0=제외) |
-| `explore.agents.gemini` | `{ count: 1, tier: "premium" }` | Explore Gemini 에이전트 (0=제외) |
-| `explore.agents.claude` | `{ count: 0 }` | Explore Claude 에이전트 (0=제외) |
+| `explore.agents.codex` | `{ count: 2, tier: "premium" }` | Explore Codex 에이전트 (0=제외) |
+| `explore.agents.gemini` | `{ count: 0, tier: "premium" }` | Explore Gemini 에이전트 (0=제외) |
+| `explore.agents.claude` | `{ count: 0, tier: "economy" }` | Explore Claude 에이전트 (0=제외) |
 
 - `tier` 생략 시 해당 프로바이더의 `models.providers.<provider>.default_tier` 적용
 - 하위 호환: 정수값(`"codex": 1`)도 허용되며, `{ count: 1 }`으로 해석됩니다
@@ -284,10 +300,10 @@ Git worktree 생성 및 관리 설정입니다.
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `models.roles.pm_conductor` | `{ provider: "claude", tier: "premium" }` | PM 지휘자 (Phase 1, 3) |
-| `models.roles.architect` | `{ provider: "claude", tier: "premium" }` | 아키텍트 (Design Wing) |
+| `models.roles.pm_conductor` | `{ provider: "codex", tier: "premium" }` | PM 지휘자 (Phase 1, 3) |
+| `models.roles.architect` | `{ provider: "codex", tier: "premium" }` | 아키텍트 (Design Wing) |
 | `models.roles.developer` | `[codex/premium, gemini/premium]` | 개발자 (배열 — 다중 에이전트) |
-| `models.roles.developer_claude` | `{ provider: "claude", tier: "premium" }` | Claude 개발자 |
+| `models.roles.developer_claude` | `{ provider: "claude", tier: "premium", enabled: false }` | Claude legacy/fallback 개발자 |
 | `models.roles.reviewer` | `[codex/premium, gemini/premium]` | 리뷰어 (배열 — 다중 에이전트) |
 
 ### 모델 Resolve 규칙
@@ -351,9 +367,9 @@ Spec Pre-review Pass에서 사용하는 에이전트 풀 설정입니다.
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `prereview.agents.codex` | `{ count: 1, tier: "premium" }` | Pre-review Codex 에이전트 (0=제외) |
+| `prereview.agents.codex` | `{ count: 2, tier: "premium" }` | Pre-review Codex 에이전트 (0=제외) |
 | `prereview.agents.gemini` | `{ count: 0 }` | Pre-review Gemini 에이전트 (0=제외) |
-| `prereview.agents.claude` | `{ count: 1, tier: "economy" }` | Pre-review Claude 에이전트 (0=제외) |
+| `prereview.agents.claude` | `{ count: 0, tier: "economy" }` | Pre-review Claude 에이전트 (0=제외) |
 
 기본값은 `templates/defaults/config.json` 기준입니다.
 

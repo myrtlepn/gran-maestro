@@ -36,7 +36,7 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 
 ## Quick Start
 
-**사전 요구사항**: Claude Code(v1.0.33 이상), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) — 멀티 에이전트 구현에 사용됩니다.
+**사전 요구사항**: Claude Code(v1.0.33 이상) 또는 Codex CLI plugin runtime, [Codex CLI](https://github.com/openai/codex). [Gemini CLI](https://github.com/google-gemini/gemini-cli)는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider로 사용할 때만 필요합니다.
 
 ```bash
 /plugin marketplace add myrtlepn/gran-maestro
@@ -50,7 +50,7 @@ codex plugin marketplace add myrtlepn/gran-maestro
 codex plugin add mst@gran-maestro
 ```
 
-설치 후 두 런타임은 같은 MST skill source를 사용합니다. Claude Code는 hooks/agents까지 등록하고, Codex는 hookless skill surface와 queue-driven supervision으로 같은 plan → request → approve → review → accept 흐름을 제공합니다.
+설치 후 두 런타임은 같은 MST skill source를 사용합니다. Claude Code는 hooks/agents까지 등록하고, Codex는 hookless skill surface와 queue-driven supervision으로 같은 plan → request → approve → review → accept 흐름을 제공합니다. 기본 설정은 Codex-primary이며, Claude provider는 Claude 계열 preset 또는 `claude-dev` 배정으로 opt-in합니다.
 
 ```
 # 1. plan으로 상세화 → request로 스펙 생성

@@ -22,11 +22,16 @@ import { parseDesignSections } from '@/shared/designUtils';
 
 interface DesignScreen {
   id: string;
+  slug?: string;
   stitch_screen_id?: string;
   title?: string;
   url?: string;
   image_url?: string | null;
   html_file?: string | null;
+  html?: string | null;
+  image?: string | null;
+  purpose?: string | null;
+  meta?: string | null;
   style?: string | null;
   created_at?: string;
   status?: string;
@@ -129,8 +134,60 @@ function getStyleNames(session: DesignSession | null): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
-function normalizeScreenId(screenId: string): string {
-  return screenId.replace(/\.md$/, '').trim();
+export function normalizeScreenId(screenId: unknown): string {
+  if (typeof screenId !== 'string') {
+    return '';
+  }
+  return screenId.trim().replace(/\.(md|html)$/, '').trim();
+}
+
+function getScreenFileNameFromPath(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized.endsWith('.html')) {
+    return null;
+  }
+
+  const fileName = normalized.split('/').pop()?.trim() ?? '';
+  return fileName.length > 0 ? fileName : null;
+}
+
+function getScreenIdentity(screen: DesignScreen): string {
+  return normalizeScreenId(screen.id || screen.slug || screen.html_file || screen.html || '');
+}
+
+function getScreenFile(screen: DesignScreen): string | null {
+  const htmlFile = getScreenFileNameFromPath(screen.html_file) ?? getScreenFileNameFromPath(screen.html);
+  if (htmlFile) {
+    return htmlFile;
+  }
+
+  const screenId = getScreenIdentity(screen);
+  return screenId ? `${screenId}.md` : null;
+}
+
+function getSessionScreenFiles(session: DesignSession | null, hasStyles: boolean, styleScreenFiles: string[]): string[] {
+  if (!session) {
+    return [];
+  }
+
+  if (hasStyles) {
+    return styleScreenFiles;
+  }
+
+  const files = Array.isArray(session.screen_files) ? [...session.screen_files] : [];
+  const seen = new Set(files);
+  for (const screen of session.screens ?? []) {
+    const file = getScreenFile(screen);
+    if (file && !seen.has(file)) {
+      seen.add(file);
+      files.push(file);
+    }
+  }
+  return files;
 }
 
 function extractSessionNumberToken(session: DesignSession | null): string {
@@ -242,13 +299,16 @@ export function DesignView() {
   const styleNames = useMemo(() => getStyleNames(selectedSession), [selectedSession]);
   const activeStyle = hasStyles ? (selectedStyle ?? styleNames[0] ?? null) : null;
   const screenFiles = useMemo(
-    () => (hasStyles ? styleScreenFiles : (selectedSession?.screen_files ?? [])),
-    [hasStyles, styleScreenFiles, selectedSession?.screen_files]
+    () => getSessionScreenFiles(selectedSession, hasStyles, styleScreenFiles),
+    [hasStyles, styleScreenFiles, selectedSession]
   );
   const selectedScreen = useMemo(() => {
     const selectedScreenId = selectedScreenFile ? normalizeScreenId(selectedScreenFile) : null;
     return selectedSession?.screens?.find((screen) => {
-      const screenId = normalizeScreenId(screen.id);
+      const screenId = getScreenIdentity(screen);
+      if (!screenId) {
+        return false;
+      }
       if (screenId !== selectedScreenId) {
         return false;
       }
@@ -257,13 +317,18 @@ export function DesignView() {
       }
       return screen.style === activeStyle;
     }) ?? selectedSession?.screens?.find((screen) =>
-      normalizeScreenId(screen.id) === selectedScreenId && (!hasStyles || !activeStyle || !screen.style)
+      Boolean(getScreenIdentity(screen)) &&
+      getScreenIdentity(screen) === selectedScreenId &&
+      (!hasStyles || !activeStyle || !screen.style)
     );
   }, [selectedSession?.screens, selectedScreenFile, hasStyles, activeStyle]);
   const screenMap = useMemo(() => {
     const map = new Map<string, DesignScreen>();
     for (const screen of selectedSession?.screens ?? []) {
-      const screenId = normalizeScreenId(screen.id);
+      const screenId = getScreenIdentity(screen);
+      if (!screenId) {
+        continue;
+      }
       if (!map.has(screenId)) {
         map.set(screenId, screen);
       }
@@ -350,8 +415,10 @@ export function DesignView() {
   const canPreview = useMemo(
     () =>
       Boolean(selectedScreen?.html_file) ||
+      Boolean(selectedScreen?.html) ||
+      Boolean(selectedScreenFile?.endsWith('.html')) ||
       Boolean(hasStyles && activeStyle && selectedScreenFile && projectId && selectedSession),
-    [selectedScreen?.html_file, hasStyles, activeStyle, selectedScreenFile, projectId, selectedSession]
+    [selectedScreen?.html_file, selectedScreen?.html, hasStyles, activeStyle, selectedScreenFile, projectId, selectedSession]
   );
   const htmlPreviewSrc = useMemo(() => {
     if (!projectId || !selectedSession || !selectedScreenFile) {
@@ -577,7 +644,7 @@ export function DesignView() {
           } else {
             setSelectedStyle(null);
             setStyleScreenFiles([]);
-            const files = data.screen_files ?? [];
+            const files = getSessionScreenFiles(data, false, []);
             setSelectedScreenFile((prev) =>
               prev && files.includes(prev) ? prev : (files.length > 0 ? files[0] : null)
             );
@@ -711,7 +778,12 @@ export function DesignView() {
       return;
     }
 
-    const targetScreenFile = `${normalizeScreenId(pendingAutoSelectScreenId)}.md`;
+    const targetScreenId = normalizeScreenId(pendingAutoSelectScreenId);
+    if (!targetScreenId) {
+      setPendingAutoSelectScreenId(null);
+      return;
+    }
+    const targetScreenFile = screenFiles.find((file) => normalizeScreenId(file) === targetScreenId) ?? `${targetScreenId}.md`;
     if (screenFiles.includes(targetScreenFile)) {
       setSelectedScreenFile(targetScreenFile);
       setPendingAutoSelectScreenId(null);
@@ -725,6 +797,8 @@ export function DesignView() {
     setCopyFeedback({});
     setInlineEditMode(null);
     setEditPrompt('');
+    setSelectedScreenFile(null);
+    setScreenContent(null);
     setIsEditSubmitting(false);
     setActiveEditJobId(null);
     setActiveEditJobMode(null);
@@ -748,8 +822,12 @@ export function DesignView() {
 
   const selectScreenById = useCallback((screenId: string) => {
     const normalized = normalizeScreenId(screenId);
-    setSelectedScreenFile(`${normalized}.md`);
-  }, []);
+    if (!normalized) {
+      return;
+    }
+    const existingFile = screenFiles.find((file) => normalizeScreenId(file) === normalized);
+    setSelectedScreenFile(existingFile ?? `${normalized}.md`);
+  }, [screenFiles]);
 
   const handleOpenInlineEditor = useCallback((mode: InlineEditMode) => {
     setInlineEditMode(mode);
@@ -937,7 +1015,7 @@ export function DesignView() {
   }
 
   const parsedScreen = screenContent ? parseScreenContent(screenContent) : null;
-  const parsedScreenTitle = parsedScreen?.title ? parsedScreen.title : 'Design 화면';
+  const parsedScreenTitle = parsedScreen?.title || selectedScreen?.title || selectedScreen?.slug || 'Design 화면';
   const hasHtmlPreview = canPreview;
 
   const renderScreenTabs = (files: string[], emptyDescription: string) => {

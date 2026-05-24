@@ -28,7 +28,7 @@ import { cn, deepSet, getNestedValue } from '@/lib/utils';
 import type { PresetMeta, PresetDiffChange } from '../../../../src/types';
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
-type AgentSelection = 'claude' | 'claude-codex' | 'claude-gemini' | 'full-team';
+type AgentSelection = 'codex-primary' | 'claude' | 'claude-codex' | 'claude-gemini' | 'full-team';
 type TierSelection = 'performance' | 'efficient' | 'budget';
 
 type ToolToggles = {
@@ -70,6 +70,12 @@ const AGENT_OPTIONS: Array<{
   description: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
+  {
+    id: 'codex-primary',
+    title: 'Codex Primary',
+    description: 'Codex를 기본 지휘/구현 런타임으로 사용합니다.',
+    icon: Code2,
+  },
   {
     id: 'claude',
     title: 'Claude Only',

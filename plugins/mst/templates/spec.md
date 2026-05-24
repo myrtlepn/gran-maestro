@@ -25,8 +25,9 @@ Step 2: 도메인 추론
     "페이지 라우팅 추가" → frontend → gemini-dev
     "CI/CD 설정 변경" → infra → codex-dev
     "SKILL.md 로직 업데이트" → skill → codex-dev
-    "README 업데이트" → docs → claude-dev
-    "config.json 필드 추가" → config → claude-dev
+    "README 업데이트" → docs → codex-dev (Codex-primary 기본값)
+    "config.json 필드 추가" → config → codex-dev (Codex-primary 기본값)
+    Legacy Claude preset 적용 시 docs/config → claude-dev 가능
 
 Step 3: 에이전트 확정
   매칭된 에이전트 확정. 매칭 불가 시 DEFAULT_AGENT 사용 (fallback).

@@ -9,6 +9,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -94,6 +95,7 @@ def test_skill_dispatch_smoke_for_ideation_discussion_debug(tmp_path):
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["MST_SESSION_ID"] = SESSION_ID
 
     cases = [
         ("ideation", "IDN-001", "codex"),
@@ -137,6 +139,7 @@ def test_skill_dispatch_extended_smoke_for_ideation_discussion_debug(tmp_path):
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["MST_SESSION_ID"] = SESSION_ID
 
     ideation_dir = base / "ideation" / "IDN-001"
     ideation_dir.mkdir(parents=True, exist_ok=True)

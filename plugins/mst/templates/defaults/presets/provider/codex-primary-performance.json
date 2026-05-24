@@ -1,0 +1,168 @@
+{
+  "models": {
+    "roles": {
+      "pm_conductor": {
+        "provider": "codex",
+        "tier": "premium"
+      },
+      "architect": {
+        "provider": "codex",
+        "tier": "premium"
+      },
+      "developer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ],
+      "developer_claude": {
+        "provider": "claude",
+        "tier": "premium",
+        "enabled": false
+      },
+      "reviewer": [
+        {
+          "provider": "codex",
+          "tier": "premium"
+        },
+        {
+          "provider": "gemini",
+          "tier": "premium"
+        }
+      ]
+    }
+  },
+  "delegation": {
+    "host": "auto",
+    "default_provider": "codex",
+    "provider_priority": ["codex", "gemini", "claude"],
+    "native_codex_subagents": {
+      "enabled": false,
+      "scope": "review-and-exploration-only"
+    }
+  },
+  "agile": {
+    "dispatch": {
+      "enabled": false,
+      "default_mode": "inline",
+      "provider": "codex"
+    }
+  },
+  "ideation": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "discussion": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "debug": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "explore": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "prereview": {
+    "agents": {
+      "codex": {
+        "count": 2,
+        "tier": "premium"
+      },
+      "gemini": {
+        "count": 0,
+        "tier": "premium"
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "code_review": {
+    "agents": 2,
+    "agent_roster": [
+      "codex",
+      "gemini"
+    ]
+  },
+  "fact_check": {
+    "agent": {
+      "provider": "codex",
+      "tier": "premium"
+    }
+  },
+  "review": {
+    "roles": {
+      "browser_tester": {
+        "agent": "codex",
+        "tier": "economy"
+      },
+      "intent_fidelity": {
+        "agent": "codex",
+        "tier": "premium"
+      }
+    }
+  },
+  "workflow": {
+    "default_agent": "codex-dev"
+  },
+  "agent_assignments": {
+    "_comment": "Codex-primary: Claude provider는 legacy/fallback preset에서만 opt-in",
+    "codex-dev": ["backend", "skill", "test", "infra", "docs", "config"],
+    "gemini-dev": ["frontend", "ui"]
+  }
+}

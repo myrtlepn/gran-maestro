@@ -36,7 +36,7 @@ Text-only agreement leaves gaps unchecked — screens are visualized instantly w
 
 ## Quick Start
 
-**Prerequisites**: Claude Code (v1.0.33 or later), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) — used for multi-agent implementation.
+**Prerequisites**: Claude Code (v1.0.33 or later) or the Codex CLI plugin runtime, plus [Codex CLI](https://github.com/openai/codex). [Gemini CLI](https://github.com/google-gemini/gemini-cli) is only needed when you opt into the frontend/UI or large-context helper provider.
 
 ```bash
 /plugin marketplace add myrtlepn/gran-maestro
@@ -50,7 +50,7 @@ codex plugin marketplace add myrtlepn/gran-maestro
 codex plugin add mst@gran-maestro
 ```
 
-After installation, both runtimes use the same MST skill source. Claude Code registers hooks and agents as well; Codex exposes the hookless skill surface and uses queue-driven supervision for the same plan → request → approve → review → accept workflow.
+After installation, both runtimes use the same MST skill source. Claude Code registers hooks and agents as well; Codex exposes the hookless skill surface and uses queue-driven supervision for the same plan → request → approve → review → accept workflow. Defaults are Codex-primary; the Claude provider is opt-in through Claude presets or `claude-dev` assignment.
 
 ```
 # 1. Expand multiple requests as plans

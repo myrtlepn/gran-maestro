@@ -117,7 +117,8 @@
     "foundational_streak_max": 2,
     "dispatch": {
       "enabled": false,
-      "default_mode": "inline"
+      "default_mode": "inline",
+      "provider": "codex"
     },
     "integration_wire_streak_max": 3,
     "llm_steering_gate_enabled": true,
@@ -208,6 +209,13 @@
     "backoff_base_ms": 1000
   },
   "delegation": {
+    "host": "auto",
+    "default_provider": "codex",
+    "provider_priority": ["codex", "gemini", "claude"],
+    "native_codex_subagents": {
+      "enabled": false,
+      "scope": "review-and-exploration-only"
+    },
     "codex_sandbox": "workspace-write",
     "monitor_interval_ms": 180000,
     "monitor_tail_lines": 50,
@@ -268,11 +276,11 @@
     "log_prompts": false,
     "agents": {
       "codex": {
-        "count": 1,
+        "count": 2,
         "tier": "premium"
       },
       "gemini": {
-        "count": 1,
+        "count": 0,
         "tier": "premium"
       },
       "claude": {
@@ -284,11 +292,11 @@
   "explore": {
     "agents": {
       "codex": {
-        "count": 1,
+        "count": 2,
         "tier": "premium"
       },
       "gemini": {
-        "count": 1,
+        "count": 0,
         "tier": "premium"
       },
       "claude": {
@@ -300,15 +308,15 @@
   "discussion": {
     "agents": {
       "codex": {
-        "count": 1,
+        "count": 2,
         "tier": "premium"
       },
       "gemini": {
-        "count": 1,
+        "count": 0,
         "tier": "premium"
       },
       "claude": {
-        "count": 1,
+        "count": 0,
         "tier": "economy"
       }
     },
@@ -320,15 +328,15 @@
   "ideation": {
     "agents": {
       "codex": {
-        "count": 1,
+        "count": 2,
         "tier": "premium"
       },
       "gemini": {
-        "count": 1,
+        "count": 0,
         "tier": "premium"
       },
       "claude": {
-        "count": 1,
+        "count": 0,
         "tier": "economy"
       }
     },
@@ -343,7 +351,7 @@
   "prereview": {
     "agents": {
       "codex": {
-        "count": 1,
+        "count": 2,
         "tier": "premium"
       },
       "gemini": {
@@ -351,7 +359,7 @@
         "tier": "premium"
       },
       "claude": {
-        "count": 1,
+        "count": 0,
         "tier": "economy"
       }
     }
@@ -376,11 +384,11 @@
     },
     "roles": {
       "pm_conductor": {
-        "provider": "claude",
+        "provider": "codex",
         "tier": "premium"
       },
       "architect": {
-        "provider": "claude",
+        "provider": "codex",
         "tier": "premium"
       },
       "developer": [
@@ -395,7 +403,8 @@
       ],
       "developer_claude": {
         "provider": "claude",
-        "tier": "premium"
+        "tier": "premium",
+        "enabled": false
       },
       "reviewer": [
         {
@@ -423,8 +432,8 @@
   "fact_check": {
     "max_verification_rounds": 3,
     "agent": {
-      "provider": "claude",
-      "tier": "economy"
+      "provider": "codex",
+      "tier": "premium"
     }
   },
   "reference": {
@@ -592,11 +601,11 @@
         "tier": "premium"
       },
       "browser_tester": {
-        "agent": "claude",
+        "agent": "codex",
         "tier": "economy"
       },
       "intent_fidelity": {
-        "agent": "claude",
+        "agent": "codex",
         "tier": "premium"
       },
       "impact_reviewer": {
@@ -748,9 +757,8 @@
     "max_review_iterations": 3
   },
   "agent_assignments": {
-    "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
-    "codex-dev": ["backend", "skill", "test", "infra"],
-    "claude-dev": ["docs", "config"],
+    "_comment": "Codex-primary 기본값. 커스터마이징 가이드: docs/config-agent-assignments.md 참조",
+    "codex-dev": ["backend", "skill", "test", "infra", "docs", "config"],
     "gemini-dev": ["frontend", "ui"]
   },
   "omx": {

@@ -1,0 +1,194 @@
+{
+  "models": {
+    "roles": {
+      "pm_conductor": {
+        "provider": "codex",
+        "tier": "economy"
+      },
+      "architect": {
+        "provider": "codex",
+        "tier": "economy"
+      },
+      "developer": [
+        {
+          "provider": "codex",
+          "tier": "economy"
+        }
+      ],
+      "developer_claude": {
+        "provider": "claude",
+        "tier": "economy",
+        "enabled": false
+      },
+      "reviewer": [
+        {
+          "provider": "codex",
+          "tier": "economy"
+        }
+      ]
+    }
+  },
+  "delegation": {
+    "host": "auto",
+    "default_provider": "codex",
+    "provider_priority": ["codex", "gemini", "claude"],
+    "native_codex_subagents": {
+      "enabled": false,
+      "scope": "review-and-exploration-only"
+    }
+  },
+  "agile": {
+    "dispatch": {
+      "enabled": false,
+      "default_mode": "inline",
+      "provider": "codex"
+    }
+  },
+  "ideation": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "economy"
+      },
+      "gemini": {
+        "count": 0
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "discussion": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "economy"
+      },
+      "gemini": {
+        "count": 0
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "debug": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "economy"
+      },
+      "gemini": {
+        "count": 0
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "explore": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "economy"
+      },
+      "gemini": {
+        "count": 0
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "prereview": {
+    "agents": {
+      "codex": {
+        "count": 1,
+        "tier": "economy"
+      },
+      "gemini": {
+        "count": 0
+      },
+      "claude": {
+        "count": 0,
+        "tier": "economy"
+      }
+    }
+  },
+  "code_review": {
+    "agents": 1,
+    "agent_roster": [
+      "codex"
+    ]
+  },
+  "plan_review": {
+    "enabled": true,
+    "parallel": true,
+    "roles": {
+      "architect": {
+        "tier": "economy"
+      },
+      "devils_advocate": {
+        "tier": "economy"
+      },
+      "completeness": {
+        "tier": "economy"
+      },
+      "ux_reviewer": {
+        "tier": "economy"
+      }
+    }
+  },
+  "fact_check": {
+    "agent": {
+      "provider": "codex",
+      "tier": "economy"
+    }
+  },
+  "phase1_exploration": {
+    "roles": {
+      "symbol_tracing": {
+        "agent": "codex",
+        "enabled": true,
+        "tier": "economy"
+      },
+      "broad_scan": {
+        "agent": "gemini",
+        "enabled": false,
+        "tier": "economy"
+      }
+    }
+  },
+  "review": {
+    "roles": {
+      "code_reviewer": {
+        "tier": "economy"
+      },
+      "arch_reviewer": {
+        "tier": "economy"
+      },
+      "ui_reviewer": {
+        "tier": "economy"
+      },
+      "browser_tester": {
+        "agent": "codex",
+        "tier": "economy"
+      },
+      "intent_fidelity": {
+        "agent": "codex",
+        "tier": "economy"
+      }
+    }
+  },
+  "workflow": {
+    "default_agent": "codex-dev"
+  },
+  "agent_assignments": {
+    "_comment": "Codex-primary: Claude provider는 legacy/fallback preset에서만 opt-in",
+    "codex-dev": ["backend", "skill", "test", "infra", "docs", "config", "frontend", "ui"]
+  }
+}

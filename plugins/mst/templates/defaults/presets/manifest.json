@@ -17,6 +17,36 @@
   },
   "presets": [
     {
+      "id": "codex-primary-performance",
+      "name": "Codex Primary (성능)",
+      "description": "Codex를 기본 지휘/구현 런타임으로 사용하고 Claude는 opt-in으로 유지",
+      "category": "provider",
+      "wizardCategory": "codex-primary",
+      "tier": "performance",
+      "providers": ["codex", "gemini"],
+      "file": "provider/codex-primary-performance.json"
+    },
+    {
+      "id": "codex-primary-efficient",
+      "name": "Codex Primary (효율)",
+      "description": "Codex 중심 기본 구성, Claude 의존 없는 균형형 설정",
+      "category": "provider",
+      "wizardCategory": "codex-primary",
+      "tier": "efficient",
+      "providers": ["codex", "gemini"],
+      "file": "provider/codex-primary-efficient.json"
+    },
+    {
+      "id": "codex-primary-budget",
+      "name": "Codex Primary (절약)",
+      "description": "Codex 단일 실행 경로 중심의 경량 구성",
+      "category": "provider",
+      "wizardCategory": "codex-primary",
+      "tier": "budget",
+      "providers": ["codex"],
+      "file": "provider/codex-primary-budget.json"
+    },
+    {
       "id": "full-team-performance",
       "name": "Full Team (성능)",
       "description": "Claude + Codex + Gemini 전체 팀 구성, 최고 성능 모델",

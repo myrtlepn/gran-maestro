@@ -29,8 +29,8 @@ export const agents: Record<string, AgentDefinition> = {
   // ─── Analysis Agents (Phase 1) ────────────────────────────
 
   // NOTE: model 필드는 기본값. 실제 런타임에서는 config.json의 models.roles.{역할} 경유 후 providers에서 resolve.
-  // pm_conductor → models.roles.pm_conductor → providers.claude[tier]
-  // architect → models.roles.architect → providers.claude[tier]
+  // pm_conductor → models.roles.pm_conductor → providers.{configured}[tier]
+  // architect → models.roles.architect → providers.{configured}[tier]
   'pm-conductor': {
     name: 'pm-conductor',
     description:

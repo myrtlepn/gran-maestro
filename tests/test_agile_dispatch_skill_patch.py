@@ -84,22 +84,27 @@ def _claude_print_mode_hits() -> list[tuple[str, int, str]]:
     return hits
 
 
-def test_dispatch_d_uses_managed_claude_delegation():
+def test_dispatch_d_uses_provider_neutral_managed_delegation():
     text = _skill_text()
     forbidden_print_mode = "claude" + " " + "-p"
 
-    assert "MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model claude default" in text
+    assert 'PROVIDER=$(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispatch.provider' in text
+    assert 'MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model "$PROVIDER" default' in text
+    assert "--provider codex" in text
+    assert "codex exec --full-auto" in text
+    assert "--provider gemini" in text
+    assert "gemini -p" in text
     assert 'Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")' in text
     assert "python3 {PLUGIN_ROOT}/scripts/mst.py run" in text
     assert '--task-id "{AGI_ID}-S{NN}"' in text
-    assert "--provider claude" in text
+    assert '--provider "$PROVIDER"' in text
     assert '--model "$MODEL"' in text
     assert '--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"' in text
     assert "sprint dispatch lifecycle tuple" in text
     assert "prompt source: `sprint-prompt.md`" in text
     assert "cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`" in text
     assert "running log path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/running.log`" in text
-    assert "trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/claude-*.md`" in text
+    assert "trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/{provider}-*.md`" in text
     assert "running log tee / trace path / session metadata / output-failure contract / exit code propagation" in text
     assert forbidden_print_mode not in text
 
@@ -108,7 +113,7 @@ def test_dispatch_d_exit_handling_preserved():
     text = _skill_text()
 
     assert "4. 종료 신호 수신:" in text
-    assert "Claude provider exit code를 확인" in text
+    assert "provider exit code를 확인" in text
     assert "dispatch-result.json" in text
     assert "실패 조건: `exit_code != 0` 또는 `dispatch-result.json` 미생성." in text
     assert (

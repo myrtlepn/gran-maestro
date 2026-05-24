@@ -315,7 +315,7 @@ def test_agile_plan_declares_downstream_context_transfer_requirements() -> None:
     )
 
 
-def test_dispatch_contract_preserves_managed_claude_lifecycle_evidence() -> None:
+def test_dispatch_contract_preserves_provider_neutral_lifecycle_evidence() -> None:
     agile_text = _read(AGILE_SKILL)
     template_text = _read(SPRINT_DISPATCH_TEMPLATE)
 
@@ -325,12 +325,14 @@ def test_dispatch_contract_preserves_managed_claude_lifecycle_evidence() -> None
             'Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")',
             "python3 {PLUGIN_ROOT}/scripts/mst.py run",
             "--task-id \"{AGI_ID}-S{NN}\"",
-            "--provider claude",
+            "--provider codex",
+            "--provider gemini",
+            '--provider "$PROVIDER"',
             "--log-dir \"{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/\"",
             "sprint dispatch lifecycle tuple",
             "running log tee / trace path / session metadata / output-failure contract / exit code propagation",
             "running log path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/running.log`",
-            "trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/claude-*.md`",
+            "trace path: `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/traces/{provider}-*.md`",
         ],
         "skills/agile/SKILL.md",
     )

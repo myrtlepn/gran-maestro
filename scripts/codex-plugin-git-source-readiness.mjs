@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,7 +47,25 @@ const rootMarketplace = JSON.parse(readFileSync(join(repoRoot, 'marketplace.json
 const repoMarketplace = JSON.parse(readFileSync(join(repoRoot, '.agents/plugins/marketplace.json'), 'utf8'));
 const manifest = JSON.parse(readFileSync(join(repoRoot, '.codex-plugin/plugin.json'), 'utf8'));
 const pluginEntry = repoMarketplace.plugins?.[0] ?? {};
-const symlinkPathCheck = pathChecks.find((entry) => entry.path === 'plugins/mst');
+const projectionPathCheck = pathChecks.find((entry) => entry.path === 'plugins/mst');
+const projectionRoot = join(repoRoot, 'plugins/mst');
+const projectionManifestPath = join(projectionRoot, '.codex-plugin/plugin.json');
+const projectionManifest = existsSync(projectionManifestPath)
+  ? JSON.parse(readFileSync(projectionManifestPath, 'utf8'))
+  : null;
+
+function skillDirNames(root) {
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+const sourceSkillNames = skillDirNames(join(repoRoot, 'skills'));
+const projectionSkillNames = skillDirNames(join(projectionRoot, 'skills'));
 
 const contractChecks = [
   {
@@ -61,10 +79,25 @@ const contractChecks = [
       : 'fail',
   },
   {
-    id: 'plugin_alias_resolves_to_repo_root',
-    status: symlinkPathCheck?.exists === true &&
-      symlinkPathCheck.is_symlink === true &&
-      symlinkPathCheck.realpath === repoRoot
+    id: 'plugin_projection_is_copy_directory',
+    status: projectionPathCheck?.exists === true &&
+      projectionPathCheck.is_symlink === false &&
+      projectionPathCheck.realpath === projectionRoot &&
+      existsSync(projectionManifestPath) &&
+      !existsSync(join(projectionRoot, '.claude-plugin')) &&
+      !existsSync(join(projectionRoot, '.claude'))
+      ? 'pass'
+      : 'fail',
+  },
+  {
+    id: 'plugin_projection_manifest_matches_source',
+    status: JSON.stringify(projectionManifest) === JSON.stringify(manifest)
+      ? 'pass'
+      : 'fail',
+  },
+  {
+    id: 'plugin_projection_skills_match_source',
+    status: JSON.stringify(projectionSkillNames) === JSON.stringify(sourceSkillNames)
       ? 'pass'
       : 'fail',
   },

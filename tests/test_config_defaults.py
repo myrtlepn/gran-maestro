@@ -62,6 +62,29 @@ def test_agile_sections_exist():
         assert agile[section_name] == expected_section
 
 
+def test_codex_primary_defaults_do_not_require_claude_provider():
+    defaults = _load_defaults()
+
+    assert defaults["workflow"]["default_agent"] == "codex-dev"
+    assert defaults["models"]["roles"]["pm_conductor"]["provider"] == "codex"
+    assert defaults["models"]["roles"]["architect"]["provider"] == "codex"
+    assert defaults["models"]["roles"]["developer_claude"]["enabled"] is False
+    assert defaults["fact_check"]["agent"]["provider"] == "codex"
+    assert defaults["agile"]["dispatch"]["provider"] == "codex"
+    assert defaults["delegation"]["host"] == "auto"
+    assert defaults["delegation"]["default_provider"] == "codex"
+
+    assignments = defaults["agent_assignments"]
+    assert "docs" in assignments["codex-dev"]
+    assert "config" in assignments["codex-dev"]
+    assert "claude-dev" not in assignments
+
+    for section in ("ideation", "discussion", "prereview", "debug"):
+        agents = defaults[section]["agents"]
+        assert agents["codex"]["count"] >= 1
+        assert agents["claude"]["count"] == 0
+
+
 def test_agile_field_types():
     defaults = _load_defaults()
     agile = defaults["agile"]

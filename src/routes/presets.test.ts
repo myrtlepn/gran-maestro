@@ -80,7 +80,7 @@ function getByPath(root: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
-runSerialTest("GET /api/presets returns 12 builtin presets with required fields", async () => {
+runSerialTest("GET /api/presets returns 15 builtin presets with required fields", async () => {
   const fixture = await setupFixture();
 
   try {
@@ -91,7 +91,7 @@ runSerialTest("GET /api/presets returns 12 builtin presets with required fields"
       builtin: Array<Record<string, unknown>>;
     };
 
-    assertEquals(payload.builtin.length, 12);
+    assertEquals(payload.builtin.length, 15);
 
     for (const preset of payload.builtin) {
       assert(hasOwn(preset, "id"));
@@ -106,7 +106,7 @@ runSerialTest("GET /api/presets returns 12 builtin presets with required fields"
 
 runSerialTest("POST diff returns non-empty changes for representative presets", async () => {
   const fixture = await setupFixture();
-  const presetIds = ["claude-only-budget", "claude-codex-efficient", "full-team-performance"];
+  const presetIds = ["codex-primary-performance", "claude-only-budget", "claude-codex-efficient", "full-team-performance"];
 
   try {
     for (const presetId of presetIds) {

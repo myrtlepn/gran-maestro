@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 METADATA_ROOT = REPO_ROOT.parents[3]
@@ -25,6 +27,8 @@ DIRECT_CLI_TOKENS = ("codex exec", "gemini -p", "claude -p")
 
 def _text(relative_path: str) -> str:
     path = relative_path if isinstance(relative_path, Path) else REPO_ROOT / relative_path
+    if isinstance(path, Path) and path == DETAIL_DOC and not path.exists():
+        pytest.skip(f"local AGI-040 detail doc is absent: {path}")
     return path.read_text(encoding="utf-8")
 
 

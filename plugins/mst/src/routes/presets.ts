@@ -34,7 +34,11 @@ function flatDiff(before: Record<string, unknown>, after: Record<string, unknown
     if (isPlainObject(fromVal) && isPlainObject(toVal)) {
       changes.push(...flatDiff(fromVal, toVal, path));
     } else if (JSON.stringify(fromVal) !== JSON.stringify(toVal)) {
-      changes.push({ path, from: fromVal, to: toVal });
+      changes.push({
+        path,
+        from: fromVal === undefined ? null : fromVal,
+        to: toVal === undefined ? null : toVal,
+      });
     }
   }
   return changes;

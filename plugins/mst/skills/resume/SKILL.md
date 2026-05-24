@@ -7,7 +7,7 @@ argument-hint: "[--wakeup-hint stop-recover]"
 
 # maestro:resume
 
-**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. interactive resume과 외부 wrapper(`scripts/mst-loop.sh`)는 같은 queue contract를 공유하지만, **headless runtime implementation path는 `python3 {PLUGIN_ROOT}/scripts/mst.py queue drain-headless --json`** 이다. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다. `claude -p /mst:resume`는 historical 설명 문자열일 뿐 active runtime path가 아니다.
+**목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. interactive resume과 외부 wrapper(`scripts/mst-loop.sh`)는 같은 queue contract를 공유하지만, **headless runtime implementation path는 `python3 {PLUGIN_ROOT}/scripts/mst.py queue drain-headless --json`** 이다. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다. Claude print-mode로 `/mst:resume`를 직접 호출하던 방식은 historical 설명 문자열일 뿐 active runtime path가 아니다.
 
 ## Gate
 

@@ -484,10 +484,11 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 | 백엔드, 리팩토링, 테스트 | `codex-dev` → `/mst:codex` | code, refactor, test |
 | 신규 `.ts` 파일 생성, 단순 리팩토링·보일러플레이트, 독립 테스트 작성, 소규모 `.ts` 인라인 수정 | `codex-dev` → `/mst:codex` | code, refactor, test |
 | 프론트엔드, 문서, 대용량 컨텍스트 | `gemini-dev` → `/mst:gemini` | frontend, docs, large-context |
-| `.md` 문서, `.json`/`.env` config, `*.config.ts`, 기존 `.ts` 인라인 수정(신규 `.ts` 생성 없음) | `claude-dev` → `/mst:claude` | code, docs, config, small-inline |
+| `.md` 문서, `.json`/`.env` config, `*.config.ts`, 기존 `.ts` 인라인 수정(신규 `.ts` 생성 없음) | Codex-primary: `codex-dev` → `/mst:codex`; legacy Claude preset: `claude-dev` → `/mst:claude` | code, docs, config, small-inline |
 
 > **경계 케이스 기본값**: 태스크 유형이 모호한 경우 → `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)` 값 사용 (`claude-dev` 하드코딩 금지).
 > **CLI guard**: `codex-dev` 배정 시 `codex` 명령어 사용 가능 여부를 사전 확인할 것.
+> **Host-aware delegation**: 실행 직전 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py host context --json)`로 `host`를 확인한다. `host=codex`이면 `Skill(...)` 반환 객체를 기대하지 말고 provider CLI를 `mst.py run`/`dispatch build`로 감싸 stdout/stderr/exit code/log artifact를 수집한다. `host=claude`이면 기존 `Skill("mst:*")` 또는 Claude Task 경로를 유지한다.
 
 `claude`와 `claude-dev`는 동일하게 처리됩니다 (하위 호환).
 
@@ -581,9 +582,9 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 # codex-dev인 경우 (OMX_AUTOPILOT=true 시 \$autopilot 프리픽스 삽입)
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log',   # OMX_AUTOPILOT=true
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})"',   # OMX_AUTOPILOT=true
   # 또는:
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" < /dev/null 2>&1 | tee {task_dir}/running.log',              # OMX_AUTOPILOT=false
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})"',              # OMX_AUTOPILOT=false
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -591,7 +592,7 @@ Bash(
 # gemini-dev인 경우
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null);
-  command: 'set -o pipefail && cd {worktree_path} && gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false < /dev/null 2>&1 | tee {task_dir}/running.log',
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider gemini --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl -- gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )

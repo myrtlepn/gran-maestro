@@ -258,7 +258,7 @@ export interface PresetMeta {
   name: string;
   description?: string;
   category?: string;
-  wizardCategory?: "claude" | "claude-codex" | "claude-gemini" | "full-team";
+  wizardCategory?: "codex-primary" | "claude" | "claude-codex" | "claude-gemini" | "full-team";
   tier?: "performance" | "efficient" | "budget";
   providers?: string[];
   file?: string;

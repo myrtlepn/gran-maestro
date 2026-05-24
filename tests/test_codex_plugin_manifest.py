@@ -114,20 +114,26 @@ def test_codex_marketplace_entry_points_at_repository_plugin() -> None:
     assert plugin["version"] == manifest["version"]
     assert plugin["author"]["name"] == manifest["author"]["name"]
     assert plugin["source"] == {"source": "local", "path": "./plugins/mst"}
-    assert (CODEX_MARKETPLACE_PLUGIN_PATH / ".codex-plugin" / "plugin.json").resolve() == CODEX_PLUGIN_JSON
+    projection_manifest = CODEX_MARKETPLACE_PLUGIN_PATH / ".codex-plugin" / "plugin.json"
+    assert projection_manifest.is_file()
+    assert json.loads(projection_manifest.read_text(encoding="utf-8")) == manifest
     assert plugin["policy"]["installation"] == "AVAILABLE"
     assert plugin["policy"]["authentication"] == "ON_INSTALL"
     assert plugin["category"] == "productivity"
     assert plugin["homepage"] == manifest["homepage"] == manifest["repository"]
 
 
-def test_codex_marketplace_source_exposes_repo_root_without_copying() -> None:
-    assert CODEX_MARKETPLACE_PLUGIN_PATH.is_symlink()
-    assert CODEX_MARKETPLACE_PLUGIN_PATH.resolve() == REPO_ROOT
-    assert (CODEX_MARKETPLACE_PLUGIN_PATH / "skills").resolve() == SKILLS_DIR
-    assert (CODEX_MARKETPLACE_PLUGIN_PATH / ".claude-plugin" / "plugin.json").resolve() == (
-        REPO_ROOT / ".claude-plugin" / "plugin.json"
-    )
+def test_codex_marketplace_source_exposes_copy_projection_without_claude_surfaces() -> None:
+    assert CODEX_MARKETPLACE_PLUGIN_PATH.is_dir()
+    assert not CODEX_MARKETPLACE_PLUGIN_PATH.is_symlink()
+    assert (CODEX_MARKETPLACE_PLUGIN_PATH / "skills").is_dir()
+    assert sorted(
+        path.name
+        for path in (CODEX_MARKETPLACE_PLUGIN_PATH / "skills").iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    ) == sorted(path.name for path in SKILLS_DIR.iterdir() if path.is_dir() and not path.name.startswith("."))
+    assert not (CODEX_MARKETPLACE_PLUGIN_PATH / ".claude-plugin").exists()
+    assert not (CODEX_MARKETPLACE_PLUGIN_PATH / ".claude").exists()
 
 
 def test_root_marketplace_mirrors_repo_local_codex_marketplace() -> None:

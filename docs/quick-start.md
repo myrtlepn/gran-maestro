@@ -6,9 +6,9 @@
 
 ## 0. 사전 요구사항
 
-> **프로젝트 디렉토리에서 실행하세요.** Gran Maestro는 기존 프로젝트의 코드베이스를 분석하여 동작합니다. 반드시 프로젝트 루트에서 Claude Code를 실행한 뒤 플러그인을 사용하세요.
+> **프로젝트 디렉토리에서 실행하세요.** Gran Maestro는 기존 프로젝트의 코드베이스를 분석하여 동작합니다. 프로젝트 루트에서 Claude Code 또는 Codex CLI plugin runtime을 실행한 뒤 플러그인을 사용하세요.
 
-Gran Maestro는 Codex CLI와 Gemini CLI를 외부 실행 에이전트로 사용합니다. 플러그인 설치 전에 두 CLI를 먼저 설치해 주세요.
+Gran Maestro의 기본값은 Codex-primary입니다. Codex CLI는 필수이고, Gemini CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider를 사용할 때 설치하면 됩니다.
 
 ```bash
 # Codex CLI
@@ -73,7 +73,7 @@ Claude Code에서 (v1.0.33 이상 필요):
 
 ### Claude/Codex plugin 설치·업데이트·삭제·검증
 
-Claude Code와 Codex는 같은 git 저장소를 marketplace source로 사용합니다. Claude Code는 skills/agents/hooks를 등록하고, Codex는 같은 skill source를 hookless plugin surface로 등록해 동일한 plan → request → approve → review → accept 흐름을 제공합니다. 실제 사용자 환경은 각 CLI에서 명시적으로 관리합니다.
+Claude Code와 Codex는 같은 git 저장소를 marketplace source로 사용합니다. Claude Code는 skills/agents/hooks를 등록하고, Codex는 같은 skill source를 hookless plugin surface로 등록해 동일한 plan → request → approve → review → accept 흐름을 제공합니다. 기본 위임 설정은 Codex-primary이며, Claude provider는 Claude 계열 preset 또는 `claude-dev` 배정으로 opt-in합니다. 실제 사용자 환경은 각 CLI에서 명시적으로 관리합니다.
 
 1. **설치 준비**: `.claude-plugin/`, `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, `hooks/hooks.json` 같은 repository-local 산출물을 검토합니다.
 2. **설치**: Claude Code와 Codex CLI에서 같은 git source를 로드합니다.

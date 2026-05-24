@@ -6,9 +6,9 @@
 
 ## 0. Prerequisites
 
-> **Run from your project directory.** Gran Maestro analyzes your existing codebase to operate. Always launch Claude Code from your project root before using the plugin.
+> **Run from your project directory.** Gran Maestro analyzes your existing codebase to operate. Launch Claude Code or the Codex CLI plugin runtime from your project root before using the plugin.
 
-Gran Maestro uses Codex CLI and Gemini CLI as external execution agents. Please install both CLIs before installing the plugin.
+Gran Maestro defaults to Codex-primary. Codex CLI is required; Gemini CLI is only needed when you opt into the frontend/UI or large-context helper provider.
 
 ```bash
 # Codex CLI
@@ -73,7 +73,7 @@ You can also open the `/plugin` UI and install directly from the **Discover** ta
 
 ### Claude/Codex plugin install, update, uninstall, and validation
 
-Claude Code and Codex use the same git repository as the marketplace source. Claude Code registers skills, agents, and hooks; Codex registers the same skill source as a hookless plugin surface for the same plan → request → approve → review → accept workflow. Real user environments are managed explicitly through each CLI.
+Claude Code and Codex use the same git repository as the marketplace source. Claude Code registers skills, agents, and hooks; Codex registers the same skill source as a hookless plugin surface for the same plan → request → approve → review → accept workflow. Delegation defaults are Codex-primary; the Claude provider is opt-in through Claude presets or `claude-dev` assignment. Real user environments are managed explicitly through each CLI.
 
 1. **Prepare**: review repository-local artifacts such as `.claude-plugin/`, `.codex-plugin/`, `.agents/plugins/`, root `marketplace.json`, `plugins/mst`, `skills/`, `agents/`, and `hooks/hooks.json`.
 2. **Install**: load the same git source in Claude Code and Codex CLI.

@@ -8,6 +8,8 @@ const projectDesignsApi = new Hono();
 const SAFE_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const SCREEN_MD_FILE_PATTERN = /^screen-\d+\.md$/;
 const SCREEN_MD_OR_HTML_FILE_PATTERN = /^screen-\d+\.(md|html)$/;
+const NESTED_SCREEN_HTML_FILE_PATTERN = /^[a-z0-9-]+\.html$/;
+const NESTED_SCREEN_HTML_PATH_PATTERN = /^screens\/([a-z0-9-]+)\.html$/;
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const STITCH_SCREEN_NAME_PATTERN = /\/screens\/([^/]+)$/;
 const STITCH_SCRIPT_PATH = new URL("../../scripts/stitch-sdk.mjs", import.meta.url).pathname;
@@ -378,6 +380,106 @@ function resolveScreenHtmlFileName(screen: DesignScreen): string | null {
 function resolveScreenMarkdownFileName(screen: DesignScreen): string | null {
   const baseName = resolveScreenBaseName(screen.id);
   return baseName ? `${baseName}.md` : null;
+}
+
+function normalizeSafeScreenBase(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\.(md|html)$/, "");
+  return normalized.length > 0 && isSafePathSegment(normalized) ? normalized : null;
+}
+
+function resolveScreenMdFileFromId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (SCREEN_MD_FILE_PATTERN.test(normalized)) {
+    return normalized;
+  }
+  if (/^screen-\d+\.html$/.test(normalized)) {
+    return normalized.replace(/\.html$/, ".md");
+  }
+  if (/^screen-\d+$/.test(normalized)) {
+    return `${normalized}.md`;
+  }
+  return null;
+}
+
+function normalizeNestedScreenHtmlPath(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const match = normalized.match(NESTED_SCREEN_HTML_PATH_PATTERN);
+  if (!match || !isSafePathSegment(match[1])) {
+    return null;
+  }
+  return `screens/${match[1]}.html`;
+}
+
+function nestedScreenFileFromHtmlPath(htmlPath: string): string {
+  return htmlPath.replace(/^screens\//, "");
+}
+
+function resolveNestedScreenBase(screen: DesignScreen, htmlPath: string): string | null {
+  const record = screen as Record<string, unknown>;
+  return normalizeSafeScreenBase(record.slug) ??
+    normalizeSafeScreenBase(record.id) ??
+    normalizeSafeScreenBase(nestedScreenFileFromHtmlPath(htmlPath));
+}
+
+function resolveNestedScreenHtmlPath(screen: DesignScreen): string | null {
+  const record = screen as Record<string, unknown>;
+  return normalizeNestedScreenHtmlPath(screen.html_file) ??
+    normalizeNestedScreenHtmlPath(record.html);
+}
+
+function isSupportedScreenRequestFile(screenFile: string): boolean {
+  return SCREEN_MD_OR_HTML_FILE_PATTERN.test(screenFile) ||
+    NESTED_SCREEN_HTML_FILE_PATTERN.test(screenFile);
+}
+
+function resolveScreenHtmlFileFromSession(session: DesignSession, screenFile: string): string | null {
+  if (SCREEN_MD_OR_HTML_FILE_PATTERN.test(screenFile)) {
+    return screenFile.endsWith(".md") ? screenFile.replace(/\.md$/, ".html") : screenFile;
+  }
+
+  if (!NESTED_SCREEN_HTML_FILE_PATTERN.test(screenFile)) {
+    return null;
+  }
+
+  const requestedBase = normalizeSafeScreenBase(screenFile);
+  if (!requestedBase || !Array.isArray(session.screens)) {
+    return null;
+  }
+
+  for (const screen of session.screens) {
+    const htmlPath = resolveNestedScreenHtmlPath(screen);
+    if (!htmlPath) {
+      continue;
+    }
+
+    const base = resolveNestedScreenBase(screen, htmlPath);
+    if (base === requestedBase) {
+      return htmlPath;
+    }
+  }
+
+  return null;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const stat = await Deno.stat(path);
+    return stat.isFile;
+  } catch {
+    return false;
+  }
 }
 
 function buildScreenMarkdown(
@@ -1286,20 +1388,7 @@ projectDesignsApi.get("/designs/:desId", async (c) => {
   }
 
   const screenFiles = await listScreenMdFiles(desDir);
-
   const screenFilesSet = new Set(screenFiles);
-  const resolveScreenMdFile = (screenId: string): string | null => {
-    if (SCREEN_MD_FILE_PATTERN.test(screenId)) {
-      return screenId;
-    }
-    if (/^screen-\d+\.html$/.test(screenId)) {
-      return screenId.replace(/\.html$/, ".md");
-    }
-    if (/^screen-\d+$/.test(screenId)) {
-      return `${screenId}.md`;
-    }
-    return null;
-  };
 
   const screenHtmlFiles: Record<string, string> = {};
   for (const mdFile of screenFiles) {
@@ -1314,30 +1403,52 @@ projectDesignsApi.get("/designs/:desId", async (c) => {
     }
   }
 
-  const screens = Array.isArray(json.screens)
-    ? json.screens.map((screen) => {
+  let screens = json.screens;
+  if (Array.isArray(json.screens)) {
+    const normalizedScreens: DesignScreen[] = [];
+    for (const screen of json.screens) {
       const existingHtmlFile = typeof screen.html_file === "string" && screen.html_file.length > 0
         ? screen.html_file
         : null;
-      const screenMdFile = resolveScreenMdFile(screen.id);
+      const screenMdFile = resolveScreenMdFileFromId((screen as Record<string, unknown>).id);
 
-      if (existingHtmlFile) {
-        if (screenMdFile && screenFilesSet.has(screenMdFile)) {
-          screenHtmlFiles[screenMdFile] = existingHtmlFile;
-        }
-        return screen;
+      if (existingHtmlFile && screenMdFile && screenFilesSet.has(screenMdFile)) {
+        screenHtmlFiles[screenMdFile] = existingHtmlFile;
+        normalizedScreens.push(screen);
+        continue;
       }
 
       if (screenMdFile) {
         const detectedHtmlFile = screenHtmlFiles[screenMdFile];
         if (detectedHtmlFile) {
-          return { ...screen, html_file: detectedHtmlFile };
+          normalizedScreens.push({ ...screen, html_file: detectedHtmlFile });
+          continue;
         }
       }
 
-      return screen;
-    })
-    : json.screens;
+      const nestedHtmlPath = resolveNestedScreenHtmlPath(screen);
+      if (nestedHtmlPath && await fileExists(`${desDir}/${nestedHtmlPath}`)) {
+        const nestedBase = resolveNestedScreenBase(screen, nestedHtmlPath);
+        if (nestedBase) {
+          const nestedScreenFile = `${nestedBase}.html`;
+          if (!screenFilesSet.has(nestedScreenFile)) {
+            screenFilesSet.add(nestedScreenFile);
+            screenFiles.push(nestedScreenFile);
+          }
+          screenHtmlFiles[nestedScreenFile] = nestedHtmlPath;
+          normalizedScreens.push({
+            ...screen,
+            id: normalizeSafeScreenBase((screen as Record<string, unknown>).id) ?? nestedBase,
+            html_file: nestedHtmlPath,
+          });
+          continue;
+        }
+      }
+
+      normalizedScreens.push(screen);
+    }
+    screens = normalizedScreens;
+  }
 
   const response = {
     ...json,
@@ -1497,8 +1608,15 @@ projectDesignsApi.get("/designs/:desId/screens/:screenFile", async (c) => {
   }
 
   const desId = c.req.param("desId");
+  if (!/^(DES-\d+|PLN-\d+)$/.test(desId)) {
+    return c.json({ error: "Invalid design ID" }, 400);
+  }
+
   const screenFile = c.req.param("screenFile");
   if (!SCREEN_MD_FILE_PATTERN.test(screenFile)) {
+    if (NESTED_SCREEN_HTML_FILE_PATTERN.test(screenFile)) {
+      return c.json({ exists: false, content: null });
+    }
     return c.json({ error: "Invalid screen file" }, 400);
   }
 
@@ -1521,13 +1639,24 @@ projectDesignsApi.get("/designs/:desId/screens/:screenFile/html", async (c) => {
   }
 
   const screenFile = c.req.param("screenFile");
-  if (!SCREEN_MD_OR_HTML_FILE_PATTERN.test(screenFile)) {
+  if (!isSupportedScreenRequestFile(screenFile)) {
     return c.json({ error: "Invalid screen file" }, 400);
   }
 
-  const htmlFile = screenFile.endsWith(".md")
-    ? screenFile.replace(/\.md$/, ".html")
-    : screenFile;
+  let htmlFile: string | null = null;
+  if (SCREEN_MD_OR_HTML_FILE_PATTERN.test(screenFile)) {
+    htmlFile = screenFile.endsWith(".md")
+      ? screenFile.replace(/\.md$/, ".html")
+      : screenFile;
+  } else {
+    const session = await readJsonFile<DesignSession>(`${baseDir}/designs/${desId}/design.json`);
+    htmlFile = session ? resolveScreenHtmlFileFromSession(session, screenFile) : null;
+  }
+
+  if (!htmlFile) {
+    return c.html("<html><body></body></html>", 404);
+  }
+
   const content = await readTextFile(`${baseDir}/designs/${desId}/${htmlFile}`);
   if (content === null) {
     return c.html("<html><body></body></html>", 404);
