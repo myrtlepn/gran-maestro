@@ -117,16 +117,16 @@ recover 자체 로그는 stdout에 간결히 남긴다. `--json` 결과의 `orph
 
 ### 외주 실행/재실행 프로토콜
 
-Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 **반드시 `/mst:codex` 또는 `/mst:gemini` 외주**; Claude(PM) 직접 코드 작성 금지.
+Phase 2 상태(`pending`/`queued`/`executing`/`pre_check_failed`/`feedback`)는 **반드시 `/mst:codex` 또는 `/mst:agy` 외주**; Claude(PM) 직접 코드 작성 금지.
 
 > ⚠️ **CONTINUATION GUARD**: 서브스킬 반환 후 즉시 다음 Step 진행 (hook이 자동 강제).
 
-1. `Assigned Agent` 기준: `codex` → `mst:codex`; `gemini` → `mst:gemini`
+1. `Assigned Agent` 기준: `codex` → `mst:codex`; `agy` → `mst:agy`
 2. Worktree 존재 시 이어서 실행; 없으면 새로 생성
 3. 외주 실행:
    ```
    Skill(skill: "mst:codex", args: "{프롬프트} --dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase2-impl")
-   Skill(skill: "mst:gemini", args: "{프롬프트} --dir {worktree_path} --files {worktree_path}/**/* --trace {REQ-ID}/{TASK-NUM}/phase2-impl")
+   Skill(skill: "mst:agy", args: "{프롬프트} --dir {worktree_path} --files {worktree_path}/**/* --trace {REQ-ID}/{TASK-NUM}/phase2-impl")
    ```
 4. `feedback` 상태: feedback-RN.md 수정 요청을 프롬프트에 포함
 5. 완료 후 사전 검증 (테스트+타입 체크) → Phase 3

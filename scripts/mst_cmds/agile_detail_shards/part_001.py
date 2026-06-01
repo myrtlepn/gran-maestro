@@ -227,6 +227,7 @@ def _resolve_downstream_trace_path(details_path: Path, explicit_path: str | None
     candidates = [
         details_path.parent / "downstream" / "plan.trace.json",
         details_path.parent / "plan.trace.json",
+        details_path.parent / "finding-trace.json",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -288,6 +289,19 @@ def _load_mapped_anchor_ids(trace_path: Path | None) -> tuple[set[str], list[str
             anchor_id = _normalize_anchor_id(item.get("anchor_id"))
             if anchor_id:
                 mapped.add(anchor_id)
+
+    raw_findings = payload.get("findings") if isinstance(payload, dict) else None
+    if isinstance(raw_findings, list):
+        for item in raw_findings:
+            if not isinstance(item, dict):
+                continue
+            anchor_refs = item.get("anchor_refs")
+            if not isinstance(anchor_refs, list):
+                continue
+            for raw_id in anchor_refs:
+                anchor_id = _normalize_anchor_id(raw_id)
+                if anchor_id:
+                    mapped.add(anchor_id)
 
     return mapped, []
 def _compute_anchor_coverage(details_path: Path, args) -> dict:
@@ -458,6 +472,9 @@ def _source_mapping_failure_payload(path: str, reason: str) -> dict:
     return {
         "path": path,
         "original": None,
+        "source_type": None,
+        "evidence": None,
+        "skip_reason": None,
         "sections": [],
         "valid": False,
         "errors": [reason],

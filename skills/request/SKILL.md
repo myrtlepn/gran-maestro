@@ -218,7 +218,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
       ② `broad_scan` role agent [background dispatch] — enabled=true인 경우 (①과 동일 응답에서 dispatch)
       ③ Claude 직접 탐색 [즉시 시작] — Read/Glob/Grep 자율 실행 (탐색 범위 자율 판단, 중복 허용)
       수신된 결과를 Claude 직접 탐색 컨텍스트와 함께 종합. 총 소요 = max(enabled_roles_time, claude_direct_time).
-      반드시 `Skill(skill: "mst:codex/gemini", ...)` 도구로 호출 — MCP 직접 호출 금지. role agent 기본값: symbol_tracing=codex, broad_scan=gemini
+      반드시 `Skill(skill: "mst:codex/agy", ...)` 도구로 호출 — MCP 직접 호출 금지. role agent 기본값: symbol_tracing=codex, broad_scan=agy
    c-ref. **Reference Lookup 실행 (Step 1c 완료 직후, Step h 이전, MANDATORY)**:
       - Step 1c 탐색 산출물 + 요청 원문 + plan 컨텍스트를 입력으로 `Reference Lookup Protocol`을 실행한다.
       - `reference.auto_search != true`이면 기존 REF 캐시 조회만 수행한다.
@@ -586,7 +586,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
 
       prereview-prompt.md N개 동시 Write: 각 `tasks/NN/prereview-prompt.md`를 `templates/spec-prereview-prompt.md` + 변수 치환으로 생성
 
-      에이전트 병렬 dispatch: `python3 {PLUGIN_ROOT}/scripts/mst.py host context --json`로 host를 확인한다. host=claude에서 claude-dev 2개+ 태스크는 `Task(run_in_background: true)` 직접 호출을 유지한다. host=codex에서는 claude-dev를 기본 배정하지 않으며, codex-dev/gemini-dev 병렬 태스크는 공통 dispatch runner(`mst.py dispatch build --require-worktree` + background process) 사용
+      에이전트 병렬 dispatch: `python3 {PLUGIN_ROOT}/scripts/mst.py host context --json`로 host를 확인한다. host=claude에서 claude-dev 2개+ 태스크는 `Task(run_in_background: true)` 직접 호출을 유지한다. host=codex에서는 claude-dev를 기본 배정하지 않으며, codex-dev/agy-dev 병렬 태스크는 공통 dispatch runner(`mst.py dispatch build --require-worktree` + background process) 사용
 
       결과 수집: 태스크별 결과를 CRITICAL/MAJOR/MINOR로 분류. `NO_ISSUES` → 이슈 없음. 실패 응답 → "[Pre-review skip]" 후 건너뜀.
 

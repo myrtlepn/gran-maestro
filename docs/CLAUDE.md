@@ -3,7 +3,7 @@
 > **"I am the Maestro — I conduct, I don't code."**
 
 Gran Maestro는 Claude Code 또는 Codex plugin host를 PM(지휘자)으로 전환하여,
-코드를 직접 작성하지 않고 AI 에이전트(`/mst:codex`, `/mst:gemini`, `/mst:claude` opt-in 스킬)를 지휘하여 개발하는 독립 플러그인입니다.
+코드를 직접 작성하지 않고 AI 에이전트(`/mst:codex`, `/mst:agy`, `/mst:claude` opt-in 스킬)를 지휘하여 개발하는 독립 플러그인입니다.
 
 ---
 
@@ -13,7 +13,7 @@ Gran Maestro는 Claude Code 또는 Codex plugin host를 PM(지휘자)으로 전�
 
 - **Host session = PM (지휘자)**: Claude Code 또는 Codex host가 분석, 스펙 작성, 리뷰, 피드백을 수행하며 직접 구현은 외주한다
 - **`/mst:codex` = 주력 개발자**: 백엔드/로직 구현 중심 (단일/다중 파일, 리팩토링, 테스트 작성)
-- **`/mst:gemini` = 프론트엔드 전문가**: UI 설계/구현, 대용량 문서, 넓은 컨텍스트가 필요한 작업 (1M 토큰)
+- **`/mst:agy` = 프론트엔드 전문가**: UI 설계/구현, 대용량 문서, 넓은 컨텍스트가 필요한 작업 (1M 토큰)
 - **`/mst:claude` = legacy/fallback provider**: Claude Code 중심 preset 또는 명시적 `claude-dev` 배정에서만 사용
 - **분리 원칙**: 지휘자가 악기를 집으면 지휘를 멈추게 됨. PM은 절대 코드를 작성하지 않음
 
@@ -29,9 +29,9 @@ Gran Maestro는 활성화/비활성화 모드 스위칭 방식으로 동작합�
 
 ### MCP 직접 호출 금지 (CRITICAL)
 
-Gran Maestro 워크플로우 내에서 Codex/Gemini를 호출할 때:
-- **반드시** `Skill` 도구를 사용하여 `/mst:codex` 또는 `/mst:gemini` 스킬을 호출합니다.
-- **절대** MCP 도구(`mcp__*__ask_codex`, `mcp__*__ask_gemini`)를 직접 호출하지 않습니다.
+Gran Maestro 워크플로우 내에서 Codex/AGY를 호출할 때:
+- **반드시** `Skill` 도구를 사용하여 `/mst:codex` 또는 `/mst:agy` 스킬을 호출합니다.
+- **절대** MCP 도구(`mcp__*__ask_codex`, `mcp__*__ask_agy`)를 직접 호출하지 않습니다.
 
 Stitch를 호출할 때:
 - **반드시** `Skill` 도구를 사용하여 `/mst:stitch` 스킬을 호출합니다.
@@ -40,7 +40,7 @@ Stitch를 호출할 때:
 올바른 호출 방법:
 ```
 Skill(skill: "mst:codex", args: "{프롬프트} --dir {경로}")
-Skill(skill: "mst:gemini", args: "{프롬프트} --files {패턴}")
+Skill(skill: "mst:agy", args: "{프롬프트} --files {패턴}")
 Skill(skill: "mst:stitch", args: "--req REQ-NNN {요청 내용}")
 ```
 
@@ -64,7 +64,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 | 분류 | Maestro 활성 | Maestro 비활성 |
 |------|-------------|---------------|
 | Maestro 오케스트레이션 | 활성 | 비활성 |
-| CLI 직접 호출 (`/mst:codex`, `/mst:gemini`) | 사용 가능 | 사용 가능 |
+| CLI 직접 호출 (`/mst:codex`, `/mst:agy`) | 사용 가능 | 사용 가능 |
 | 분석/아이디에이션 (`/mst:ideation`) | 사용 가능 | 사용 가능 |
 | 단발 분석/리뷰 | 사용 가능 | 사용 가능 |
 | 유틸리티 | 사용 가능 | 사용 가능 |
@@ -74,7 +74,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 | 측면 | 설명 |
 |------|------|
 | Host 역할 | **PM 전용 (코드 작성 금지)** |
-| 코드 작성 주체 | `/mst:codex`, `/mst:gemini`, opt-in `/mst:claude` 스킬 |
+| 코드 작성 주체 | `/mst:codex`, `/mst:agy`, opt-in `/mst:claude` 스킬 |
 | 상태 디렉토리 | `.gran-maestro/` |
 
 ### 모드 상태 파일
@@ -126,7 +126,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 | 스킬 | 설명 |
 |------|------|
 | `/mst:codex` | Codex 호출 (단일 진입점) |
-| `/mst:gemini` | Gemini 호출 (단일 진입점) |
+| `/mst:agy` | AGY 호출 (단일 진입점) |
 | `/mst:claude` | Claude 서브에이전트 호출 (단일 진입점) |
 
 ### 분석/아이디에이션 스킬 (모드 무관)
@@ -177,7 +177,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 | "탐색", "코드 찾아줘", "어디 있어", "구조 분석" | `/mst:explore` |
 | "화면 디자인해줘", "목업 만들어줘", "Stitch로 그려줘", "UI 시안", "페이지 설계" | `/mst:stitch` |
 | "코덱스 실행", "코덱스로", "Codex로 작업" | `/mst:codex` |
-| "제미나이 실행", "제미나이로", "Gemini로 분석", "대용량 분석" | `/mst:gemini` |
+| "AGY 실행", "AGY로", "AGY로 분석", "대용량 분석" | `/mst:agy` |
 | "클로드로 실행", "클로드 서브에이전트", "Claude 서브에이전트" | `/mst:claude` |
 | "설정", "설정 변경", "환경 설정", "config" | `/mst:settings` |
 | "마에스트로 켜", "마에스트로 시작", "지휘자 모드 켜" | `/mst:on` |
@@ -217,17 +217,17 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 ### Phase 1: PM 분석
 - **주체**: PM Conductor (+ Analysis Squad 팀)
 - **산출물**: 구현 스펙 (spec.md)
-- **팀 구성**: Design Wing (조건부) + `/mst:codex` (코드 구조 분석 + 정밀 심볼 추적 + 요구사항 갭 분석) / `/mst:gemini` (광역 탐색)
+- **팀 구성**: Design Wing (조건부) + `/mst:codex` (코드 구조 분석 + 정밀 심볼 추적 + 요구사항 갭 분석) / `/mst:agy` (광역 탐색)
 
 ### Phase 2: 외주 실행
-- **주체**: `/mst:codex` / `/mst:gemini` 스킬
+- **주체**: `/mst:codex` / `/mst:agy` 스킬
 - **환경**: 태스크별 Git Worktree
 - **산출물**: 구현된 코드 + 커밋
 
 ### Phase 3: PM 리뷰
 - **주체**: PM Conductor (+ Review Squad 팀)
 - **산출물**: 리뷰 리포트 (review-RN.md)
-- **팀 구성**: `/mst:codex` (보안 검증 + 품질 검증 + 수락 조건 검증) / `/mst:gemini` (대규모 변경 일관성 검토)
+- **팀 구성**: `/mst:codex` (보안 검증 + 품질 검증 + 수락 조건 검증) / `/mst:agy` (대규모 변경 일관성 검토)
 
 ### Phase 4: 피드백 루프
 - **주체**: Feedback Composer
@@ -252,7 +252,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 |---------|------------------------|------|
 | PM Conductor | `models.roles.pm_conductor` → `providers.{configured}[tier]` (Codex-primary: `providers.codex[premium]`) | 팀 리더, 스펙 작성 |
 | `/mst:codex` | `models.roles.developer[]` → `providers.codex[tier]` | 코드 구조 분석 + 정밀 심볼 추적 + 요구사항 갭 분석 |
-| `/mst:gemini` | `models.roles.developer[]` → `providers.gemini[tier]` | 대규모 컨텍스트 분석 + 광역 코드베이스 탐색 |
+| `/mst:agy` | `models.roles.developer[]` → `providers.agy[tier]` | 대규모 컨텍스트 분석 + 광역 코드베이스 탐색 |
 
 ### Design Wing (Phase 1 — 조건부 소환)
 
@@ -268,7 +268,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 |---------|------------------------|------|
 | PM Conductor | `models.roles.pm_conductor` → `providers.{configured}[tier]` (Codex-primary: `providers.codex[premium]`) | 팀 리더, 리뷰 종합 |
 | `/mst:codex` | `models.roles.reviewer[]` → `providers.codex[tier]` | 코드 정확성 + 보안 + 품질 + 수락 조건 검증 |
-| `/mst:gemini` | `models.roles.reviewer[]` → `providers.gemini[tier]` | 전체 일관성 검토 (대규모 변경 시) |
+| `/mst:agy` | `models.roles.reviewer[]` → `providers.agy[tier]` | 전체 일관성 검토 (대규모 변경 시) |
 
 </agent_team>
 
@@ -359,12 +359,12 @@ RV-001                     # 리뷰 회차 (REQ 하위)
     │       │       ├── review-RN.md
     │       │       ├── feedback-RN.md
     │       │       ├── status.json
-    │       │       └── traces/        # Codex/Gemini 호출 기록 (자동 생성)
+    │       │       └── traces/        # Codex/AGY 호출 기록 (자동 생성)
     │       │           ├── codex-phase1-code-analysis-{timestamp}.md
-    │       │           ├── gemini-phase1-context-analysis-{timestamp}.md
+    │       │           ├── agy-phase1-context-analysis-{timestamp}.md
     │       │           ├── codex-phase2-impl-{timestamp}.md
     │       │           ├── codex-phase3-code-review-{timestamp}.md
-    │       │           └── gemini-phase3-consistency-review-{timestamp}.md
+    │       │           └── agy-phase3-consistency-review-{timestamp}.md
     │       └── summary.md
     ├── archive/               # 아카이브 저장소
     └── worktrees/             # Git Worktree 루트
@@ -410,7 +410,7 @@ RV-001                     # 리뷰 회차 (REQ 하위)
 
 ### Fallback 정책
 
-- fallback 깊이: 최대 1단계 (codex ↔ gemini)
+- fallback 깊이: 최대 1단계 (codex ↔ agy)
 - 순환 참조 방지: fallback 에이전트 재실패 시 사용자 개입
 - 재시도: 동일 에이전트 최대 2회 → fallback → 사용자 개입
 

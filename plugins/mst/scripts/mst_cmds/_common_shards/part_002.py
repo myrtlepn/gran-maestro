@@ -584,6 +584,17 @@ def _split_csv_values(raw_values) -> List[str]:
 _SOURCE_MAPPING_RE = re.compile(
     r"^<!--\s*source-mapping:\s*original=(?P<original>\S+)\s+sections=\[(?P<sections>.*?)\]\s*-->$"
 )
+_SOURCE_MAPPING_CONVERSATION_RE = re.compile(
+    r"^<!--\s*source-mapping:\s*source=conversation\s+"
+    r"(?:(?:evidence=(?P<evidence>\S+))|(?:skip_reason=(?P<skip_reason>\S+)))\s+"
+    r"sections=\[(?P<sections>.*?)\]\s*-->$"
+)
+def _is_source_mapping_line(line: str) -> bool:
+    stripped = str(line).strip()
+    return bool(
+        _SOURCE_MAPPING_RE.fullmatch(stripped)
+        or _SOURCE_MAPPING_CONVERSATION_RE.fullmatch(stripped)
+    )
 def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[str]]:
     sections: list[str] = []
     errors: list[str] = []
@@ -612,6 +623,9 @@ def _parse_source_mapping_sections(raw_sections: str) -> tuple[list[str], list[s
 def parse_source_mapping(text: str) -> dict:
     result = {
         "original": None,
+        "source_type": None,
+        "evidence": None,
+        "skip_reason": None,
         "sections": [],
         "valid": False,
         "errors": [],
@@ -627,16 +641,24 @@ def parse_source_mapping(text: str) -> dict:
         return result
 
     match = _SOURCE_MAPPING_RE.fullmatch(first_line)
-    if match is None:
+    conversation_match = _SOURCE_MAPPING_CONVERSATION_RE.fullmatch(first_line)
+    if match is None and conversation_match is None:
         result["errors"].append("source-mapping metadata is missing or malformed in first line")
         return result
 
-    sections, section_errors = _parse_source_mapping_sections(match.group("sections"))
+    active_match = match or conversation_match
+    sections, section_errors = _parse_source_mapping_sections(active_match.group("sections"))
     if section_errors:
         result["errors"].extend(section_errors)
         return result
 
-    result["original"] = match.group("original")
+    if match is not None:
+        result["source_type"] = "document"
+        result["original"] = match.group("original")
+    else:
+        result["source_type"] = "conversation"
+        result["evidence"] = conversation_match.group("evidence")
+        result["skip_reason"] = conversation_match.group("skip_reason")
     result["sections"] = sections
     result["valid"] = True
     return result
@@ -659,7 +681,7 @@ def _extract_frontmatter_block(content: str) -> dict:
 
     probe_index = 0
     first_line = lines[0].strip()
-    if _SOURCE_MAPPING_RE.fullmatch(first_line):
+    if _is_source_mapping_line(first_line):
         probe_index = 1
 
     while probe_index < len(lines) and not lines[probe_index].strip():

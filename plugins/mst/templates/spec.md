@@ -21,8 +21,8 @@ Step 2: 도메인 추론
   어떤 에이전트의 도메인 목록과 가장 잘 맞는지 LLM이 판단한다.
   추론 예시:
     "API 엔드포인트 추가" → backend → codex-dev
-    "버튼 컴포넌트 수정" → ui → gemini-dev
-    "페이지 라우팅 추가" → frontend → gemini-dev
+    "버튼 컴포넌트 수정" → ui → agy-dev
+    "페이지 라우팅 추가" → frontend → agy-dev
     "CI/CD 설정 변경" → infra → codex-dev
     "SKILL.md 로직 업데이트" → skill → codex-dev
     "README 업데이트" → docs → codex-dev (Codex-primary 기본값)

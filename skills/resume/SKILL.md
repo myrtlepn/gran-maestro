@@ -158,6 +158,6 @@ python3 {PLUGIN_ROOT}/scripts/mst.py queue drain-headless --json
 ## 현재 제한사항 (Phase 1+2 스코프)
 
 - **Lease 없음 (Phase 3 예정)**: 동일 리소스(AGI/REQ/PLN)에 대한 동시 pop이 race condition을 일으킬 수 있다. 현재는 사용자가 수동으로 중복 실행을 피해야 한다. `fcntl.flock`으로 queue 파일 자체의 원자성은 보장되지만, "동일 REQ에 대해 두 세션이 각각 pop해서 동시 실행" 같은 도메인 레벨 직렬화는 Phase 3에서 lease manager로 해결 예정.
-- **Outbox 없음 (Phase 4 예정)**: 백그라운드 codex/gemini dispatch 중 세션 크래시 시 재진입 복원이 불완전할 수 있다. 현재는 각 Skill 호출이 단일 iteration 내에서 동기적으로 완료되는 경로만 안전하게 재진입 가능.
+- **Outbox 없음 (Phase 4 예정)**: 백그라운드 codex/agy dispatch 중 세션 크래시 시 재진입 복원이 불완전할 수 있다. 현재는 각 Skill 호출이 단일 iteration 내에서 동기적으로 완료되는 경로만 안전하게 재진입 가능.
 - **POSIX 파일시스템 가정**: `fcntl.flock`은 로컬 파일시스템에서만 안정. NFS/네트워크 FS는 미지원.
 - **인라인 체이닝과 공존**: 기존 스킬들의 인라인 `Skill()` 체이닝은 그대로 작동한다. queue + resume은 **외부 재진입 경로**이며 인라인 경로를 대체하지 않는다.

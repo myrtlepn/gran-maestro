@@ -4,7 +4,7 @@
 > Phase 4 수정 요청은 `templates/fix-request.md`를 사용합니다.
 > 이 파일은 하위 호환 및 `<error_context>` 재외주 시나리오를 위해 유지됩니다.
 
-Phase 2에서 `/mst:codex` / `/mst:gemini` 스킬에 전달하는 프롬프트 템플릿입니다.
+Phase 2에서 `/mst:codex` / `/mst:agy` 스킬에 전달하는 프롬프트 템플릿입니다.
 이 파일은 에이전트가 아닌 **템플릿**으로, PM Conductor가 변수를 치환하여 사용합니다.
 
 <outsource_brief>
@@ -75,8 +75,8 @@ Important:
 
 ## 스킬 호출 방식
 
-모든 외부 AI 호출은 내부 스킬(`/mst:codex`, `/mst:gemini`)을 경유합니다.
-직접 CLI 호출(`codex exec`, `gemini -p`)이나 MCP 도구는 사용하지 않습니다.
+모든 외부 AI 호출은 내부 스킬(`/mst:codex`, `/mst:agy`)을 경유합니다.
+직접 CLI 호출(`codex exec`, `agy --print`)이나 MCP 도구는 사용하지 않습니다.
 
 **CRITICAL — Prompt-File 패턴**: 워크플로우 내에서는 brief를 파일로 먼저 저장한 뒤 `--prompt-file`로 전달합니다.
 이렇게 하면 프롬프트가 Claude 컨텍스트를 통과하지 않아 토큰이 절약되고, 프롬프트 파일이 디스크에 남아 감사 추적이 가능합니다.
@@ -90,18 +90,18 @@ Write → .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase2-impl.m
 /mst:codex --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase2-impl.md --dir {WORKTREE_PATH} --trace {REQ-ID}/{TASK-NUM}/phase2-impl
 ```
 
-### Gemini 실행 (2단계: Write → Skill)
+### AGY 실행 (2단계: Write → Skill)
 ```
 # Step 1: 템플릿 치환 후 파일에 저장
 Write → .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase2-impl.md
 
 # Step 2: 파일 경로로 호출
-/mst:gemini --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase2-impl.md --trace {REQ-ID}/{TASK-NUM}/phase2-impl
+/mst:agy --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase2-impl.md --trace {REQ-ID}/{TASK-NUM}/phase2-impl
 ```
 
 ### Claude 실행 (Task 서브에이전트)
 
-Codex/Gemini CLI가 없는 환경이거나 `Assigned Agent: claude` / `claude-dev`인 경우 사용합니다.
+Codex/AGY CLI가 없는 환경이거나 `Assigned Agent: claude` / `claude-dev`인 경우 사용합니다.
 CLI 대신 Claude의 `Task(subagent_type: "general-purpose", ...)` 메커니즘으로 서브에이전트를 스폰합니다.
 
 ```

@@ -73,6 +73,15 @@ def _write_json(path: Path, payload) -> None:
 
 def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) -> None:
     objective_dir = workspace / ".gran-maestro" / "agile" / agi_id / "objective"
+    details_dir = objective_dir / "details"
+    details_dir.mkdir(parents=True, exist_ok=True)
+    (details_dir / "review-evidence-and-gates.md").write_text(
+        "<!-- source-mapping: original=objective.md sections=[\"Objective\"] -->\n"
+        "# Review Evidence and Gates\n\n"
+        "> 관련 DoD: DOD-001\n\n"
+        "- 반드시 DOD-001 evidence is preserved.\n",
+        encoding="utf-8",
+    )
     _write_json(
         objective_dir / "objective.ids.json",
         [
@@ -92,8 +101,25 @@ def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) 
         {
             "schema_version": 1,
             "agi_id": agi_id,
-            "context_files": [],
-            "skip_reasons": [],
+            "context_files": [
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/objective.md",
+                    "kind": "objective_context",
+                },
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/objective.ids.json",
+                    "kind": "objective_context",
+                },
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/details/review-evidence-and-gates.md",
+                    "kind": "objective_context",
+                },
+            ],
+            "skip_reasons": [
+                {"kind": "design", "reason": "not_applicable_or_missing"},
+                {"kind": "references", "reason": "not_applicable_or_missing"},
+                {"kind": "previous_feedback", "reason": "not_applicable_or_missing"},
+            ],
             "created_at": "2026-06-01T00:00:00Z",
         },
     )
@@ -272,6 +298,74 @@ def test_objective_check_dod_all_done(tmp_path):
     assert proc.returncode == 0
     assert payload["all_done"] is True
     assert payload["incomplete"] == []
+    assert payload["schedule_wording"]["valid"] is True
+
+
+def test_agile_wording_check_blocks_model_estimated_schedule_language(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "예상 스프린트: 3회\n\n"
+            "- [x] DOD-001\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
+        ),
+    )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
+
+    wording_proc = _run_mst(workspace, "agile", "wording-check", agi_id, "--json")
+    wording_payload = json.loads(wording_proc.stdout)
+
+    assert wording_proc.returncode == 1
+    assert wording_payload["valid"] is False
+    assert wording_payload["violation_count"] == 1
+    assert wording_payload["checked_files"][0]["violations"][0]["pattern"] == "estimated_sprint_count"
+
+    check_proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-check",
+        agi_id,
+        "--mst-session-id",
+        mst_session_id,
+        "--json",
+    )
+    check_payload = json.loads(check_proc.stdout)
+
+    assert check_proc.returncode == 0
+    assert check_payload["marker_all_done"] is True
+    assert check_payload["all_done"] is False
+    assert any("schedule_wording:" in error for error in check_payload["completion_blockers"])
+
+
+def test_agile_wording_check_allows_deterministic_control_contracts(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "허용 control contract: retry budget 3회, soft_limit_rounds=8, state counter.\n\n"
+            "- [x] DOD-001\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
+        ),
+    )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
+
+    wording_proc = _run_mst(workspace, "agile", "wording-check", agi_id, "--json")
+    wording_payload = json.loads(wording_proc.stdout)
+
+    assert wording_proc.returncode == 0
+    assert wording_payload["valid"] is True
+    assert wording_payload["violation_count"] == 0
 
 
 def test_objective_check_blocks_all_done_when_required_sidecars_missing(tmp_path):
@@ -295,6 +389,98 @@ def test_objective_check_blocks_all_done_when_required_sidecars_missing(tmp_path
     assert payload["marker_all_done"] is True
     assert payload["all_done"] is False
     assert any("objective_anchor_manifest" in error for error in payload["completion_blockers"])
+
+
+def test_objective_check_blocks_all_done_when_source_mapping_invalid(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "- [x] DOD-001\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
+        ),
+    )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
+    detail_path = (
+        workspace
+        / ".gran-maestro"
+        / "agile"
+        / agi_id
+        / "objective"
+        / "details"
+        / "review-evidence-and-gates.md"
+    )
+    detail_path.write_text("# Missing source mapping\n", encoding="utf-8")
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-check",
+        agi_id,
+        "--mst-session-id",
+        mst_session_id,
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 0
+    assert payload["marker_all_done"] is True
+    assert payload["all_done"] is False
+    assert any("source_mapping:" in error for error in payload["completion_blockers"])
+    assert payload["source_mapping"]["valid"] is False
+
+
+def test_objective_check_blocks_all_done_when_detail_h1_missing(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "- [x] DOD-001\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
+        ),
+    )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
+    detail_path = (
+        workspace
+        / ".gran-maestro"
+        / "agile"
+        / agi_id
+        / "objective"
+        / "details"
+        / "review-evidence-and-gates.md"
+    )
+    detail_path.write_text(
+        "<!-- source-mapping: original=objective.md sections=[\"Objective\"] -->\n"
+        "\n"
+        "No heading here.\n",
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-check",
+        agi_id,
+        "--mst-session-id",
+        mst_session_id,
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 0
+    assert payload["marker_all_done"] is True
+    assert payload["all_done"] is False
+    assert any("canonical detail H1 is missing" in error for error in payload["completion_blockers"])
 
 
 def test_objective_transition_dod(tmp_path):

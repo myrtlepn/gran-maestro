@@ -102,5 +102,5 @@ Write the design document in the following format:
 ```
 Write → requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-schema-design.md
 /mst:codex --prompt-file {위 경로} --output requests/{REQ-ID}/design/data-model.md --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design
-/mst:gemini --prompt-file {위 경로} --files {schema_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design-gemini  # 대규모 스키마 시 Gemini 보조 (선택)
+/mst:agy --prompt-file {위 경로} --files {schema_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design-agy  # 대규모 스키마 시 AGY 보조 (선택)
 ```

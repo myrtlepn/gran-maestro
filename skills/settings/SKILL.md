@@ -84,10 +84,10 @@ argument-hint: "[{key} [{value}] | preset {list|apply|diff|save|wizard} [id]]"
 | `history.retention_days` | 이력 보존 기간 (일) | `30` | number |
 | `history.auto_archive` | 자동 아카이브 | `true` | boolean |
 | `ideation.agents.codex` | `{ count: 2, tier: "premium" }` | Ideation Codex 참여 설정 (0=제외) | object |
-| `ideation.agents.gemini` | `{ count: 0, tier: "premium" }` | Ideation Gemini 참여 설정 (0=제외) | object |
+| `ideation.agents.agy` | `{ count: 0, tier: "premium" }` | Ideation AGY 참여 설정 (0=제외) | object |
 | `ideation.agents.claude` | `{ count: 0, tier: "economy" }` | Ideation Claude 참여 설정 (0=제외) | object |
 | `discussion.agents.codex` | `{ count: 2, tier: "premium" }` | Discussion Codex 참여 설정 (0=제외) | object |
-| `discussion.agents.gemini` | `{ count: 0, tier: "premium" }` | Discussion Gemini 참여 설정 (0=제외) | object |
+| `discussion.agents.agy` | `{ count: 0, tier: "premium" }` | Discussion AGY 참여 설정 (0=제외) | object |
 | `discussion.agents.claude` | `{ count: 0, tier: "economy" }` | Discussion Claude 참여 설정 (0=제외) | object |
 | `notifications.terminal` | 터미널 알림 활성화 | `true` | boolean |
 | `notifications.dashboard` | 대시보드 알림 활성화 | `true` | boolean |
@@ -95,7 +95,7 @@ argument-hint: "[{key} [{value}] | preset {list|apply|diff|save|wizard} [id]]"
 | `debug.log_level` | 로그 레벨 | `info` | string |
 | `debug.log_prompts` | 프롬프트 로깅 | `false` | boolean |
 | `explore.agents.codex` | `{ count: 2, tier: "premium" }` | Explore Codex 탐색 에이전트 설정 (0=제외) | object |
-| `explore.agents.gemini` | `{ count: 0, tier: "premium" }` | Explore Gemini 탐색 에이전트 설정 (0=제외) | object |
+| `explore.agents.agy` | `{ count: 0, tier: "premium" }` | Explore AGY 탐색 에이전트 설정 (0=제외) | object |
 | `explore.agents.claude` | `{ count: 0, tier: "economy" }` | Explore Claude 탐색 에이전트 설정 (0=제외) | object |
 | `auto_mode.plan` | `/mst:plan` Q&A 단계 자율 실행 (config 레벨 -a 활성화) | `false` | boolean |
 | `auto_mode.request` | `/mst:request` 스펙 승인 자동 실행 (config 레벨 -a 활성화) | `false` | boolean |
@@ -107,12 +107,12 @@ argument-hint: "[{key} [{value}] | preset {list|apply|diff|save|wizard} [id]]"
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `debug.agents.codex` | `{ count: 2, tier: "premium" }` | Debug 조사에 참여하는 Codex 에이전트 설정 (0=제외) |
-| `debug.agents.gemini` | `{ count: 0, tier: "premium" }` | Debug 조사에 참여하는 Gemini 에이전트 설정 (0=제외) |
+| `debug.agents.agy` | `{ count: 0, tier: "premium" }` | Debug 조사에 참여하는 AGY 에이전트 설정 (0=제외) |
 | `debug.agents.claude` | `{ count: 0, tier: "economy" }` | Debug 조사에 참여하는 Claude 에이전트 설정 (0=제외) |
 
 - 총합: 1명 이상 6명 이하
 - 프로바이더별 상한 없음
-- 누락 시 기본값: `codex: { count: 2, tier: "premium" }`, `gemini: { count: 0, tier: "premium" }`, `claude: { count: 0, tier: "economy" }`
+- 누락 시 기본값: `codex: { count: 2, tier: "premium" }`, `agy: { count: 0, tier: "premium" }`, `claude: { count: 0, tier: "economy" }`
 
 ### config 마이그레이션
 
@@ -154,7 +154,7 @@ python3 scripts/mst.py config migrate --apply   # 실제 적용
 #### preset wizard
 
 대화형 위저드로 프리셋을 선택·적용합니다.
-1. AskUserQuestion — AI 프로바이더 조합 선택 (Full / Codex Only / Gemini Only / Claude Only)
+1. AskUserQuestion — AI 프로바이더 조합 선택 (Full / Codex Only / AGY Only / Claude Only)
 2. AskUserQuestion — 모델 등급 선택 (성능 / 효율 / 절약)
 3. AskUserQuestion — 보조 도구 활성화 (multiSelect: Stitch 등)
 → 조합된 preset ID로 `preset apply` 실행
@@ -168,7 +168,7 @@ python3 scripts/mst.py config migrate --apply   # 실제 적용
 /mst:settings workflow.auto_approve_spec true         # 스펙 자동 승인 활성화
 /mst:settings workflow.auto_accept_result false       # 최종 수락 수동 모드로 전환
 /mst:settings workflow.auto_approve_on_unblock true  # 의존 체인 자동 실행 활성화
-/mst:settings workflow.default_agent gemini-dev       # 기본 에이전트를 Gemini로 변경
+/mst:settings workflow.default_agent agy-dev       # 기본 에이전트를 AGY로 변경
 /mst:settings auto_mode.plan true           # 플랜 Q&A 자율 실행 활성화
 /mst:settings auto_mode.request true        # 스펙 승인 자동 실행 활성화
 /mst:settings auto_mode.review true         # 리뷰 fix 루프 자율 실행 활성화

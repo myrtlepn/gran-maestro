@@ -116,7 +116,7 @@ Page
 ```
 Write → requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-design.md
 /mst:codex --prompt-file {위 경로} --output requests/{REQ-ID}/design/ui-spec.md --trace {REQ-ID}/{TASK-NUM}/phase1-ui-design
-/mst:gemini --prompt-file {위 경로} --files {component_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-ui-crossview  # 멀티 화면 일관성
+/mst:agy --prompt-file {위 경로} --files {component_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-ui-crossview  # 멀티 화면 일관성
 ```
 
-사용 기준: 단일 컴포넌트/페이지 → Codex; 다수 화면 일관성/전체 UX 흐름 → Gemini (보조)
+사용 기준: 단일 컴포넌트/페이지 → Codex; 다수 화면 일관성/전체 UX 흐름 → AGY (보조)

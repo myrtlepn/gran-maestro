@@ -32,11 +32,13 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 > 막히면 ideation으로 AI 팀의 의견을 모을 수 있습니다.
 ```
 
-텍스트만으로 합의하면 빈칸이 남습니다 — 화면은 Stitch로 즉석 시각화하고, 완성된 플랜은 다중 AI가 역할별로 검토합니다(Plan Review). 검증된 플랜은 `/mst:request`로 구현 스펙이 되고, `/mst:approve`로 Codex와 Gemini 개발팀에 전달되어 자동으로 구현됩니다. 구현이 끝나면 `/mst:review`가 AC 기준으로 검증하고, `/mst:accept`로 머지까지 완료됩니다. 대시보드에서 진행 상태와 근거를 실시간으로 확인할 수 있습니다. 아래 Quick Start에서 바로 시작하세요.
+텍스트만으로 합의하면 빈칸이 남습니다 — 화면은 Stitch로 즉석 시각화하고, 완성된 플랜은 다중 AI가 역할별로 검토합니다(Plan Review). 검증된 플랜은 `/mst:request`로 구현 스펙이 되고, `/mst:approve`로 Codex와 AGY 개발팀에 전달되어 자동으로 구현됩니다. 구현이 끝나면 `/mst:review`가 AC 기준으로 검증하고, `/mst:accept`로 머지까지 완료됩니다. 대시보드에서 진행 상태와 근거를 실시간으로 확인할 수 있습니다. 아래 Quick Start에서 바로 시작하세요.
 
 ## Quick Start
 
-**사전 요구사항**: Claude Code(v1.0.33 이상) 또는 Codex CLI plugin runtime, [Codex CLI](https://github.com/openai/codex). [Gemini CLI](https://github.com/google-gemini/gemini-cli)는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider로 사용할 때만 필요합니다.
+**사전 요구사항**: Claude Code(v1.0.33 이상) 또는 Codex CLI plugin runtime, [Codex CLI](https://github.com/openai/codex). AGY CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider로 사용할 때만 필요하며, `agy --version`이 동작하도록 설치되어 있어야 합니다.
+
+기존 `/mst:gemini`, `gemini`, `gemini-dev` 설정/세션 값은 한 릴리스 동안 deprecated alias로 읽고 AGY 경로로 정규화합니다. 새 설정과 문서는 `/mst:agy`, `agy`, `agy-dev`를 기준으로 작성하세요.
 
 ```bash
 /plugin marketplace add myrtlepn/gran-maestro
@@ -98,7 +100,7 @@ Gran Maestro는 Claude Code와 Codex에서 같은 git 저장소를 marketplace s
 |------|------|------|
 | Q&A 계획 수립 | `/mst:plan` | 질문으로 요구사항 정제, 검증된 플랜 생성 |
 | 구현 스펙 작성 | `/mst:request` | 플랜을 구현 가능한 스펙(spec.md)으로 변환 |
-| 스펙 승인 & 실행 | `/mst:approve` | 스펙 검증 후 Codex/Gemini 개발팀에 자동 전달 |
+| 스펙 승인 & 실행 | `/mst:approve` | 스펙 검증 후 Codex/AGY 개발팀에 자동 전달 |
 | AC 검증 리뷰 | `/mst:review` | 다중 AI가 수락 조건 기준으로 병렬 검증 |
 | 머지 & 정리 | `/mst:accept` | worktree 머지 + 정리 완료 |
 

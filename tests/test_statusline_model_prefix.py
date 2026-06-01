@@ -53,6 +53,7 @@ def test_prefix_claude_idle(tmp_path):
     [
         ({"id": "claude-opus-4-7", "display_name": "Opus"}, "Claude", "Opus"),
         ({"id": "gpt-5.3-codex", "display_name": "Codex"}, "OpenAI", "Codex"),
+        ({"id": "agy-default"}, "AGY", None),
         ({"id": "gemini-3.1-pro-preview"}, "Gemini", None),
     ],
 )

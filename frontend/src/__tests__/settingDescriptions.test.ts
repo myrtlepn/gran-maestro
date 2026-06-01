@@ -22,4 +22,26 @@ describe('setting descriptions', () => {
       expect(SETTING_DESCRIPTIONS).toHaveProperty(key)
     }
   })
+
+  it('uses AGY as the canonical large-context provider option', () => {
+    const providerFields = [
+      'workflow.default_agent',
+      'agile.dispatch.provider',
+      'delegation.default_provider',
+      'models.roles.developer.1.provider',
+      'models.roles.reviewer.1.provider',
+    ]
+
+    for (const key of providerFields) {
+      const entry = SETTING_DESCRIPTIONS[key]
+      expect(typeof entry).toBe('object')
+      if (typeof entry === 'object') {
+        expect(entry.options).toContain(key === 'workflow.default_agent' ? 'agy-dev' : 'agy')
+        expect(entry.options?.join(',')).not.toContain('gemini')
+      }
+    }
+
+    expect(SETTING_DESCRIPTIONS).toHaveProperty('models.providers.agy.default_tier')
+    expect(SETTING_DESCRIPTIONS).not.toHaveProperty('models.providers.gemini.default_tier')
+  })
 })

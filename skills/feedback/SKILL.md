@@ -57,13 +57,13 @@ mst:feedback 실행 시 아래 정보를 반드시 제공해야 합니다:
 
 ### 외주 재실행 프로토콜 (구현 오류 시)
 
-**반드시 `/mst:codex` 또는 `/mst:gemini`를 통해 외주. Claude(PM) 직접 코드 수정 금지.**
+**반드시 `/mst:codex` 또는 `/mst:agy`를 통해 외주. Claude(PM) 직접 코드 수정 금지.**
 
 1. spec.md에서 `Assigned Agent` 확인
 2. 수정 프롬프트 구성: spec.md §3 수락 조건 + feedback-RN.md 수정 요청 + §5 테스트 명령
 3. 외주 실행:
    - codex-dev → `Skill("mst:codex", "--dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase4-fix-R{N}")`
-   - gemini-dev → `Skill("mst:gemini", "--dir {worktree_path} --files {worktree_path}/**/* --trace {REQ-ID}/{TASK-NUM}/phase4-fix-R{N}")`
+   - agy-dev → `Skill("mst:agy", "--dir {worktree_path} --files {worktree_path}/**/* --trace {REQ-ID}/{TASK-NUM}/phase4-fix-R{N}")`
    - claude-dev → `Skill("mst:claude", "--prompt-file {prompt_path} --dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase4-fix-R{N}")`
 4. **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 2 phase2_execution`; 실패 시 fallback으로 `current_phase`=2, `status`=`phase2_execution` 직접 업데이트 → 완료 후 사전 검증 → Phase 3
 5. **외주 재실행 완료 후 Phase 3 복귀**:

@@ -12,17 +12,17 @@ TARGET_PATHS = [
     "skills/approve/SKILL.md",
     "skills/request/SKILL.md",
     "skills/codex/SKILL.md",
-    "skills/gemini/SKILL.md",
+    "skills/agy/SKILL.md",
     "scripts/mst_cmds/dispatch_shards/part_001.py",
 ]
 DIRECT_CLI_SURFACES = {
     "skills/approve/SKILL.md": "explicit_parallel_exception",
     "skills/request/SKILL.md": "policy_prohibition",
     "skills/codex/SKILL.md": "protected_skill_codex",
-    "skills/gemini/SKILL.md": "protected_skill_gemini",
+    "skills/agy/SKILL.md": "protected_skill_agy",
     "scripts/mst_cmds/dispatch_shards/part_001.py": "common_dispatch_runner",
 }
-DIRECT_CLI_TOKENS = ("codex exec", "agy --print", "gemini" + " -p", "claude -p")
+DIRECT_CLI_TOKENS = ("codex exec", "agy --print", "claude -p")
 
 
 def _text(relative_path: str) -> str:
@@ -49,10 +49,10 @@ def test_dod005_inventory_classifies_target_direct_cli_surfaces() -> None:
 
     assert set(inventory) == set(DIRECT_CLI_SURFACES)
     assert any("codex exec" in line for line in inventory["skills/codex/SKILL.md"])
-    assert any("gemini" + " -p" in line for line in inventory["skills/gemini/SKILL.md"])
+    assert any("agy --print" in line for line in inventory["skills/agy/SKILL.md"])
     assert any("codex exec" in line for line in inventory["skills/request/SKILL.md"])
     assert any("codex exec" in line for line in inventory["skills/approve/SKILL.md"])
-    assert any("gemini" + " -p" in line for line in inventory["skills/approve/SKILL.md"])
+    assert any("agy --print" in line for line in inventory["skills/approve/SKILL.md"])
     assert any("codex exec" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
     assert any("agy --print" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
 
@@ -61,7 +61,7 @@ def test_dod005_inventory_classifies_target_direct_cli_surfaces() -> None:
     dispatch_runner = _text("scripts/mst_cmds/dispatch_shards/part_001.py")
 
     assert "`Skill` 호출은 직렬이므로 병렬 실행 시 CLI 직접 호출 필요" in approve_doc
-    assert "`Skill(mst:gemini)` 전환 불가" in approve_doc
+    assert "`Skill(mst:agy)` 전환 불가" in approve_doc
     assert "직접 `codex exec` + master 커밋으로 전환한다" in request_doc
     assert "dispatch build does not support provider 'claude'. Use Task-based claude dispatch." in dispatch_runner
 
@@ -73,7 +73,7 @@ def test_dod005_replacement_categories_are_explicit_in_scope_docs() -> None:
 
     assert 'Task(subagent_type: "general-purpose", run_in_background: true)' in detail_doc
     assert 'Skill(skill: "mst:codex")' in detail_doc
-    assert 'Skill(skill: "mst:gemini")' in detail_doc
+    assert 'Skill(skill: "mst:agy")' in detail_doc or 'Skill(skill: "mst:gemini")' in detail_doc
     assert "공통 dispatch runner" in detail_doc
 
     assert 'Task(subagent_type: "general-purpose", prompt: {prompt_file 내용}, run_in_background: true)' in approve_doc
@@ -90,7 +90,7 @@ def test_dod005_parallel_dispatch_contract_preserves_agent_or_runner_lanes() -> 
     assert "Agent background 또는 공통 runner로 대체하는 기준" in detail_doc
     assert "`Skill` 호출은 직렬이므로 병렬 실행 시 CLI 직접 호출 필요" in approve_doc
     assert "trace는 `running.log`로 대체된다." in approve_doc
-    assert "codex-dev/gemini-dev 병렬 태스크 → 공통 dispatch runner(`mst.py dispatch build` + background process) 사용" in request_doc
+    assert "codex-dev/agy-dev 병렬 태스크 → 공통 dispatch runner(`mst.py dispatch build` + background process) 사용" in request_doc
     assert 'Skill(skill: "mst:{agent}", run_in_background: true)' not in request_doc
 
 

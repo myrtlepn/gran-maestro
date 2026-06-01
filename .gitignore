@@ -8,5 +8,6 @@ frontend/node_modules/
 /frontend/.gran-maestro/
 /.omx/
 /.claude/*
+/.antigravitycli/
 .pytest_cache/
 *.backup-*.json

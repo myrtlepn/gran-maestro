@@ -15,7 +15,7 @@
           "tier": "economy"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         }
       ],
@@ -29,7 +29,7 @@
           "tier": "economy"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         }
       ]
@@ -41,7 +41,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -57,7 +57,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -73,7 +73,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -89,7 +89,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -105,7 +105,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -119,7 +119,7 @@
     "agents": 1,
     "agent_roster": [
       "codex",
-      "gemini"
+      "agy"
     ]
   },
   "plan_review": {
@@ -148,7 +148,7 @@
         "tier": "economy"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": true,
         "tier": "economy"
       }
@@ -173,7 +173,7 @@
   "agent_assignments": {
     "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
     "codex-dev": ["backend", "skill", "test", "infra"],
-    "gemini-dev": ["frontend", "ui"],
+    "agy-dev": ["frontend", "ui"],
     "claude-dev": ["docs", "config"]
   }
 }

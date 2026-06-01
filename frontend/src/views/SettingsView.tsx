@@ -23,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 const HIDDEN_FIELDS = ['version', 'plugin_name', 'branding'];
 const BEHAVIOR_SECTIONS = ['workflow', 'auto_mode', 'concurrency', 'review', 'plan_review'];
-const AGENT_PROVIDERS = ['codex', 'gemini', 'claude'] as const;
+const AGENT_PROVIDERS = ['codex', 'agy', 'claude'] as const;
 
 type AgentProvider = typeof AGENT_PROVIDERS[number];
 type AgentTier = 'premium' | 'economy';
@@ -104,7 +104,7 @@ const WORKFLOW_INFO_FOCUS_FIELDS: Partial<Record<WorkflowNode['id'], string[]>> 
   code_review: ['enabled', 'agents', 'agent_roster', 'parallel', 'use_native_review', 'native_review_prompt'],
   collaborative_debug: ['finding_char_limit', 'merge_wait_ms', 'auto_trigger_from_request'],
   'workflow.feedback': ['max_feedback_rounds'],
-  'models.providers': ['codex', 'gemini', 'claude'],
+  'models.providers': ['codex', 'agy', 'claude'],
   'models.roles': ['pm_conductor', 'architect', 'developer', 'reviewer', 'developer_claude'],
   auto_mode: ['plan', 'request', 'review', 'confidence_threshold', 'max_review_iterations'],
   intent_fidelity: ['enabled', 'mode', 'exclude_dirs'],

@@ -32,7 +32,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -46,7 +46,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -60,7 +60,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -74,7 +74,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -88,7 +88,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -130,7 +130,7 @@
         "tier": "premium"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": false,
         "tier": "premium"
       }

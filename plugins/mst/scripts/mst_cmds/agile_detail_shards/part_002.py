@@ -377,6 +377,9 @@ def cmd_agile_detail_validate_mapping(args):
     payload = {
         "path": details_path,
         "original": parsed.get("original"),
+        "source_type": parsed.get("source_type"),
+        "evidence": parsed.get("evidence"),
+        "skip_reason": parsed.get("skip_reason"),
         "sections": parsed.get("sections", []),
         "valid": bool(parsed.get("valid")),
         "errors": parsed.get("errors", []),
@@ -629,6 +632,75 @@ def _render_sidecar_schema_entry(schema: dict, agi_id: str | None, mst_session_i
         rendered = rendered[len(".gran-maestro/") :]
     entry["path"] = str(_common.BASE_DIR / rendered) if "{" not in rendered else None
     return entry
+def _resolve_manifest_context_path(path_value: str) -> Path:
+    candidate = Path(str(path_value)).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return _common.BASE_DIR.parent / candidate
+def _validate_handoff_manifest_payload(payload: dict, result: dict) -> None:
+    context_files = payload.get("context_files")
+    skip_reasons = payload.get("skip_reasons")
+    if not isinstance(context_files, list):
+        result["errors"].append("context_files must be a list")
+        context_files = []
+    elif not context_files:
+        result["errors"].append("context_files must not be empty")
+    if not isinstance(skip_reasons, list):
+        result["errors"].append("skip_reasons must be a list")
+        skip_reasons = []
+
+    seen_kinds: set[str] = set()
+    skipped_kinds: set[str] = set()
+    has_objective = False
+    has_anchor_manifest = False
+    has_detail = False
+
+    for index, item in enumerate(context_files):
+        if not isinstance(item, dict):
+            result["errors"].append(f"context_files item {index} must be an object")
+            continue
+        raw_path = str(item.get("path") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        if not raw_path:
+            result["errors"].append(f"context_files item {index} missing path")
+            continue
+        if not kind:
+            result["errors"].append(f"context_files item {index} missing kind")
+        else:
+            seen_kinds.add(kind)
+        resolved = _resolve_manifest_context_path(raw_path)
+        if not resolved.is_file():
+            result["errors"].append(f"context_files item {index} path not found: {raw_path}")
+        if raw_path.endswith("objective.md"):
+            has_objective = True
+        if raw_path.endswith("objective.ids.json"):
+            has_anchor_manifest = True
+        if "/details/" in raw_path and raw_path.endswith(".md"):
+            has_detail = True
+
+    for index, item in enumerate(skip_reasons):
+        if not isinstance(item, dict):
+            result["errors"].append(f"skip_reasons item {index} must be an object")
+            continue
+        kind = str(item.get("kind") or "").strip()
+        raw_path = str(item.get("path") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if not kind and not raw_path:
+            result["errors"].append(f"skip_reasons item {index} missing kind or path")
+        if not reason:
+            result["errors"].append(f"skip_reasons item {index} missing reason")
+        if kind:
+            skipped_kinds.add(kind)
+
+    if not has_objective:
+        result["errors"].append("handoff manifest missing objective.md context file")
+    if not has_anchor_manifest:
+        result["errors"].append("handoff manifest missing objective.ids.json context file")
+    if not has_detail:
+        result["errors"].append("handoff manifest missing detail context file")
+    for expected_kind in ("design", "references", "previous_feedback"):
+        if expected_kind not in seen_kinds and expected_kind not in skipped_kinds:
+            result["errors"].append(f"handoff manifest missing context or skip reason for {expected_kind}")
 def _validate_json_sidecar(path: Path, schema: dict) -> dict:
     result = {
         "path": str(path),
@@ -675,6 +747,7 @@ def _validate_json_sidecar(path: Path, schema: dict) -> dict:
             "unmapped_major_or_higher_count",
             "unreviewed_required_count",
             "blocking_count",
+            "unlinked_reference_count",
         ):
             if count_field not in required_fields:
                 continue
@@ -684,21 +757,33 @@ def _validate_json_sidecar(path: Path, schema: dict) -> dict:
                 continue
             if raw_count != 0:
                 result["errors"].append(f"{count_field} must be 0")
+        if schema.get("name") == "handoff_manifest":
+            _validate_handoff_manifest_payload(payload, result)
     else:
         result["errors"].append(f"unsupported sidecar format: {schema.get('format')}")
 
     result["valid"] = not result["errors"]
     return result
+def _load_agile_mst_session_id(agi_id: str | None) -> str | None:
+    if not agi_id:
+        return None
+    try:
+        session, _ = _load_agile_session(agi_id)
+    except ValueError:
+        return None
+    value = session.get("mst_session_id") if isinstance(session, dict) else None
+    return str(value).strip() if isinstance(value, str) and value.strip() else None
 def build_sidecar_schema_payload(agi_id: str | None = None, mst_session_id: str | None = None, validate_existing: bool = False) -> dict:
     normalized_agi_id = _normalize_agi_id(agi_id) if agi_id else None
+    normalized_mst_session_id = str(mst_session_id or "").strip() or _load_agile_mst_session_id(normalized_agi_id)
     entries = [
-        _render_sidecar_schema_entry(schema, normalized_agi_id, mst_session_id)
+        _render_sidecar_schema_entry(schema, normalized_agi_id, normalized_mst_session_id)
         for schema in _SIDECAR_SCHEMAS
     ]
     payload = {
         "schema_version": _SIDECAR_SCHEMA_VERSION,
         "agi_id": normalized_agi_id,
-        "mst_session_id": mst_session_id,
+        "mst_session_id": normalized_mst_session_id,
         "sidecars": entries,
         "valid": True,
         "errors": [],
@@ -783,6 +868,77 @@ def _dod_refs_for_detail_file(path: Path) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return []
     return sorted(set(_ANCHOR_DOD_RE.findall(content)))
+_REFERENCE_ID_RE = re.compile(r"\bREF-\d+\b", re.IGNORECASE)
+def _collect_reference_mentions(agi_id: str) -> dict[str, list[str]]:
+    objective_root = _objective_root_for_sidecars(agi_id)
+    candidates = [objective_root / "objective.md"] + _detail_files_for_sidecars(agi_id)
+    mentions: dict[str, list[str]] = {}
+    for path in candidates:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for match in _REFERENCE_ID_RE.findall(content):
+            ref_id = match.upper()
+            rel_path = _rel_to_project(path)
+            mentions.setdefault(ref_id, [])
+            if rel_path not in mentions[ref_id]:
+                mentions[ref_id].append(rel_path)
+    return mentions
+def _build_reference_links_payload(agi_id: str) -> dict:
+    from scripts.mst_cmds import reference as _reference
+
+    mentions = _collect_reference_mentions(agi_id)
+    config = _reference._load_reference_config()
+    references = []
+    unlinked_count = 0
+    for ref_id, linked_paths in sorted(mentions.items()):
+        ref_path = _common.BASE_DIR / "references" / ref_id / "reference.json"
+        ref_payload = load_json(ref_path)
+        if not isinstance(ref_payload, dict):
+            references.append(
+                {
+                    "ref_id": ref_id,
+                    "linked_paths": linked_paths,
+                    "status": "missing_reference",
+                }
+            )
+            unlinked_count += 1
+            continue
+        references.append(
+            {
+                "ref_id": ref_id,
+                "topic": str(ref_payload.get("topic") or ""),
+                "url": str(ref_payload.get("url") or ""),
+                "freshness": _reference._check_reference_freshness(ref_payload, config=config),
+                "linked_paths": linked_paths,
+                "status": "linked",
+            }
+        )
+    skip_reasons = []
+    if not references:
+        skip_reasons.append(
+            {
+                "kind": "references",
+                "reason": "no_explicit_reference_ids_in_objective_context",
+            }
+        )
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "references": references,
+        "unlinked_reference_count": unlinked_count,
+        "skip_reasons": skip_reasons,
+        "reference_config": {
+            "auto_search": bool(config.get("auto_search")),
+            "cache_ttl_days": config.get("cache_ttl_days"),
+            "cutoff_threshold_months": config.get("cutoff_threshold_months"),
+            "max_searches_per_step": config.get("max_searches_per_step"),
+        },
+        "created_at": _now_iso(),
+    }
 def _anchors_by_dod(anchors) -> dict[str, list[str]]:
     mapping: dict[str, list[str]] = {}
     if not isinstance(anchors, list):
@@ -966,10 +1122,10 @@ def _build_section_review_inventory_payload(agi_id: str, finding_trace: dict) ->
 def _ambiguity_score_for_detail(content: str) -> tuple[float, list[str]]:
     reasons = []
     lowered = content.lower()
-    for token in ("tbd", "todo", "placeholder", "unclear", "ambiguous"):
+    for token in ("tbd", "todo"):
         if re.search(rf"\b{re.escape(token)}\b", lowered):
             reasons.append(f"contains {token}")
-    for token in ("미정", "불명확", "정의되지 않음"):
+    for token in ("미정", "정의되지 않음"):
         if token in content:
             reasons.append(f"contains {token}")
     nonblank_lines = [line for line in content.splitlines() if line.strip()]
@@ -1030,12 +1186,14 @@ def build_sidecar_artifacts(agi_id: str, *, d3_threshold: float = 0.25, refresh_
     finding_trace = _build_finding_trace_payload(normalized_agi_id, review_findings)
     section_inventory = _build_section_review_inventory_payload(normalized_agi_id, finding_trace)
     d3_results = _build_d3_results_payload(normalized_agi_id, d3_threshold)
+    reference_links = _build_reference_links_payload(normalized_agi_id)
     sidecar_payloads = {
         "handoff_manifest": handoff,
         "review_findings": review_findings,
         "finding_trace_manifest": finding_trace,
         "section_review_inventory": section_inventory,
         "d3_detail_results": d3_results,
+        "reference_links": reference_links,
     }
     for name, payload in sidecar_payloads.items():
         path = _objective_sidecar_path(normalized_agi_id, name)

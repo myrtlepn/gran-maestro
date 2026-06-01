@@ -28,7 +28,7 @@ import { cn, deepSet, getNestedValue } from '@/lib/utils';
 import type { PresetMeta, PresetDiffChange } from '../../../../src/types';
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
-type AgentSelection = 'codex-primary' | 'claude' | 'claude-codex' | 'claude-gemini' | 'full-team';
+type AgentSelection = 'codex-primary' | 'claude' | 'claude-codex' | 'claude-agy' | 'full-team';
 type TierSelection = 'performance' | 'efficient' | 'budget';
 
 type ToolToggles = {
@@ -62,7 +62,7 @@ const AGENT_FEATURES = [
   { id: 'explore', label: 'Explore' },
   { id: 'prereview', label: 'Prereview' },
 ];
-const AGENT_TYPES = ['codex', 'gemini', 'claude'];
+const AGENT_TYPES = ['codex', 'agy', 'claude'];
 
 const AGENT_OPTIONS: Array<{
   id: AgentSelection;
@@ -89,15 +89,15 @@ const AGENT_OPTIONS: Array<{
     icon: Brain,
   },
   {
-    id: 'claude-gemini',
-    title: 'Claude + Gemini',
-    description: 'Claude 기반에 Gemini를 더해 다양한 관점을 확보합니다.',
+    id: 'claude-agy',
+    title: 'Claude + AGY',
+    description: 'Claude 기반에 AGY를 더해 다양한 관점을 확보합니다.',
     icon: Sparkles,
   },
   {
     id: 'full-team',
     title: 'Full Team',
-    description: 'Claude + Codex + Gemini 전체 팀 구성으로 운영합니다.',
+    description: 'Claude + Codex + AGY 전체 팀 구성으로 운영합니다.',
     icon: Users,
   },
 ];

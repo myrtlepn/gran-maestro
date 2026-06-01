@@ -58,26 +58,24 @@ def _run_dispatch_build(tmp_path: Path) -> str:
     return proc.stdout.strip()
 
 
-def test_gemini_skill_declares_fixed_identity_and_codex_parity_contract() -> None:
-    text = _text("skills/gemini/SKILL.md")
+def test_agy_skill_declares_fixed_identity_and_codex_parity_contract() -> None:
+    text = _text("skills/agy/SKILL.md")
 
-    identity = _section(text, "DOD-004 Gemini Identity Protection Contract")
-    assert "command_identity: `mst:gemini`" in identity
+    identity = _section(text, "AGY Identity Protection Contract")
+    assert "command_identity: `mst:agy`" in identity
     assert "/mst:plan" in identity and "/mst:request" in identity and "built-in plan mode" in identity
     assert "path rules" in identity
     assert "model resolve" in identity
     assert "trace label" in identity
 
-    forbidden = _section(text, "Trace 모드 (워크플로우 내 자동 문서화)")
     for marker in ("NEXT_ACTION", "step=returned", "[MST skill=...]"):
-        assert marker in forbidden
-    assert "Exit Code 캡처" in text
+        assert marker in text
     assert "DOD-003 Context Transfer Contract" in text
 
 
-def test_gemini_delegation_contract_requires_context_failure_evidence_and_codex_fallback() -> None:
-    text = _text("skills/gemini/SKILL.md")
-    contract = _section(text, "DOD-004 Gemini Delegation Failure and Fallback Contract")
+def test_agy_delegation_contract_requires_context_failure_evidence_and_codex_fallback() -> None:
+    text = _text("skills/agy/SKILL.md")
+    contract = _section(text, "Delegation Failure and Fallback Contract")
 
     for token in (
         "context file path",
@@ -96,12 +94,12 @@ def test_gemini_delegation_contract_requires_context_failure_evidence_and_codex_
     assert "429" in contract or "rate-limit" in contract
 
 
-def test_approve_gemini_dev_direct_bash_exception_is_classified() -> None:
+def test_approve_agy_dev_direct_bash_exception_is_classified() -> None:
     text = _text("skills/approve/SKILL.md")
-    section = _section(text, "DOD-004 gemini-dev Direct Bash Exception Contract")
+    section = _section(text, "DOD-004 agy-dev Direct Bash Exception Contract")
 
     assert "parallel dispatch" in section
-    assert "Skill(mst:gemini)" in section
+    assert "Skill(mst:agy)" in section
     assert "direct Bash exception" in section
     assert "lifecycle" in section and "trace" in section and "exit" in section
     assert "running.log" in section

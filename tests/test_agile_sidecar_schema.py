@@ -152,6 +152,7 @@ def test_agile_sidecar_build_writes_required_objective_sidecars(tmp_path: Path) 
         "finding_trace_manifest",
         "section_review_inventory",
         "d3_detail_results",
+        "reference_links",
     } <= written_names
 
     validate_proc = _run_mst(
@@ -172,6 +173,11 @@ def test_agile_sidecar_build_writes_required_objective_sidecars(tmp_path: Path) 
     finding_trace = json.loads((objective_dir / "finding-trace.json").read_text(encoding="utf-8"))
     assert finding_trace["unmapped_major_or_higher_count"] == 0
     assert finding_trace["findings"][0]["trace_status"] == "mapped"
+
+    reference_links = json.loads((objective_dir / "reference-links.json").read_text(encoding="utf-8"))
+    assert reference_links["references"] == []
+    assert reference_links["unlinked_reference_count"] == 0
+    assert reference_links["skip_reasons"][0]["reason"] == "no_explicit_reference_ids_in_objective_context"
 
 
 def test_agile_sidecar_schema_rejects_nonzero_blocking_counts(tmp_path: Path) -> None:
@@ -204,6 +210,140 @@ def test_agile_sidecar_schema_rejects_nonzero_blocking_counts(tmp_path: Path) ->
     assert "unreviewed_required_count must be 0" in section_validation["errors"]
 
 
+def test_agile_sidecar_schema_rejects_unlinked_reference_count(tmp_path: Path) -> None:
+    workspace = _make_agile_workspace(tmp_path)
+    objective_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective"
+    _write_json(
+        objective_dir / "reference-links.json",
+        {
+            "schema_version": 1,
+            "agi_id": "AGI-001",
+            "references": [{"ref_id": "REF-001", "status": "missing_reference"}],
+            "unlinked_reference_count": 1,
+        },
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "sidecar-schema",
+        "AGI-001",
+        "--validate-existing",
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+    reference_validation = next(
+        item for item in payload["validations"] if item["name"] == "reference_links"
+    )
+
+    assert proc.returncode == 1
+    assert reference_validation["valid"] is False
+    assert "unlinked_reference_count must be 0" in reference_validation["errors"]
+
+
+def test_agile_sidecar_schema_validates_handoff_manifest_paths_and_skips(tmp_path: Path) -> None:
+    workspace = _make_agile_workspace(tmp_path)
+    objective_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective"
+    _write_json(
+        objective_dir / "handoff-manifest.json",
+        {
+            "schema_version": 1,
+            "agi_id": "AGI-001",
+            "context_files": [
+                {"path": ".gran-maestro/agile/AGI-001/objective/missing.md", "kind": "objective_context"}
+            ],
+            "skip_reasons": [
+                {"kind": "design", "reason": "not_applicable_or_missing"},
+            ],
+            "created_at": "2026-06-01T00:00:00Z",
+        },
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "sidecar-schema",
+        "AGI-001",
+        "--validate-existing",
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+    handoff_validation = next(
+        item for item in payload["validations"] if item["name"] == "handoff_manifest"
+    )
+
+    assert proc.returncode == 1
+    assert handoff_validation["valid"] is False
+    assert any("path not found" in error for error in handoff_validation["errors"])
+    assert "handoff manifest missing objective.md context file" in handoff_validation["errors"]
+    assert "handoff manifest missing context or skip reason for references" in handoff_validation["errors"]
+
+
+def test_agile_sidecar_schema_rejects_empty_handoff_context_and_skip_reason_without_reason(tmp_path: Path) -> None:
+    workspace = _make_agile_workspace(tmp_path)
+    objective_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective"
+    _write_json(
+        objective_dir / "handoff-manifest.json",
+        {
+            "schema_version": 1,
+            "agi_id": "AGI-001",
+            "context_files": [],
+            "skip_reasons": [
+                {"kind": "design", "reason": "not_applicable_or_missing"},
+                {"kind": "references"},
+                {"kind": "previous_feedback", "reason": "not_applicable_or_missing"},
+            ],
+            "created_at": "2026-06-01T00:00:00Z",
+        },
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "sidecar-schema",
+        "AGI-001",
+        "--validate-existing",
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+    handoff_validation = next(
+        item for item in payload["validations"] if item["name"] == "handoff_manifest"
+    )
+
+    assert proc.returncode == 1
+    assert handoff_validation["valid"] is False
+    assert "context_files must not be empty" in handoff_validation["errors"]
+    assert "skip_reasons item 1 missing reason" in handoff_validation["errors"]
+
+
+def test_agile_sidecar_schema_uses_agile_session_mst_session_id(tmp_path: Path) -> None:
+    workspace = _make_agile_workspace(tmp_path)
+    agi_id = "AGI-001"
+    mst_session_id = "MST-AGI-001-20260601T000000000Z-testabcd"
+    agi_dir = workspace / ".gran-maestro" / "agile" / agi_id
+    session_payload = json.loads((agi_dir / "session.json").read_text(encoding="utf-8"))
+    session_payload["mst_session_id"] = mst_session_id
+    _write_json(agi_dir / "session.json", session_payload)
+    _write_json(
+        workspace / ".gran-maestro" / "state" / mst_session_id / "snapshot.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": mst_session_id,
+            "root_mst_id": agi_id,
+            "workflow": {"current_skill": "mst:agile", "current_step": 2, "status": "active"},
+            "history": {"last_event_id": "a" * 64},
+        },
+    )
+
+    proc = _run_mst(workspace, "agile", "sidecar-schema", agi_id, "--validate-existing", "--json")
+    payload = json.loads(proc.stdout)
+
+    state_validation = next(item for item in payload["validations"] if item["name"] == "state_snapshot")
+    assert payload["mst_session_id"] == mst_session_id
+    assert state_validation["path"].endswith(f"/.gran-maestro/state/{mst_session_id}/snapshot.json")
+    assert state_validation["valid"] is True
+
+
 def test_agile_sidecar_build_d3_does_not_flag_jtbd_or_ambiguity_topic(tmp_path: Path) -> None:
     workspace = _make_agile_workspace(tmp_path)
     objective_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective"
@@ -214,6 +354,7 @@ def test_agile_sidecar_build_d3_does_not_flag_jtbd_or_ambiguity_topic(tmp_path: 
         "# Downstream Handoff Contracts\n\n"
         "> 관련 DoD: DOD-001\n\n"
         "- **결정**: JTBD 질문과 모호성 해소 질문은 분리한다.\n"
+        "- **High - placeholder objective와 계약 불명확 사례**: 문제 설명으로만 기록한다.\n"
         "- 반드시 DOD-001 evidence is preserved.\n",
         encoding="utf-8",
     )

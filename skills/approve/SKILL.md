@@ -415,7 +415,7 @@ OMX_AUTOPILOT = (config.omx.enabled == true && config.omx.autopilot == true)
 
 이 값을 Step 4c / Fix / Escalation에서 참조한다.
 
-Phase 2에서 Claude(PM)는 **절대 코드를 직접 작성하지 않습니다**. 모든 구현은 `/mst:codex` 또는 `/mst:gemini`로 외주합니다.
+Phase 2에서 Claude(PM)는 **절대 코드를 직접 작성하지 않습니다**. 모든 구현은 `/mst:codex` 또는 `/mst:agy`로 외주합니다.
 
 #### 실행 전략 결정 (Phase 2 진입 시 1회, MANDATORY)
 
@@ -483,7 +483,7 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 |------------|---------|-------------|
 | 백엔드, 리팩토링, 테스트 | `codex-dev` → `/mst:codex` | code, refactor, test |
 | 신규 `.ts` 파일 생성, 단순 리팩토링·보일러플레이트, 독립 테스트 작성, 소규모 `.ts` 인라인 수정 | `codex-dev` → `/mst:codex` | code, refactor, test |
-| 프론트엔드, 문서, 대용량 컨텍스트 | `gemini-dev` → `/mst:gemini` | frontend, docs, large-context |
+| 프론트엔드, 문서, 대용량 컨텍스트 | `agy-dev` → `/mst:agy` | frontend, docs, large-context |
 | `.md` 문서, `.json`/`.env` config, `*.config.ts`, 기존 `.ts` 인라인 수정(신규 `.ts` 생성 없음) | Codex-primary: `codex-dev` → `/mst:codex`; legacy Claude preset: `claude-dev` → `/mst:claude` | code, docs, config, small-inline |
 
 > **경계 케이스 기본값**: 태스크 유형이 모호한 경우 → `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)` 값 사용 (`claude-dev` 하드코딩 금지).
@@ -567,16 +567,16 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 
 {task_dir} = {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/
 
-## DOD-004 gemini-dev Direct Bash Exception Contract
+## DOD-004 agy-dev Direct Bash Exception Contract
 
-- `gemini-dev` direct Bash exception은 병렬 dispatch(parallel dispatch)에서 `Skill(mst:gemini)` 직렬 호출로 전환할 수 없는 경우에만 허용한다.
-- direct Bash exception은 protected `/mst:gemini` identity를 대체하지 않으며, prompt-file path와 context file path inspection 결과를 브리프와 completion report에 남겨야 한다.
+- `agy-dev` direct Bash exception은 병렬 dispatch(parallel dispatch)에서 `Skill(mst:agy)` 직렬 호출로 전환할 수 없는 경우에만 허용한다.
+- direct Bash exception은 protected `/mst:agy` identity를 대체하지 않으며, prompt-file path와 context file path inspection 결과를 브리프와 completion report에 남겨야 한다.
 - lifecycle evidence는 `running.log`, worktree path, trace label 또는 trace-equivalent id, final exit evidence, evidence path, evidence id를 포함한다.
 - failure_kind는 `rate_limit`, `timeout`, `empty_result`, `nonzero_exit`로 구분하고, 429/rate-limit/quota 신호는 `rate_limit`으로 기록한다.
-- Codex fallback은 `gemini-dev → codex fallback` 정책에 따라 structured failure_kind와 lifecycle evidence가 존재할 때만 실행 또는 갭 태스크로 기록한다.
+- Codex fallback은 `agy-dev → codex fallback` 정책에 따라 structured failure_kind와 lifecycle evidence가 존재할 때만 실행 또는 갭 태스크로 기록한다.
 
-> ⚠️ **gemini-dev Bash 강제 (MANDATORY)**: gemini-dev는 단건/병렬 무관하게 **항상** `Bash(run_in_background: true)`로 실행한다.
-> `Skill(mst:gemini)` 전환 불가. trace는 `running.log`로 대체된다.
+> ⚠️ **agy-dev Bash 강제 (MANDATORY)**: agy-dev는 단건/병렬 무관하게 **항상** `Bash(run_in_background: true)`로 실행한다.
+> `Skill(mst:agy)` 전환 불가. trace는 `running.log`로 대체된다.
 
 ```bash
 # codex-dev인 경우 (OMX_AUTOPILOT=true 시 \$autopilot 프리픽스 삽입)
@@ -589,10 +589,10 @@ Bash(
   timeout: {config.timeouts.cli_large_task_ms}
 )
 
-# gemini-dev인 경우
+# agy-dev인 경우
 Bash(
-  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null);
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider gemini --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
+  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model agy default 2>/dev/null);
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider agy --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- agy --print "$(cat {prompt_file})" --dangerously-skip-permissions --add-dir "{worktree_path}" < /dev/null',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -706,7 +706,7 @@ while (실행 중인 태스크가 있음):
 > ⚠️ **NON-STOP EXECUTION RULE (CRITICAL)**:
 > Step 5 ~ Step 6 ~ Phase 3 ~ 최종 수락까지 **중간 멈춤 없이 연속 실행**한다.
 > 텍스트를 출력했으면 **반드시 해당 단계의 도구 호출(Bash/Edit/Skill 등)을 즉시 실행**한다.
-> **서브스킬 반환 직후 강제 패턴**: 서브스킬(mst:claude, mst:codex, mst:gemini, mst:review 등)이 반환되면 반환 텍스트와 무관하게 **즉시** `NEXT_ACTION: <다음 Step 설명>` 패턴을 출력하고 해당 Step의 도구 호출을 실행한다. 서브스킬 반환은 종료가 아니라 **다음 단계 전환 신호**다.
+> **서브스킬 반환 직후 강제 패턴**: 서브스킬(mst:claude, mst:codex, mst:agy, mst:review 등)이 반환되면 반환 텍스트와 무관하게 **즉시** `NEXT_ACTION: <다음 Step 설명>` 패턴을 출력하고 해당 Step의 도구 호출을 실행한다. 서브스킬 반환은 종료가 아니라 **다음 단계 전환 신호**다.
 > 컨텍스트 길이/대화 길이/토큰 소비량을 이유로 한 자발적 중단을 금지한다. Claude Code는 자동 대화 압축으로 실제 한계를 관리하므로, LLM이 이를 근거로 중단 여부를 직접 판단하지 않는다.
 > 이 규칙은 이 approve 스킬의 모든 후속 Step에 적용된다.
 
@@ -1127,7 +1127,7 @@ Write 실패 시 warn만 출력하고 워크플로우를 차단하지 않는다 
 
 #### Fallback 규칙
 
-- 최대 깊이: 1단계 (codex → gemini, gemini → codex)
+- 최대 깊이: 1단계 (codex → agy, agy → codex)
 - 동일 에이전트 재시도: 최대 2회
 - fallback 에이전트 재시도: 최대 2회
 - 모두 실패 시: 사용자 개입 요청

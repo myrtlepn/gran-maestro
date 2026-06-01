@@ -67,35 +67,35 @@ argument-hint: "{주제 또는 IDN-NNN} [--max-rounds {N}] [--focus {분야}]"
     { "key": "architect(codex)", "role": "architect", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
     { "key": "ux(codex)", "role": "ux", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
     { "key": "security(codex)", "role": "security", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
-    { "key": "architecture(gemini)", "role": "architecture", "perspective": "", "type": "opinion", "status": "pending", "provider": "gemini", "started_at": null, "completed_at": null },
-    { "key": "cost(gemini)", "role": "cost", "perspective": "", "type": "opinion", "status": "pending", "provider": "gemini", "started_at": null, "completed_at": null },
+    { "key": "architecture(agy)", "role": "architecture", "perspective": "", "type": "opinion", "status": "pending", "provider": "agy", "started_at": null, "completed_at": null },
+    { "key": "cost(agy)", "role": "cost", "perspective": "", "type": "opinion", "status": "pending", "provider": "agy", "started_at": null, "completed_at": null },
     { "key": "risk(claude)", "role": "risk", "perspective": "", "type": "opinion", "status": "pending", "provider": "claude", "started_at": null, "completed_at": null }
   ],
   "critics": {
     "claude": { "status": "pending", "provider": "claude" }
   },
   "critic_count": 1,
-  "participant_config": { "codex": 3, "gemini": 2, "claude": 1 },
+  "participant_config": { "codex": 3, "agy": 2, "claude": 1 },
   "rounds": []
 }
 ```
 
 `participants`는 config의 `discussion.agents`를 읽어 생성합니다.
 ### participants 동적 생성 규칙
-1. 각 provider(codex, gemini, claude)의 count 읽기
+1. 각 provider(codex, agy, claude)의 count 읽기
 2. count == 1 → key는 `{role}(provider)` 형태
 3. count > 1 → role 키를 순차 생성, `{role}(provider)` 형태 유지
 4. 각 항목에 `provider` 필드 기록
 5. 합계 검증: 2~7명, 위반 시 에러 후 중단
 6. count == 0 → 해당 provider 완전 skip
 
-`participants` 키 없으면 기본값 `{ codex:1, gemini:1, claude:1 }` 사용.
+`participants` 키 없으면 기본값 `{ codex:1, agy:1, claude:1 }` 사용.
 
 ### Step 1.5: PM 역할 배정
 
 PM이 주제/포커스를 분석해 `participants` 수만큼 관점을 배정하고 `critics`를 결정합니다.
-- Codex/Gemini/Claude 강점에 맞춰 관점 배정
-- Critic 규칙: Claude 1명+ → Claude 우선, Claude 0명 → Codex → Gemini. critic_count 2 → 2명 배정
+- Codex/AGY/Claude 강점에 맞춰 관점 배정
+- Critic 규칙: Claude 1명+ → Claude 우선, Claude 0명 → Codex → AGY. critic_count 2 → 2명 배정
 
 `session.json`에 `participants`, `critics`, `critic_count`, `participant_config`, `status: "initializing"` 기록.
 
@@ -236,11 +236,11 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
        command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/00/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/{participant.key}.md; exit $EC"
      )
      ```
-   - `provider: "gemini"`:
+   - `provider: "agy"`:
      ```
      Bash(
        run_in_background: true,
-       command: "gemini -p \"$(cat {absolute_path}/rounds/00/prompts/{participant.key}-prompt.md)\" --model {config.models.providers.gemini[discussion.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/rounds/00/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/{participant.key}.md; exit $EC"
+       command: "agy --print \"$(cat {absolute_path}/rounds/00/prompts/{participant.key}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/rounds/00/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/{participant.key}.md; exit $EC"
      )
      ```
    - `provider: "claude"`:
@@ -261,11 +261,11 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
        command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/00/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/critique-{criticKey}.md; exit $EC"
      )
      ```
-   - `provider: "gemini"`:
+   - `provider: "agy"`:
      ```
      Bash(
        run_in_background: true,
-       command: "gemini -p \"$(cat {absolute_path}/rounds/00/prompts/critique-{criticKey}-prompt.md)\" --model {config.models.providers.gemini[discussion.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/rounds/00/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/critique-{criticKey}.md; exit $EC"
+       command: "agy --print \"$(cat {absolute_path}/rounds/00/prompts/critique-{criticKey}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/rounds/00/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/critique-{criticKey}.md; exit $EC"
      )
      ```
    - `provider: "claude"`:
@@ -305,7 +305,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
 
 `critic_count >= 1`이면: `rounds/00` 응답 기반으로 `rounds/00/prompts/critique-{criticKey}-prompt.md` 생성 → Step 4c와 동일 방식으로 `rounds/00/critique-{criticKey}.md` 저장. Step 4 미실행 시에도 Critic 평가 보장.
 
-> **NOTE**: "Step 4c와 동일 방식"은 Step 2 (R0) critic 발송 블록의 Bash 직접 호출 패턴을 가리킵니다. `provider: "codex"` → `Bash(codex exec ...)`, `provider: "gemini"` → `Bash(gemini -p ...)`, `provider: "claude"` → `Task(...)` 방식으로 dispatch하되, 경로는 `rounds/00/prompts/critique-{criticKey}-prompt.md` → `rounds/00/critique-{criticKey}.md`를 사용합니다.
+> **NOTE**: "Step 4c와 동일 방식"은 Step 2 (R0) critic 발송 블록의 Bash 직접 호출 패턴을 가리킵니다. `provider: "codex"` → `Bash(codex exec ...)`, `provider: "agy"` → `Bash(agy --print ...)`, `provider: "claude"` → `Task(...)` 방식으로 dispatch하되, 경로는 `rounds/00/prompts/critique-{criticKey}-prompt.md` → `rounds/00/critique-{criticKey}.md`를 사용합니다.
 
 ### Step 3.6: Round 0 완료 상태 업데이트
 
@@ -398,11 +398,11 @@ participant 발송 (`participants` 동적 순회):
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/NN/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/{participant.key}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/rounds/NN/prompts/{participant.key}-prompt.md)\" --model {config.models.providers.gemini[discussion.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/rounds/NN/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/{participant.key}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/rounds/NN/prompts/{participant.key}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/rounds/NN/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/{participant.key}.md; exit $EC"
   )
   ```
 - `provider: "claude"`:
@@ -423,11 +423,11 @@ critic 동시 발송 (`critics` 동적 순회):
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/NN/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/critique-{criticKey}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/rounds/NN/prompts/critique-{criticKey}-prompt.md)\" --model {config.models.providers.gemini[discussion.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/rounds/NN/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/critique-{criticKey}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/rounds/NN/prompts/critique-{criticKey}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/rounds/NN/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/critique-{criticKey}.md; exit $EC"
   )
   ```
 - `provider: "claude"`:

@@ -175,13 +175,15 @@ Git worktree 생성 및 관리 설정입니다.
 
 Host와 provider를 분리해 위임 명령을 선택합니다. `host=auto`이면 `/mst:on`과 `mst.py host context`가 Codex 또는 Claude Code 런타임을 감지하고, provider는 실제 실행 CLI를 결정합니다.
 
+호환성: 기존 `gemini`, `gemini-dev`, `gemini-reviewer` 설정 키와 세션 값은 한 릴리스 동안 AGY alias로 읽습니다. 새 config는 `agy`, `agy-dev`, `agy-reviewer`를 사용하세요.
+
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `delegation.host` | `"auto"` | 위임 명령 선택 기준 host (`auto` / `codex` / `claude` / `headless`) |
 | `delegation.default_provider` | `"codex"` | Assigned Agent가 모호할 때 사용할 기본 provider |
-| `delegation.provider_priority` | `["codex","gemini","claude"]` | fallback 또는 추천 순서 |
+| `delegation.provider_priority` | `["codex","agy","claude"]` | fallback 또는 추천 순서 |
 | `delegation.native_codex_subagents.enabled` | `false` | Codex native subagent를 MST wrapper 대신 사용할지 여부 |
-| `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `gemini` / `claude`) |
+| `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
 Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stderr/exit code를 수집합니다. Claude provider는 `/mst:claude` managed path를 통해서만 사용합니다.
 
@@ -210,14 +212,14 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `discussion.agents.codex` | `{ count: 2, tier: "premium" }` | Discussion Codex 에이전트 (0=제외) |
-| `discussion.agents.gemini` | `{ count: 0, tier: "premium" }` | Discussion Gemini 에이전트 (0=제외) |
+| `discussion.agents.agy` | `{ count: 0, tier: "premium" }` | Discussion AGY 에이전트 (0=제외) |
 | `discussion.agents.claude` | `{ count: 0, tier: "economy" }` | Discussion Claude 에이전트 (0=제외) |
 | `discussion.response_char_limit` | `2000` | Discussion 응답 글자 제한 |
 | `discussion.critique_char_limit` | `2000` | Discussion Critic 글자 제한 |
 | `discussion.default_max_rounds` | `5` | 기본 최대 라운드 수 |
 | `discussion.max_rounds_upper_limit` | `10` | 최대 라운드 상한 |
 | `ideation.agents.codex` | `{ count: 2, tier: "premium" }` | Ideation Codex 에이전트 (0=제외) |
-| `ideation.agents.gemini` | `{ count: 0, tier: "premium" }` | Ideation Gemini 에이전트 (0=제외) |
+| `ideation.agents.agy` | `{ count: 0, tier: "premium" }` | Ideation AGY 에이전트 (0=제외) |
 | `ideation.agents.claude` | `{ count: 0, tier: "economy" }` | Ideation Claude 에이전트 (0=제외) |
 | `ideation.opinion_char_limit` | `2000` | Ideation 의견 글자 제한 |
 | `ideation.critique_char_limit` | `2000` | Ideation Critic 글자 제한 |
@@ -248,12 +250,12 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `debug.agents.codex` | `{ count: 2, tier: "premium" }` | Debug 조사 Codex 에이전트 (0=제외) |
-| `debug.agents.gemini` | `{ count: 0, tier: "premium" }` | Debug 조사 Gemini 에이전트 (0=제외) |
+| `debug.agents.agy` | `{ count: 0, tier: "premium" }` | Debug 조사 AGY 에이전트 (0=제외) |
 | `debug.agents.claude` | `{ count: 0, tier: "economy" }` | Debug 조사 Claude 에이전트 (0=제외) |
 
 참여자 규칙:
 - 총합: 1명 이상 6명 이하
-- 누락 시 기본값: `codex: 2`, `gemini: 0`, `claude: 0`
+- 누락 시 기본값: `codex: 2`, `agy: 0`, `claude: 0`
 - `tier` 생략 시 해당 프로바이더의 `models.providers.<provider>.default_tier` 적용
 - 하위 호환: 정수값(`"codex": 1`)도 허용되며, `{ count: 1 }`으로 해석됩니다
 
@@ -266,7 +268,7 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `explore.agents.codex` | `{ count: 2, tier: "premium" }` | Explore Codex 에이전트 (0=제외) |
-| `explore.agents.gemini` | `{ count: 0, tier: "premium" }` | Explore Gemini 에이전트 (0=제외) |
+| `explore.agents.agy` | `{ count: 0, tier: "premium" }` | Explore AGY 에이전트 (0=제외) |
 | `explore.agents.claude` | `{ count: 0, tier: "economy" }` | Explore Claude 에이전트 (0=제외) |
 
 - `tier` 생략 시 해당 프로바이더의 `models.providers.<provider>.default_tier` 적용
@@ -287,9 +289,9 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium 모델 |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy 모델 |
 | `models.providers.codex.default_tier` | `"premium"` | Codex 기본 티어 |
-| `models.providers.gemini.premium` | `"gemini-3.1-pro-preview"` | Gemini premium 모델 |
-| `models.providers.gemini.economy` | `"gemini-2.5-flash"` | Gemini economy 모델 |
-| `models.providers.gemini.default_tier` | `"premium"` | Gemini 기본 티어 |
+| `models.providers.agy.premium` | `"agy-default"` | AGY premium 모델 |
+| `models.providers.agy.economy` | `"agy-default"` | AGY economy 모델 |
+| `models.providers.agy.default_tier` | `"premium"` | AGY 기본 티어 |
 | `models.providers.claude.premium` | `"opus"` | Claude premium 모델 |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy 모델 |
 | `models.providers.claude.default_tier` | `"economy"` | Claude 기본 티어 |
@@ -302,9 +304,9 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
 |----|--------|------|
 | `models.roles.pm_conductor` | `{ provider: "codex", tier: "premium" }` | PM 지휘자 (Phase 1, 3) |
 | `models.roles.architect` | `{ provider: "codex", tier: "premium" }` | 아키텍트 (Design Wing) |
-| `models.roles.developer` | `[codex/premium, gemini/premium]` | 개발자 (배열 — 다중 에이전트) |
+| `models.roles.developer` | `[codex/premium, agy/premium]` | 개발자 (배열 — 다중 에이전트) |
 | `models.roles.developer_claude` | `{ provider: "claude", tier: "premium", enabled: false }` | Claude legacy/fallback 개발자 |
-| `models.roles.reviewer` | `[codex/premium, gemini/premium]` | 리뷰어 (배열 — 다중 에이전트) |
+| `models.roles.reviewer` | `[codex/premium, agy/premium]` | 리뷰어 (배열 — 다중 에이전트) |
 
 ### 모델 Resolve 규칙
 
@@ -331,9 +333,9 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
       "economy": "codex-mini",
       "default_tier": "premium"
     },
-    "gemini": {
-      "premium": "gemini-3.1-pro-preview",
-      "economy": "gemini-2.5-flash",
+    "agy": {
+      "premium": "agy-default",
+      "economy": "agy-default",
       "default_tier": "premium"
     },
     "claude": {
@@ -347,12 +349,12 @@ Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stde
     "architect": { "provider": "claude", "tier": "premium" },
     "developer": [
       { "provider": "codex", "tier": "premium" },
-      { "provider": "gemini", "tier": "premium" }
+      { "provider": "agy", "tier": "premium" }
     ],
     "developer_claude": { "provider": "claude", "tier": "premium" },
     "reviewer": [
       { "provider": "codex", "tier": "premium" },
-      { "provider": "gemini", "tier": "premium" }
+      { "provider": "agy", "tier": "premium" }
     ]
   }
 }
@@ -368,7 +370,7 @@ Spec Pre-review Pass에서 사용하는 에이전트 풀 설정입니다.
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `prereview.agents.codex` | `{ count: 2, tier: "premium" }` | Pre-review Codex 에이전트 (0=제외) |
-| `prereview.agents.gemini` | `{ count: 0 }` | Pre-review Gemini 에이전트 (0=제외) |
+| `prereview.agents.agy` | `{ count: 0 }` | Pre-review AGY 에이전트 (0=제외) |
 | `prereview.agents.claude` | `{ count: 0, tier: "economy" }` | Pre-review Claude 에이전트 (0=제외) |
 
 기본값은 `templates/defaults/config.json` 기준입니다.
@@ -387,7 +389,7 @@ Phase 3에서 추가 독립 리뷰어를 배치하는 설정입니다.
 |----|--------|------|
 | `code_review.enabled` | `true` | 추가 독립 리뷰어 활성화 여부 |
 | `code_review.agents` | `1` | 추가 리뷰어 수 (agent_roster에서 순서대로 선택) |
-| `code_review.agent_roster` | `["codex", "gemini"]` | 리뷰어 후보 에이전트 목록 |
+| `code_review.agent_roster` | `["codex", "agy"]` | 리뷰어 후보 에이전트 목록 |
 | `code_review.parallel` | `true` | 기존 Phase 3 패스와 동시 실행 여부 |
 
 ---
@@ -423,13 +425,13 @@ Plan Review Pass 설정입니다. `/mst:plan` Step 3.8에서 플랜 사전 리�
 | `plan_review.roles.architect.agent` | `"codex"` | 아키텍트 리뷰어 에이전트 |
 | `plan_review.roles.architect.tier` | `"premium"` | 아키텍트 리뷰어 모델 티어 (`models.providers`에서 resolve) |
 | `plan_review.roles.devils_advocate.enabled` | `true` | 악마의 대변인 리뷰어 활성화 |
-| `plan_review.roles.devils_advocate.agent` | `"gemini"` | 악마의 대변인 리뷰어 에이전트 |
+| `plan_review.roles.devils_advocate.agent` | `"agy"` | 악마의 대변인 리뷰어 에이전트 |
 | `plan_review.roles.devils_advocate.tier` | `"premium"` | 악마의 대변인 리뷰어 모델 티어 (`models.providers`에서 resolve) |
 | `plan_review.roles.completeness.enabled` | `true` | 완전성 검토 리뷰어 활성화 |
 | `plan_review.roles.completeness.agent` | `"codex"` | 완전성 검토 리뷰어 에이전트 |
 | `plan_review.roles.completeness.tier` | `"premium"` | 완전성 검토 리뷰어 모델 티어 (`models.providers`에서 resolve) |
 | `plan_review.roles.ux_reviewer.enabled` | `true` | UX 리뷰어 활성화 |
-| `plan_review.roles.ux_reviewer.agent` | `"gemini"` | UX 리뷰어 에이전트 |
+| `plan_review.roles.ux_reviewer.agent` | `"agy"` | UX 리뷰어 에이전트 |
 | `plan_review.roles.ux_reviewer.tier` | `"premium"` | UX 리뷰어 모델 티어 (`models.providers`에서 resolve) |
 
 ---
@@ -446,9 +448,9 @@ Plan Review Pass 설정입니다. `/mst:plan` Step 3.8에서 플랜 사전 리�
 | `review.max_iterations` | `3` | 리뷰-갭수정 반복 최대 횟수 |
 | `review.roles.code_reviewer.agent` | `"codex"` | 코드 리뷰어 에이전트 |
 | `review.roles.code_reviewer.tier` | `"premium"` | 코드 리뷰어 모델 티어 (`models.providers`에서 resolve) |
-| `review.roles.arch_reviewer.agent` | `"gemini"` | 아키텍처 리뷰어 에이전트 |
+| `review.roles.arch_reviewer.agent` | `"agy"` | 아키텍처 리뷰어 에이전트 |
 | `review.roles.arch_reviewer.tier` | `"premium"` | 아키텍처 리뷰어 모델 티어 (`models.providers`에서 resolve) |
-| `review.roles.ui_reviewer.agent` | `"gemini"` | UI 리뷰어 에이전트 |
+| `review.roles.ui_reviewer.agent` | `"agy"` | UI 리뷰어 에이전트 |
 | `review.roles.ui_reviewer.tier` | `"premium"` | UI 리뷰어 모델 티어 (`models.providers`에서 resolve) |
 
 ### severity_auto_fix 키
@@ -476,7 +478,7 @@ Phase 1 코드베이스 탐색에 참여하는 에이전트 역할 설정입니�
 | `phase1_exploration.roles.symbol_tracing.agent` | `"codex"` | 정밀 심볼 추적 에이전트 |
 | `phase1_exploration.roles.symbol_tracing.enabled` | `true` | 심볼 추적 역할 활성화 여부 |
 | `phase1_exploration.roles.symbol_tracing.tier` | `"premium"` | 심볼 추적에 사용할 모델 티어 (`models.providers`에서 resolve) |
-| `phase1_exploration.roles.broad_scan.agent` | `"gemini"` | 광역 탐색 에이전트 |
+| `phase1_exploration.roles.broad_scan.agent` | `"agy"` | 광역 탐색 에이전트 |
 | `phase1_exploration.roles.broad_scan.enabled` | `true` | 광역 탐색 역할 활성화 여부 |
 | `phase1_exploration.roles.broad_scan.tier` | `"premium"` | 광역 탐색에 사용할 모델 티어 (`models.providers`에서 resolve) |
 
@@ -548,7 +550,7 @@ API 호출 비용을 최소화하기 위해 참여 에이전트 수와 토론 �
   "debug": {
     "agents": {
       "codex": 1,
-      "gemini": 0,
+      "agy": 0,
       "claude": 0
     }
   },

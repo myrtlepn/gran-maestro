@@ -569,6 +569,26 @@ def cmd_agile_review(args):
         return 1
 
     objective_path = _agi_objective_path(agi_id)
+    draft_dir_arg = str(getattr(args, "draft_dir", "") or "").strip()
+    draft_dir = Path(draft_dir_arg).expanduser() if draft_dir_arg else None
+    if draft_dir is not None and not draft_dir.is_absolute():
+        draft_dir = (Path.cwd() / draft_dir).resolve()
+    if draft_dir is not None:
+        draft_objective = draft_dir / "objective.md"
+        if not draft_objective.exists() or not draft_objective.is_file():
+            print(f"Error: draft objective not found: {draft_objective}", file=sys.stderr)
+            return 1
+        context_files = [draft_objective]
+        draft_details = draft_dir / "details"
+        if draft_details.exists() and draft_details.is_dir():
+            context_files.extend(sorted(draft_details.glob("*.md")))
+        return _emit_adversarial_review_payload(
+            context_files,
+            perspective,
+            context_source="draft",
+            draft_dir=draft_dir,
+        )
+
     if not objective_path.exists():
         print(f"Error: objective not found: {objective_path}", file=sys.stderr)
         return 1

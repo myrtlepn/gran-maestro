@@ -16,7 +16,7 @@ export interface AgentDefinition {
   /** Maximum fallback chain depth (default: 1) */
   maxFallbackDepth?: number;
   /** Provider for CLI-based agents */
-  provider?: 'claude' | 'codex' | 'agy' | 'gemini';
+  provider?: 'claude' | 'codex' | 'agy';
   /** Capabilities for agent selection */
   capabilities?: string[];
   /** Condition for automatic spawning */
@@ -71,16 +71,16 @@ export const agents: Record<string, AgentDefinition> = {
  * | Schema Designer | (스킬 전환: skills/schema-designer/) | analysis | 1 |
  * | UI Designer | (스킬 전환: skills/ui-designer/) | analysis | 1 |
  * | Codex Developer | codex-dev (agents.json) | execution | 2 |
- * | Gemini Developer | gemini-dev (agents.json) | execution | 2 |
+ * | AGY Developer | agy-dev (agents.json) | execution | 2 |
  * | Security Reviewer (/mst:codex) | codex (security review) | review | 3 |
  * | Quality Reviewer (/mst:codex) | codex (quality review) | review | 3 |
  * | Verifier (/mst:codex) | codex (acceptance verification) | review | 3 |
  * | Codex Reviewer | codex-reviewer (agents.json) | review | 3 |
- * | Gemini Reviewer | gemini-reviewer (agents.json) | review | 3 |
+ * | AGY Reviewer | agy-reviewer (agents.json) | review | 3 |
  * | Feedback Composer | (스킬 전환: skills/feedback-composer/) | — | 4 |
  *
- * Note: Execution agents (codex-dev, gemini-dev) and review agents
- * (codex-reviewer, gemini-reviewer) are defined in the runtime
+ * Note: Execution agents (codex-dev, agy-dev) and review agents
+ * (codex-reviewer, agy-reviewer) are defined in the runtime
  * agents.json file at .gran-maestro/agents.json, not here.
  * They are invoked via CLI (Phase 2) or MCP (Phase 1, 3).
  * Schema Designer, UI Designer, Feedback Composer are migrated to skills

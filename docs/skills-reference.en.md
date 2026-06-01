@@ -39,7 +39,7 @@ Claude Code and Codex install the same `skills/` source. Claude Code provides th
   - [/mst:debug](#mstdebug)
 - [Direct CLI execution](#direct-cli-execution)
   - [/mst:codex](#mstcodex)
-  - [/mst:gemini](#mstgemini)
+  - [/mst:agy](#mstagy)
   - [/mst:claude](#mstclaude)
 - [Design tools](#design-tools)
   - [/mst:stitch](#mststitch)
@@ -63,7 +63,7 @@ Claude Code and Codex install the same `skills/` source. Claude Code provides th
 | Orchestration | 8 | core flow control: start, approve, feedback, cancel, recover |
 | Monitoring | 4 | request/task status viewing and dashboard |
 | Analysis tools | 3 | ideation, discussion, debug — can be used independently of workflow mode |
-| Direct CLI calls | 3 | dispatching Codex/Gemini/Claude sub-agents directly |
+| Direct CLI calls | 3 | dispatching Codex/AGY/Claude sub-agents directly |
 | Design tools | 4 | UI, DB, feedback design specialist agents |
 | Management | 5 | mode transition, settings, session cleanup |
 
@@ -405,7 +405,7 @@ AI collaboration analysis tools that can be used independently of Maestro mode s
 
 #### Purpose
 
-A brainstorming skill where multiple AI agents (Codex, Gemini, etc.) collect ideas in one parallel round and PM (Claude) synthesizes them. The goal is to explore multiple perspectives, not necessarily to reach consensus.
+A brainstorming skill where multiple AI agents (Codex, AGY, etc.) collect ideas in one parallel round and PM (Claude) synthesizes them. The goal is to explore multiple perspectives, not necessarily to reach consensus.
 
 #### When to use
 
@@ -514,27 +514,29 @@ Single entry point for Codex CLI calls. Every Codex call inside and outside Gran
 
 ---
 
-### /mst:gemini
+### /mst:agy
 
-**One-line description**: call Gemini CLI for large-context jobs.
+**One-line description**: call AGY CLI for large-context jobs.
 
 **Arguments**: `{prompt} [--prompt-file {path}] [--dir {path}] [--files {pattern}] [--trace {REQ/TASK/label}]`
 
 #### Purpose
 
-Single entry point for Gemini CLI calls. Suitable for large-context tasks such as full frontend analysis or documentation-heavy work.
+Single entry point for AGY CLI calls. Suitable for large-context tasks such as full frontend analysis or documentation-heavy work.
+
+`/mst:gemini` is a deprecated compatibility wrapper for one release and forwards the same arguments to `/mst:agy`.
 
 #### When to use
 
 - when analyzing full frontend codebase
-- when large-context tasks (e.g., documenting 27 skills) need Gemini
+- when large-context tasks (e.g., documenting 27 skills) need AGY
 - when passing multiple files through `--files` context
 
 #### Examples
 
 ```
-/mst:gemini "Analyze this codebase architecture"
-/mst:gemini --prompt-file .gran-maestro/requests/REQ-007/tasks/01/spec.md --dir .gran-maestro/worktrees/REQ-007-01
+/mst:agy "Analyze this codebase architecture"
+/mst:agy --prompt-file .gran-maestro/requests/REQ-007/tasks/01/spec.md --dir .gran-maestro/worktrees/REQ-007-01
 ```
 
 ---
@@ -547,11 +549,11 @@ Single entry point for Gemini CLI calls. Suitable for large-context tasks such a
 
 #### Purpose
 
-Maintains the PM Conductor principle "I conduct, I don't code" by spawning a separate Claude sub-agent process and separating implementation tasks. Useful when Codex/Gemini are unavailable or when tasks require Claude file tools (Read/Write/Edit/Bash/Glob/Grep).
+Maintains the PM Conductor principle "I conduct, I don't code" by spawning a separate Claude sub-agent process and separating implementation tasks. Useful when Codex/AGY are unavailable or when tasks require Claude file tools (Read/Write/Edit/Bash/Glob/Grep).
 
 #### When to use
 
-- when implementing tasks via Claude sub-agent in environments without Codex/Gemini CLI
+- when implementing tasks via Claude sub-agent in environments without Codex/AGY CLI
 - when dispatching `claude-dev` tasks inside Gran Maestro workflow
 - when read/write/edit-style tasks should be executed by sub-agent
 
@@ -846,7 +848,7 @@ Gran Maestro detects intent from Korean utterances and executes the matching ski
 | Natural language keywords / patterns | auto-triggered skill |
 |--------------------------|--------------|
 | "run codex", "use codex", "work with codex" | `/mst:codex` |
-| "run gemini", "use gemini", "analyze with gemini", "large analysis" | `/mst:gemini` |
+| "run agy", "use agy", "analyze with agy", "large analysis" | `/mst:agy` |
 | "run claud", "use claud", "claude sub-agent", "sub-agent" | `/mst:claude` |
 
 ### Management triggers

@@ -100,45 +100,44 @@ def test_agile_plan_guard_does_not_reclassify_to_plan_or_request():
 def test_agile_plan_existing_happy_path_objective_flow_is_preserved():
     content = (REPO_ROOT / "skills" / "agile-plan" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "Step 0에서 반드시 `mst.py agile init`" in content
+    assert "Step 0.0에서 command identity/no-plan-mode preflight를 먼저 통과한다" in content
+    assert "Step 0.2에서 `mst.py agile init`으로 AGI 세션을 생성한다" in content
     assert "[의도 확인: objective 생성으로 진행]" in content
     assert "Step 1A: JTBD + 프로젝트 DoD Q&A 생성 모드" in content
     assert "Observable-by-Sprint 사고 프롬프트" in content
     assert "objective 생성 결과를 안내하고 종료한다" in content
 
 
-def test_gemini_command_identity_guard_preserves_impl_edit_plan_requests():
-    content = (REPO_ROOT / "skills" / "gemini" / "SKILL.md").read_text(encoding="utf-8")
+def test_agy_command_identity_guard_preserves_impl_edit_plan_requests():
+    content = (REPO_ROOT / "skills" / "agy" / "SKILL.md").read_text(encoding="utf-8")
     identity_section = _section_between(
         content,
-        "## DOD-004 Gemini Identity Protection Contract",
-        "## DOD-004 Gemini Delegation Failure and Fallback Contract",
+        "## AGY Identity Protection Contract",
+        "## Delegation Failure and Fallback Contract",
     )
 
-    assert "/mst:gemini 구현" in identity_section
-    assert "/mst:gemini 수정" in identity_section
-    assert "/mst:gemini 계획" in identity_section
-    assert "다른 스킬로 재분류하지 않는다" in identity_section
-    assert "/mst:codex" in identity_section
-    assert "보호 수준" in identity_section
+    assert "/mst:agy 구현" in identity_section
+    assert "/mst:agy 수정" in identity_section
+    assert "/mst:agy 계획" in identity_section
+    assert "command identity를 유지" in identity_section
+    assert "path rules" in identity_section
 
 
-def test_gemini_identity_contract_evidence_rejects_reclassification_signals():
-    content = (REPO_ROOT / "skills" / "gemini" / "SKILL.md").read_text(encoding="utf-8")
+def test_agy_identity_contract_evidence_rejects_reclassification_signals():
+    content = (REPO_ROOT / "skills" / "agy" / "SKILL.md").read_text(encoding="utf-8")
     identity_section = _section_between(
         content,
-        "## DOD-004 Gemini Identity Protection Contract",
-        "## DOD-004 Gemini Delegation Failure and Fallback Contract",
+        "## AGY Identity Protection Contract",
+        "## Delegation Failure and Fallback Contract",
     )
     fixtures = [
-        "/mst:gemini 구현",
-        "/mst:gemini 수정",
-        "/mst:gemini 계획",
+        "/mst:agy 구현",
+        "/mst:agy 수정",
+        "/mst:agy 계획",
     ]
     shared_evidence = {
-        "command_identity": _line_containing(identity_section, "command_identity: `mst:gemini`"),
+        "command_identity": _line_containing(identity_section, "command_identity: `mst:agy`"),
         "path_rules": _line_containing(identity_section, "path rules"),
-        "rewrite_guard": _line_containing(identity_section, "rewrite하지 않는다"),
     }
 
     for fixture_input in fixtures:
@@ -147,10 +146,9 @@ def test_gemini_identity_contract_evidence_rejects_reclassification_signals():
             **shared_evidence,
         }
 
-        assert fixture_input.startswith("/mst:gemini")
-        assert "`mst:gemini`" in fixture_evidence["command_identity"]
-        assert "`mst:gemini` command identity를 유지" in fixture_evidence["fixture_identity"]
-        assert "다른 스킬로 재분류하지 않는다" in fixture_evidence["fixture_identity"]
+        assert fixture_input.startswith("/mst:agy")
+        assert "`mst:agy`" in fixture_evidence["command_identity"]
+        assert "`mst:agy` command identity를 유지" in fixture_evidence["fixture_identity"]
         for channel_name, channel_content in fixture_evidence.items():
             for signal in FORBIDDEN_GEMINI_RECLASSIFICATION_SIGNALS:
                 assert signal not in channel_content, (

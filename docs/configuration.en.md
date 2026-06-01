@@ -130,13 +130,15 @@ Controls retry behavior on failure.
 
 Separates runtime host from execution provider. With `host=auto`, `/mst:on` and `mst.py host context` detect Codex or Claude Code; provider selects the actual delegated CLI.
 
+Compatibility: existing `gemini`, `gemini-dev`, and `gemini-reviewer` config keys/session values are read as AGY aliases for one release. New config should use `agy`, `agy-dev`, and `agy-reviewer`.
+
 | Key | Default | Description |
 |----|--------|------|
 | `delegation.host` | `"auto"` | host used to choose delegation commands (`auto` / `codex` / `claude` / `headless`) |
 | `delegation.default_provider` | `"codex"` | default provider when the assigned agent is ambiguous |
-| `delegation.provider_priority` | `["codex","gemini","claude"]` | fallback or recommendation order |
+| `delegation.provider_priority` | `["codex","agy","claude"]` | fallback or recommendation order |
 | `delegation.native_codex_subagents.enabled` | `false` | whether Codex native subagents replace the MST wrapper |
-| `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `gemini` / `claude`) |
+| `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
 The Codex provider uses `mst.py run --provider codex -- codex exec ...` so stdout, stderr, exit code, and lifecycle logs return to the parent. The Claude provider remains available through `/mst:claude` managed delegation.
 
@@ -165,14 +167,14 @@ Controls discussion and ideation rounds.
 | Key | Default | Description |
 |----|--------|------|
 | `discussion.agents.codex` | `{ count: 2, tier: "premium" }` | Discussion Codex agent (0 to exclude) |
-| `discussion.agents.gemini` | `{ count: 0, tier: "premium" }` | Discussion Gemini agent (0 to exclude) |
+| `discussion.agents.agy` | `{ count: 0, tier: "premium" }` | Discussion AGY agent (0 to exclude) |
 | `discussion.agents.claude` | `{ count: 0, tier: "economy" }` | Discussion Claude agent (0 to exclude) |
 | `discussion.response_char_limit` | `2000` | Discussion response character limit |
 | `discussion.critique_char_limit` | `2000` | Discussion critique character limit |
 | `discussion.default_max_rounds` | `5` | default max number of rounds |
 | `discussion.max_rounds_upper_limit` | `10` | maximum rounds upper limit |
 | `ideation.agents.codex` | `{ count: 2, tier: "premium" }` | Ideation Codex agent (0 to exclude) |
-| `ideation.agents.gemini` | `{ count: 0, tier: "premium" }` | Ideation Gemini agent (0 to exclude) |
+| `ideation.agents.agy` | `{ count: 0, tier: "premium" }` | Ideation AGY agent (0 to exclude) |
 | `ideation.agents.claude` | `{ count: 0, tier: "economy" }` | Ideation Claude agent (0 to exclude) |
 | `ideation.opinion_char_limit` | `2000` | Ideation opinion character limit |
 | `ideation.critique_char_limit` | `2000` | Ideation critique character limit |
@@ -203,12 +205,12 @@ Agent pool for debug investigation. Each agent is specified as a `{ count, tier 
 | Key | Default | Description |
 |----|--------|------|
 | `debug.agents.codex` | `{ count: 2, tier: "premium" }` | Debug Codex agent (0 to exclude) |
-| `debug.agents.gemini` | `{ count: 0, tier: "premium" }` | Debug Gemini agent (0 to exclude) |
+| `debug.agents.agy` | `{ count: 0, tier: "premium" }` | Debug AGY agent (0 to exclude) |
 | `debug.agents.claude` | `{ count: 0, tier: "economy" }` | Debug Claude agent (0 to exclude) |
 
 Participation rules:
 - total: 1 to 6
-- defaults when omitted: `codex: 1`, `gemini: 1`, `claude: 0`
+- defaults when omitted: `codex: 1`, `agy: 1`, `claude: 0`
 - When `tier` is omitted, the provider's `models.providers.<provider>.default_tier` is used
 - Backward compatible: integer values (`"codex": 1`) are also accepted and interpreted as `{ count: 1 }`
 
@@ -221,7 +223,7 @@ Agent pool for codebase exploration (`/mst:explore`). Each agent is specified as
 | Key | Default | Description |
 |----|--------|------|
 | `explore.agents.codex` | `{ count: 2, tier: "premium" }` | Explore Codex agent (0 to exclude) |
-| `explore.agents.gemini` | `{ count: 0, tier: "premium" }` | Explore Gemini agent (0 to exclude) |
+| `explore.agents.agy` | `{ count: 0, tier: "premium" }` | Explore AGY agent (0 to exclude) |
 | `explore.agents.claude` | `{ count: 0, tier: "economy" }` | Explore Claude agent (0 to exclude) |
 
 - When `tier` is omitted, the provider's `models.providers.<provider>.default_tier` is used
@@ -242,9 +244,9 @@ Defines model tiers (premium/economy) per provider.
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium model |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy model |
 | `models.providers.codex.default_tier` | `"premium"` | Codex default tier |
-| `models.providers.gemini.premium` | `"gemini-3.1-pro-preview"` | Gemini premium model |
-| `models.providers.gemini.economy` | `"gemini-2.5-flash"` | Gemini economy model |
-| `models.providers.gemini.default_tier` | `"premium"` | Gemini default tier |
+| `models.providers.agy.premium` | `"agy-default"` | AGY premium model |
+| `models.providers.agy.economy` | `"agy-default"` | AGY economy model |
+| `models.providers.agy.default_tier` | `"premium"` | AGY default tier |
 | `models.providers.claude.premium` | `"opus"` | Claude premium model |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy model |
 | `models.providers.claude.default_tier` | `"economy"` | Claude default tier |
@@ -257,9 +259,9 @@ Specifies the provider and tier for each role. Use an array to assign multiple a
 |----|--------|------|
 | `models.roles.pm_conductor` | `{ provider: "codex", tier: "premium" }` | PM conductor (Phase 1, 3) |
 | `models.roles.architect` | `{ provider: "codex", tier: "premium" }` | architect (Design Wing) |
-| `models.roles.developer` | `[codex/premium, gemini/premium]` | developer (array — multiple agents) |
+| `models.roles.developer` | `[codex/premium, agy/premium]` | developer (array — multiple agents) |
 | `models.roles.developer_claude` | `{ provider: "claude", tier: "premium", enabled: false }` | Claude legacy/fallback developer |
-| `models.roles.reviewer` | `[codex/premium, gemini/premium]` | reviewer (array — multiple agents) |
+| `models.roles.reviewer` | `[codex/premium, agy/premium]` | reviewer (array — multiple agents) |
 
 ### Model resolve rules
 
@@ -286,9 +288,9 @@ If `tier` is omitted, the provider's `default_tier` is used.
       "economy": "codex-mini",
       "default_tier": "premium"
     },
-    "gemini": {
-      "premium": "gemini-3.1-pro-preview",
-      "economy": "gemini-2.5-flash",
+    "agy": {
+      "premium": "agy-default",
+      "economy": "agy-default",
       "default_tier": "premium"
     },
     "claude": {
@@ -302,12 +304,12 @@ If `tier` is omitted, the provider's `default_tier` is used.
     "architect": { "provider": "claude", "tier": "premium" },
     "developer": [
       { "provider": "codex", "tier": "premium" },
-      { "provider": "gemini", "tier": "premium" }
+      { "provider": "agy", "tier": "premium" }
     ],
     "developer_claude": { "provider": "claude", "tier": "premium" },
     "reviewer": [
       { "provider": "codex", "tier": "premium" },
-      { "provider": "gemini", "tier": "premium" }
+      { "provider": "agy", "tier": "premium" }
     ]
   }
 }
@@ -323,7 +325,7 @@ Referenced when dispatching Pre-review agents in the `request` skill's Step h-2.
 | Key | Default | Description |
 |----|--------|------|
 | `prereview.agents.codex` | `{ count: 2, tier: "premium" }` | Pre-review Codex agent (0 to exclude) |
-| `prereview.agents.gemini` | `{ count: 0 }` | Pre-review Gemini agent (0 to exclude) |
+| `prereview.agents.agy` | `{ count: 0 }` | Pre-review AGY agent (0 to exclude) |
 | `prereview.agents.claude` | `{ count: 0, tier: "economy" }` | Pre-review Claude agent (0 to exclude) |
 
 Defaults are based on `templates/defaults/config.json`.
@@ -349,13 +351,13 @@ Referenced in `/mst:plan` Step 3.8 when running pre-review on the execution plan
 | `plan_review.roles.architect.agent` | `"codex"` | architect reviewer agent |
 | `plan_review.roles.architect.tier` | `"premium"` | architect reviewer model tier (resolved from `models.providers`) |
 | `plan_review.roles.devils_advocate.enabled` | `true` | enable devil's advocate reviewer |
-| `plan_review.roles.devils_advocate.agent` | `"gemini"` | devil's advocate reviewer agent |
+| `plan_review.roles.devils_advocate.agent` | `"agy"` | devil's advocate reviewer agent |
 | `plan_review.roles.devils_advocate.tier` | `"premium"` | devil's advocate reviewer model tier (resolved from `models.providers`) |
 | `plan_review.roles.completeness.enabled` | `true` | enable completeness reviewer |
 | `plan_review.roles.completeness.agent` | `"codex"` | completeness reviewer agent |
 | `plan_review.roles.completeness.tier` | `"premium"` | completeness reviewer model tier (resolved from `models.providers`) |
 | `plan_review.roles.ux_reviewer.enabled` | `true` | enable UX reviewer |
-| `plan_review.roles.ux_reviewer.agent` | `"gemini"` | UX reviewer agent |
+| `plan_review.roles.ux_reviewer.agent` | `"agy"` | UX reviewer agent |
 | `plan_review.roles.ux_reviewer.tier` | `"premium"` | UX reviewer model tier (resolved from `models.providers`) |
 
 ---
@@ -371,9 +373,9 @@ Used in Phase 3 for AC verification and parallel code/architecture/UI reviews.
 | `review.max_iterations` | `3` | maximum review-fix iterations |
 | `review.roles.code_reviewer.agent` | `"codex"` | code reviewer agent |
 | `review.roles.code_reviewer.tier` | `"premium"` | code reviewer model tier (resolved from `models.providers`) |
-| `review.roles.arch_reviewer.agent` | `"gemini"` | architecture reviewer agent |
+| `review.roles.arch_reviewer.agent` | `"agy"` | architecture reviewer agent |
 | `review.roles.arch_reviewer.tier` | `"premium"` | architecture reviewer model tier (resolved from `models.providers`) |
-| `review.roles.ui_reviewer.agent` | `"gemini"` | UI reviewer agent |
+| `review.roles.ui_reviewer.agent` | `"agy"` | UI reviewer agent |
 | `review.roles.ui_reviewer.tier` | `"premium"` | UI reviewer model tier (resolved from `models.providers`) |
 | `review.severity_auto_fix.enabled` | `true` | enable severity-based auto-fix |
 | `review.severity_auto_fix.minor_skip_threshold` | `3` | MINOR issue skip threshold |
@@ -394,7 +396,7 @@ In `/mst:request` Step 4.c, the PM reads `config.phase1_exploration.roles` and d
 | `phase1_exploration.roles.symbol_tracing.agent` | `"codex"` | precise symbol tracing agent |
 | `phase1_exploration.roles.symbol_tracing.enabled` | `true` | enable symbol tracing role |
 | `phase1_exploration.roles.symbol_tracing.tier` | `"premium"` | model tier for symbol tracing (resolved from `models.providers`) |
-| `phase1_exploration.roles.broad_scan.agent` | `"gemini"` | broad scan agent |
+| `phase1_exploration.roles.broad_scan.agent` | `"agy"` | broad scan agent |
 | `phase1_exploration.roles.broad_scan.enabled` | `true` | enable broad scan role |
 | `phase1_exploration.roles.broad_scan.tier` | `"premium"` | model tier for broad scan (resolved from `models.providers`) |
 
@@ -464,7 +466,7 @@ Suitable for small projects or personal development.
   "debug": {
     "agents": {
       "codex": 1,
-      "gemini": 0,
+      "agy": 0,
       "claude": 0
     }
   },

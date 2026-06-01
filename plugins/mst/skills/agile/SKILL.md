@@ -163,7 +163,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
 신규 세션(`--resume` 없음)은 Step 1 전체를 아래 1줄 호출로 수행한다:
 
 ```text
-Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1")
+Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")
 ```
 
 규칙:
@@ -550,23 +550,23 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
        --worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" \
        -- codex exec --full-auto -m "$MODEL" -C "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" "$(cat sprint-prompt.md)"
      ```
-   - `PROVIDER=gemini` canonical delegation call:
+   - `PROVIDER=agy` canonical delegation call:
      ```bash
      python3 {PLUGIN_ROOT}/scripts/mst.py run \
        --task-id "{AGI_ID}-S{NN}" \
-       --provider gemini \
+       --provider agy \
        --model "$MODEL" \
        --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
        --trace {AGI_ID}/S{NN}/dispatch \
        --require-worktree \
        --worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" \
-       -- gemini -p "$(cat sprint-prompt.md)" --model "$MODEL" --approval-mode yolo --sandbox=false
+       -- agy --print "$(cat sprint-prompt.md)" --dangerously-skip-permissions --add-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/"
      ```
    - `PROVIDER=claude` canonical delegation call:
      ```text
      Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")
      ```
-   - sprint dispatch lifecycle tuple: `sprint-prompt.md`, sprint worktree path, trace label, `{AGI_ID}-S{NN}`, sprint log dir는 같은 dispatch attempt에 속한다. Codex/Gemini는 `mst.py run` wrapper가 stdout/stderr/exit code를 직접 수집하고, Claude는 `/mst:claude` wrapper가 같은 경계에서 task/log/runtime evidence를 파생하거나 전달한다.
+   - sprint dispatch lifecycle tuple: `sprint-prompt.md`, sprint worktree path, trace label, `{AGI_ID}-S{NN}`, sprint log dir는 같은 dispatch attempt에 속한다. Codex/AGY는 `mst.py run` wrapper가 stdout/stderr/exit code를 직접 수집하고, Claude는 `/mst:claude` wrapper가 같은 경계에서 task/log/runtime evidence를 파생하거나 전달한다.
    - 모든 provider는 `python3 {PLUGIN_ROOT}/scripts/mst.py run` lifecycle wrapper를 통해 다음 계약을 유지해야 한다:
      - `--task-id "{AGI_ID}-S{NN}"`
      - `--provider "$PROVIDER"`
@@ -999,7 +999,7 @@ DoD 체크 갱신 제안 (pending)
 #### 3.4 방향 수정 (Objective 변경)
 
 1. 버전 스냅샷: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} --reason "{사용자 입력 요약}" --json`
-2. `Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID}")` 재호출
+2. `Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")` 재호출
 3. 재계획 결과 반영 후 2.2 루프로 복귀
 
 #### 3.5 변경 후 정합성 정책

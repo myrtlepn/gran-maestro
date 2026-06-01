@@ -82,7 +82,21 @@ def test_codex_primary_defaults_do_not_require_claude_provider():
     for section in ("ideation", "discussion", "prereview", "debug"):
         agents = defaults[section]["agents"]
         assert agents["codex"]["count"] >= 1
+        assert "agy" in agents
+        assert "gemini" not in agents
         assert agents["claude"]["count"] == 0
+
+
+def test_agy_is_canonical_provider_in_defaults():
+    defaults = _load_defaults()
+
+    assert "agy" in defaults["models"]["providers"]
+    assert "gemini" not in defaults["models"]["providers"]
+    assert defaults["models"]["providers"]["agy"]["premium"] == "agy-default"
+    assert defaults["models"]["providers"]["agy"]["economy"] == "agy-default"
+    assert defaults["delegation"]["provider_priority"] == ["codex", "agy", "claude"]
+    assert defaults["models"]["roles"]["developer"][1]["provider"] == "agy"
+    assert defaults["models"]["roles"]["reviewer"][1]["provider"] == "agy"
 
 
 def test_agile_field_types():

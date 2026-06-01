@@ -15,7 +15,7 @@
           "tier": "premium"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "premium"
         }
       ],
@@ -30,7 +30,7 @@
           "tier": "premium"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "premium"
         }
       ]
@@ -39,7 +39,7 @@
   "delegation": {
     "host": "auto",
     "default_provider": "codex",
-    "provider_priority": ["codex", "gemini", "claude"],
+    "provider_priority": ["codex", "agy", "claude"],
     "native_codex_subagents": {
       "enabled": false,
       "scope": "review-and-exploration-only"
@@ -58,7 +58,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -74,7 +74,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -90,7 +90,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -106,7 +106,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -122,7 +122,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -136,7 +136,7 @@
     "agents": 2,
     "agent_roster": [
       "codex",
-      "gemini"
+      "agy"
     ]
   },
   "fact_check": {
@@ -163,6 +163,6 @@
   "agent_assignments": {
     "_comment": "Codex-primary: Claude provider는 legacy/fallback preset에서만 opt-in",
     "codex-dev": ["backend", "skill", "test", "infra", "docs", "config"],
-    "gemini-dev": ["frontend", "ui"]
+    "agy-dev": ["frontend", "ui"]
   }
 }

@@ -148,6 +148,7 @@ def register(subparsers):
     agile_review = agile_sub.add_parser("review")
     agile_review.add_argument("--agi", dest="agi_id", required=True)
     agile_review.add_argument("--perspective", required=True, choices=ADVERSARIAL_REVIEW_PERSPECTIVES)
+    agile_review.add_argument("--draft-dir", dest="draft_dir")
     agile_review.add_argument("--json", action="store_true", required=True)
 
     agile_detail = agile_sub.add_parser("detail")
@@ -258,6 +259,10 @@ def register(subparsers):
     agile_objective_check.add_argument("--dod-id", default=None)
     agile_objective_check.add_argument("--mst-session-id", dest="mst_session_id")
     agile_objective_check.add_argument("--json", action="store_true")
+
+    agile_wording_check = agile_sub.add_parser("wording-check")
+    agile_wording_check.add_argument("agi_id")
+    agile_wording_check.add_argument("--json", action="store_true")
 
     agile_objective_snapshot = agile_sub.add_parser("objective-snapshot")
     agile_objective_snapshot.add_argument("agi_id")

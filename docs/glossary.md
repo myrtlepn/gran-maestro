@@ -20,7 +20,7 @@
 | 용어 | 설명 |
 |------|------|
 | **Phase 1: PM 분석** | 요구사항 분석, 스펙 작성, 작업 분할, 사용자 승인 |
-| **Phase 2: 외주 실행** | `/mst:codex` / `/mst:gemini` 스킬이 worktree에서 코드 구현 |
+| **Phase 2: 외주 실행** | `/mst:codex` / `/mst:agy` 스킬이 worktree에서 코드 구현 |
 | **Phase 3: PM 리뷰** | 구현 결과 검증, 수락 조건 매핑, PASS/FAIL 판정 |
 | **Phase 4: 피드백 루프** | 실패 유형 분류, 피드백 문서 작성, Phase 2 또는 1로 회귀 |
 | **Phase 5: 수락/완료** | rebase + squash merge, worktree 정리, 알림 |
@@ -62,8 +62,8 @@
 
 | 유형 | agents.json 키 | 제공자 | Phase |
 |------|---------------|--------|-------|
-| 실행 에이전트 | `codex-dev`, `gemini-dev` | `/mst:codex` / `/mst:gemini` | 2 |
-| 리뷰 에이전트 | `codex-reviewer`, `gemini-reviewer` | `/mst:codex` / `/mst:gemini` | 3 |
+| 실행 에이전트 | `codex-dev`, `agy-dev` | `/mst:codex` / `/mst:agy` | 2 |
+| 리뷰 에이전트 | `codex-reviewer`, `agy-reviewer` | `/mst:codex` / `/mst:agy` | 3 |
 | 분석 에이전트 | `architect`, `schema-designer`, `ui-designer` | Claude Code | 1 |
 
 ## 모드

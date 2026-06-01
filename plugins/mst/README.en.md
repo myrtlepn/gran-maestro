@@ -32,11 +32,13 @@ The most important thing is the plan. Conventional spec documents and PRDs creat
 > If you're stuck, use ideation to gather opinions from the AI team.
 ```
 
-Text-only agreement leaves gaps unchecked — screens are visualized instantly with Stitch, and completed plans are reviewed by multiple AIs in dedicated roles (Plan Review). Validated plans become implementation specs via `/mst:request` and are handed off to the Codex and Gemini engineering team for automatic implementation via `/mst:approve`. Once implementation is done, `/mst:review` verifies against acceptance criteria, and `/mst:accept` completes the merge. The dashboard lets you track progress and rationale in real time. Get started with the Quick Start below.
+Text-only agreement leaves gaps unchecked — screens are visualized instantly with Stitch, and completed plans are reviewed by multiple AIs in dedicated roles (Plan Review). Validated plans become implementation specs via `/mst:request` and are handed off to the Codex and AGY engineering team for automatic implementation via `/mst:approve`. Once implementation is done, `/mst:review` verifies against acceptance criteria, and `/mst:accept` completes the merge. The dashboard lets you track progress and rationale in real time. Get started with the Quick Start below.
 
 ## Quick Start
 
-**Prerequisites**: Claude Code (v1.0.33 or later) or the Codex CLI plugin runtime, plus [Codex CLI](https://github.com/openai/codex). [Gemini CLI](https://github.com/google-gemini/gemini-cli) is only needed when you opt into the frontend/UI or large-context helper provider.
+**Prerequisites**: Claude Code (v1.0.33 or later) or the Codex CLI plugin runtime, plus [Codex CLI](https://github.com/openai/codex). AGY CLI is only needed when you opt into the frontend/UI or large-context helper provider, and `agy --version` must work on PATH.
+
+Existing `/mst:gemini`, `gemini`, and `gemini-dev` settings/session values are read as deprecated aliases for one release and normalized to the AGY path. New configuration and docs should use `/mst:agy`, `agy`, and `agy-dev`.
 
 ```bash
 /plugin marketplace add myrtlepn/gran-maestro
@@ -97,7 +99,7 @@ Over 35 skills available.
 |---------|---------|---------|
 | Q&A Planning | `/mst:plan` | Refine requirements through questions, produce validated plans |
 | Implementation Spec | `/mst:request` | Convert plans into implementable specs (spec.md) |
-| Approve & Execute | `/mst:approve` | Verify specs, auto-dispatch to Codex/Gemini team |
+| Approve & Execute | `/mst:approve` | Verify specs, auto-dispatch to Codex/AGY team |
 | AC Verification Review | `/mst:review` | Multiple AIs verify against acceptance criteria in parallel |
 | Merge & Cleanup | `/mst:accept` | Worktree merge + cleanup |
 

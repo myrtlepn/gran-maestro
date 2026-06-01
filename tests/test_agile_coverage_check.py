@@ -364,3 +364,56 @@ def test_coverage_passes_when_all_anchors_are_mapped(tmp_path):
     assert payload["anchor_mapped"] == len(manifest)
     assert payload["anchor_missing_ids"] == []
     assert payload["anchor_coverage"] == 1.0
+
+
+def test_coverage_uses_canonical_finding_trace_anchor_refs(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    original = REPO_ROOT / "tests" / "fixtures" / "req_889" / "anchor_traceability" / "original.md"
+    fixture_details_dir = REQ_889_FIXTURE_ROOT / "details"
+    details_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective" / "details"
+    details_dir.mkdir(parents=True, exist_ok=True)
+    for fixture_file in fixture_details_dir.glob("*.md"):
+        (details_dir / fixture_file.name).write_text(
+            fixture_file.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    manifest = _load_req_889_anchor_manifest()
+    (details_dir.parent / "objective.ids.json").write_text(
+        json.dumps(manifest, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (details_dir.parent / "finding-trace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "agi_id": "AGI-001",
+                "findings": [
+                    {
+                        "finding_id": "F-001",
+                        "anchor_refs": [item["id"] for item in manifest],
+                    }
+                ],
+                "unmapped_major_or_higher_count": 0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "coverage-check",
+        str(original),
+        "--details-dir",
+        str(details_dir),
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 0
+    assert payload["valid"] is True
+    assert payload["anchor_downstream_trace"].endswith("/finding-trace.json")
+    assert payload["anchor_missing_ids"] == []
+    assert payload["anchor_coverage"] == 1.0

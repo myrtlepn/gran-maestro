@@ -8,24 +8,27 @@
 
 > **프로젝트 디렉토리에서 실행하세요.** Gran Maestro는 기존 프로젝트의 코드베이스를 분석하여 동작합니다. 프로젝트 루트에서 Claude Code 또는 Codex CLI plugin runtime을 실행한 뒤 플러그인을 사용하세요.
 
-Gran Maestro의 기본값은 Codex-primary입니다. Codex CLI는 필수이고, Gemini CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider를 사용할 때 설치하면 됩니다.
+Gran Maestro의 기본값은 Codex-primary입니다. Codex CLI는 필수이고, AGY CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider를 사용할 때 설치하면 됩니다.
+
+기존 `/mst:gemini`, `gemini`, `gemini-dev` 값은 한 릴리스 동안 deprecated alias로 동작하지만, 새 설정은 `/mst:agy`, `agy`, `agy-dev`를 사용하세요.
 
 ```bash
 # Codex CLI
 npm install -g @openai/codex
 
-# Gemini CLI
-npm install -g @google/gemini-cli
+# AGY CLI
+# Antigravity/AGY CLI를 설치한 뒤 agy --version이 동작하는지 확인하세요.
+agy --version
 ```
 
-**Gran Maestro는 각 CLI를 직접 호출합니다.** 별도 서버를 경유하거나 API를 중간에서 가로채지 않으며, 여러분이 직접 터미널에서 실행하는 것과 완전히 동일하게 동작합니다. 인증 정보와 데이터는 각 CLI와 해당 서비스 사이에서만 오가므로 Gran Maestro를 신뢰할 필요 없이 Codex/Gemini를 신뢰하는 것으로 충분합니다.
+**Gran Maestro는 각 CLI를 직접 호출합니다.** 별도 서버를 경유하거나 API를 중간에서 가로채지 않으며, 여러분이 직접 터미널에서 실행하는 것과 완전히 동일하게 동작합니다. 인증 정보와 데이터는 각 CLI와 해당 서비스 사이에서만 오가므로 Gran Maestro를 신뢰할 필요 없이 Codex/AGY를 신뢰하는 것으로 충분합니다.
 
 ### 각 CLI 설정이 그대로 적용됩니다
 
 Gran Maestro는 CLI의 기능을 그대로 활용하기 때문에, 각 에이전트에 맞게 설정한 내용이 Gran Maestro 실행 중에도 동일하게 적용됩니다.
 
 - **Codex**: 프로젝트 루트의 `AGENTS.md`, `CODEX.md` 등 에이전트 지시 파일이 Codex 호출 시 그대로 반영됩니다.
-- **Gemini**: `GEMINI.md` 또는 `.gemini/` 하위 설정 파일이 Gemini 호출 시 그대로 반영됩니다.
+- **AGY**: AGY/Antigravity CLI가 지원하는 프로젝트 지시 파일과 로컬 설정이 AGY 호출 시 그대로 반영됩니다.
 
 각 CLI의 개성(모델 설정, 시스템 프롬프트, 금지 동작 등)을 잘 조율해 두면 Gran Maestro 내에서도 동일한 품질과 일관성이 유지됩니다.
 
@@ -35,15 +38,15 @@ Gran Maestro는 CLI의 기능을 그대로 활용하기 때문에, 각 에이전
 
 ```bash
 codex   # 첫 실행 — 인증 플로우 완료
-gemini  # 첫 실행 — Google 계정 로그인 완료
+agy  # 첫 실행 — AGY 인증 플로우 완료
 ```
 
 인증 방법:
 
 - Codex: 첫 실행 시 대화형 로그인 또는 `OPENAI_API_KEY` 환경변수 설정
-- Gemini: 첫 실행 시 Google 계정 OAuth 로그인 또는 `GEMINI_API_KEY` 환경변수 설정
+- AGY: 사용 중인 AGY CLI가 요구하는 로그인 또는 API 키 설정
 
-> **Tip.** 설치 후 `which codex`, `which gemini` 명령으로 PATH에 정상 등록되었는지도 확인하세요.
+> **Tip.** 설치 후 `which codex`, `which agy` 명령으로 PATH에 정상 등록되었는지도 확인하세요.
 
 ## 1. 설치
 
@@ -122,7 +125,7 @@ Gran Maestro의 핵심은 **plan → request → approve → review → accept**
 ```
 /mst:request "JWT 기반 사용자 인증 기능을 추가해줘"
 /mst:list                        # 요청 현황 확인
-/mst:approve REQ-001             # 스펙 승인 → Codex/Gemini가 구현 시작
+/mst:approve REQ-001             # 스펙 승인 → Codex/AGY가 구현 시작
 ```
 
 ### plan 분기: 요구사항이 모호할 때
@@ -168,7 +171,7 @@ Gran Maestro의 핵심은 **plan → request → approve → review → accept**
 |--------|------|
 | `/mst:plan` | Q&A로 요구사항을 정제하여 실행 가능한 플랜 생성 |
 | `/mst:request` | 플랜 또는 직접 입력을 구현 스펙으로 변환 |
-| `/mst:approve` | 스펙 승인 후 Codex/Gemini 개발팀에 자동 전달 |
+| `/mst:approve` | 스펙 승인 후 Codex/AGY 개발팀에 자동 전달 |
 | `/mst:review` | AC 기준 다중 AI 검증 리뷰 |
 | `/mst:dashboard` | 대시보드 서버 시작 및 브라우저 열기 |
 | `/mst:recover` | 세션 종료 후 미완료 요청 복구 |
@@ -177,9 +180,9 @@ Gran Maestro의 핵심은 **plan → request → approve → review → accept**
 
 ## 5. 트러블슈팅
 
-**인증 실패 (`Authentication error`)** — Codex/Gemini CLI를 직접 한 번 실행하여 인증 플로우를 완료하세요. `codex` 또는 `gemini` 명령으로 대화형 로그인을 먼저 마쳐야 합니다.
+**인증 실패 (`Authentication error`)** — Codex/AGY CLI를 직접 한 번 실행하여 인증 플로우를 완료하세요. `codex` 또는 `agy` 명령으로 대화형 로그인을 먼저 마쳐야 합니다.
 
-**CLI를 찾을 수 없음 (`command not found`)** — `which codex`, `which gemini`로 PATH에 등록되었는지 확인하세요. 글로벌 설치가 안 되어 있다면 `npm install -g @openai/codex @google/gemini-cli`를 실행합니다.
+**CLI를 찾을 수 없음 (`command not found`)** — `which codex`, `which agy`로 PATH에 등록되었는지 확인하세요. 글로벌 설치가 안 되어 있다면 `npm install -g @openai/codex @google/agy-cli`를 실행합니다.
 
 **플러그인 미로드 (`plugin not found`)** — Claude Code 버전이 v1.0.33 이상인지 확인하세요. `/plugin marketplace add myrtlepn/gran-maestro` 후 `/plugin install mst@gran-maestro`를 다시 실행합니다.
 

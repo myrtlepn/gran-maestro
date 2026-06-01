@@ -146,7 +146,7 @@
           "count": 1,
           "tier": "premium"
         },
-        "gemini": {
+        "agy": {
           "count": 0,
           "tier": "premium"
         },
@@ -172,7 +172,7 @@
           "count": 1,
           "tier": "premium"
         },
-        "gemini": {
+        "agy": {
           "count": 1,
           "tier": "premium"
         },
@@ -216,7 +216,7 @@
   "delegation": {
     "host": "auto",
     "default_provider": "codex",
-    "provider_priority": ["codex", "gemini", "claude"],
+    "provider_priority": ["codex", "agy", "claude"],
     "native_codex_subagents": {
       "enabled": false,
       "scope": "review-and-exploration-only"
@@ -284,7 +284,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -300,7 +300,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -316,7 +316,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -336,7 +336,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -359,7 +359,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -376,9 +376,9 @@
         "economy": "gpt-5.3-codex-spark",
         "default_tier": "premium"
       },
-      "gemini": {
-        "premium": "gemini-3.1-pro-preview",
-        "economy": "gemini-3-flash-preview",
+      "agy": {
+        "premium": "agy-default",
+        "economy": "agy-default",
         "default_tier": "premium"
       },
       "claude": {
@@ -402,7 +402,7 @@
           "tier": "premium"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "premium"
         }
       ],
@@ -417,7 +417,7 @@
           "tier": "premium"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "premium"
         }
       ]
@@ -428,7 +428,7 @@
     "agents": 1,
     "agent_roster": [
       "codex",
-      "gemini"
+      "agy"
     ],
     "parallel": true,
     "use_native_review": false,
@@ -541,7 +541,7 @@
       },
       "devils_advocate": {
         "enabled": true,
-        "agent": "gemini",
+        "agent": "agy",
         "tier": "premium"
       },
       "completeness": {
@@ -551,7 +551,7 @@
       },
       "ux_reviewer": {
         "enabled": true,
-        "agent": "gemini",
+        "agent": "agy",
         "tier": "premium"
       }
     }
@@ -598,11 +598,11 @@
         "tier": "premium"
       },
       "arch_reviewer": {
-        "agent": "gemini",
+        "agent": "agy",
         "tier": "premium"
       },
       "ui_reviewer": {
-        "agent": "gemini",
+        "agent": "agy",
         "tier": "premium"
       },
       "browser_tester": {
@@ -691,7 +691,7 @@
         "count": 2,
         "tier": "premium"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -747,7 +747,7 @@
         "tier": "premium"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": true,
         "tier": "premium"
       }
@@ -764,7 +764,7 @@
   "agent_assignments": {
     "_comment": "Codex-primary 기본값. 커스터마이징 가이드: docs/config-agent-assignments.md 참조",
     "codex-dev": ["backend", "skill", "test", "infra", "docs", "config"],
-    "gemini-dev": ["frontend", "ui"]
+    "agy-dev": ["frontend", "ui"]
   },
   "omx": {
     "enabled": false,

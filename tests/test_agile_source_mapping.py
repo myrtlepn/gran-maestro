@@ -72,8 +72,39 @@ def test_parse_source_mapping_valid():
 
     assert payload["valid"] is True
     assert payload["original"] == "docs/sample.md"
+    assert payload["source_type"] == "document"
     assert payload["sections"] == ["Intro", "Background", "Decisions"]
     assert payload["errors"] == []
+
+
+def test_parse_source_mapping_conversation_evidence_valid():
+    text = (
+        "<!-- source-mapping: source=conversation evidence=clarification-context.md sections=[JTBD, Decisions] -->\n"
+        "# Domain\n"
+    )
+    payload = MST_MODULE.parse_source_mapping(text)
+
+    assert payload["valid"] is True
+    assert payload["original"] is None
+    assert payload["source_type"] == "conversation"
+    assert payload["evidence"] == "clarification-context.md"
+    assert payload["skip_reason"] is None
+    assert payload["sections"] == ["JTBD", "Decisions"]
+    assert payload["errors"] == []
+
+
+def test_parse_source_mapping_conversation_skip_reason_valid():
+    text = (
+        "<!-- source-mapping: source=conversation skip_reason=no_source_document sections=[JTBD] -->\n"
+        "# Domain\n"
+    )
+    payload = MST_MODULE.parse_source_mapping(text)
+
+    assert payload["valid"] is True
+    assert payload["source_type"] == "conversation"
+    assert payload["evidence"] is None
+    assert payload["skip_reason"] == "no_source_document"
+    assert payload["sections"] == ["JTBD"]
 
 
 def test_parse_source_mapping_missing():
@@ -81,6 +112,7 @@ def test_parse_source_mapping_missing():
 
     assert payload["valid"] is False
     assert payload["original"] is None
+    assert payload["source_type"] is None
     assert payload["sections"] == []
     assert payload["errors"]
 
@@ -121,8 +153,36 @@ def test_validate_mapping_cli_valid_json(tmp_path):
     assert payload["path"] == str(details_path)
     assert payload["valid"] is True
     assert payload["original"] == "docs/sample.md"
+    assert payload["source_type"] == "document"
     assert payload["sections"] == ["Intro", "Decisions", "QA"]
     assert payload["errors"] == []
+
+
+def test_validate_mapping_cli_accepts_conversation_source_mapping(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    details_path = tmp_path / "details-conversation.md"
+    details_path.write_text(
+        "<!-- source-mapping: source=conversation evidence=clarification-context.md sections=[\"JTBD\", Decisions] -->\n"
+        "# Domain\n",
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "detail",
+        "validate-mapping",
+        str(details_path),
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 0
+    assert payload["valid"] is True
+    assert payload["original"] is None
+    assert payload["source_type"] == "conversation"
+    assert payload["evidence"] == "clarification-context.md"
+    assert payload["sections"] == ["JTBD", "Decisions"]
 
 
 def test_validate_mapping_cli_missing_metadata_graceful(tmp_path):

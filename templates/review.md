@@ -13,7 +13,7 @@
 - 네이밍 이슈: {N건}
 - 상세: {trace 파일 경로}
 
-### Security Scan (Gemini)
+### Security Scan (AGY)
 - 취약점 후보: {N건}
 - 심각도별: Critical {N} / High {N} / Medium {N} / Low {N}
 - 상세: {trace 파일 경로}
@@ -25,12 +25,12 @@
 - **Codex (Security Review)**: ...
 - **Codex (Quality Review)**: ...
 - **Codex (Acceptance Verification)**: ...
-- **Gemini (Consistency Review)**: ... (대규모 변경 시)
+- **AGY (Consistency Review)**: ... (대규모 변경 시)
 
 ## 추가 독립 리뷰어 의견 (config.code_review 기반)
 
 - **Codex (코드 레벨)**: ... (enabled 시)
-- **Gemini (시스템 레벨)**: ... (agents ≥ 2 시)
+- **AGY (시스템 레벨)**: ... (agents ≥ 2 시)
 
 ## 종합 판단
 

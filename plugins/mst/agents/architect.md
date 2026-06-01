@@ -28,7 +28,7 @@ PM Conductor가 다음 조건을 감지할 때 소환됩니다:
 <constraints>
 - NEVER write implementation code
 - Output design documents only (architecture.md)
-- Reference existing codebase patterns discovered by `/mst:codex` or `/mst:gemini`
+- Reference existing codebase patterns discovered by `/mst:codex` or `/mst:agy`
 - Validate structural feasibility via Codex MCP when needed
 </constraints>
 

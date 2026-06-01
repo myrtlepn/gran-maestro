@@ -22,7 +22,7 @@ Consistent term usage reduces communication ambiguity.
 | Term | Description |
 |------|------|
 | **Phase 1: PM analysis** | requirement analysis, spec writing, task splitting, user approval |
-| **Phase 2: outsourced execution** | work done in worktrees by `/mst:codex` / `/mst:gemini` |
+| **Phase 2: outsourced execution** | work done in worktrees by `/mst:codex` / `/mst:agy` |
 | **Phase 3: PM review** | verify results, map against acceptance criteria, PASS/FAIL judgment |
 | **Phase 4: feedback loop** | classify failure type, write feedback docs, return to Phase 2 or 1 |
 | **Phase 5: accept / complete** | rebase + squash merge, worktree cleanup, notification |
@@ -56,8 +56,8 @@ Consistent term usage reduces communication ambiguity.
 
 | Type | agents.json key | Provider | Phase |
 |------|---------------|----------|-------|
-| execution agent | `codex-dev`, `gemini-dev` | `/mst:codex` / `/mst:gemini` | 2 |
-| review agent | `codex-reviewer`, `gemini-reviewer` | `/mst:codex` / `/mst:gemini` | 3 |
+| execution agent | `codex-dev`, `agy-dev` | `/mst:codex` / `/mst:agy` | 2 |
+| review agent | `codex-reviewer`, `agy-reviewer` | `/mst:codex` / `/mst:agy` | 3 |
 | analysis agent | `architect`, `schema-designer`, `ui-designer` | Claude Code | 1 |
 
 ## Modes

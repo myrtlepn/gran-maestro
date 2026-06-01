@@ -106,8 +106,8 @@ Write → .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-schema
 /mst:codex --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-schema-design.md --output .gran-maestro/requests/{REQ-ID}/design/data-model.md --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design
 ```
 
-### 대규모 스키마 시 Gemini 보조 (선택)
+### 대규모 스키마 시 AGY 보조 (선택)
 ```
-# 기존 스키마가 대규모(다수 테이블, 복잡한 관계)인 경우 Gemini의 대용량 컨텍스트 활용
-/mst:gemini --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-schema-design.md --files {schema_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design-gemini
+# 기존 스키마가 대규모(다수 테이블, 복잡한 관계)인 경우 AGY의 대용량 컨텍스트 활용
+/mst:agy --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-schema-design.md --files {schema_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-schema-design-agy
 ```

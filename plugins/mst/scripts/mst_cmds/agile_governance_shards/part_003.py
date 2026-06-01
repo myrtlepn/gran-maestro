@@ -342,6 +342,239 @@ def cmd_agile_recall(args):
     for warning in payload["warnings"]:
         print(str(warning), file=sys.stderr)
     return 0
+def _build_objective_source_mapping_validation(agi_id: str) -> dict:
+    from scripts.mst_cmds._common import parse_source_mapping
+
+    details_dir = _agi_session_dir(agi_id) / "objective" / "details"
+    payload = {
+        "details_dir": str(details_dir),
+        "valid": True,
+        "checked_files": [],
+        "errors": [],
+    }
+    if not details_dir.exists():
+        payload["valid"] = False
+        payload["errors"].append(f"details dir not found: {details_dir}")
+        return payload
+    if not details_dir.is_dir():
+        payload["valid"] = False
+        payload["errors"].append(f"details path is not a directory: {details_dir}")
+        return payload
+
+    detail_files = sorted(details_dir.glob("*.md"))
+    if not detail_files:
+        payload["valid"] = False
+        payload["errors"].append(f"no detail files found: {details_dir}")
+        return payload
+
+    for detail_file in detail_files:
+        record = {
+            "path": str(detail_file),
+            "valid": False,
+            "original": None,
+            "source_type": None,
+            "evidence": None,
+            "skip_reason": None,
+            "sections": [],
+            "h1": None,
+            "errors": [],
+        }
+        try:
+            content = detail_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            record["errors"].append(f"failed to read detail: {exc}")
+        else:
+            parsed = parse_source_mapping(content)
+            record["valid"] = bool(parsed.get("valid"))
+            record["original"] = parsed.get("original")
+            record["source_type"] = parsed.get("source_type")
+            record["evidence"] = parsed.get("evidence")
+            record["skip_reason"] = parsed.get("skip_reason")
+            record["sections"] = parsed.get("sections", [])
+            record["errors"] = list(parsed.get("errors") or [])
+            h1_candidates = [
+                line.strip()[2:].strip()
+                for line in content.splitlines()[1:]
+                if re.fullmatch(r"#\s+\S.*", line.strip())
+            ]
+            if h1_candidates:
+                record["h1"] = h1_candidates[0]
+            else:
+                record["valid"] = False
+                record["errors"].append("canonical detail H1 is missing after source-mapping")
+        payload["checked_files"].append(record)
+        if not record["valid"]:
+            payload["valid"] = False
+            payload["errors"].extend(
+                f"{detail_file}: {error}" for error in (record["errors"] or ["invalid source mapping"])
+            )
+    return payload
+_SCHEDULE_WORDING_ALLOWED_CONTEXT = (
+    "금지",
+    "허용",
+    "예시",
+    "검출",
+    "분리",
+    "문제",
+    "리스크",
+    "forbidden",
+    "prohibited",
+    "allowed",
+    "example",
+    "deterministic",
+    "control contract",
+    "loop cap",
+    "retry budget",
+    "state counter",
+    "soft_limit",
+    "soft limit",
+    "threshold",
+    "streak",
+    "한도",
+    "상한",
+    "카운터",
+)
+_SCHEDULE_WORDING_PATTERNS = (
+    (
+        "estimated_sprint_count",
+        re.compile(
+            r"(예상\s*(?:스프린트|sprint|반복|iteration))"
+            r"|((?:\d+|N)\s*회\s*(?:스프린트|sprint|반복|iteration))"
+            r"|((?:스프린트|sprint)\s*(?:\d+|N)\s*회)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "estimated_calendar_duration",
+        re.compile(
+            r"(\d+\s*(?:~|-|–)\s*\d+\s*(?:일|주|개월|days?|weeks?|months?)"
+            r"\s*(?:소요|걸림|완료|내|안|estimate|estimated)?)"
+            r"|(\d+\s*(?:일|주|개월)\s*(?:소요|걸림|내\s*완료|안에\s*완료|이면\s*완료|완료\s*예상))",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "eta_wording",
+        re.compile(r"(?:\bETA\b|예상\s*(?:완료|일정|소요\s*기간|기간)|완료\s*예상|마무리\s*예상)", re.IGNORECASE),
+    ),
+    (
+        "model_guess_timing",
+        re.compile(r"(?:아마|probably|likely|대략|roughly).{0,30}(?:완료|끝|마무리|스프린트|sprint|일|주|week)", re.IGNORECASE),
+    ),
+)
+def _schedule_wording_context_allowed(line: str) -> bool:
+    lowered = line.lower()
+    return any(token.lower() in lowered for token in _SCHEDULE_WORDING_ALLOWED_CONTEXT)
+def _schedule_wording_kind(path: Path) -> str:
+    name = path.name.lower()
+    if "prompt" in name:
+        return "prompt"
+    if "report" in name or name in {"result.md", "result.json", "retrospective.md"}:
+        return "report"
+    if path.parent.name == "details":
+        return "detail"
+    return "objective"
+def _objective_schedule_wording_paths(agi_id: str) -> list[Path]:
+    agi_dir = _agi_session_dir(agi_id)
+    objective_dir = agi_dir / "objective"
+    candidates: list[Path] = [
+        objective_dir / "objective.md",
+        objective_dir / "clarification-context.md",
+        objective_dir / "clarification-questions.md",
+        agi_dir / "final-report.md",
+    ]
+    details_dir = objective_dir / "details"
+    if details_dir.exists() and details_dir.is_dir():
+        candidates.extend(sorted(details_dir.glob("*.md")))
+    sprints_dir = agi_dir / "sprints"
+    if sprints_dir.exists() and sprints_dir.is_dir():
+        for pattern in ("**/sprint-prompt.md", "**/*report*.md", "**/result.md", "**/result.json", "**/retrospective.md"):
+            candidates.extend(sorted(sprints_dir.glob(pattern)))
+
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key in seen or not path.is_file():
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+def _build_objective_schedule_wording_validation(agi_id: str) -> dict:
+    payload = {
+        "valid": True,
+        "violation_count": 0,
+        "checked_files": [],
+        "errors": [],
+        "policy": {
+            "forbidden": [name for name, _ in _SCHEDULE_WORDING_PATTERNS],
+            "allowed_control_contracts": ["loop cap", "retry budget", "state counter", "soft_limit", "threshold", "streak limit"],
+            "external_timing_terms": ["deadline", "trigger", "마감", "트리거"],
+        },
+    }
+    for path in _objective_schedule_wording_paths(agi_id):
+        record = {
+            "path": str(path),
+            "kind": _schedule_wording_kind(path),
+            "violations": [],
+        }
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            record["violations"].append(
+                {
+                    "line": 0,
+                    "pattern": "unreadable_file",
+                    "excerpt": str(exc),
+                }
+            )
+        else:
+            for line_number, line in enumerate(lines, start=1):
+                if _schedule_wording_context_allowed(line):
+                    continue
+                for pattern_name, pattern in _SCHEDULE_WORDING_PATTERNS:
+                    if not pattern.search(line):
+                        continue
+                    excerpt = line.strip()
+                    if len(excerpt) > 180:
+                        excerpt = excerpt[:177].rstrip() + "..."
+                    record["violations"].append(
+                        {
+                            "line": line_number,
+                            "pattern": pattern_name,
+                            "excerpt": excerpt,
+                        }
+                    )
+                    break
+        if record["violations"]:
+            payload["valid"] = False
+            payload["violation_count"] += len(record["violations"])
+            for violation in record["violations"]:
+                payload["errors"].append(
+                    f"schedule_wording: {path}:{violation['line']} {violation['pattern']}"
+                )
+        payload["checked_files"].append(record)
+    return payload
+def _build_objective_completion_validation(agi_id: str, mst_session_id: str | None = None) -> dict:
+    from scripts.mst_cmds import agile_detail as _agile_detail
+
+    sidecar_schema = _agile_detail.build_sidecar_schema_payload(
+        agi_id,
+        mst_session_id=mst_session_id,
+        validate_existing=True,
+    )
+    source_mapping = _build_objective_source_mapping_validation(agi_id)
+    schedule_wording = _build_objective_schedule_wording_validation(agi_id)
+    errors = list(sidecar_schema.get("errors") or [])
+    errors.extend(f"source_mapping: {error}" for error in source_mapping.get("errors") or [])
+    errors.extend(schedule_wording.get("errors") or [])
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "sidecar_schema": sidecar_schema,
+        "source_mapping": source_mapping,
+        "schedule_wording": schedule_wording,
+    }
 def cmd_agile_objective_transition(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)
@@ -378,15 +611,12 @@ def cmd_agile_objective_transition(args):
         print(f"Error: DoD item not found ({dod_id})", file=sys.stderr)
         return 1
     if requested_status in {"done", "completed"} or getattr(args, "deferred_promote", False):
-        from scripts.mst_cmds import agile_detail as _agile_detail
-
         mst_session_id = str(getattr(args, "mst_session_id", "") or os.environ.get("MST_SESSION_ID") or "").strip() or None
-        sidecar_schema = _agile_detail.build_sidecar_schema_payload(
+        completion_validation = _build_objective_completion_validation(
             agi_id,
             mst_session_id=mst_session_id,
-            validate_existing=True,
         )
-        completion_blockers = list(sidecar_schema.get("errors") or [])
+        completion_blockers = list(completion_validation.get("errors") or [])
         if completion_blockers:
             output = {
                 "agi_id": agi_id,
@@ -396,7 +626,9 @@ def cmd_agile_objective_transition(args):
                 "requested_status": requested_status,
                 "changed": False,
                 "completion_blockers": completion_blockers,
-                "sidecar_schema": sidecar_schema,
+                "sidecar_schema": completion_validation.get("sidecar_schema"),
+                "source_mapping": completion_validation.get("source_mapping"),
+                "schedule_wording": completion_validation.get("schedule_wording"),
             }
             if args.json:
                 print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -606,15 +838,12 @@ def cmd_agile_objective_check(args):
         dod_id for dod_id, item in dod_items.items()
         if item.get("status", "").lower() not in {"done", "completed"}
     ])
-    from scripts.mst_cmds import agile_detail as _agile_detail
-
     mst_session_id = str(getattr(args, "mst_session_id", "") or os.environ.get("MST_SESSION_ID") or "").strip() or None
-    sidecar_schema = _agile_detail.build_sidecar_schema_payload(
+    completion_validation = _build_objective_completion_validation(
         agi_id,
         mst_session_id=mst_session_id,
-        validate_existing=True,
     )
-    completion_blockers = list(sidecar_schema.get("errors") or [])
+    completion_blockers = list(completion_validation.get("errors") or [])
     marker_all_done = len(incomplete) == 0
     status_only = {dod_id: item.get("status") for dod_id, item in dod_items.items()}
     legacy_dods = {}
@@ -633,13 +862,33 @@ def cmd_agile_objective_check(args):
         "completion_blockers": completion_blockers,
         "dods": legacy_dods,
         "stories": status_only,
-        "sidecar_schema": sidecar_schema,
+        "sidecar_schema": completion_validation.get("sidecar_schema"),
+        "source_mapping": completion_validation.get("source_mapping"),
+        "schedule_wording": completion_validation.get("schedule_wording"),
     }
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
         print(json.dumps(output, ensure_ascii=False))
     return 0
+def cmd_agile_wording_check(args):
+    try:
+        agi_id = _normalize_agi_id(args.agi_id)
+        _load_agile_session(agi_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    payload = _build_objective_schedule_wording_validation(agi_id)
+    payload["agi_id"] = agi_id
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"schedule_wording_valid: {'true' if payload.get('valid') else 'false'}")
+        print(f"violation_count: {payload.get('violation_count', 0)}")
+        for error in payload.get("errors") or []:
+            print(f"- {error}")
+    return 0 if payload.get("valid") else 1
 def cmd_agile_objective_snapshot(args):
     try:
         agi_id = _normalize_agi_id(args.agi_id)

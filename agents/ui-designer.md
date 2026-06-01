@@ -5,7 +5,7 @@
 
 Analysis Squad의 Design Wing 멤버. 화면 설계, 컴포넌트 구조, 인터랙션 흐름, 디자인 시스템을 설계합니다.
 이 파일은 에이전트가 아닌 **템플릿**으로, PM Conductor가 변수를 치환하여 실행합니다.
-기본: `/mst:codex` (컴포넌트 단위 설계). 크로스뷰 통합 시: `/mst:gemini` 보조.
+기본: `/mst:codex` (컴포넌트 단위 설계). 크로스뷰 통합 시: `/mst:agy` 보조.
 
 <ui_designer>
 <role>
@@ -108,7 +108,7 @@ Page
 
 ## 스킬 호출 방식
 
-모든 외부 AI 호출은 내부 스킬(`/mst:codex`, `/mst:gemini`)을 경유합니다.
+모든 외부 AI 호출은 내부 스킬(`/mst:codex`, `/mst:agy`)을 경유합니다.
 
 **CRITICAL — Prompt-File 패턴**: 워크플로우 내에서는 이 템플릿의 변수를 치환한 뒤 파일로 저장하고, `--prompt-file`로 전달합니다.
 
@@ -121,10 +121,10 @@ Write → .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-des
 /mst:codex --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-design.md --output .gran-maestro/requests/{REQ-ID}/design/ui-spec.md --trace {REQ-ID}/{TASK-NUM}/phase1-ui-design
 ```
 
-### Gemini 보조 — 크로스뷰 통합 (멀티 화면 일관성)
+### AGY 보조 — 크로스뷰 통합 (멀티 화면 일관성)
 ```
 # 다수 화면 간 디자인 일관성, 전체 흐름 통합 검토 시
-/mst:gemini --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-crossview.md --files {component_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-ui-crossview
+/mst:agy --prompt-file .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-crossview.md --files {component_pattern} --trace {REQ-ID}/{TASK-NUM}/phase1-ui-crossview
 ```
 
 ### 사용 기준
@@ -132,6 +132,6 @@ Write → .gran-maestro/requests/{REQ-ID}/tasks/{TASK-NUM}/prompts/phase1-ui-des
 | 조건 | 프로바이더 | 사유 |
 |------|----------|------|
 | 단일 컴포넌트/페이지 설계 | Codex | 컨텍스트 제한 내, 구조화된 출력 |
-| 다수 화면 간 일관성 검토 | Gemini (보조) | 대용량 컨텍스트로 전체 뷰 조망 |
+| 다수 화면 간 일관성 검토 | AGY (보조) | 대용량 컨텍스트로 전체 뷰 조망 |
 | 디자인 시스템 적합성 검토 | Codex | 토큰/컴포넌트 매칭은 제한적 컨텍스트로 충분 |
-| 전체 UX 흐름 통합 | Gemini (보조) | 다수 화면 + 인터랙션 흐름 동시 분석 |
+| 전체 UX 흐름 통합 | AGY (보조) | 다수 화면 + 인터랙션 흐름 동시 분석 |

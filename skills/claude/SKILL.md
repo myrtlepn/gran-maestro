@@ -7,7 +7,7 @@ argument-hint: "{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--trac
 
 # maestro:claude
 
-PM Conductor 원칙 유지 목적으로 Claude provider 작업은 `mst.py run` lifecycle wrapper가 소유하는 managed delegation path로 위임한다. 직접 Claude one-shot print-mode argv를 구현 지침으로 노출하지 않으며, Codex/Gemini와 동일하게 provider subprocess detail은 runtime 내부 계약으로 취급한다.
+PM Conductor 원칙 유지 목적으로 Claude provider 작업은 `mst.py run` lifecycle wrapper가 소유하는 managed delegation path로 위임한다. 직접 Claude one-shot print-mode argv를 구현 지침으로 노출하지 않으며, Codex/AGY와 동일하게 provider subprocess detail은 runtime 내부 계약으로 취급한다.
 
 ## DOD-003 Context Transfer Contract
 
@@ -97,10 +97,10 @@ caller-facing dispatch contract와 wrapper-owned runtime contract는 분리하�
    > **Exit Code 캡처 (MANDATORY)**: `mst.py run`의 종료 코드를 반드시 확인한다.
    > 0이 아니어도 trace의 `exit_code` 필드에 해당 값을 반드시 기록한다.
 
-## Codex/Gemini와의 차이점
+## Codex/AGY와의 차이점
 
 - Codex: wrapper 뒤에서 `codex exec ...` 실행
-- Gemini: wrapper 뒤에서 `gemini -p ...` 실행
+- AGY: wrapper 뒤에서 `agy --print ...` 실행
 - Claude: wrapper 뒤에서 provider-owned subprocess를 실행하며, user-facing contract는 `/mst:claude` managed delegation과 lifecycle evidence다.
 - register/heartbeat/tee/final-state/trace 생성은 세 provider 모두 wrapper가 공통 담당
 

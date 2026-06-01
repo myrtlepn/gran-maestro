@@ -127,6 +127,47 @@ def test_dispatch_preflight_warns_on_stdin_pipe_but_returns_zero(tmp_path):
     assert "stdin" in proc.stderr.lower()
 
 
+def test_dispatch_preflight_accepts_agy_and_legacy_gemini_alias(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    _write_stub_binary(bin_dir, "agy")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    agy_proc = _run_mst(
+        workspace,
+        "dispatch",
+        "preflight",
+        "--provider",
+        "agy",
+        "--model",
+        "agy-test",
+        env=env,
+    )
+    legacy_proc = _run_mst(
+        workspace,
+        "dispatch",
+        "preflight",
+        "--provider",
+        "gemini",
+        "--model",
+        "legacy-test",
+        env=env,
+    )
+
+    assert agy_proc.returncode == 0, agy_proc.stderr
+    assert json.loads(agy_proc.stdout)["provider"] == "agy"
+    assert legacy_proc.returncode == 0, legacy_proc.stderr
+    legacy_payload = json.loads(legacy_proc.stdout)
+    assert legacy_payload["provider"] == "agy"
+    assert legacy_payload["binary"] == "agy"
+    assert legacy_payload["deprecated_alias"] == "gemini"
+
+
 def test_dispatch_register_resolves_started_by_pid_from_session_anchor(tmp_path):
     workspace = tmp_path / "workspace"
     gm_tmp = workspace / ".gran-maestro" / "tmp"

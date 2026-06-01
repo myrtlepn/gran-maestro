@@ -70,7 +70,7 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
    python3 {PLUGIN_ROOT}/scripts/mst.py run \
      --task-id "{task_id}" \
      --provider codex \
-     --model "$MODEL" \
+     \
      --log-dir "{task_dir}" \
      --require-worktree \
      --worktree-dir "{working_dir}" \
@@ -80,7 +80,7 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
    python3 {PLUGIN_ROOT}/scripts/mst.py run \
      --task-id "{task_id}" \
      --provider codex \
-     --model "$MODEL" \
+     \
      --log-dir "{task_dir}" \
      --require-worktree \
      --worktree-dir "{working_dir}" \
@@ -90,7 +90,7 @@ Codex CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 포
    python3 {PLUGIN_ROOT}/scripts/mst.py run \
      --task-id "{task_id}" \
      --provider codex \
-     --model "$MODEL" \
+     \
      --log-dir "{task_dir}" \
      --trace "{REQ-ID}/{TASK-NUM}/{label}" \
      --require-worktree \

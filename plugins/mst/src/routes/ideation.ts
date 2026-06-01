@@ -183,8 +183,8 @@ projectIdeationApi.get("/ideation/:id", async (c) => {
   const participants = normalizeParticipants(rawSession);
   const participantKeys = participants.length > 0
     ? participants.map((p) => p.key)
-    : ["codex", "agy", "gemini", "claude"];
-  const keyList = participantKeys.length > 0 ? participantKeys : ["codex", "agy", "gemini", "claude"];
+    : ["codex", "agy", "claude"];
+  const keyList = participantKeys.length > 0 ? participantKeys : ["codex", "agy", "claude"];
 
   const opinions: Record<string, string | null> = {};
   for (const key of keyList) {

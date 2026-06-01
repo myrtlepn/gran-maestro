@@ -31,7 +31,7 @@
   "delegation": {
     "host": "auto",
     "default_provider": "codex",
-    "provider_priority": ["codex", "gemini", "claude"],
+    "provider_priority": ["codex", "agy", "claude"],
     "native_codex_subagents": {
       "enabled": false,
       "scope": "review-and-exploration-only"
@@ -50,7 +50,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -65,7 +65,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -80,7 +80,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -95,7 +95,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -110,7 +110,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -157,7 +157,7 @@
         "tier": "economy"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": false,
         "tier": "economy"
       }

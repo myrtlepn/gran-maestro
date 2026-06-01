@@ -92,12 +92,20 @@ def _adversarial_review_template_path(perspective: str) -> Path:
         / "perspectives"
         / f"{perspective}.md"
     ).resolve()
-def _emit_adversarial_review_payload(context_files: List[Path], perspective: str) -> int:
+def _emit_adversarial_review_payload(
+    context_files: List[Path],
+    perspective: str,
+    *,
+    context_source: str = "accepted",
+    draft_dir: Path | None = None,
+) -> int:
     payload = {
         "context_files": [str(path.resolve()) for path in context_files],
         "role_template": str(_adversarial_review_template_path(perspective)),
         "output_schema": ADVERSARIAL_REVIEW_OUTPUT_SCHEMA,
         "perspective": perspective,
+        "context_source": context_source,
+        "draft_dir": str(draft_dir.resolve()) if draft_dir is not None else None,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0

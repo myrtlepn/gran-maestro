@@ -221,6 +221,7 @@ DISPATCH = {
     ("agile", "sidecar-build"): agile_detail.cmd_agile_sidecar_build,
     ("agile", "objective-transition"): agile_governance.cmd_agile_objective_transition,
     ("agile", "objective-check"): agile_governance.cmd_agile_objective_check,
+    ("agile", "wording-check"): agile_governance.cmd_agile_wording_check,
     ("agile", "objective-snapshot"): agile_governance.cmd_agile_objective_snapshot,
     ("agile", "link"): agile_detail.cmd_agile_link,
     ("agile", "integration-review"): agile_detail.cmd_agile_integration_review,

@@ -17,7 +17,7 @@ Gran Maestro 모드를 활성화합니다. Maestro 오케스트레이션 스킬�
 
 ### Maestro 모드에서 사용 가능한 스킬
 - Maestro 오케스트레이션: `/mst:request`, `/mst:list`, `/mst:inspect`, `/mst:approve`, `/mst:accept`, `/mst:feedback`, `/mst:cancel`, `/mst:dashboard`, `/mst:priority`, `/mst:history`, `/mst:settings`
-- CLI 직접 호출: `/mst:codex`, `/mst:gemini` (모드 무관)
+- CLI 직접 호출: `/mst:codex`, `/mst:agy` (모드 무관)
 - 단발 분석/리뷰: `/analyze`, `/deepsearch`, `/code-review`, `/security-review` (모드 무관)
 - 유틸리티: `/note`, `/plan`, `/trace`, `/doctor` (모드 무관)
 
@@ -272,7 +272,7 @@ fi
 Gran Maestro 모드 활성화
 
 역할 전환: 현재 host → PM (지휘자)
-- 코드 작성: 금지 (Codex/Gemini에 위임)
+- 코드 작성: 금지 (Codex/AGY에 위임)
 - 분석/스펙/리뷰: 활성
 
 Maestro 오케스트레이션 스킬이 활성화되었습니다.

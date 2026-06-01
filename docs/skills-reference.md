@@ -41,7 +41,7 @@ Claude Code와 Codex는 같은 `skills/` source를 설치합니다. Claude Code�
   - [/mst:explore](#mstexplore)
 - [CLI 직접 호출](#cli-직접-호출)
   - [/mst:codex](#mstcodex)
-  - [/mst:gemini](#mstgemini)
+  - [/mst:agy](#mstagy)
   - [/mst:claude](#mstclaude)
 - [설계 도구](#설계-도구)
   - [/mst:stitch](#mststitch)
@@ -68,7 +68,7 @@ Claude Code와 Codex는 같은 `skills/` source를 설치합니다. Claude Code�
 | 오케스트레이션 | 9 | 워크플로우 시작·승인·피드백·취소·복구·리뷰 등 핵심 흐름 |
 | 모니터링 | 4 | 요청/태스크 현황 조회 및 대시보드 |
 | 분석 도구 | 4 | 아이디어·토론·디버그·탐색 — 모드 독립적으로 사용 가능 |
-| CLI 직접 호출 | 3 | Codex/Gemini/Claude 서브에이전트 직접 디스패치 |
+| CLI 직접 호출 | 3 | Codex/AGY/Claude 서브에이전트 직접 디스패치 |
 | 설계 도구 | 4 | UI·DB·피드백 설계 전문 에이전트 |
 | 관리 | 7 | 모드 전환, 설정, 세션 정리, OMX 설치, Extension 설치 |
 
@@ -497,7 +497,7 @@ Maestro 모드 활성 여부에 관계없이 독립적으로 사용할 수 있�
 
 #### 목적
 
-여러 AI 에이전트(Codex, Gemini 등)의 의견을 1회 병렬 수집하고 PM(Claude)이 종합하는 브레인스토밍 스킬입니다. 다양한 관점을 발산적으로 수집하는 것이 목적이며, 합의까지는 요구하지 않습니다.
+여러 AI 에이전트(Codex, AGY 등)의 의견을 1회 병렬 수집하고 PM(Claude)이 종합하는 브레인스토밍 스킬입니다. 다양한 관점을 발산적으로 수집하는 것이 목적이며, 합의까지는 요구하지 않습니다.
 
 #### 사용 시점
 
@@ -582,7 +582,7 @@ PM(Claude)이 사회자 역할로 AI 팀원들 간 의견 발산점을 식별하
 
 #### 목적
 
-PM(Claude)이 탐색 목표를 분석하여 Codex(코드 구조/구현 패턴)와 Gemini(아키텍처/흐름/연결 관계)에 역할을 배정합니다. 모든 탐색 에이전트를 백그라운드로 동시 실행한 뒤, 개별 결과를 종합하여 `explore-report.md`를 작성합니다. Maestro 모드 활성 여부에 관계없이 독립적으로 사용 가능합니다.
+PM(Claude)이 탐색 목표를 분석하여 Codex(코드 구조/구현 패턴)와 AGY(아키텍처/흐름/연결 관계)에 역할을 배정합니다. 모든 탐색 에이전트를 백그라운드로 동시 실행한 뒤, 개별 결과를 종합하여 `explore-report.md`를 작성합니다. Maestro 모드 활성 여부에 관계없이 독립적으로 사용 가능합니다.
 
 #### 의존 설정
 
@@ -637,27 +637,29 @@ Codex CLI 호출의 단일 진입점입니다. Gran Maestro 워크플로우 내�
 
 ---
 
-### /mst:gemini
+### /mst:agy
 
-**한 줄 설명**: Gemini CLI를 호출하여 대용량 컨텍스트 작업을 실행합니다.
+**한 줄 설명**: AGY CLI를 호출하여 대용량 컨텍스트 작업을 실행합니다.
 
 **인자**: `{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--files {패턴}] [--trace {REQ/TASK/label}]`
 
 #### 목적
 
-Gemini CLI 호출의 단일 진입점입니다. 대용량 문서, 프론트엔드 전체 분석, 넓은 컨텍스트가 필요한 작업에 적합합니다.
+AGY CLI 호출의 단일 진입점입니다. 대용량 문서, 프론트엔드 전체 분석, 넓은 컨텍스트가 필요한 작업에 적합합니다.
+
+`/mst:gemini`는 deprecated compatibility wrapper로 한 릴리스 동안 동일 인자를 `/mst:agy`로 넘깁니다.
 
 #### 사용 시점
 
 - 프론트엔드 전체 코드베이스를 분석해야 할 때
-- 대용량 문서 작업(예: 30개 스킬 레퍼런스 일괄 갱신)에 Gemini의 넓은 컨텍스트 창이 필요할 때
+- 대용량 문서 작업(예: 30개 스킬 레퍼런스 일괄 갱신)에 AGY의 넓은 컨텍스트 창이 필요할 때
 - `--files` 옵션으로 여러 파일을 컨텍스트로 전달할 때
 
 #### 사용 예시
 
 ```
-/mst:gemini "이 코드베이스의 아키텍처를 분석해줘" --files "src/**/*.ts"
-/mst:gemini --prompt-file .gran-maestro/requests/REQ-007/tasks/01/spec.md --dir .gran-maestro/worktrees/REQ-007-01
+/mst:agy "이 코드베이스의 아키텍처를 분석해줘" --files "src/**/*.ts"
+/mst:agy --prompt-file .gran-maestro/requests/REQ-007/tasks/01/spec.md --dir .gran-maestro/worktrees/REQ-007-01
 ```
 
 ---
@@ -670,11 +672,11 @@ Gemini CLI 호출의 단일 진입점입니다. 대용량 문서, 프론트엔�
 
 #### 목적
 
-PM Conductor의 "I conduct, I don't code" 원칙을 유지하면서, 별도 Claude 서브에이전트 프로세스를 스폰하여 구현 작업을 분리합니다. Codex/Gemini CLI가 설치되지 않은 환경이나 Claude의 파일 편집 도구(Read/Write/Edit/Bash/Glob/Grep)가 필요한 작업에 활용합니다.
+PM Conductor의 "I conduct, I don't code" 원칙을 유지하면서, 별도 Claude 서브에이전트 프로세스를 스폰하여 구현 작업을 분리합니다. Codex/AGY CLI가 설치되지 않은 환경이나 Claude의 파일 편집 도구(Read/Write/Edit/Bash/Glob/Grep)가 필요한 작업에 활용합니다.
 
 #### 사용 시점
 
-- Codex나 Gemini CLI가 설치되지 않은 환경에서 구현 작업을 위임할 때
+- Codex나 AGY CLI가 설치되지 않은 환경에서 구현 작업을 위임할 때
 - Gran Maestro 워크플로우 내 `claude-dev` 태스크를 디스패치할 때
 - 파일 읽기/쓰기/편집 도구가 필요한 태스크를 서브에이전트에게 분리 실행할 때
 
@@ -1000,7 +1002,7 @@ Gran Maestro Chrome Extension(UI Picker)을 Chrome에 로드하는 설치 절차
      └→ /mst:request --plan PLN-NNN -a
            └→ spec.md 작성 (Spec Pre-review 없음)
               └→ /mst:approve REQ-NNN --auto
-                    └→ Phase 2 실행 (codex/gemini)
+                    └→ Phase 2 실행 (codex/agy)
                        └→ /mst:review --auto
                               └→ /mst:accept  (auto_accept_result=true 시)
 ```
@@ -1082,7 +1084,7 @@ Gran Maestro는 사용자의 자연어 발화에서 의도를 감지하여 해�
 | 자연어 키워드 / 발화 패턴 | 자동 실행 스킬 |
 |--------------------------|--------------|
 | "코덱스 실행", "코덱스로", "Codex로 작업" | `/mst:codex` |
-| "제미나이 실행", "제미나이로", "Gemini로 분석", "대용량 분석" | `/mst:gemini` |
+| "AGY 실행", "AGY로", "AGY로 분석", "대용량 분석" | `/mst:agy` |
 | "클로드로 실행", "클로드 서브에이전트", "Claude 서브에이전트" | `/mst:claude` |
 
 ### 관리 트리거

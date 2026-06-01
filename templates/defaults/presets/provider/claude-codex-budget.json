@@ -37,7 +37,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -53,7 +53,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -70,7 +70,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -85,7 +85,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0
       },
       "claude": {
@@ -100,7 +100,7 @@
         "count": 1,
         "tier": "economy"
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -146,7 +146,7 @@
         "tier": "economy"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": false,
         "tier": "economy"
       }

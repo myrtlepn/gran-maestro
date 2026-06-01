@@ -63,12 +63,12 @@ argument-hint: "{주제} [--focus {architecture|ux|performance|security|cost}]"
       "completed_at": null
     },
     {
-      "key": "ux-strategist(gemini)",
+      "key": "ux-strategist(agy)",
       "role": "ux-strategist",
       "perspective": "",
       "type": "opinion",
       "status": "pending",
-      "provider": "gemini",
+      "provider": "agy",
       "started_at": null,
       "completed_at": null
     },
@@ -87,30 +87,30 @@ argument-hint: "{주제} [--focus {architecture|ux|performance|security|cost}]"
     "claude": { "status": "pending", "provider": "claude" }
   },
   "critic_count": 1,
-  "participant_config": { "codex": 3, "gemini": 2, "claude": 1 }
+  "participant_config": { "codex": 3, "agy": 2, "claude": 1 }
 }
 ```
 
 `participants`는 config의 `ideation.agents`를 읽어 생성합니다 (`discussion`과 독립 운영).
 ### participants 동적 생성 규칙
-1. 각 provider(codex, gemini, claude)의 count 읽기
+1. 각 provider(codex, agy, claude)의 count 읽기
 2. count == 1 → key는 `{role}(provider)` 형식
 3. count > 1 → 순서대로 role 생성, `{participant.key}` 형태로 key 구성
 4. 각 항목에 `provider` 필드 기록
 5. 합계 검증: 2~7명, 위반 시 에러 후 중단
 6. count == 0 → 해당 provider 완전 skip
 
-`participants` 키 없으면 기본값 `{ codex:1, gemini:1, claude:1 }`.
+`participants` 키 없으면 기본값 `{ codex:1, agy:1, claude:1 }`.
 
-예시 (`ideation.agents.codex=3`, `ideation.agents.gemini=2`, `ideation.agents.claude=1`):
+예시 (`ideation.agents.codex=3`, `ideation.agents.agy=2`, `ideation.agents.claude=1`):
 ```json
 {
   "participants": [
     { "key": "architect(codex)", "role": "architect", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
     { "key": "ux(codex)", "role": "ux", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
     { "key": "security(codex)", "role": "security", "perspective": "", "type": "opinion", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
-    { "key": "architecture(gemini)", "role": "architecture", "perspective": "", "type": "opinion", "status": "pending", "provider": "gemini", "started_at": null, "completed_at": null },
-    { "key": "cost(gemini)", "role": "cost", "perspective": "", "type": "opinion", "status": "pending", "provider": "gemini", "started_at": null, "completed_at": null },
+    { "key": "architecture(agy)", "role": "architecture", "perspective": "", "type": "opinion", "status": "pending", "provider": "agy", "started_at": null, "completed_at": null },
+    { "key": "cost(agy)", "role": "cost", "perspective": "", "type": "opinion", "status": "pending", "provider": "agy", "started_at": null, "completed_at": null },
     { "key": "risk(claude)", "role": "risk", "perspective": "", "type": "opinion", "status": "pending", "provider": "claude", "started_at": null, "completed_at": null }
   ]
 }
@@ -120,15 +120,15 @@ argument-hint: "{주제} [--focus {architecture|ux|performance|security|cost}]"
 
 PM이 주제와 focus를 분석하여 `participants` 수만큼 관점을 배정합니다.
 - 주제 분석: 도메인, 복잡도, 기술적 깊이 파악
-- 프로바이더 매칭: Codex(코드/구현/아키텍처), Gemini(전략/디자인/트렌드), Claude(추론/리스크/평가)
+- 프로바이더 매칭: Codex(코드/구현/아키텍처), AGY(전략/디자인/트렌드), Claude(추론/리스크/평가)
 - Critic 수: 기본 1, 복잡 주제 2
-- Critic 배정: Claude ≥ 1 → Claude 우선, Claude = 0 → Codex → Gemini. critic_count=2 → 2명 배정
+- Critic 배정: Claude ≥ 1 → Claude 우선, Claude = 0 → Codex → AGY. critic_count=2 → 2명 배정
 - `session.json` 업데이트: `participants[].perspective`, `critics` 키, `participant_config`, `critic_count`, `status: "collecting"`
 
 ### AUTO-CONTINUE 원칙 (CRITICAL)
 
 > **이 스킬의 Step 1~3은 사용자 입력 없이 자율적으로 진행합니다.**
-> - 백그라운드 작업(Codex/Gemini/Claude)이 완료될 때, 사용자에게 "계속할까요?" "진행할까요?" 등을 **절대 묻지 마세요**.
+> - 백그라운드 작업(Codex/AGY/Claude)이 완료될 때, 사용자에게 "계속할까요?" "진행할까요?" 등을 **절대 묻지 마세요**.
 > - 개별 백그라운드 작업 완료 알림에는 간단히 확인만 하고 **모든 작업이 완료될 때까지 대기**하세요.
 > - 모든 작업이 완료되면 **즉시 다음 Step**으로 진행하세요 (Step 2 (participants + critics 동시 dispatch) → 2.5 (완료 대기 + 진행 상황 출력) → 2.7 (critic 완료 확인) → 3 → 사용자 보고).
 > - 사용자 상호작용은 Step 4(인터랙티브 토론)에서만 발생합니다.
@@ -264,11 +264,11 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{participant.key}-prompt.md)\" > {absolute_path}/opinion-{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/opinion-{participant.key}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/prompts/{participant.key}-prompt.md)\" --model {config.models.providers.gemini[ideation.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/opinion-{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/opinion-{participant.key}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/prompts/{participant.key}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/opinion-{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/opinion-{participant.key}.md; exit $EC"
   )
   ```
 - `provider: "claude"`:
@@ -290,11 +290,11 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/critique-{criticKey}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/prompts/critique-{criticKey}-prompt.md)\" --model {config.models.providers.gemini[ideation.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/critique-{criticKey}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/prompts/critique-{criticKey}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/critique-{criticKey}.md; exit $EC"
   )
   ```
 - `provider: "claude"`:

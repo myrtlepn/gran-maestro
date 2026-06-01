@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### 개선
+
+- **AGY provider 전환**: Gemini CLI 종료 예정에 맞춰 canonical provider/skill/agent를 `agy`, `/mst:agy`, `agy-dev`로 전환했습니다. 기존 `/mst:gemini`, `gemini`, `gemini-dev` 설정과 세션 값은 한 릴리스 동안 deprecated alias로 읽고 AGY 경로로 정규화합니다.
+
 ---
 
 ## [0.61.0] — 2026-05-25

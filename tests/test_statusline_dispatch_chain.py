@@ -11,6 +11,7 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATUSLINE_SCRIPT = REPO_ROOT / "scripts" / "mst-statusline.sh"
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SID = "MST-REQ-700-20260601T000000000Z-test0001"
 
 
 def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.CompletedProcess:
@@ -21,6 +22,9 @@ def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.Complete
     env["CLAUDE_CONFIG_DIR"] = str(home_dir / ".claude")
     env["LANG"] = "C"
     env["LC_ALL"] = "C"
+    env.pop("MST_SESSION_ID", None)
+    env.pop("MST_CONTEXT_JSON", None)
+    env.pop("MST_STATE_PPID", None)
 
     return subprocess.run(
         ["bash", str(STATUSLINE_SCRIPT)],
@@ -33,13 +37,17 @@ def _run_statusline(workspace: Path, payload: str = "{}") -> subprocess.Complete
     )
 
 
-def _run_mst(workspace: Path, *args: str) -> subprocess.CompletedProcess:
+def _run_mst(workspace: Path, *args: str, env_overrides: Optional[dict[str, str]] = None) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    if env_overrides:
+        env.update(env_overrides)
     return subprocess.run(
         [sys.executable, str(MST_SCRIPT), *args],
         cwd=workspace,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -52,6 +60,18 @@ def _last_line(result: subprocess.CompletedProcess) -> str:
 
 def _iso_ago(**kwargs) -> str:
     return (datetime.now(timezone.utc) - timedelta(**kwargs)).isoformat()
+
+
+def _canonical_env() -> dict[str, str]:
+    context = {
+        "schema_version": 1,
+        "mst_session_id": SID,
+        "root_mst_id": "REQ-700",
+    }
+    return {
+        "MST_SESSION_ID": SID,
+        "MST_CONTEXT_JSON": json.dumps(context, separators=(",", ":")),
+    }
 
 
 def _write_snapshot(workspace: Path, payload: dict) -> Path:
@@ -110,7 +130,7 @@ def test_oldest_auto_scale_and_prefix_absorption(tmp_path):
     assert "MST 3 run" not in last_line
     assert re.search(r"oldest \d+s", last_line) is None
     assert re.fullmatch(
-        r"plan\(1m\) > \[codex:REQ-700-T01\(3[0-9]s\), gemini:REQ-700-T02\(2m\), claude:REQ-700-T03\(9d\)\]",
+        r"\[codex:REQ-700-T01\(3[0-9]s\), gemini:REQ-700-T02\(2m\), claude:REQ-700-T03\(9d\)\]",
         last_line,
     ), last_line
 
@@ -151,7 +171,7 @@ def test_run_json_skill_field(tmp_path):
         "dispatch",
         "register",
         "--provider",
-        "gemini",
+        "agy",
         "--task-id",
         "REQ-700-T02",
         "--pid",
@@ -160,13 +180,14 @@ def test_run_json_skill_field(tmp_path):
         "test-model",
         "--worktree-dir",
         str(workspace),
+        env_overrides=_canonical_env(),
     )
     assert no_skill.returncode == 0, no_skill.stderr
 
     data = json.loads((workspace / ".gran-maestro" / "run" / "REQ-700-T02.json").read_text(encoding="utf-8"))
     assert data["skill"] == ""
     assert data["pid"] == 12345
-    assert data["provider"] == "gemini"
+    assert data["provider"] == "agy"
 
 
 def test_parallel_group_node(tmp_path):
@@ -188,7 +209,7 @@ def test_parallel_group_node(tmp_path):
     last_line = _last_line(result)
 
     assert re.fullmatch(
-        r"plan\(8m\) > request\(2m\) > \[codex:REQ-700-T01\(2m\), gemini:REQ-700-T02\(3m\)\]",
+        r"\[codex:REQ-700-T01\(2m\), gemini:REQ-700-T02\(3m\)\]",
         last_line,
     ), last_line
 
@@ -205,6 +226,16 @@ def test_dispatch_group_keeps_only_current_ppid_running_runs(tmp_path):
     assert re.fullmatch(r"\[codex:A\(3[0-9]s\)\]", last_line), last_line
     assert "B" not in last_line
     assert "C" not in last_line
+
+
+def test_dispatch_group_displays_agy_provider(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_run(workspace, "REQ-754-T01", "agy", _iso_ago(seconds=30), skill="mst:agy")
+
+    result = _run_statusline(workspace)
+    last_line = _last_line(result)
+
+    assert re.fullmatch(r"\[agy:REQ-754-T01\(3[0-9]s\)\]", last_line), last_line
 
 
 def test_dispatch_group_silently_drops_legacy_run_without_started_by_pid(tmp_path):
@@ -235,6 +266,6 @@ def test_no_dispatch_no_group(tmp_path):
     result = _run_statusline(workspace)
     last_line = _last_line(result)
 
-    assert last_line == "plan(8m) > request(2m)"
+    assert last_line == "MST idle"
     assert "[" not in last_line
     assert "]" not in last_line

@@ -5,13 +5,13 @@
       "role": "developer",
       "agent_category": "execution",
       "capabilities": ["code", "refactor", "test"],
-      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+      "cli_command_map": { "codex": "codex", "agy": "agy" }
     },
     "fallback_dev": {
       "role": "developer",
       "agent_category": "execution",
       "capabilities": ["frontend", "docs", "large-context"],
-      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+      "cli_command_map": { "codex": "codex", "agy": "agy" }
     }
   },
   "review_agents": {
@@ -19,13 +19,13 @@
       "role": "reviewer",
       "agent_category": "review",
       "capabilities": ["code-review", "accuracy"],
-      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+      "cli_command_map": { "codex": "codex", "agy": "agy" }
     },
     "fallback_reviewer": {
       "role": "reviewer",
       "agent_category": "review",
       "capabilities": ["review", "consistency", "large-context"],
-      "cli_command_map": { "codex": "codex", "gemini": "gemini" }
+      "cli_command_map": { "codex": "codex", "agy": "agy" }
     }
   }
 }

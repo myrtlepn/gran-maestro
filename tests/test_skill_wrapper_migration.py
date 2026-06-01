@@ -16,24 +16,31 @@ def test_codex_skill_uses_run_wrapper():
     assert "-- codex exec" in content or "-- codex" in content
 
 
-def test_gemini_skill_uses_run_wrapper():
-    content = _skill_md("gemini")
+def test_agy_skill_uses_run_wrapper():
+    content = _skill_md("agy")
     assert "mst.py run" in content
     assert "--task-id" in content
-    assert "-- gemini" in content
+    assert "-- agy --print" in content
+
+
+def test_gemini_skill_is_deprecated_wrapper():
+    content = _skill_md("gemini")
+    assert "Deprecated compatibility wrapper" in content
+    assert "/mst:agy" in content
+    assert "gemini -p" not in content
 
 
 def test_claude_skill_uses_run_wrapper():
     content = _skill_md("claude")
     assert "mst.py run" in content
     assert "--task-id" in content
-    # claude-code 또는 claude CLI 호출
-    assert "-- claude" in content
+    assert "--provider claude" in content
+    assert "provider-owned subprocess" in content
 
 
 def test_skills_preserve_frontmatter():
     """frontmatter(name, description, argument-hint)가 유지되는지 검증"""
-    for skill in ("codex", "gemini", "claude"):
+    for skill in ("codex", "agy", "gemini", "claude"):
         content = _skill_md(skill)
         assert content.startswith("---"), f"{skill}/SKILL.md must start with frontmatter"
         assert "name:" in content.split("---")[1]
@@ -42,7 +49,7 @@ def test_skills_preserve_frontmatter():
 
 def test_skills_document_task_id_placeholder():
     """AC-004: 3개 SKILL.md에 {task_id} placeholder 유도 규칙 명시"""
-    for skill in ("codex", "gemini", "claude"):
+    for skill in ("codex", "agy", "claude"):
         content = _skill_md(skill)
         assert "{task_id}" in content, f"{skill}: {{task_id}} 언급 없음"
         assert "Placeholder 유도 규칙" in content or "REQ-ID" in content, (

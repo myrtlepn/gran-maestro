@@ -128,7 +128,7 @@ python3 scripts/mst.py state set-workflow \
 
 ### Phase 4 예정: Outbox 패턴 + Event log
 
-백그라운드 codex/gemini dispatch 중 세션 크래시 시 재진입 복원이 불완전할 수 있습니다. 현재는 각 Skill 호출이 iteration 내에서 동기 완료되는 경로만 안전합니다.
+백그라운드 codex/agy dispatch 중 세션 크래시 시 재진입 복원이 불완전할 수 있습니다. 현재는 각 Skill 호출이 iteration 내에서 동기 완료되는 경로만 안전합니다.
 
 ### 기타 제한사항
 

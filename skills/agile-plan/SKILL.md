@@ -2,7 +2,7 @@
 name: agile-plan
 description: "프로젝트 목표 + 설계 문서(objective.md)를 JTBD 기반 Q&A로 생성하고, 실행 전 검토 가능한 플래닝 세션을 초기화합니다."
 user-invocable: true
-argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/step]"
+argument-hint: "{프로젝트 목표 | --doc 파일경로 | --resume AGI-NNN} [--return-to parent/step] [-a|--auto]"
 ---
 
 # maestro:agile-plan
@@ -15,8 +15,14 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/objective.md` (신규 생성)
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/details/*.md` (신규 생성)
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/draft/objective.md` (staged draft)
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/draft/details/*.md` (staged draft)
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/clarification-context.md`
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/clarification-questions.md`
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/round-history.md`
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/adversarial-review-findings.md` (review transcript only; canonical JSON sidecar는 managed command 사용)
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/quality-gate-log.md`
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/auto-decisions.md`
 - `{PROJECT_ROOT}/.gran-maestro/state/{MST_SESSION_ID}/snapshot.json` (`agile init`이 반환한 `mst_session_id`, 상속된 `MST_SESSION_ID`, 또는 동일한 structured context로 기록되는 상태 파일)
 
 그 외 모든 경로에 대한 Write/Edit 사용은 금지합니다.
@@ -24,11 +30,39 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 - objective 상태 변경은 직접 편집이 아니라 `mst.py` 명령을 통해 수행한다.
 - 프로젝트 DoD 체크리스트는 완료 판정의 유일한 게이트로 다룬다(DSC-047).
 
+### Managed Artifact Contract (MANDATORY)
+
+위 allowlist는 PM/에이전트의 직접 `Write/Edit` 도구 사용에만 적용한다. 아래 산출물은 직접 생성하지 말고 반드시 `mst.py` managed command를 통해 생성/갱신한다.
+
+| 산출물 | 생성/갱신 경로 | 실패 시 처리 |
+|--------|----------------|--------------|
+| `objective.ids.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` 또는 `agile detail generate-anchors --details-dir ...` | completion blocker |
+| `handoff-manifest.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | missing_context / completion blocker |
+| `adversarial-review-findings.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | completion blocker |
+| `finding-trace.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | completion blocker |
+| `section-review-inventory.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | completion blocker |
+| `d3-findings.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | completion blocker |
+| `reference-links.json` | `python3 {PLUGIN_ROOT}/scripts/mst.py agile sidecar-build {AGI_ID}` | explicit skip reason 또는 fail_reference_handoff |
+| `state/{MST_SESSION_ID}/snapshot.json` | `MST_SESSION_ID=... python3 {PLUGIN_ROOT}/scripts/mst.py state set ...` | structured non-success |
+| `.gran-maestro/references/REF-*/` | `python3 {PLUGIN_ROOT}/scripts/mst.py reference add ...` | `NO_REFERENCE` / missing_context |
+| DoD status marker 및 changelog | `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-transition ...` | 전이 거부 |
+
+managed command가 없거나 실패한 산출물을 직접 `Write/Edit`로 우회 생성하지 않는다. 실패는 해당 command 출력, sidecar schema validation, 또는 explicit skip reason으로 남긴다.
+
+### Draft Lifecycle Contract (MANDATORY)
+
+- 저장 전 초안은 먼저 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/draft/` 아래 staged draft로 materialize한다.
+- 적대적 검토, source mapping, D3, anchor generation, handoff manifest 검증은 staged draft 또는 그 draft에서 생성한 sidecar evidence를 대상으로 수행한다.
+- accepted `objective.md`와 `objective/details/*.md`는 mandatory gate가 모두 통과한 뒤에만 promote한다.
+- gate 실패, review blocker, source mapping 실패, sidecar schema 실패가 있으면 accepted objective를 변경하지 않고 draft 경로와 failure reason만 남긴다.
+- promotion 후에는 `objective-snapshot`, `objective-transition`, `sidecar-build`, `objective-check` 순서로 completion evidence를 재계산한다.
+
 ## Gate
 
 ### Entry
 
-- Step 0에서 반드시 `mst.py agile init`으로 AGI 세션을 먼저 생성한다.
+- Step 0.0에서 command identity/no-plan-mode preflight를 먼저 통과한다.
+- preflight 통과 후 Step 0.2에서 `mst.py agile init`으로 AGI 세션을 생성한다.
 - `--doc` 미지정 시 1A(Q&A 생성 모드), 지정 시 1B(문서 파싱 모드)로 분기한다.
 - Story/작업 실행 루프로 진입하지 않는다. 이 스킬은 objective 생성까지만 수행한다.
 
@@ -76,13 +110,50 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 | 플래그 | 설명 | 예시 |
 |--------|------|------|
 | `--doc 파일경로` | 기존 문서 파싱 모드 | `--doc docs/spec.md` |
+| `--resume AGI-NNN` | 기존 AGI objective 재진입/recall patch 모드 | `--resume AGI-029` |
 | `--return-to parent/step` | 서브스킬 복귀 지점 | `--return-to agile/1` |
+| `-a`, `--auto` | parent agile 자율 모드 상속 | `--auto` |
 
 - `--return-to` 미지정 시 독립 실행으로 간주 (`return_to=null`)
+- `--auto`가 있거나 parent workflow state의 `auto=true`이면 `AUTO_MODE=true`로 고정한다. 이 값은 Step 0부터 Exit까지 유지하며 사용자 대기 질문을 생성하지 않는다.
+
+#### Entry Mode Precedence Contract (MANDATORY)
+
+Entry mode는 아래 순서로 deterministic하게 해석한다. 뒤 단계는 앞 단계 결정을 override하지 못한다.
+
+1. `--resume AGI-NNN`: 기존 session/objective/history를 로드하며 `agile init`을 실행하지 않는다. recall patch manifest가 있으면 이 resume context 안에서만 Step 1P로 진입한다.
+2. `--doc 파일경로`: `--resume`이 없을 때만 문서 파싱 모드(1B)를 선택한다.
+3. Q&A objective 생성: `--resume`과 `--doc`이 모두 없을 때만 Step 1A를 선택한다.
+4. `--return-to`: entry mode를 바꾸지 않는 exit routing only 값이다.
+5. `--auto` 또는 parent workflow `auto=true`: entry mode를 바꾸지 않는 interaction policy 값이다.
+
+충돌 해소 우선순위는 `CLI flags > inherited workflow state > config defaults > prompt summary diagnostic-only`이다. source precedence는 `validated history ledger`, `validated state snapshot`, `prompt summary diagnostic-only` 순서로만 읽으며 prompt summary는 canonical state를 만들거나 복구하는 source가 아니다.
+
+상태 mutation에는 canonical `MST_SESSION_ID`/`mst_session_id`가 반드시 필요하다. canonical identity가 없거나 검증 실패하면 AGI/session/history/snapshot을 silent pass로 갱신하지 않고 structured non-success로 종료한다. Legacy-only input(`MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, `sessionId`, `session_id`)은 diagnostic-only이며 canonical fallback이 아니다.
+
+Regression fixture matrix는 최소한 아래 조합을 포함한다.
+- `/mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`: resume wins, doc ignored for mode, return-to is exit routing, auto only changes interaction policy.
+- `/mst:agile-plan --doc spec.md` with no canonical identity mutation request: doc mode wins over Q&A.
+- parent agile inherited `auto=true` without CLI `--auto`: AUTO_MODE=true, no AskUserQuestion wait.
+- missing canonical `MST_SESSION_ID` on state write: structured non-success, no snapshot mutation.
+
+#### 0.0 command identity/no-plan-mode preflight (MANDATORY, before side effects)
+
+이 preflight는 `mst.py agile init`, 파일 생성, state 기록, 에이전트 위임보다 먼저 수행한다.
+
+- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 고정한다.
+- `/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.
+- Claude Code 내장 plan mode로 진입하지 않는다. 어떤 단계에서도 `EnterPlanMode`를 호출하지 않고, transcript/tool-call/captured output에 `Entered plan mode`를 출력하지 않는다.
+- 입력 형식이나 필수 정보 부족으로 objective/agile planning 입력으로 수용할 수 없으면, 아직 AGI 세션을 만들지 않은 상태로 수용 불가 사유를 보고하고 Step 0.5.3의 후보 제시 절차로만 이동한다.
 
 #### 0.2 agile init 호출
 
-1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile init --steering-every 3 --json` 실행
+0. `--resume AGI-NNN`이 있으면 `agile init`을 실행하지 않는다.
+   - `python3 {PLUGIN_ROOT}/scripts/mst.py agile status AGI-NNN --json`으로 기존 session을 로드한다.
+   - 로드 성공 시 기존 `AGI_ID`, `mst_session_id`, objective version/history를 그대로 사용한다. 새 AGI를 만들거나 objective를 새 파일로 복사하지 않는다.
+   - `MST_SESSION_ID`는 session의 canonical `mst_session_id` 또는 상속된 structured context 값만 사용한다.
+   - 재진입 목적이 recall patch이면 Step 1P로, 단순 정제 재진입이면 Step 1A.10 저장 규칙 검증으로 이동한다.
+1. `--resume`이 없을 때만 `python3 {PLUGIN_ROOT}/scripts/mst.py agile init --steering-every 3 --json` 실행
 2. 출력에서 `agi_id`를 파싱해 `AGI_ID`에 저장하고, `mst_session_id`를 파싱해 `MST_SESSION_ID`에 저장한다.
 3. 이후 모든 `mst.py state ...` 호출은 아래처럼 동일한 canonical identity를 명시해 실행한다.
    ```bash
@@ -95,9 +166,10 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 ### Step 0.5: 의도 분류 게이트
 
-#### 0.5.0 command identity guard (MANDATORY)
+#### 0.5.0 command identity guard 확인 (MANDATORY)
 
-- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Step 0부터 Exit까지 고정한다.
+- Step 0.0에서 command identity/no-plan-mode preflight가 이미 완료됐는지 확인한다. 완료되지 않았으면 Step 0.0으로 돌아가며, AGI/session/state side effect를 만들지 않는다.
+- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 유지한다.
 - 이 guard는 `/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `/mst:plan` 및 `/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.
 - `/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.
 - Claude Code 내장 plan mode로 진입하지 않는다. 어떤 단계에서도 `EnterPlanMode`를 호출하지 않고, transcript/tool-call/captured output에 `Entered plan mode`를 출력하지 않는다.
@@ -131,6 +203,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 2. 사용자 응답이 `objective 생성으로 진행`이면 Step 1A로 진행한다.
 3. Step 1A 진행 시 요청 원문 + Step 0.5 확인 대화 내용을 JTBD Q&A 초기 컨텍스트로 함께 전달한다.
 4. 사용자 응답이 `다른 의도 설명`이면 Step 0.5.3으로 진행한다.
+5. `AUTO_MODE=true`에서는 AskUserQuestion을 호출하지 않는다. confidence가 낮으면 `auto-decisions.md`와 `clarification-questions.md`에 blocker를 기록하고 structured non-success로 종료하거나, Step 0.5.3 후보 제시를 사용자 대기 없이 산출물로만 남긴다.
 
 #### 0.5.3 메타/질문 처리 후 objective 선제시
 
@@ -141,8 +214,9 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
    - 형식: `[objective 후보] A. {후보1} B. {후보2} C. {후보3}` 또는 `[objective 후보] 1. {후보1} 2. {후보2} 3. {후보3}`
    - 후보 표기는 `A.`, `B.`, `C.`, `1.`, `2.`, `3.`처럼 쉬운 prefix와 의미 요약을 함께 사용한다. 그리스 문자·로마 숫자·bare prefix는 금지한다.
    - 후보가 도출되지 않으면 "objective 후보가 도출되지 않았습니다. agile-plan 입력으로 수용할 수 없는 사유: {사유}" 출력 후 종료한다. 다른 명령이나 내장 plan mode로 전환하지 않는다.
-3. AskUserQuestion으로 후보 중 선택받거나 UI 자동 Other로 직접 objective 입력받아 Step 1A로 진입한다. `"D. 종료"` 선택지를 포함한다.
-4. 선택된 주제를 Step 1A JTBD Q&A 초기 컨텍스트로 전달한다.
+3. `AUTO_MODE=false`: AskUserQuestion으로 후보 중 선택받거나 UI 자동 Other로 직접 objective 입력받아 Step 1A로 진입한다. `"D. 종료"` 선택지를 포함한다.
+4. `AUTO_MODE=true`: AskUserQuestion을 호출하지 않는다. 후보가 1개이고 objective 입력으로 충분하면 PM이 그 후보를 선택하고 근거를 `auto-decisions.md`에 기록한다. 후보가 2개 이상이거나 사용자 의존성이 있으면 `clarification-questions.md`에 blocker를 기록하고 structured non-success로 종료한다.
+5. 선택된 주제를 Step 1A JTBD Q&A 초기 컨텍스트로 전달한다.
 
 ---
 
@@ -334,6 +408,12 @@ END WHILE
    - 단순 "네/아니오" 응답은 제외하되, 사용자가 **왜 그렇게 결정했는지**, **어떤 구조로 만들고 싶은지**, **어떤 프로세스를 따르는지** 등 설계 의도가 담긴 발화는 반드시 축적한다.
    - 축적 시 원문을 보존하고, PM이 구체화·보강할 수 있다 (요약/축약 금지).
    - 이 버퍼는 Step 1A.9.5(도메인 클러스터링)와 1A.10(저장) 단계에서 details/*.md의 핵심 소재로 사용된다.
+6. `AUTO_MODE=true`: 자연어 사용자 대기, AskUserQuestion, "종료하시겠습니까?"류 확인 질문을 생성하지 않는다.
+   - 최대 `agile.objective_refinement.max_auto_rounds`(기본 2)까지만 PM 자율 정제를 수행한다.
+   - 수렴하면 Step 1A.6으로 진행한다.
+   - critical/major 사용자 의존 모호성이 남으면 `clarification-questions.md`와 `auto-decisions.md`에 blocker를 기록하고 structured non-success로 종료한다.
+   - minor/PM 판단 가능 항목만 남으면 `auto-decisions.md`에 근거를 기록하고 진행한다.
+7. `AUTO_MODE=false`: 사용자 대화 루프는 soft limit과 수렴 체크포인트를 반드시 적용하며, soft limit 도달 시에도 질문은 1회만 수행한다.
 
 ##### 1A.5 수렴 판정 + soft limit 체크포인트 (MANDATORY)
 
@@ -360,6 +440,7 @@ END WHILE
 soft limit:
 - 기본 `soft_limit_rounds=8` (설정값이 있으면 우선 적용)
 - `round == soft_limit_rounds`에 도달하면 합의사항/미해결 쟁점을 요약하고 종료/연장 선택을 받는다.
+- `AUTO_MODE=true`에서는 soft limit 질문을 하지 않는다. `max_auto_rounds` 도달 시 수렴/blocked/auto-decision 중 하나의 structured branch로만 종료한다.
 
 ##### 1A.6 프로젝트 DoD 품질 게이트 (MANDATORY)
 
@@ -549,22 +630,24 @@ Step 1A.9.5 도메인 클러스터링 (및 Step 1A.9.6 완성된 모습 미리�
    - `agile.adversarial_review.enabled != true`이면 graceful skip 후 Step 1A.10으로 진행한다.
    - enabled perspective만 실행한다. 기본 enabled는 `edge`, `flow`, `integration`이며 `persona`, `nfr`은 설정이 true인 경우에만 실행한다.
    - `max_rounds` 기본값은 3, `current_round` 초기값은 1이다.
-2. 각 perspective마다 아래 CLI로 context 경로와 output schema 경로만 조회한다.
+2. 현재 draft를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/draft/`에 materialize한다. 이 단계는 accepted objective promotion이 아니다.
+3. 각 perspective마다 아래 CLI로 context 경로와 output schema 경로만 조회한다.
    ```bash
-   python3 {PLUGIN_ROOT}/scripts/mst.py agile review --agi {AGI_ID} --perspective {name} --json
+   python3 {PLUGIN_ROOT}/scripts/mst.py agile review --agi {AGI_ID} --perspective {name} --draft-dir {PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/draft --json
    ```
-3. CLI 결과의 `context_files` 경로와 `output_schema` 경로만 독립 에이전트에 전달한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이며 반드시 독립 컨텍스트로 실행한다. 프롬프트에는 plan/objective 원문, detail 본문, DoD/JTBD 원문을 절대 포함하지 않는다.
+4. CLI 결과의 `context_source`가 `draft`인지 확인한다. `accepted`, `placeholder`, 빈 context, 또는 이전 objective 경로가 반환되면 review를 중단하고 draft materialization을 수정한다.
+5. CLI 결과의 `context_files` 경로와 `output_schema` 경로만 독립 에이전트에 전달한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이며 반드시 독립 컨텍스트로 실행한다. 프롬프트에는 plan/objective 원문, detail 본문, DoD/JTBD 원문을 절대 포함하지 않는다.
    ```text
    역할: {perspective} 관점의 적대적 검토자.
    Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
    ```
-4. findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/objective/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, `requires_user_answer`, `question`, `recommended_answer`, 반영 여부를 포함한다.
-5. 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. 수렴 전에는 먼저 critical/major 사용자 의존 finding을 Critical/Major Clarification Batch Rule로 처리한다. 사용자 의존성이 없는 나머지 finding만 Step 1A.4 재귀 정제 루프의 추가 입력으로 반영하고 `current_round += 1` 후 재검토한다.
-6. `AUTO_MODE=true`:
+6. findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/objective/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, `requires_user_answer`, `question`, `recommended_answer`, 반영 여부를 포함한다.
+7. 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. 수렴 전에는 먼저 critical/major 사용자 의존 finding을 Critical/Major Clarification Batch Rule로 처리한다. 사용자 의존성이 없는 나머지 finding만 Step 1A.4 재귀 정제 루프의 추가 입력으로 반영하고 `current_round += 1` 후 재검토한다.
+8. `AUTO_MODE=true`:
    - `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다.
    - `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 보낸다. PM이 자동 반영하지 않는다.
    - 그 외 finding만 자동 반영 가능하며 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
-7. `AUTO_MODE=false`:
+9. `AUTO_MODE=false`:
    - 기본 실행은 `edge` + `flow` 2종을 순차 실행한다. 설정에서 다른 perspective가 enabled여도 PM이 필요하다고 판단한 경우에만 추가 실행한다.
    - `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 묶어 사용자 confirm 후 objective/detail 보강에 반영한다. minor는 요약만 제시하고 사용자가 반영을 선택한 경우에만 재정제한다.
 
@@ -673,7 +756,11 @@ objective 저장 직후, downstream agile/request/approve handoff는 아래 path
 - detail 파일(`objective/details/*.md`)에는 해당 도메인의 **모든 상세 내용**을 원본 수준으로 보존한다(요약/축약 금지).
   - Q&A 모드(1A): 사용자와의 대화에서 논의된 **모든** 설계 내용을 원본 그대로 `## 상세 명세` 하위에 1:1 보존한다 — 설계 결정과 그 근거, 기술 선택과 비교 대안, 디렉토리 구조, 프로세스 흐름, Gate/체크리스트, 스키마/템플릿, 예시, 합의 사항 등. PM은 사용자 발화를 누락 없이 기록하며, 대화에서 논의되었으나 details/에 없는 내용이 있으면 안 된다.
   - `--doc` 모드(1B): 원본 문서의 해당 도메인 내용 전체 + Q&A로 추가 보완된 내용. 원본 문서에 기술된 내용이 details/에서 누락되어서는 안 된다.
-  - 각 `details/{domain}.md` 파일의 **첫 줄**에는 반드시 `<!-- source-mapping: original=<원본경로> sections=[<H1/H2 헤더 목록>] -->` 메타데이터를 작성한다.
+  - 각 `details/{domain}.md` 파일의 **첫 줄**에는 반드시 source mapping 메타데이터를 작성한다.
+    - `--doc` 모드 또는 원본문서가 있는 경우: `<!-- source-mapping: original=<원본경로> sections=[<H1/H2 헤더 목록>] -->`
+    - Q&A 모드처럼 원본문서가 없는 경우: `<!-- source-mapping: source=conversation evidence=clarification-context.md sections=[<JTBD/결정/질문 묶음>] -->`
+    - 대화 근거 파일이 없거나 만들 수 없는 예외 경로: `<!-- source-mapping: source=conversation skip_reason=<명시적 사유> sections=[<근거 묶음>] -->`
+    - Q&A 모드에서 `original=objective.md`, `original=SKILL.md` 같은 가짜 원본문서 경로로 대체하지 않는다.
   - details 저장 직후 `.gran-maestro/agile/{AGI_ID}/objective/objective.ids.json` anchor manifest를 생성/갱신한다. 각 objective anchor는 `id`, `source_file`, `text`, `kind`, `grade`, `domain_slug`, `dod_refs`를 포함해야 하며, AD/설계 결정/DoD/NFR/리스크/체크리스트 성격의 MUST/SHOULD 요구를 deterministic하게 추적 가능해야 한다.
   - detail 파일 저장 직후 `python3 {PLUGIN_ROOT}/scripts/mst.py agile detail validate-mapping {details_file_path}` 명령으로 source-mapping 메타데이터를 검증한다.
   - 모든 details 파일 저장 직후, `python3 {PLUGIN_ROOT}/scripts/mst.py agile coverage-check {원본문서경로} --details-dir {details_dir}` 명령으로 원본 ↔ details 집합 매칭률과 objective anchor coverage evidence를 검증한다. 매칭률이 임계 미만이면 저장을 **실패**로 처리하고, 누락된 원본 슬러그 목록을 사용자에게 보고한 뒤 details 보강 후 재실행한다. `objective.ids.json`이 존재하면 출력의 `anchor_total`, `anchor_mapped`, `anchor_missing_ids`도 확인하고 downstream trace 누락을 다음 agile/plan 단계의 known evidence로 보존한다.

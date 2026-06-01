@@ -323,20 +323,64 @@ def _archive_run_type(type_key: str, max_active: int, emit_output: bool) -> int:
     return len(to_archive)
 def _compact_json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+def _normalize_agy_config_aliases(config):
+    if not isinstance(config, dict):
+        return config
+
+    normalized = copy.deepcopy(config)
+
+    def move_key(parent, old_key, new_key):
+        if isinstance(parent, dict) and old_key in parent:
+            if new_key not in parent:
+                parent[new_key] = parent[old_key]
+            del parent[old_key]
+
+    for section in ["debug", "explore", "discussion", "ideation", "prereview"]:
+        move_key(normalized.get(section, {}).get("agents", {}), "gemini", "agy")
+
+    models = normalized.get("models")
+    if isinstance(models, dict):
+        move_key(models.get("providers", {}), "gemini", "agy")
+        roles = models.get("roles")
+        if isinstance(roles, dict):
+            for role_cfg in roles.values():
+                items = role_cfg if isinstance(role_cfg, list) else [role_cfg]
+                for item in items:
+                    if isinstance(item, dict) and item.get("provider") == "gemini":
+                        item["provider"] = "agy"
+
+    delegation = normalized.get("delegation")
+    if isinstance(delegation, dict):
+        if delegation.get("default_provider") == "gemini":
+            delegation["default_provider"] = "agy"
+        priority = delegation.get("provider_priority")
+        if isinstance(priority, list):
+            next_priority = []
+            for item in priority:
+                mapped = "agy" if item == "gemini" else item
+                if mapped not in next_priority:
+                    next_priority.append(mapped)
+            delegation["provider_priority"] = next_priority
+
+    workflow = normalized.get("workflow")
+    if isinstance(workflow, dict) and workflow.get("default_agent") == "gemini-dev":
+        workflow["default_agent"] = "agy-dev"
+
+    return normalized
 def _load_config_for_get():
     resolved = load_json(BASE_DIR / "config.resolved.json")
     if isinstance(resolved, dict):
-        return resolved
+        return _normalize_agy_config_aliases(resolved)
 
     plugin_root = _plugin_root()
     defaults = load_json(plugin_root / "templates" / "defaults" / "config.json")
     overrides = load_json(BASE_DIR / "config.json")
     if isinstance(defaults, dict) and isinstance(overrides, dict):
-        return deep_merge(defaults, overrides)
+        return _normalize_agy_config_aliases(deep_merge(defaults, overrides))
     if isinstance(defaults, dict):
-        return defaults
+        return _normalize_agy_config_aliases(defaults)
     if isinstance(overrides, dict):
-        return overrides
+        return _normalize_agy_config_aliases(overrides)
     return {}
 def _flat_diff(old, new, prefix=""):
     changes = {}

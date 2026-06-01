@@ -92,8 +92,10 @@ def test_dispatch_d_uses_provider_neutral_managed_delegation():
     assert 'MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model "$PROVIDER" default' in text
     assert "--provider codex" in text
     assert "codex exec --full-auto" in text
-    assert "--provider gemini" in text
-    assert "gemini" + " -p" in text
+    assert "--provider agy" in text
+    assert "agy --print" in text
+    assert "--dangerously-skip-permissions" in text
+    assert "gemini" + " -p" not in text
     assert 'Skill(skill: "mst:claude", args: "--prompt-file sprint-prompt.md --dir {PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/ --trace {AGI_ID}/S{NN}/dispatch")' in text
     assert "python3 {PLUGIN_ROOT}/scripts/mst.py run" in text
     assert '--task-id "{AGI_ID}-S{NN}"' in text

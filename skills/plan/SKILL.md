@@ -757,7 +757,7 @@ findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN
 
 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get d3 pac_trace)`로 `d3`, `pac_trace` 섹션 읽기 (없으면 `templates/defaults/config.json` fallback). 기본값:
 - `d3.enabled=true`, `d3.light_mode=true`, `d3.ambiguity_threshold=0.2`, `d3.sprint_plan_threshold=0.15`, `d3.max_escalation_retries=3`, `pac_trace.enabled=true`
-- `d3.agents`: `codex={count:2,tier:"premium"}`, `gemini={count:0,tier:"premium"}`, `claude={count:0,tier:"economy"}`
+- `d3.agents`: `codex={count:2,tier:"premium"}`, `agy={count:0,tier:"premium"}`, `claude={count:0,tier:"economy"}`
 - `d3.cynefin_skip=["simple","chaotic"]`
 
 `d3.enabled != true`면 이 단계 전체 skip → Step 4. 현재 Cynefin 도메인이 `d3.cynefin_skip`에 포함되면 D3 skip → Step 4. `complicated` 또는 `complex`이면 D3 실행을 필수로 적용.
@@ -773,7 +773,7 @@ D3 실행 에이전트는 config의 `d3.agents`를 기준으로 결정 (`debug.a
 2. provider별 `count > 0` 항목만 dispatch 대상, 각 `count`만큼 독립 실행 엔트리 생성
 3. 모델 tier: `d3.agents.{provider}.tier` → 모델명: `config.models.providers.{provider}[tier || default_tier]`으로 resolve
 
-D3는 반드시 **독립 컨텍스트**로 호출한다 (허용: `Task(subagent_type: "general-purpose")` 또는 `Skill(skill: "mst:codex/gemini/claude")`). 입력 제한: AC 텍스트 + 용어집 + 제약만 전달, plan 대화 맥락은 전달하지 않는다.
+D3는 반드시 **독립 컨텍스트**로 호출한다 (허용: `Task(subagent_type: "general-purpose")` 또는 `Skill(skill: "mst:codex/agy/claude")`). 입력 제한: AC 텍스트 + 용어집 + 제약만 전달, plan 대화 맥락은 전달하지 않는다.
 
 기본 실행은 `d3.light_mode=true` 기준 (저비용 모드). `complicated`/`complex` 도메인에서는 AC 형식/완결성 micro-screen 1회 선행.
 

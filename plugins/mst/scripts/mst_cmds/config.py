@@ -33,6 +33,8 @@ from scripts.mst_cmds._common import (
 LEGACY_AGENT_SECTIONS = ["debug", "explore", "discussion", "ideation", "prereview"]
 
 LEGACY_MODEL_KEYS = ["claude", "codex", "gemini", "developer", "reviewer"]
+PROVIDER_ALIASES = {"gemini": "agy"}
+AGENT_ALIASES = {"gemini-dev": "agy-dev", "gemini-reviewer": "agy-reviewer"}
 
 PROTECTED_BRANCHES_KEY = "worktree.protected_branches"
 FALLBACK_PROTECTED_BRANCHES = ["main", "master", "release/*"]
@@ -180,6 +182,135 @@ def _ensure_roles_dict(models):
         return roles
     return None
 
+def _normalize_agy_aliases(config, warn):
+    def normalize_provider_value(value, path):
+        if value in PROVIDER_ALIASES:
+            replacement = PROVIDER_ALIASES[value]
+            warn(f"{path}: deprecated provider '{value}' → '{replacement}'")
+            return replacement
+        return value
+
+    def normalize_agent_value(value, path):
+        if value in AGENT_ALIASES:
+            replacement = AGENT_ALIASES[value]
+            warn(f"{path}: deprecated agent '{value}' → '{replacement}'")
+            return replacement
+        return value
+
+    def move_alias_key(parent, old_key, new_key, path):
+        if not isinstance(parent, dict) or old_key not in parent:
+            return
+        if new_key not in parent:
+            parent[new_key] = parent[old_key]
+        del parent[old_key]
+        warn(f"{path}.{old_key}: deprecated key moved to {path}.{new_key}")
+
+    if not isinstance(config, dict):
+        return
+
+    for section in LEGACY_AGENT_SECTIONS:
+        agents = config.get(section, {}).get("agents", {})
+        move_alias_key(agents, "gemini", "agy", f"{section}.agents")
+
+    models = config.get("models")
+    if isinstance(models, dict):
+        providers = models.get("providers")
+        move_alias_key(providers, "gemini", "agy", "models.providers")
+
+        roles = models.get("roles")
+        if isinstance(roles, dict):
+            for role_name, role_cfg in roles.items():
+                if isinstance(role_cfg, dict) and "provider" in role_cfg:
+                    role_cfg["provider"] = normalize_provider_value(
+                        role_cfg["provider"], f"models.roles.{role_name}.provider"
+                    )
+                elif isinstance(role_cfg, list):
+                    for index, item in enumerate(role_cfg):
+                        if isinstance(item, dict) and "provider" in item:
+                            item["provider"] = normalize_provider_value(
+                                item["provider"],
+                                f"models.roles.{role_name}.{index}.provider",
+                            )
+
+    agent_assignments = config.get("agent_assignments")
+    if isinstance(agent_assignments, dict):
+        for old_key, new_key in AGENT_ALIASES.items():
+            move_alias_key(agent_assignments, old_key, new_key, "agent_assignments")
+
+    workflow = config.get("workflow")
+    if isinstance(workflow, dict) and "default_agent" in workflow:
+        workflow["default_agent"] = normalize_agent_value(
+            workflow["default_agent"], "workflow.default_agent"
+        )
+
+    delegation = config.get("delegation")
+    if isinstance(delegation, dict):
+        if "default_provider" in delegation:
+            delegation["default_provider"] = normalize_provider_value(
+                delegation["default_provider"], "delegation.default_provider"
+            )
+        priority = delegation.get("provider_priority")
+        if isinstance(priority, list):
+            normalized = []
+            seen = set()
+            changed = False
+            for item in priority:
+                next_item = normalize_provider_value(item, "delegation.provider_priority")
+                if next_item != item:
+                    changed = True
+                if next_item not in seen:
+                    normalized.append(next_item)
+                    seen.add(next_item)
+            if changed or len(normalized) != len(priority):
+                delegation["provider_priority"] = normalized
+
+    agile = config.get("agile")
+    dispatch = agile.get("dispatch") if isinstance(agile, dict) else None
+    if isinstance(dispatch, dict) and "provider" in dispatch:
+        dispatch["provider"] = normalize_provider_value(
+            dispatch["provider"], "agile.dispatch.provider"
+        )
+
+    fact_check = config.get("fact_check")
+    fact_agent = fact_check.get("agent") if isinstance(fact_check, dict) else None
+    if isinstance(fact_agent, dict) and "provider" in fact_agent:
+        fact_agent["provider"] = normalize_provider_value(
+            fact_agent["provider"], "fact_check.agent.provider"
+        )
+
+    review = config.get("review")
+    review_roles = review.get("roles") if isinstance(review, dict) else None
+    if isinstance(review_roles, dict):
+        for role_name, role_cfg in review_roles.items():
+            if isinstance(role_cfg, dict) and "agent" in role_cfg:
+                role_cfg["agent"] = normalize_provider_value(
+                    role_cfg["agent"], f"review.roles.{role_name}.agent"
+                )
+
+    phase1 = config.get("phase1_exploration")
+    phase1_roles = phase1.get("roles") if isinstance(phase1, dict) else None
+    if isinstance(phase1_roles, dict):
+        for role_name, role_cfg in phase1_roles.items():
+            if isinstance(role_cfg, dict) and "agent" in role_cfg:
+                role_cfg["agent"] = normalize_provider_value(
+                    role_cfg["agent"], f"phase1_exploration.roles.{role_name}.agent"
+                )
+
+    code_review = config.get("code_review")
+    if isinstance(code_review, dict):
+        roster = code_review.get("agent_roster")
+        if isinstance(roster, list):
+            code_review["agent_roster"] = [
+                normalize_provider_value(item, "code_review.agent_roster")
+                for item in roster
+            ]
+        elif isinstance(roster, str):
+            code_review["agent_roster"] = ",".join(
+                normalize_provider_value(item.strip(), "code_review.agent_roster")
+                for item in roster.split(",")
+                if item.strip()
+            )
+
 def _default_section_claude_tier(defaults, section):
     section_cfg = defaults.get(section, {}) if isinstance(defaults, dict) else {}
     agents = section_cfg.get("agents", {}) if isinstance(section_cfg, dict) else {}
@@ -196,6 +327,8 @@ def _migrate_config(config, defaults):
 
     def warn(message):
         warnings.append(message)
+
+    _normalize_agy_aliases(migrated, warn)
 
     defaults_models = defaults.get("models", {}) if isinstance(defaults, dict) else {}
     default_providers = defaults_models.get("providers", {}) if isinstance(defaults_models, dict) else {}
@@ -317,7 +450,7 @@ def _migrate_config(config, defaults):
                     roles_cfg[role] = {"tier": mapped_tier}
                 del legacy_claude[role]
 
-        for provider in ["codex", "gemini"]:
+        for provider in ["codex", "agy", "gemini"]:
             legacy_provider = models.get(provider)
             if not isinstance(legacy_provider, dict):
                 continue
@@ -569,12 +702,16 @@ def cmd_config_resolve(args):
     defaults_path = plugin_root / "templates" / "defaults" / "config.json"
     defaults = load_json(defaults_path) or {}
     overrides = load_json(_common.BASE_DIR / "config.json") or {}
-    if _has_legacy_format(overrides):
+    migrated, warnings = _migrate_config(overrides, defaults)
+    changed = _flat_diff(overrides, migrated)
+    if _has_legacy_format(overrides) or changed:
         print(
             "⚠ 구 포맷 설정 감지. `python3 scripts/mst.py config migrate` 실행을 권장합니다.",
             file=sys.stderr,
         )
-    resolved = deep_merge(defaults, overrides)
+    for warning in warnings:
+        print(f"[WARN] {warning}", file=sys.stderr)
+    resolved = deep_merge(defaults, migrated)
     for warning in _validate_resolved_worktree_config(resolved, defaults):
         print(warning, file=sys.stderr)
     save_json(_common.BASE_DIR / "config.resolved.json", resolved)
@@ -633,11 +770,15 @@ def cmd_config_set(args):
         print("Error: key.path is required", file=sys.stderr)
         return 1
 
-    resolved = deep_merge(defaults, overrides)
+    migrated, warnings = _migrate_config(overrides, defaults)
+    for warning in warnings:
+        print(f"[WARN] {warning}", file=sys.stderr)
+
+    resolved = deep_merge(defaults, migrated)
     for warning in _validate_resolved_worktree_config(resolved, defaults):
         print(warning, file=sys.stderr)
 
-    save_json(config_path, overrides)
+    save_json(config_path, migrated)
     save_json(_common.BASE_DIR / "config.resolved.json", resolved)
     print(f"{key_path} updated")
     return 0

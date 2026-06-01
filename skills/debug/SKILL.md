@@ -81,9 +81,9 @@ argument-hint: "{버그/이슈 설명} [--focus {파일패턴}]"
   "dispatch_started_at": null,
   "investigators": {
     "codex": { "role": "", "status": "pending", "provider": "codex", "started_at": null, "completed_at": null },
-    "gemini": { "role": "", "status": "pending", "provider": "gemini", "started_at": null, "completed_at": null }
+    "agy": { "role": "", "status": "pending", "provider": "agy", "started_at": null, "completed_at": null }
   },
-  "participant_config": { "codex": 1, "gemini": 1, "claude": 0 },
+  "participant_config": { "codex": 1, "agy": 1, "claude": 0 },
   "merge_wait_ms": 60000,
   "fix_attempts": {
     "total_attempts": 0,
@@ -104,13 +104,13 @@ argument-hint: "{버그/이슈 설명} [--focus {파일패턴}]"
 
 `investigators`는 config의 `debug.agents`를 읽어 생성합니다.
 ### investigators 동적 생성 규칙
-1. 각 provider(codex, gemini, claude)의 count 읽기
+1. 각 provider(codex, agy, claude)의 count 읽기
 2. count == 1 → 키 이름은 provider 그대로
 3. count > 1 → 첫 번째는 `{provider}`, 이후는 `{provider}-2`, `{provider}-3` ...
 4. 각 항목에 `provider` 필드 기록
 5. 합계 검증: 1~6명, 위반 시 에러 후 중단
 
-`debug.agents` 키 없으면 기본값 `{ codex:1, gemini:1, claude:0 }` 사용.
+`debug.agents` 키 없으면 기본값 `{ codex:1, agy:1, claude:0 }` 사용.
 
 ### fix_attempts 추적 규칙
 1. Step 7에서 `/mst:request --from-debug {DBG-NNN}` 실행이 종료될 때마다 `fix_attempts`를 갱신합니다.
@@ -127,7 +127,7 @@ argument-hint: "{버그/이슈 설명} [--focus {파일패턴}]"
 
 PM이 이슈를 분석하여 `investigators` 수만큼 조사 역할을 배정합니다.
 - 이슈 분석: 증상, 재현 조건, 관련 모듈, 의심 영역 파악
-- 조사 각도 배정: Codex(코드 레벨 추적), Gemini(광역 컨텍스트), Claude(설계 의도/아키텍처)
+- 조사 각도 배정: Codex(코드 레벨 추적), AGY(광역 컨텍스트), Claude(설계 의도/아키텍처)
 - `session.json` 업데이트: `investigators[key].role` 기록, `status: "investigating"`
 
 ### AUTO-CONTINUE 원칙 (CRITICAL)
@@ -235,11 +235,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_bu
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex debug 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{investigatorKey}-prompt.md)\" > {absolute_path}/finding-{investigatorKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/finding-{investigatorKey}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/prompts/{investigatorKey}-prompt.md)\" --model {config.models.providers.gemini[debug.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/finding-{investigatorKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/finding-{investigatorKey}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/prompts/{investigatorKey}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/finding-{investigatorKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/finding-{investigatorKey}.md; exit $EC"
   )
   ```
 - `provider: "claude"`:
@@ -287,7 +287,7 @@ TIMEOUT이면 완료된 결과만 사용, 미완료는 `"timeout"` 기록 후 St
   "status": "synthesizing",
   "investigators": {
     "codex": { "status": "done", ... },
-    "gemini": { "status": "timeout", ... }
+    "agy": { "status": "timeout", ... }
   },
   "merge_completed_at": "{TS — mst.py timestamp now 출력값}"
 }
@@ -313,7 +313,7 @@ TIMEOUT이면 완료된 결과만 사용, 미완료는 `"timeout"` 기록 후 St
 
 ### 참여 조사자
 - {investigatorKey} ({role}, {provider}): {status}  ← investigators 키 순서대로 반복
-  (예: codex, codex-2, gemini, claude 등 설정에 따라 동적 나열)
+  (예: codex, codex-2, agy, claude 등 설정에 따라 동적 나열)
 
 ### 핵심 발견
 {가장 확신도 높은 문제 1~3개}

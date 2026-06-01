@@ -677,11 +677,11 @@ Bash(
 )
 ```
 
-**`gemini` 에이전트**:
+**`agy` 에이전트**:
 ```bash
 Bash(
-  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini {tier} 2>/dev/null);
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ_ID}-{RV_ID}-{role} --provider gemini --model "$MODEL" --log-dir {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role} --trace {REQ_ID}/{RV_ID}/{role}-review --require-worktree --worktree-dir "$REVIEW_WORKTREE" -- gemini -p "$(cat {PROMPT_FILE})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
+  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model agy {tier} 2>/dev/null);
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ_ID}-{RV_ID}-{role} --provider agy --model "$MODEL" --log-dir {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role} --trace {REQ_ID}/{RV_ID}/{role}-review --require-worktree --worktree-dir "$REVIEW_WORKTREE" -- agy --print "$(cat {PROMPT_FILE})" --dangerously-skip-permissions --add-dir "$REVIEW_WORKTREE" < /dev/null',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )

@@ -74,6 +74,11 @@ def test_evaluate_stop_judge_returns_structured_decision_and_wrapper_payload(tmp
     assert wrapper_payload == {"decision": "approve", "reason": decision["reason"]}
 
 
+def test_agy_is_recognized_as_mst_snapshot_skill() -> None:
+    assert stop_judge._is_mst_snapshot_skill("agy") is True
+    assert stop_judge._is_mst_snapshot_skill("mst:agy") is True
+
+
 @pytest.mark.parametrize(
     ("signals", "expected_decision", "expected_reason"),
     [

@@ -8,24 +8,27 @@
 
 > **Run from your project directory.** Gran Maestro analyzes your existing codebase to operate. Launch Claude Code or the Codex CLI plugin runtime from your project root before using the plugin.
 
-Gran Maestro defaults to Codex-primary. Codex CLI is required; Gemini CLI is only needed when you opt into the frontend/UI or large-context helper provider.
+Gran Maestro defaults to Codex-primary. Codex CLI is required; AGY CLI is only needed when you opt into the frontend/UI or large-context helper provider.
+
+Existing `/mst:gemini`, `gemini`, and `gemini-dev` values remain deprecated aliases for one release, but new configuration should use `/mst:agy`, `agy`, and `agy-dev`.
 
 ```bash
 # Codex CLI
 npm install -g @openai/codex
 
-# Gemini CLI
-npm install -g @google/gemini-cli
+# AGY CLI
+# Install Antigravity/AGY CLI, then confirm agy --version works.
+agy --version
 ```
 
-**Gran Maestro calls each CLI directly.** It does not proxy through another server or intercept APIs; it behaves exactly like running the commands yourself in terminal. Authentication and data only pass between each CLI and its service, so trusting Codex/Gemini is sufficient.
+**Gran Maestro calls each CLI directly.** It does not proxy through another server or intercept APIs; it behaves exactly like running the commands yourself in terminal. Authentication and data only pass between each CLI and its service, so trusting Codex/AGY is sufficient.
 
 ### CLI settings are applied as-is
 
 Because Gran Maestro uses the CLI capabilities directly, your per-agent configuration also applies identically while running Gran Maestro.
 
 - **Codex**: agent instruction files such as `AGENTS.md`, `CODEX.md` in the project root are applied when Codex is invoked.
-- **Gemini**: files in `GEMINI.md` or `.gemini/` are applied when Gemini is invoked.
+- **AGY**: project instruction files and local settings supported by AGY/Antigravity CLI are applied when AGY is invoked.
 
 When you align agent-specific settings (model configuration, system prompts, forbidden behaviors), consistency and quality remain stable inside Gran Maestro.
 
@@ -35,15 +38,15 @@ After installation, run each CLI directly at least once. The first run starts an
 
 ```bash
 codex   # first run: complete auth flow
-gemini  # first run: complete Google login
+agy  # first run: complete AGY auth flow
 ```
 
 Authentication methods:
 
 - Codex: interactive login on first run or set `OPENAI_API_KEY` environment variable
-- Gemini: Google account OAuth login on first run or set `GEMINI_API_KEY` environment variable
+- AGY: complete the login or API-key setup required by your AGY CLI
 
-> **Tip.** After install, verify PATH registration with `which codex` and `which gemini`.
+> **Tip.** After install, verify PATH registration with `which codex` and `which agy`.
 
 ## 1. Installation
 
@@ -120,7 +123,7 @@ The fastest route. Convert a request directly into an implementation spec and ex
 ```
 /mst:request "Add JWT-based user authentication"
 /mst:list                        # Check request status
-/mst:approve REQ-001             # Approve spec → Codex/Gemini starts implementation
+/mst:approve REQ-001             # Approve spec → Codex/AGY starts implementation
 ```
 
 ### Plan branch: when requirements are ambiguous
@@ -166,7 +169,7 @@ Opens a real-time dashboard in your browser where you can:
 |---------|-------------|
 | `/mst:plan` | Refine requirements via Q&A to produce an actionable plan |
 | `/mst:request` | Convert a plan or direct input into an implementation spec |
-| `/mst:approve` | Approve spec and dispatch to Codex/Gemini dev team |
+| `/mst:approve` | Approve spec and dispatch to Codex/AGY dev team |
 | `/mst:review` | Multi-AI review against acceptance criteria |
 | `/mst:dashboard` | Start dashboard server and open browser |
 | `/mst:recover` | Resume incomplete requests after session termination |
@@ -175,9 +178,9 @@ Opens a real-time dashboard in your browser where you can:
 
 ## 5. Troubleshooting
 
-**Authentication error** — Run Codex/Gemini CLI directly once to complete the auth flow. Execute `codex` or `gemini` to finish interactive login first.
+**Authentication error** — Run Codex/AGY CLI directly once to complete the auth flow. Execute `codex` or `agy` to finish interactive login first.
 
-**Command not found** — Verify PATH registration with `which codex` and `which gemini`. If not globally installed, run `npm install -g @openai/codex @google/gemini-cli`.
+**Command not found** — Verify PATH registration with `which codex` and `which agy`. If not globally installed, run `npm install -g @openai/codex @google/agy-cli`.
 
 **Plugin not found** — Ensure Claude Code version is v1.0.33 or later. Run `/plugin marketplace add myrtlepn/gran-maestro` followed by `/plugin install mst@gran-maestro` again.
 

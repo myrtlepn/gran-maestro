@@ -97,6 +97,15 @@ def _write_json(path: Path, payload) -> None:
 
 def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) -> None:
     objective_dir = workspace / ".gran-maestro" / "agile" / agi_id / "objective"
+    details_dir = objective_dir / "details"
+    details_dir.mkdir(parents=True, exist_ok=True)
+    (details_dir / "review-evidence-and-gates.md").write_text(
+        "<!-- source-mapping: original=objective.md sections=[\"Objective\"] -->\n"
+        "# Review Evidence and Gates\n\n"
+        "> 관련 DoD: DOD-005\n\n"
+        "- 반드시 DOD-005 evidence is preserved.\n",
+        encoding="utf-8",
+    )
     _write_json(
         objective_dir / "objective.ids.json",
         [
@@ -113,7 +122,30 @@ def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) 
     )
     _write_json(
         objective_dir / "handoff-manifest.json",
-        {"schema_version": 1, "agi_id": agi_id, "context_files": [], "skip_reasons": [], "created_at": "2026-06-01T00:00:00Z"},
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "context_files": [
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/objective.md",
+                    "kind": "objective_context",
+                },
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/objective.ids.json",
+                    "kind": "objective_context",
+                },
+                {
+                    "path": f".gran-maestro/agile/{agi_id}/objective/details/review-evidence-and-gates.md",
+                    "kind": "objective_context",
+                },
+            ],
+            "skip_reasons": [
+                {"kind": "design", "reason": "not_applicable_or_missing"},
+                {"kind": "references", "reason": "not_applicable_or_missing"},
+                {"kind": "previous_feedback", "reason": "not_applicable_or_missing"},
+            ],
+            "created_at": "2026-06-01T00:00:00Z",
+        },
     )
     _write_json(
         objective_dir / "adversarial-review-findings.json",

@@ -11,11 +11,11 @@
       },
       "developer": [
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         }
       ],
@@ -25,11 +25,11 @@
       },
       "reviewer": [
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         },
         {
-          "provider": "gemini",
+          "provider": "agy",
           "tier": "economy"
         }
       ]
@@ -40,7 +40,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -56,7 +56,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -73,7 +73,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -88,7 +88,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 1,
         "tier": "economy"
       },
@@ -103,7 +103,7 @@
       "codex": {
         "count": 0
       },
-      "gemini": {
+      "agy": {
         "count": 0,
         "tier": "premium"
       },
@@ -116,7 +116,7 @@
   "code_review": {
     "agents": 1,
     "agent_roster": [
-      "gemini"
+      "agy"
     ]
   },
   "plan_review": {
@@ -139,7 +139,7 @@
   },
   "workflow": {
     "spec_prereview": false,
-    "default_agent": "gemini-dev"
+    "default_agent": "agy-dev"
   },
   "phase1_exploration": {
     "roles": {
@@ -149,7 +149,7 @@
         "tier": "economy"
       },
       "broad_scan": {
-        "agent": "gemini",
+        "agent": "agy",
         "enabled": true,
         "tier": "economy"
       }
@@ -170,7 +170,7 @@
   },
   "agent_assignments": {
     "_comment": "커스터마이징 가이드: docs/config-agent-assignments.md 참조",
-    "gemini-dev": ["frontend", "ui"],
+    "agy-dev": ["frontend", "ui"],
     "claude-dev": ["docs", "config", "backend", "skill", "test", "infra"]
   }
 }

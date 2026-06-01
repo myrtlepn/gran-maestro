@@ -53,7 +53,7 @@ Phase 진행:
       Agent: codex-dev | Status: executing (45m)
       Worktree: {PROJECT_ROOT}/.gran-maestro/worktrees/REQ-001-01
   02: 로그인 UI 구현
-      Agent: gemini-dev | Status: pending
+      Agent: agy-dev | Status: pending
       blockedBy: REQ-001-01
   03: 유저 모델 테스트
       Agent: codex-dev | Status: completed (38s)

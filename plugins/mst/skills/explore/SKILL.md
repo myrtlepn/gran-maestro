@@ -95,14 +95,14 @@ argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] 
       "task_id": null,
       "exit_code": null
     },
-    "gemini": {
+    "agy": {
       "role": "",
       "status": "pending",
-      "provider": "gemini",
+      "provider": "agy",
       "tier": "default",
       "started_at": null,
       "completed_at": null,
-      "output_file": "explore-gemini.md",
+      "output_file": "explore-agy.md",
       "task_id": null,
       "exit_code": null
     }
@@ -115,7 +115,7 @@ argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] 
   },
   "participant_config": {
     "codex": { "count": 1, "tier": "default" },
-    "gemini": { "count": 1, "tier": "default" },
+    "agy": { "count": 1, "tier": "default" },
     "claude": { "count": 1, "tier": "default" }
   },
   "merge_wait_ms": 60000,
@@ -126,14 +126,14 @@ argument-hint: "{탐색 목표 설명} [--focus {파일패턴|관점키워드}] 
 `explorers`는 config의 `explore.agents`를 읽어 동적 생성합니다.
 
 ### explorers 동적 생성 규칙
-1. provider(`codex`, `gemini`, `claude`)별 count/tier를 읽어 `participant_config`를 `{provider: {count, tier}}` 구조로 기록
+1. provider(`codex`, `agy`, `claude`)별 count/tier를 읽어 `participant_config`를 `{provider: {count, tier}}` 구조로 기록
 2. `claude`는 `explorers` 생성 대상에서 **항상 제외**하고 `claude_synthesis`로만 사용
 3. count == 1이면 explorer 키는 `{provider}`
 4. count > 1이면 `{provider}`, `{provider}-2`, `{provider}-3`... 순으로 생성
 5. 각 explorer 항목에 `provider` 및 `tier` 필드를 기록 (tier는 config의 `explore.agents.{provider}.tier` 값을 전파, 미설정 시 `"default"`)
 6. explorer 합계는 1~6명으로 제한, 위반 시 에러로 중단
 
-`explore.agents`가 없으면 기본값 `{ codex:1, gemini:1, claude:1 }`을 사용합니다.
+`explore.agents`가 없으면 기본값 `{ codex:1, agy:1, claude:1 }`을 사용합니다.
 
 ### 레거시 읽기 호환 (SHOULD)
 
@@ -165,7 +165,7 @@ PM(Claude)이 탐색 목표를 분석하여 `explorers` 수만큼 역할을 배�
 - 목표 분석: 확인할 기능/경로/의존/증거 수준 정의
 - 조사 각도 배정:
   - Codex: 코드 레벨 추적, 파일/심볼/호출 경로 중심
-  - Gemini: 아키텍처, 흐름, 모듈 간 관계 중심
+  - AGY: 아키텍처, 흐름, 모듈 간 관계 중심
 - `session.json` 업데이트:
   - `explorers[key].role` 기록
   - `status: "dispatching"`으로 전이
@@ -290,11 +290,11 @@ python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_bu
     command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex explore 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" > {absolute_path}/explore-{explorerKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
   )
   ```
-- `provider: "gemini"`:
+- `provider: "agy"`:
   ```
   Bash(
     run_in_background: true,
-    command: "gemini -p \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" --model {config.models.providers.gemini[explore.agents.gemini.tier || default_tier]} --approval-mode yolo --sandbox=false > {absolute_path}/explore-{explorerKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
+    command: "agy --print \"$(cat {absolute_path}/prompts/explore-{explorerKey}-prompt.md)\" --dangerously-skip-permissions > {absolute_path}/explore-{explorerKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/explore-{explorerKey}.md; exit $EC"
   )
   ```
 
@@ -348,7 +348,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py wait-files \
   "status": "synthesizing",
   "explorers": {
     "codex": { "status": "done", "completed_at": "{TS}", "exit_code": 0 },
-    "gemini": { "status": "timeout", "completed_at": null, "exit_code": null }
+    "agy": { "status": "timeout", "completed_at": null, "exit_code": null }
   },
   "merge_completed_at": "{TS — mst.py timestamp now 출력값}"
 }
@@ -449,7 +449,7 @@ exploring → dispatching → waiting → synthesizing → completed
   - 종합 단계 중단
   - `status: "failed"` + `failed_at` + `error` 기록
   - 재시도 명령/원인(환경/권한/모델)을 안내
-- **케이스 4: CLI 미설치 (codex/gemini)**
+- **케이스 4: CLI 미설치 (codex/agy)**
   - 해당 provider를 `skipped`로 표시하고 계속 진행
   - 가용 provider가 1명 이상이면 진행, 0명이면 즉시 `failed`
 - **케이스 5: `mst.py counter next --type exp` 실패**
