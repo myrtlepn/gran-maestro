@@ -39,6 +39,11 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 
 - `plan.md`와 `plan.json`이 생성되고 저장 경로/ID(PLN-NNN)가 확정되어야 종료할 수 있다.
 - `저장하고 /mst:request 실행` 경로는 `plan.md` 디스크 저장 확인 후 1회만 호출한다.
+- 어떤 종료 경로든 사용자에게 보이는 마지막 마무리는 반드시 `다음 단계 실행 명령:` 블록으로 끝난다.
+  - `저장만 하기`: `/mst:request --plan PLN-NNN` 및 `/mst:request --plan PLN-NNN -a`
+  - `mst:request`까지 실행 완료: 생성된 REQ가 있으면 `/mst:approve REQ-NNN`, REQ를 특정하지 못하면 `/mst:list`
+  - 계획 후보 미선택/후보 없음 등 plan 산출물 없이 종료: `/mst:plan "{계획 주제}"`
+  - 마지막 줄 뒤에 추가 설명, 인사, 요약을 붙이지 않는다.
 - 범위 밖 수정 요청은 plan 요구사항으로 흡수 기록하고 코드/설정 파일은 수정하지 않는다.
 
 ### 금지 패턴
@@ -972,6 +977,12 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
    - `AUTO_MODE=false`, 자율 모드 선택 시: `Skill(skill: "mst:request", args: "--plan PLN-NNN -a {주제}")`
    - `## 분리 실행` 섹션이 있으면 mst:request가 다중 REQ 자동 생성
    - ⚠️ **spec.md 작성 완료 전 plan 스킬 종료 금지**
+   - request 결과에서 생성된 REQ ID를 수집하고, plan 스킬 최종 마무리의 마지막 블록에 다음 명령을 출력한다:
+     ```text
+     다음 단계 실행 명령:
+       /mst:approve REQ-NNN
+     ```
+     REQ ID를 특정하지 못한 경우에는 fallback으로 `다음 단계 실행 명령:\n  /mst:list`를 출력한다.
 6. Stitch 연계 (`AUTO_MODE=false`에서 선택했거나, `AUTO_MODE=true`에서 UI 감지된 경우):
    1. `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {plan 주제}")` 호출 (⚠️ `mcp__stitch__*` 도구 직접 호출 절대 금지)
    2. 호출 완료 후 Stitch 프로젝트/화면 정보를 plan 초안에 `## 디자인 시안` 섹션으로 추가: DES-NNN ID + 프로젝트 URL, 각 화면: 화면명 + Stitch URL + html_file 경로. html_file이 null이면 해당 행 생략.
@@ -987,7 +998,11 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
    - web-search→discussion 사용: {AUTO_EXPLORE_DISCUSSION_COUNT}건
 
    자세한 결정 내역: .gran-maestro/plans/PLN-NNN/auto-decisions.md
+
+   다음 단계 실행 명령:
+     /mst:approve REQ-NNN
    ```
+   생성된 REQ ID를 특정하지 못한 경우 마지막 명령은 `/mst:list`로 대체한다. 위 블록 뒤에 추가 설명을 붙이지 않는다.
 
 ## 출력 형식
 

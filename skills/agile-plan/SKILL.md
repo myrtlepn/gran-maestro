@@ -36,6 +36,10 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 - `mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 완료
 - `python3 {PLUGIN_ROOT}/scripts/mst.py state set --skill agile-plan --step 3 --total 3 [--return-to ...]` 기록 완료 (`MST_SESSION_ID`는 현재 세션에서 상속되거나 structured context로 제공됨)
 - `--return-to`가 있으면 stop-hook continuation guard로 상위 스킬 복귀(re-feed), 없으면 독립 실행을 종료하고 `--resume` 안내
+- 어떤 종료 경로든 사용자에게 보이는 마지막 마무리는 반드시 `다음 단계 실행 명령:` 블록으로 끝난다.
+  - `--return-to` 존재: 자동 복귀가 정상 경로임을 밝히고, 수동 fallback 명령으로 `/mst:resume --wakeup-hint stop-recover`를 마지막에 출력한다.
+  - `--return-to` 없음: `/mst:agile --resume AGI-NNN`을 마지막에 출력한다.
+  - 마지막 줄 뒤에 추가 설명, 인사, 요약을 붙이지 않는다.
 
 ### 금지 패턴
 
@@ -742,16 +746,22 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set \
 
 #### 2.2 서브스킬 호출(return_to 존재) 처리
 
-- `--return-to`가 있으면 아래 종료 마커 출력 후 즉시 종료:
+- `--return-to`가 있으면 아래 종료 마커와 다음 단계 실행 명령을 출력 후 즉시 종료:
   - `[MST skill=agile-plan step=returned return_to={RETURN_TO}]`
+  - ```text
+    다음 단계 실행 명령:
+      /mst:resume --wakeup-hint stop-recover
+    ```
 - stop-hook continuation guard가 `return_to`를 감지하여 상위 스킬 re-feed를 강제한다.
 
 #### 2.3 독립 실행(return_to 없음) 처리
 
 - objective 생성 결과를 안내하고 종료한다.
-- 사용자가 objective를 수동 검토/수정한 뒤 아래로 실행을 연결하도록 안내한다:
-  - `/mst:agile --resume {AGI_ID}`
-
+- 사용자가 objective를 수동 검토/수정한 뒤 아래로 실행을 연결하도록 안내하고, 마지막 마무리는 반드시 아래 블록으로 끝낸다:
+  ```text
+  다음 단계 실행 명령:
+    /mst:agile --resume {AGI_ID}
+  ```
 ---
 
 ## Anti-Rationalization Checklist
