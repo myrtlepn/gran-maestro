@@ -546,6 +546,8 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
        --model "$MODEL" \
        --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
        --trace {AGI_ID}/S{NN}/dispatch \
+       --require-worktree \
+       --worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" \
        -- codex exec --full-auto -m "$MODEL" -C "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" "$(cat sprint-prompt.md)"
      ```
    - `PROVIDER=gemini` canonical delegation call:
@@ -556,6 +558,8 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
        --model "$MODEL" \
        --log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/" \
        --trace {AGI_ID}/S{NN}/dispatch \
+       --require-worktree \
+       --worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" \
        -- gemini -p "$(cat sprint-prompt.md)" --model "$MODEL" --approval-mode yolo --sandbox=false
      ```
    - `PROVIDER=claude` canonical delegation call:
@@ -568,6 +572,8 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
      - `--provider "$PROVIDER"`
      - `--model "$MODEL"`
      - `--log-dir "{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/"`
+     - `--require-worktree`
+     - `--worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/"`
      - prompt source: `sprint-prompt.md`
      - cwd/worktree: `{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/`
    - lifecycle boundary mapping:

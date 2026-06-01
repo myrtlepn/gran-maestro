@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 from pathlib import Path
 
@@ -102,6 +103,42 @@ def test_child_worktree_blocks_remove(master_repo: Path, tmp_path: Path, monkeyp
     assert child_worktree.resolve(strict=False) in _worktree_roots(master_repo)
 
 
+def test_child_worktree_blocker_json_is_actionable(master_repo: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    parent_worktree = _add_worktree(
+        master_repo,
+        tmp_path / "linked-worktree-parent-json",
+        "feature/remove-parent-json",
+    )
+    child_worktree = _add_worktree(
+        master_repo,
+        parent_worktree / "child-worktree",
+        "feature/remove-child-json",
+    )
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = cmd_worktree_remove(
+        argparse.Namespace(
+            path=str(parent_worktree),
+            force=False,
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code != 0
+    assert payload["status"] == "blocked"
+    assert payload["classification"] == "nested_child_worktree"
+    assert payload["reason"] == "child_worktree_present"
+    assert payload["next_action"] == "cleanup_child_worktree_first"
+    assert payload["destructive_cleanup_performed"] is False
+    assert {item["kind"] for item in payload["affected_resources"]} == {"worktree", "child_worktree"}
+    assert str(parent_worktree.resolve(strict=False)) in {item["path"] for item in payload["affected_resources"]}
+    assert str(child_worktree.resolve(strict=False)) in {item["path"] for item in payload["affected_resources"]}
+
+
 def test_dirty_blocks_remove_without_force(master_repo: Path, tmp_path: Path, monkeypatch, capsys) -> None:
     worktree_path = _add_worktree(
         master_repo,
@@ -127,6 +164,37 @@ def test_dirty_blocks_remove_without_force(master_repo: Path, tmp_path: Path, mo
     assert str(worktree_path.resolve(strict=False)) in captured.err
     assert worktree_path.exists()
     assert worktree_path.resolve(strict=False) in _worktree_roots(master_repo)
+
+
+def test_dirty_blocker_json_is_actionable(master_repo: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    worktree_path = _add_worktree(
+        master_repo,
+        tmp_path / "linked-worktree-dirty-json",
+        "feature/remove-dirty-json",
+    )
+    (worktree_path / "untracked.txt").write_text("dirty\n")
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    exit_code = cmd_worktree_remove(
+        argparse.Namespace(
+            path=str(worktree_path),
+            force=False,
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code != 0
+    assert payload["status"] == "blocked"
+    assert payload["classification"] == "dirty_worktree"
+    assert payload["reason"] == "uncommitted_changes_present"
+    assert payload["next_action"] == "commit_stash_inspect_or_explicit_owned_force_cleanup"
+    assert payload["destructive_cleanup_allowed"] is False
+    assert payload["destructive_cleanup_performed"] is False
+    assert payload["details"]["status_porcelain"] == ["?? untracked.txt"]
 
 
 def test_dirty_force_warns_then_removes(master_repo: Path, tmp_path: Path, monkeypatch, capsys) -> None:

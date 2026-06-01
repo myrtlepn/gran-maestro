@@ -900,7 +900,7 @@ projectRequestsApi.get("/requests/:id/tasks/:taskId/traces", async (c) => {
       if (entry.isFile && entry.name.endsWith(".md")) {
         // Parse filename: {agent}-{label}-{YYYYMMDD-HHmmss}.md
         const match = entry.name.match(
-          /^(codex|gemini|claude)-(.+)-(\d{8}-\d{6})\.md$/,
+          /^(codex|agy|gemini|claude)-(.+)-(\d{8}-\d{6})\.md$/,
         );
         if (match) {
           traceFiles.push({

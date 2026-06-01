@@ -197,6 +197,15 @@ def compute_coverage(original_slugs: List[str], mapped_slugs: set[str]) -> dict:
         "missing_sections": missing,
     }
 _ANCHOR_REQUIRED_FIELDS = {"id", "source_file", "text", "kind", "grade", "domain_slug", "dod_refs"}
+def _is_canonical_objective_details_path(details_path: Path) -> bool:
+    parts = details_path.expanduser().parts
+    for index, part in enumerate(parts):
+        if part != ".gran-maestro":
+            continue
+        candidate = parts[index:index + 5]
+        if len(candidate) == 5 and candidate[1] == "agile" and candidate[3] == "objective" and candidate[4] == "details":
+            return bool(re.fullmatch(r"AGI-\d+", candidate[2], flags=re.IGNORECASE))
+    return False
 def _resolve_anchor_manifest_path(details_path: Path, explicit_path: str | None = None) -> Path | None:
     if explicit_path:
         return Path(str(explicit_path)).expanduser()
@@ -208,6 +217,8 @@ def _resolve_anchor_manifest_path(details_path: Path, explicit_path: str | None 
     for candidate in candidates:
         if candidate.exists():
             return candidate
+    if _is_canonical_objective_details_path(details_path):
+        return details_path.parent / "objective.ids.json"
     return None
 def _resolve_downstream_trace_path(details_path: Path, explicit_path: str | None = None) -> Path | None:
     if explicit_path:

@@ -1,8 +1,14 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
-import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
+import {
+  dirname,
+  fromFileUrl,
+  join,
+} from "https://deno.land/std@0.224.0/path/mod.ts";
 import { setRegistry } from "../config.ts";
 import { closeFlowWatchersForTest } from "../flow-watcher.ts";
 import { flowApi } from "./flowApi.ts";
+
+const REPO_ROOT = dirname(dirname(dirname(fromFileUrl(import.meta.url))));
 
 type TestFixture = {
   app: Hono;
@@ -126,8 +132,16 @@ async function writeExecutionFlow(
       { id: "mst:request.step-2", label: "Spec ready", status: "active" },
     ],
     edges: [
-      { from: "mst:plan.step-4", to: "mst:request.step-1", transition: "request.created" },
-      { from: "mst:request.step-1", to: "mst:request.step-2", transition: "spec.ready" },
+      {
+        from: "mst:plan.step-4",
+        to: "mst:request.step-1",
+        transition: "request.created",
+      },
+      {
+        from: "mst:request.step-1",
+        to: "mst:request.step-2",
+        transition: "spec.ready",
+      },
     ],
     coverage: {
       recognized_event_families: ["plan", "request"],
@@ -135,13 +149,97 @@ async function writeExecutionFlow(
       required_event_families: ["plan", "request"],
     },
     worktrees: {
-      session: { path: "/tmp/session", state: "active", branch: "gran-maestro/master/AGI-038/session" },
-      children: [{ id: "REQ-873-T01", path: "/tmp/child", state: "dirty", merge_target: "session" }],
+      session: {
+        path: "/tmp/session",
+        state: "active",
+        branch: "gran-maestro/master/AGI-038/session",
+      },
+      children: [{
+        id: "REQ-873-T01",
+        path: "/tmp/child",
+        state: "dirty",
+        merge_target: "session",
+      }],
     },
     recovery_action: "cleanup_child",
     ...overrides,
   };
-  await Deno.writeTextFile(join(sessionDir, "execution-flow.json"), JSON.stringify(projection));
+  await Deno.writeTextFile(
+    join(sessionDir, "execution-flow.json"),
+    JSON.stringify(projection),
+  );
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function seedReplayableSessionHistory(baseDir: string): Promise<string> {
+  const script = `
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+sys.path.insert(0, ${JSON.stringify(REPO_ROOT)})
+from scripts.mst_cmds import session as session_mod
+base_dir = Path(sys.argv[1])
+created = session_mod.create_root_session_artifacts(
+    base_dir,
+    "AGI-001",
+    root_payload={"id": "AGI-001", "agi_id": "AGI-001", "status": "active"},
+    started_at=datetime(2026, 5, 15, tzinfo=timezone.utc),
+    random_segment="aaa111aa",
+)
+sid = created["mst_session_id"]
+events = [
+    ("skill.enter", {"skill": "mst:agile-plan", "step": 0}),
+    ("skill.step", {"skill": "mst:agile-plan", "step": 1}),
+    ("action.queued", {"next_action": {"skill": "mst:agile", "source_id": "AGI-001"}}),
+    ("continue.queued_action", {"transition": "continue.queued_action"}),
+    ("context.compacted", {"current_node": "mst:agile-plan.step-1"}),
+    ("skill.recover", {"skill": "mst:recover", "step": 1}),
+    ("context.rehydrated", {"rehydration_transition": "continue.rehydrate_retry"}),
+    ("guard.inspect_only_verification", {"transition": "guard.inspect_only_verification"}),
+    ("blocker.detected", {"blocker": {"type": "state_inconsistency", "critical": False}}),
+    ("blocker.resolved", {"blocker": {"type": "state_inconsistency"}}),
+    ("action.completed", {"action_id": "agile-plan-complete"}),
+    ("skill.exit", {"skill": "mst:agile-plan", "step": 3, "status": "done"}),
+    ("terminal.completed", {"transition": "terminal.completed"}),
+]
+for index, (event_type, extra) in enumerate(events, 1):
+    session_mod.write_session_history_event(
+        base_dir,
+        sid,
+        {
+            "event_type": event_type,
+            "artifact_id": "AGI-001",
+            "resource_id": "AGI-001",
+            "idempotency_key": f"{sid}:flow-api-test:{index}:{event_type}",
+            "created_at": f"2026-05-15T00:00:{index:02d}.000Z",
+            **extra,
+        },
+    )
+print(sid)
+`;
+  const command = new Deno.Command("python3", {
+    args: ["-c", script, baseDir],
+    cwd: REPO_ROOT,
+    env: {
+      PYTHONPATH: REPO_ROOT,
+      MST_POLICY_HOME: join(baseDir, "policy"),
+    },
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await command.output();
+  if (output.code !== 0) {
+    throw new Error(new TextDecoder().decode(output.stderr));
+  }
+  return new TextDecoder().decode(output.stdout).trim();
 }
 
 async function readDataEvents(
@@ -248,7 +346,10 @@ Deno.test("flow view returns session graph contract", async () => {
       mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
       session_id: "legacy-session-a",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -258,20 +359,62 @@ Deno.test("flow view returns session graph contract", async () => {
     const body = await response.json();
     assertEquals(body.view_kind, "gran-maestro.flow-view");
     assert(Array.isArray(body.events), "events should be preserved");
-    assert(Array.isArray(body.execution_flow_views), "execution_flow_views should be preserved");
-    assert(Array.isArray(body.session_graphs), "session_graphs should be present");
+    assert(
+      Array.isArray(body.execution_flow_views),
+      "execution_flow_views should be preserved",
+    );
+    assert(
+      Array.isArray(body.session_graphs),
+      "session_graphs should be present",
+    );
     assertEquals(body.session_graphs.length, 1);
 
     const graph = body.session_graphs[0];
     assertEquals(graph.view_kind, "gran-maestro.session-graph.dashboard-view");
     assertEquals(graph.mst_session_id, "MST-AGI-001-20260515T000000Z-aaa111");
-    assert(Array.isArray(graph.nodes) && graph.nodes.length === 3, "nodes should be projected");
-    assert(Array.isArray(graph.edges) && graph.edges.length === 2, "edges should be projected");
-    assert(Array.isArray(graph.events) && graph.events.length === 1, "events should be joined");
+    assert(
+      Array.isArray(graph.nodes) && graph.nodes.length === 3,
+      "nodes should be projected",
+    );
+    assert(
+      Array.isArray(graph.edges) && graph.edges.length === 2,
+      "edges should be projected",
+    );
+    assert(
+      Array.isArray(graph.events) && graph.events.length === 1,
+      "events should be joined",
+    );
     assertEquals(graph.current_node, "mst:request.step-2");
     assertEquals(graph.recovery_action, "cleanup_child");
     assertEquals(graph.worktrees.session.state, "active");
     assertEquals(graph.worktrees.children[0].state, "dirty");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+Deno.test("flow view lazily materializes execution-flow projection from verified history", async () => {
+  const fixture = await setupFixture();
+
+  try {
+    const mstSessionId = await seedReplayableSessionHistory(fixture.baseDir);
+    const projectionPath = join(
+      fixture.baseDir,
+      "sessions",
+      mstSessionId,
+      "execution-flow.json",
+    );
+    assertEquals(await pathExists(projectionPath), false);
+
+    const response = await fixture.app.request(
+      "http://localhost/api/agile/AGI-001/flow/view",
+    );
+    assertEquals(response.status, 200);
+    const body = await response.json();
+
+    assertEquals(await pathExists(projectionPath), true);
+    assertEquals(body.session_graphs.length, 1);
+    assertEquals(body.session_graphs[0].mst_session_id, mstSessionId);
   } finally {
     await fixture.cleanup();
   }
@@ -292,7 +435,10 @@ Deno.test("flow view uses canonical mst session id", async () => {
       event_type: "legacy_only_event",
       session_id: "legacy-session-a",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -313,7 +459,10 @@ Deno.test("flow view remains display only", async () => {
   const fixture = await setupFixture();
 
   try {
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -327,8 +476,17 @@ Deno.test("flow view remains display only", async () => {
     assertEquals(graph.display_only, true);
     assertEquals(graph.next_action_authority, false);
     assertEquals(graph.transition_authority, "dod016_transition_graph");
-    assertEquals(Object.prototype.hasOwnProperty.call(graph, "cleanup_authority"), false);
-    assertEquals(Object.prototype.hasOwnProperty.call(graph, "final_merge_retry_authority"), false);
+    assertEquals(
+      Object.prototype.hasOwnProperty.call(graph, "cleanup_authority"),
+      false,
+    );
+    assertEquals(
+      Object.prototype.hasOwnProperty.call(
+        graph,
+        "final_merge_retry_authority",
+      ),
+      false,
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -338,12 +496,16 @@ Deno.test("flow view tolerates legacy projections", async () => {
   const fixture = await setupFixture();
 
   try {
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      worktrees: undefined,
-      recovery_action: undefined,
-      child_worktrees: undefined,
-      session_worktree: undefined,
-    });
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        worktrees: undefined,
+        recovery_action: undefined,
+        child_worktrees: undefined,
+        session_worktree: undefined,
+      },
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -364,25 +526,33 @@ Deno.test("flow view reports graph consistency for canonical lifecycle events", 
   const fixture = await setupFixture();
 
   try {
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      timestamp: "2026-05-15T00:00:01Z",
-      event_type: "session_worktree_created",
-      mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-    });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      worktrees: {
-        session: {
-          path: "/tmp/session",
-          state: "active",
-          mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-        },
-        children: [{
-          id: "REQ-874-T01",
-          state: "merged",
-          parent_mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-        }],
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        timestamp: "2026-05-15T00:00:01Z",
+        event_type: "session_worktree_created",
+        mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
       },
-    });
+    );
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        worktrees: {
+          session: {
+            path: "/tmp/session",
+            state: "active",
+            mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+          },
+          children: [{
+            id: "REQ-874-T01",
+            state: "merged",
+            parent_mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+          }],
+        },
+      },
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -410,7 +580,10 @@ Deno.test("flow view diagnoses legacy session id mismatch", async () => {
       mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
       session_id: "legacy-session-a",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -420,8 +593,14 @@ Deno.test("flow view diagnoses legacy session id mismatch", async () => {
 
     assertEquals(graph.events.length, 1);
     assertEquals(graph.graph_consistency.status, "degraded");
-    assertEquals(graph.graph_consistency.diagnostics[0].code, "legacy_session_id_mismatch");
-    assertEquals(graph.graph_consistency.diagnostics[0].legacy_session_id, "legacy-session-a");
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].code,
+      "legacy_session_id_mismatch",
+    );
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].legacy_session_id,
+      "legacy-session-a",
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -436,7 +615,10 @@ Deno.test("flow view diagnoses legacy-only events without canonical fallback", a
       event_type: "legacy_only_lifecycle",
       session_id: "legacy-session-a",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -447,8 +629,14 @@ Deno.test("flow view diagnoses legacy-only events without canonical fallback", a
     assertEquals(graph.events.length, 0);
     assertEquals(body.events.length, 1);
     assertEquals(body.graph_consistency.status, "degraded");
-    assertEquals(body.graph_consistency.diagnostics[0].code, "legacy_only_event");
-    assertEquals(body.graph_consistency.diagnostics[0].legacy_session_id, "legacy-session-a");
+    assertEquals(
+      body.graph_consistency.diagnostics[0].code,
+      "legacy_only_event",
+    );
+    assertEquals(
+      body.graph_consistency.diagnostics[0].legacy_session_id,
+      "legacy-session-a",
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -458,20 +646,24 @@ Deno.test("flow view diagnoses worktree session metadata mismatch", async () => 
   const fixture = await setupFixture();
 
   try {
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      worktrees: {
-        session: {
-          path: "/tmp/session",
-          state: "active",
-          mst_session_id: "MST-OTHER-20260515T000000Z-bbb222",
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        worktrees: {
+          session: {
+            path: "/tmp/session",
+            state: "active",
+            mst_session_id: "MST-OTHER-20260515T000000Z-bbb222",
+          },
+          children: [{
+            id: "REQ-874-T01",
+            state: "active",
+            parent_mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+          }],
         },
-        children: [{
-          id: "REQ-874-T01",
-          state: "active",
-          parent_mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-        }],
       },
-    });
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -480,7 +672,10 @@ Deno.test("flow view diagnoses worktree session metadata mismatch", async () => 
     const graph = body.session_graphs[0];
 
     assertEquals(graph.graph_consistency.status, "mismatch");
-    assertEquals(graph.graph_consistency.diagnostics[0].code, "worktree_session_mismatch");
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].code,
+      "worktree_session_mismatch",
+    );
     assertEquals(graph.display_only, true);
     assertEquals(graph.next_action_authority, false);
   } finally {
@@ -498,7 +693,10 @@ Deno.test("flow view diagnoses orphan canonical flow events", async () => {
       mst_session_id: "MST-AGI-001-20260515T000000Z-bbb222",
       session_id: "legacy-session-b",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -508,8 +706,14 @@ Deno.test("flow view diagnoses orphan canonical flow events", async () => {
 
     assertEquals(graph.events.length, 0);
     assertEquals(body.graph_consistency.status, "degraded");
-    assertEquals(body.graph_consistency.diagnostics[0].code, "orphan_flow_event");
-    assertEquals(body.graph_consistency.diagnostics[0].mst_session_id, "MST-AGI-001-20260515T000000Z-bbb222");
+    assertEquals(
+      body.graph_consistency.diagnostics[0].code,
+      "orphan_flow_event",
+    );
+    assertEquals(
+      body.graph_consistency.diagnostics[0].mst_session_id,
+      "MST-AGI-001-20260515T000000Z-bbb222",
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -519,15 +723,22 @@ Deno.test("DOD-017 lifecycle schema normalizes replay-compatible canonical event
   const fixture = await setupFixture();
 
   try {
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      timestamp: "2026-05-15T00:00:01Z",
-      event_type: "child_merged_to_session",
-      mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-      child_id: "REQ-882-T01",
-      idempotency_key: "child-merge:REQ-882-T01",
-      ordering_key: "2026-05-15T00:00:01Z#001",
-    });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        timestamp: "2026-05-15T00:00:01Z",
+        event_type: "child_merged_to_session",
+        mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+        child_id: "REQ-882-T01",
+        idempotency_key: "child-merge:REQ-882-T01",
+        ordering_key: "2026-05-15T00:00:01Z#001",
+      },
+    );
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -559,8 +770,15 @@ Deno.test("DOD-017 live and persisted replay graph equivalence", async () => {
       event_id: "evt-session-created",
       ordering_key: "2026-05-15T00:00:01Z#001",
     };
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", liveEvent);
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      liveEvent,
+    );
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const replayResponse = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -571,16 +789,23 @@ Deno.test("DOD-017 live and persisted replay graph equivalence", async () => {
       "http://localhost/api/agile/AGI-001/flow/stream",
     );
     await sleep(100);
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      ...liveEvent,
-      event_id: "evt-session-created-live",
-      idempotency_key: "evt-session-created-live",
-      ordering_key: "2026-05-15T00:00:02Z#002",
-      timestamp: "2026-05-15T00:00:02Z",
-    });
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        ...liveEvent,
+        event_id: "evt-session-created-live",
+        idempotency_key: "evt-session-created-live",
+        ordering_key: "2026-05-15T00:00:02Z#002",
+        timestamp: "2026-05-15T00:00:02Z",
+      },
+    );
     const liveEvents = await readDataEvents(streamResponse, 1);
 
-    assertEquals(replayGraph.mst_session_id, "MST-AGI-001-20260515T000000Z-aaa111");
+    assertEquals(
+      replayGraph.mst_session_id,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
     assertEquals(replayGraph.graph_consistency.status, "consistent");
     assertEquals(replayGraph.events[0].replay_compatible, true);
     assertEquals(liveEvents[0].replay_compatible, true);
@@ -601,9 +826,20 @@ Deno.test("DOD-017 duplicate lifecycle events are diagnosed and deduplicated", a
       idempotency_key: "child-created:REQ-882-T01",
       ordering_key: "2026-05-15T00:00:01Z#001",
     };
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", duplicate);
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", duplicate);
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      duplicate,
+    );
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      duplicate,
+    );
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -612,8 +848,14 @@ Deno.test("DOD-017 duplicate lifecycle events are diagnosed and deduplicated", a
 
     assertEquals(graph.events.length, 1);
     assertEquals(graph.graph_consistency.status, "degraded");
-    assertEquals(graph.graph_consistency.diagnostics[0].code, "duplicate_lifecycle_event");
-    assertEquals(graph.graph_consistency.diagnostics[0].idempotency_key, "child-created:REQ-882-T01");
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].code,
+      "duplicate_lifecycle_event",
+    );
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].idempotency_key,
+      "child-created:REQ-882-T01",
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -623,31 +865,48 @@ Deno.test("DOD-017 out-of-order lifecycle events remain deterministic", async ()
   const fixture = await setupFixture();
 
   try {
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      timestamp: "2026-05-15T00:00:03Z",
-      event_type: "child_merged_to_session",
-      mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-      ordering_key: "2026-05-15T00:00:03Z#003",
-    });
-    await appendFlowLine(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111", {
-      timestamp: "2026-05-15T00:00:02Z",
-      event_type: "child_created",
-      mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
-      ordering_key: "2026-05-15T00:00:02Z#002",
-    });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        timestamp: "2026-05-15T00:00:03Z",
+        event_type: "child_merged_to_session",
+        mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+        ordering_key: "2026-05-15T00:00:03Z#003",
+      },
+    );
+    await appendFlowLine(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+      {
+        timestamp: "2026-05-15T00:00:02Z",
+        event_type: "child_created",
+        mst_session_id: "MST-AGI-001-20260515T000000Z-aaa111",
+        ordering_key: "2026-05-15T00:00:02Z#002",
+      },
+    );
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
     );
     const graph = (await response.json()).session_graphs[0];
 
-    assertEquals(graph.events.map((event: Record<string, unknown>) => event.event_type), [
-      "child_created",
-      "child_merged_to_session",
-    ]);
+    assertEquals(
+      graph.events.map((event: Record<string, unknown>) => event.event_type),
+      [
+        "child_created",
+        "child_merged_to_session",
+      ],
+    );
     assertEquals(graph.graph_consistency.status, "degraded");
-    assertEquals(graph.graph_consistency.diagnostics[0].code, "out_of_order_lifecycle_event");
+    assertEquals(
+      graph.graph_consistency.diagnostics[0].code,
+      "out_of_order_lifecycle_event",
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -663,7 +922,10 @@ Deno.test("DOD-017 legacy lifecycle events stay degraded without canonical fallb
       session_id: "legacy-session-a",
       idempotency_key: "legacy-event",
     });
-    await writeExecutionFlow(fixture.baseDir, "MST-AGI-001-20260515T000000Z-aaa111");
+    await writeExecutionFlow(
+      fixture.baseDir,
+      "MST-AGI-001-20260515T000000Z-aaa111",
+    );
 
     const response = await fixture.app.request(
       "http://localhost/api/agile/AGI-001/flow/view",
@@ -673,8 +935,14 @@ Deno.test("DOD-017 legacy lifecycle events stay degraded without canonical fallb
 
     assertEquals(graph.events.length, 0);
     assertEquals(body.graph_consistency.status, "degraded");
-    assertEquals(body.graph_consistency.diagnostics[0].code, "legacy_only_event");
-    assertEquals(body.graph_consistency.diagnostics[0].legacy_session_id, "legacy-session-a");
+    assertEquals(
+      body.graph_consistency.diagnostics[0].code,
+      "legacy_only_event",
+    );
+    assertEquals(
+      body.graph_consistency.diagnostics[0].legacy_session_id,
+      "legacy-session-a",
+    );
   } finally {
     await fixture.cleanup();
   }

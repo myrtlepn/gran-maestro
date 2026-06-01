@@ -110,19 +110,19 @@ def test_approve_gemini_dev_direct_bash_exception_is_classified() -> None:
         assert failure_kind in section
 
 
-def test_dispatch_gemini_command_records_structured_failure_and_fallback_evidence(tmp_path: Path) -> None:
+def test_dispatch_agy_command_records_structured_failure_and_fallback_evidence(tmp_path: Path) -> None:
     command = _run_dispatch_build(tmp_path)
 
-    assert "gemini -p" in command
-    assert "MST_GEMINI_FAILURE_KIND" in command
+    assert "agy --print" in command
+    assert "MST_PROVIDER_FAILURE_KIND" in command
     assert "rate_limit" in command
     assert "timeout" in command
     assert "empty_result" in command
     assert "nonzero_exit" in command
-    assert "MST_GEMINI_CODEX_FALLBACK_CONDITION" in command
-    assert "MST_GEMINI_EVIDENCE_ID" in command
+    assert "MST_PROVIDER_FALLBACK_CONDITION" in command
+    assert "MST_PROVIDER_EVIDENCE_ID" in command
     assert "EXIT_CODE:" in command
-    assert re.search(r"GEMINI_FAILURE_KIND:\$\{MST_GEMINI_FAILURE_KIND", command)
+    assert re.search(r"PROVIDER_FAILURE_KIND:\$\{MST_PROVIDER_FAILURE_KIND", command)
 
 
 def test_dod002_direct_claude_print_mode_guidance_is_not_reintroduced() -> None:

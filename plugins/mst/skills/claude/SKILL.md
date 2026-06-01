@@ -67,7 +67,7 @@ caller-facing dispatch contract와 wrapper-owned runtime contract는 분리하�
      ```
    - wrapper invocation contract:
      - `python3 {PLUGIN_ROOT}/scripts/mst.py run` is the canonical lifecycle boundary.
-     - required wrapper fields: `--task-id`, `--provider claude`, `--model "$MODEL"`, `--log-dir "{task_dir}"`.
+     - required wrapper fields: `--task-id`, `--provider claude`, `--model "$MODEL"`, `--log-dir "{task_dir}"`, `--require-worktree`, `--worktree-dir "{worktree_path}"`.
      - optional trace field: `--trace "{REQ-ID}/{TASK-NUM}/{label}"`.
      - prompt source is the inline payload or the contents of `{prompt_file}`.
    - lifecycle boundary mapping:

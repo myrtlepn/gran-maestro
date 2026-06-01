@@ -11,6 +11,8 @@ const adversarialReviewKeys = [
   'agile.adversarial_review.perspectives.nfr.enabled',
   'agile.adversarial_review.max_rounds',
   'agile.adversarial_review.auto_apply_severity_threshold',
+  'agile.adversarial_review.clarification_blocking_severities',
+  'agile.adversarial_review.clarification_batch_max_items',
   'agile.adversarial_review.parallel_in_auto_mode',
 ]
 

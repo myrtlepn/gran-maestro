@@ -525,6 +525,557 @@ def cmd_agile_detail(args):
         print("Error: detail subcommand is required (validate-mapping|validate-evidence|append|generate-anchors)", file=sys.stderr)
         return 1
     return fn(args)
+_SIDECAR_SCHEMA_VERSION = 1
+_SIDECAR_SCHEMAS = [
+    {
+        "name": "objective_anchor_manifest",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/objective.ids.json",
+        "format": "json_array",
+        "required_fields": ["id", "source_file", "text", "kind", "grade", "domain_slug", "dod_refs"],
+        "producer": "mst.py agile detail generate-anchors --details-dir ...",
+        "consumer": "mst.py agile coverage-check --anchor-manifest ...; downstream context handoff",
+        "missing_behavior": "fail_objective_completion",
+        "invalid_behavior": "fail_objective_completion",
+        "required_for_completion": True,
+        "min_items": 1,
+    },
+    {
+        "name": "handoff_manifest",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/handoff-manifest.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "context_files", "skip_reasons", "created_at"],
+        "producer": "mst.py agile sidecar-build",
+        "consumer": "mst:agile, mst:request, mst:approve",
+        "missing_behavior": "missing_context_non_success",
+        "invalid_behavior": "fail_downstream_handoff",
+        "required_for_completion": True,
+    },
+    {
+        "name": "review_findings",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/adversarial-review-findings.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "rounds", "findings", "unresolved_blocking_count"],
+        "producer": "mst.py agile sidecar-build",
+        "consumer": "mst.py agile objective-check; sprint completion report",
+        "missing_behavior": "fail_objective_completion",
+        "invalid_behavior": "fail_objective_completion",
+        "required_for_completion": True,
+    },
+    {
+        "name": "finding_trace_manifest",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/finding-trace.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "findings", "unmapped_major_or_higher_count"],
+        "producer": "mst.py agile sidecar-build",
+        "consumer": "mst.py agile objective-check; downstream implementation report",
+        "missing_behavior": "fail_objective_completion",
+        "invalid_behavior": "fail_objective_completion",
+        "required_for_completion": True,
+    },
+    {
+        "name": "section_review_inventory",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/section-review-inventory.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "sections", "unreviewed_required_count"],
+        "producer": "mst.py agile sidecar-build",
+        "consumer": "mst.py agile objective-check",
+        "missing_behavior": "fail_objective_completion",
+        "invalid_behavior": "fail_objective_completion",
+        "required_for_completion": True,
+    },
+    {
+        "name": "d3_detail_results",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/d3-findings.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "threshold", "details", "blocking_count"],
+        "producer": "mst.py agile sidecar-build",
+        "consumer": "mst.py agile objective-check; completion report",
+        "missing_behavior": "missing_context_non_success",
+        "invalid_behavior": "fail_objective_completion",
+        "required_for_completion": True,
+    },
+    {
+        "name": "reference_links",
+        "path_template": ".gran-maestro/agile/{agi_id}/objective/reference-links.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "agi_id", "references", "unlinked_reference_count"],
+        "producer": "mst.py reference add + agile reference linker",
+        "consumer": "objective reference section; downstream context handoff",
+        "missing_behavior": "explicit_no_references_or_missing_context",
+        "invalid_behavior": "fail_reference_handoff",
+        "required_for_completion": False,
+    },
+    {
+        "name": "state_snapshot",
+        "path_template": ".gran-maestro/state/{mst_session_id}/snapshot.json",
+        "format": "json_object",
+        "required_fields": ["schema_version", "mst_session_id", "root_mst_id", "workflow", "history"],
+        "producer": "MST_SESSION_ID=... mst.py state set ...",
+        "consumer": "stop hook, resume, dashboard",
+        "missing_behavior": "structured_non_success_when_canonical_identity_missing",
+        "invalid_behavior": "fail_resume_state_validation",
+        "required_for_completion": True,
+    },
+]
+def _render_sidecar_schema_entry(schema: dict, agi_id: str | None, mst_session_id: str | None) -> dict:
+    entry = dict(schema)
+    path_template = str(schema.get("path_template") or "")
+    rendered = path_template
+    if agi_id:
+        rendered = rendered.replace("{agi_id}", agi_id)
+    if mst_session_id:
+        rendered = rendered.replace("{mst_session_id}", mst_session_id)
+    if _common.BASE_DIR.name == ".gran-maestro" and rendered.startswith(".gran-maestro/"):
+        rendered = rendered[len(".gran-maestro/") :]
+    entry["path"] = str(_common.BASE_DIR / rendered) if "{" not in rendered else None
+    return entry
+def _validate_json_sidecar(path: Path, schema: dict) -> dict:
+    result = {
+        "path": str(path),
+        "exists": path.exists(),
+        "valid": False,
+        "errors": [],
+    }
+    if not path.exists():
+        result["errors"].append(f"missing sidecar: {schema.get('name')}")
+        return result
+    if not path.is_file():
+        result["errors"].append(f"sidecar is not a file: {path}")
+        return result
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        result["errors"].append(f"failed to read JSON sidecar: {exc}")
+        return result
+
+    required_fields = list(schema.get("required_fields") or [])
+    if schema.get("format") == "json_array":
+        if not isinstance(payload, list):
+            result["errors"].append("sidecar must be a JSON array")
+            return result
+        min_items = int(schema.get("min_items") or 0)
+        if len(payload) < min_items:
+            result["errors"].append(f"sidecar must contain at least {min_items} item(s)")
+        for index, item in enumerate(payload):
+            if not isinstance(item, dict):
+                result["errors"].append(f"item {index} must be an object")
+                continue
+            missing = [field for field in required_fields if field not in item]
+            if missing:
+                result["errors"].append(f"item {index} missing fields: {', '.join(missing)}")
+    elif schema.get("format") == "json_object":
+        if not isinstance(payload, dict):
+            result["errors"].append("sidecar must be a JSON object")
+            return result
+        missing = [field for field in required_fields if field not in payload]
+        if missing:
+            result["errors"].append(f"missing fields: {', '.join(missing)}")
+        for count_field in (
+            "unresolved_blocking_count",
+            "unmapped_major_or_higher_count",
+            "unreviewed_required_count",
+            "blocking_count",
+        ):
+            if count_field not in required_fields:
+                continue
+            raw_count = payload.get(count_field)
+            if not isinstance(raw_count, int) or isinstance(raw_count, bool):
+                result["errors"].append(f"{count_field} must be an integer")
+                continue
+            if raw_count != 0:
+                result["errors"].append(f"{count_field} must be 0")
+    else:
+        result["errors"].append(f"unsupported sidecar format: {schema.get('format')}")
+
+    result["valid"] = not result["errors"]
+    return result
+def build_sidecar_schema_payload(agi_id: str | None = None, mst_session_id: str | None = None, validate_existing: bool = False) -> dict:
+    normalized_agi_id = _normalize_agi_id(agi_id) if agi_id else None
+    entries = [
+        _render_sidecar_schema_entry(schema, normalized_agi_id, mst_session_id)
+        for schema in _SIDECAR_SCHEMAS
+    ]
+    payload = {
+        "schema_version": _SIDECAR_SCHEMA_VERSION,
+        "agi_id": normalized_agi_id,
+        "mst_session_id": mst_session_id,
+        "sidecars": entries,
+        "valid": True,
+        "errors": [],
+    }
+    if not validate_existing:
+        return payload
+
+    validations = []
+    for entry in entries:
+        path = entry.get("path")
+        if path is None:
+            result = {
+                "name": entry.get("name"),
+                "path": None,
+                "exists": False,
+                "valid": False,
+                "errors": [f"cannot validate unresolved path: {entry.get('path_template')}"],
+            }
+        else:
+            result = _validate_json_sidecar(Path(path), entry)
+            result["name"] = entry.get("name")
+        validations.append(result)
+        if entry.get("required_for_completion") and not result.get("valid"):
+            payload["valid"] = False
+            payload["errors"].extend(f"{entry.get('name')}: {err}" for err in result.get("errors", []))
+    payload["validations"] = validations
+    return payload
+def _emit_sidecar_schema_payload(payload: dict, as_json: bool):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    print(f"Schema version: {payload.get('schema_version')}")
+    print(f"AGI: {payload.get('agi_id') or '-'}")
+    print(f"Valid: {'true' if payload.get('valid') else 'false'}")
+    for sidecar in payload.get("sidecars") or []:
+        print(f"- {sidecar.get('name')}: {sidecar.get('path') or sidecar.get('path_template')}")
+    for error in payload.get("errors") or []:
+        print(f"ERROR: {error}", file=sys.stderr)
+def cmd_agile_sidecar_schema(args):
+    mst_session_id = str(getattr(args, "mst_session_id", "") or "").strip() or None
+    payload = build_sidecar_schema_payload(
+        getattr(args, "agi_id", None),
+        mst_session_id=mst_session_id,
+        validate_existing=bool(getattr(args, "validate_existing", False)),
+    )
+    _emit_sidecar_schema_payload(payload, getattr(args, "json", False))
+    return 0 if payload.get("valid") else 1
+def _sidecar_schema_by_name(name: str) -> dict | None:
+    for schema in _SIDECAR_SCHEMAS:
+        if schema.get("name") == name:
+            return schema
+    return None
+def _objective_sidecar_path(agi_id: str, sidecar_name: str, mst_session_id: str | None = None) -> Path:
+    schema = _sidecar_schema_by_name(sidecar_name)
+    if schema is None:
+        raise ValueError(f"unknown sidecar: {sidecar_name}")
+    rendered = _render_sidecar_schema_entry(schema, agi_id, mst_session_id).get("path")
+    if not rendered:
+        raise ValueError(f"cannot resolve sidecar path: {sidecar_name}")
+    return Path(str(rendered))
+def _write_sidecar_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+def _rel_to_project(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(_common.BASE_DIR.parent.resolve()))
+    except ValueError:
+        return str(path)
+def _load_json_sidecar(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+def _objective_root_for_sidecars(agi_id: str) -> Path:
+    return _agi_session_dir(agi_id) / "objective"
+def _detail_files_for_sidecars(agi_id: str) -> list[Path]:
+    details_dir = _objective_root_for_sidecars(agi_id) / "details"
+    return sorted(details_dir.glob("*.md")) if details_dir.exists() else []
+def _dod_refs_for_detail_file(path: Path) -> list[str]:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    return sorted(set(_ANCHOR_DOD_RE.findall(content)))
+def _anchors_by_dod(anchors) -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = {}
+    if not isinstance(anchors, list):
+        return mapping
+    for item in anchors:
+        if not isinstance(item, dict):
+            continue
+        anchor_id = str(item.get("id") or "").strip()
+        if not anchor_id:
+            continue
+        for dod_ref in item.get("dod_refs") or []:
+            token = str(dod_ref or "").strip().upper()
+            if token:
+                mapping.setdefault(token, []).append(anchor_id)
+    return mapping
+def _build_handoff_manifest(agi_id: str) -> dict:
+    objective_root = _objective_root_for_sidecars(agi_id)
+    context_files = []
+    skip_reasons = []
+    candidates = [
+        objective_root / "objective.md",
+        objective_root / "objective.ids.json",
+    ] + _detail_files_for_sidecars(agi_id)
+    for path in candidates:
+        if path.exists() and path.is_file():
+            context_files.append({"path": _rel_to_project(path), "kind": "objective_context"})
+        else:
+            skip_reasons.append({"path": _rel_to_project(path), "reason": "missing"})
+    optional_context = {
+        "design": objective_root / "design.md",
+        "references": objective_root / "reference-links.json",
+        "previous_feedback": objective_root / "previous-feedback.md",
+    }
+    for kind, path in optional_context.items():
+        if path.exists() and path.is_file():
+            context_files.append({"path": _rel_to_project(path), "kind": kind})
+        else:
+            skip_reasons.append({"kind": kind, "reason": "not_applicable_or_missing"})
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "context_files": context_files,
+        "skip_reasons": skip_reasons,
+        "created_at": _now_iso(),
+    }
+_FINDING_RE = re.compile(
+    r"^\s*[-*]\s+\*\*(?P<id>F-[A-Za-z0-9_-]+)\s+(?P<severity>critical|high|major|medium|low)\s+(?P<title>[^*]+)\*\*:\s*(?P<summary>.*)$",
+    re.IGNORECASE,
+)
+_BULLET_SEVERITY_RE = re.compile(
+    r"^\s*[-*]\s+\*\*(?P<severity>Critical|High|Major|Medium|Low)\s*-\s*(?P<title>[^*]+)\*\*:\s*(?P<summary>.*)$"
+)
+def _collect_review_findings(agi_id: str) -> list[dict]:
+    findings: list[dict] = []
+    sequence = 1
+    for detail_file in _detail_files_for_sidecars(agi_id):
+        try:
+            content = detail_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        file_dods = _dod_refs_for_detail_file(detail_file)
+        for raw_line in content.splitlines():
+            finding_id = None
+            severity = None
+            title = None
+            summary = None
+            match = _FINDING_RE.match(raw_line)
+            if match:
+                finding_id = match.group("id").upper()
+                severity = match.group("severity").lower()
+                title = match.group("title").strip()
+                summary = match.group("summary").strip()
+            else:
+                match = _BULLET_SEVERITY_RE.match(raw_line)
+                if match:
+                    finding_id = f"F-LOCAL-{sequence:03d}"
+                    sequence += 1
+                    severity = match.group("severity").lower()
+                    title = match.group("title").strip()
+                    summary = match.group("summary").strip()
+            if not finding_id:
+                continue
+            line_dods = sorted(set(_ANCHOR_DOD_RE.findall(raw_line)))
+            findings.append(
+                {
+                    "finding_id": finding_id,
+                    "source_id": _rel_to_project(detail_file),
+                    "evidence_id": f"{detail_file.stem}:{len(findings) + 1}",
+                    "severity": severity,
+                    "title": title,
+                    "summary": summary,
+                    "dod_refs": line_dods or file_dods,
+                    "anchor_refs": [],
+                    "disposition": "mapped_to_objective",
+                }
+            )
+    return findings
+def _build_review_findings_payload(agi_id: str) -> dict:
+    findings = _collect_review_findings(agi_id)
+    unresolved = [
+        item for item in findings
+        if str(item.get("severity") or "").lower() in {"critical", "high", "major"}
+        and str(item.get("disposition") or "") not in {"mapped_to_objective", "deferred_with_reason", "accepted"}
+    ]
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "rounds": [{"id": "sidecar-build", "created_at": _now_iso(), "source": "objective_details"}],
+        "findings": findings,
+        "unresolved_blocking_count": len(unresolved),
+    }
+def _build_finding_trace_payload(agi_id: str, review_findings: dict) -> dict:
+    anchor_manifest = _load_json_sidecar(_objective_sidecar_path(agi_id, "objective_anchor_manifest"))
+    anchor_map = _anchors_by_dod(anchor_manifest)
+    traced = []
+    unmapped = 0
+    for finding in review_findings.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        dod_refs = [str(item).strip().upper() for item in finding.get("dod_refs") or [] if str(item).strip()]
+        anchor_refs = sorted({anchor for dod in dod_refs for anchor in anchor_map.get(dod, [])})
+        severity = str(finding.get("severity") or "").lower()
+        is_major_or_higher = severity in {"critical", "high", "major"}
+        if is_major_or_higher and (not dod_refs or not anchor_refs):
+            unmapped += 1
+        traced_item = dict(finding)
+        traced_item["anchor_refs"] = anchor_refs
+        traced_item["trace_status"] = "mapped" if dod_refs and anchor_refs else "unmapped"
+        traced.append(traced_item)
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "findings": traced,
+        "unmapped_major_or_higher_count": unmapped,
+    }
+def _build_section_review_inventory_payload(agi_id: str, finding_trace: dict) -> dict:
+    findings_by_source: dict[str, list[str]] = {}
+    for finding in finding_trace.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        source_id = str(finding.get("source_id") or "").strip()
+        finding_id = str(finding.get("finding_id") or "").strip()
+        if source_id and finding_id:
+            findings_by_source.setdefault(source_id, []).append(finding_id)
+    sections = []
+    objective_path = _agi_objective_path(agi_id)
+    if objective_path.exists():
+        sections.append(
+            {
+                "section_id": "objective",
+                "path": _rel_to_project(objective_path),
+                "required": True,
+                "reviewed_by": "sidecar-build",
+                "finding_ids": findings_by_source.get(_rel_to_project(objective_path), []),
+                "no_issue_reason": "objective parsed; findings are tracked in detail sections",
+            }
+        )
+    for detail_file in _detail_files_for_sidecars(agi_id):
+        rel_path = _rel_to_project(detail_file)
+        finding_ids = findings_by_source.get(rel_path, [])
+        sections.append(
+            {
+                "section_id": detail_file.stem,
+                "path": rel_path,
+                "required": True,
+                "reviewed_by": "sidecar-build",
+                "finding_ids": finding_ids,
+                "no_issue_reason": "" if finding_ids else "reviewed with no blocking finding",
+            }
+        )
+    unreviewed = [
+        item for item in sections
+        if item.get("required") is True and not item.get("reviewed_by")
+    ]
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "sections": sections,
+        "unreviewed_required_count": len(unreviewed),
+    }
+def _ambiguity_score_for_detail(content: str) -> tuple[float, list[str]]:
+    reasons = []
+    lowered = content.lower()
+    for token in ("tbd", "todo", "placeholder", "unclear", "ambiguous"):
+        if re.search(rf"\b{re.escape(token)}\b", lowered):
+            reasons.append(f"contains {token}")
+    for token in ("미정", "불명확", "정의되지 않음"):
+        if token in content:
+            reasons.append(f"contains {token}")
+    nonblank_lines = [line for line in content.splitlines() if line.strip()]
+    if len(nonblank_lines) < 8:
+        reasons.append("detail is too short")
+    score = min(1.0, len(reasons) / 4.0)
+    return score, reasons
+def _build_d3_results_payload(agi_id: str, threshold: float) -> dict:
+    details = []
+    blocking_count = 0
+    for detail_file in _detail_files_for_sidecars(agi_id):
+        try:
+            content = detail_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            score = 1.0
+            reasons = [f"failed to read detail: {exc}"]
+        else:
+            score, reasons = _ambiguity_score_for_detail(content)
+        passed = score <= threshold
+        if not passed:
+            blocking_count += 1
+        details.append(
+            {
+                "path": _rel_to_project(detail_file),
+                "ambiguity_score": score,
+                "pass": passed,
+                "reasons": reasons,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "agi_id": agi_id,
+        "threshold": threshold,
+        "details": details,
+        "blocking_count": blocking_count,
+    }
+def build_sidecar_artifacts(agi_id: str, *, d3_threshold: float = 0.25, refresh_anchors: bool = False) -> dict:
+    normalized_agi_id = _normalize_agi_id(agi_id)
+    objective_root = _objective_root_for_sidecars(normalized_agi_id)
+    details_dir = objective_root / "details"
+    written = []
+    errors = []
+
+    anchor_path = _objective_sidecar_path(normalized_agi_id, "objective_anchor_manifest")
+    if refresh_anchors or not anchor_path.exists():
+        anchor_payload = build_objective_anchor_manifest(details_dir, anchor_path)
+        if anchor_payload.get("valid"):
+            try:
+                _write_sidecar_json(anchor_path, anchor_payload.get("anchors") or [])
+                written.append({"name": "objective_anchor_manifest", "path": str(anchor_path)})
+            except OSError as exc:
+                errors.append(f"objective_anchor_manifest: failed to write: {exc}")
+        else:
+            errors.extend(f"objective_anchor_manifest: {err}" for err in anchor_payload.get("errors") or [])
+
+    handoff = _build_handoff_manifest(normalized_agi_id)
+    review_findings = _build_review_findings_payload(normalized_agi_id)
+    finding_trace = _build_finding_trace_payload(normalized_agi_id, review_findings)
+    section_inventory = _build_section_review_inventory_payload(normalized_agi_id, finding_trace)
+    d3_results = _build_d3_results_payload(normalized_agi_id, d3_threshold)
+    sidecar_payloads = {
+        "handoff_manifest": handoff,
+        "review_findings": review_findings,
+        "finding_trace_manifest": finding_trace,
+        "section_review_inventory": section_inventory,
+        "d3_detail_results": d3_results,
+    }
+    for name, payload in sidecar_payloads.items():
+        path = _objective_sidecar_path(normalized_agi_id, name)
+        try:
+            _write_sidecar_json(path, payload)
+            written.append({"name": name, "path": str(path)})
+        except OSError as exc:
+            errors.append(f"{name}: failed to write: {exc}")
+
+    validation = build_sidecar_schema_payload(normalized_agi_id, validate_existing=True)
+    return {
+        "schema_version": 1,
+        "agi_id": normalized_agi_id,
+        "written": written,
+        "valid": not errors and all(
+            item.get("valid") or item.get("name") == "state_snapshot"
+            for item in validation.get("validations") or []
+            if item.get("name") != "reference_links"
+        ),
+        "errors": errors,
+        "sidecar_schema": validation,
+    }
+def cmd_agile_sidecar_build(args):
+    try:
+        payload = build_sidecar_artifacts(
+            getattr(args, "agi_id", None),
+            d3_threshold=float(getattr(args, "d3_threshold", 0.25)),
+            refresh_anchors=bool(getattr(args, "refresh_anchors", False)),
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"AGI: {payload.get('agi_id')}")
+        print(f"Written: {len(payload.get('written') or [])}")
+        for error in payload.get("errors") or []:
+            print(f"ERROR: {error}", file=sys.stderr)
+    return 0 if not payload.get("errors") else 1
 def _window_sprint_ids(sprint: int, depth: int) -> List[str]:
     return [f"S{idx:02d}" for idx in range(max(0, sprint - depth + 1), sprint + 1)]
 def _load_agile_float_config(key: str, fallback: float) -> float:

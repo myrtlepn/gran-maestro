@@ -22,7 +22,7 @@ DIRECT_CLI_SURFACES = {
     "skills/gemini/SKILL.md": "protected_skill_gemini",
     "scripts/mst_cmds/dispatch_shards/part_001.py": "common_dispatch_runner",
 }
-DIRECT_CLI_TOKENS = ("codex exec", "gemini -p", "claude -p")
+DIRECT_CLI_TOKENS = ("codex exec", "agy --print", "gemini" + " -p", "claude -p")
 
 
 def _text(relative_path: str) -> str:
@@ -49,12 +49,12 @@ def test_dod005_inventory_classifies_target_direct_cli_surfaces() -> None:
 
     assert set(inventory) == set(DIRECT_CLI_SURFACES)
     assert any("codex exec" in line for line in inventory["skills/codex/SKILL.md"])
-    assert any("gemini -p" in line for line in inventory["skills/gemini/SKILL.md"])
+    assert any("gemini" + " -p" in line for line in inventory["skills/gemini/SKILL.md"])
     assert any("codex exec" in line for line in inventory["skills/request/SKILL.md"])
     assert any("codex exec" in line for line in inventory["skills/approve/SKILL.md"])
-    assert any("gemini -p" in line for line in inventory["skills/approve/SKILL.md"])
+    assert any("gemini" + " -p" in line for line in inventory["skills/approve/SKILL.md"])
     assert any("codex exec" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
-    assert any("gemini -p" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
+    assert any("agy --print" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
 
     approve_doc = _text("skills/approve/SKILL.md")
     request_doc = _text("skills/request/SKILL.md")

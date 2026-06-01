@@ -37,6 +37,30 @@ def _write_stub_cli(bin_dir: Path, name: str, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
+def _git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _init_workspace_repo(tmp_path: Path) -> Path:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    _git(workspace, "init")
+    _git(workspace, "config", "user.email", "tester@example.com")
+    _git(workspace, "config", "user.name", "Test User")
+    _git(workspace, "commit", "--allow-empty", "-m", "initial commit")
+    _git(workspace, "branch", "-M", "main")
+    return workspace
+
+
 def test_dispatch_build_codex_includes_required_fragments(tmp_path):
     workspace = tmp_path / "workspace"
     (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
@@ -82,13 +106,147 @@ def test_dispatch_build_codex_includes_required_fragments(tmp_path):
     assert "session resolve" not in command
 
 
-def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
+def test_dispatch_build_require_worktree_rejects_primary_checkout(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-primary-blocked",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+        "--require-worktree",
+    )
+
+    assert proc.returncode == 2
+    assert "worktree guard failed" in proc.stderr
+    assert "원본 primary checkout은 dispatch 작업 디렉토리로 사용할 수 없습니다" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_dispatch_build_require_worktree_allows_registered_linked_worktree(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+    linked_worktree = tmp_path / "linked-worktree"
+    _git(workspace, "worktree", "add", "-b", "feature/dispatch-linked", str(linked_worktree), "main")
+    prompt_file = workspace / "prompt-codex.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-linked-ok",
+        "--worktree-dir",
+        str(linked_worktree),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+        "--require-worktree",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+    assert "dispatch validate-worktree" in command
+    assert f"--worktree-dir {linked_worktree}" in command
+    assert f"-C {linked_worktree}" in command
+
+
+def test_dispatch_validate_worktree_rejects_primary_checkout(tmp_path):
+    workspace = _init_workspace_repo(tmp_path)
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "validate-worktree",
+        "--worktree-dir",
+        str(workspace),
+        "--json",
+    )
+
+    assert proc.returncode == 2
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is False
+    assert payload["reason"] == "primary_checkout"
+
+
+def test_dispatch_build_agy_includes_required_fragments(tmp_path):
     workspace = tmp_path / "workspace"
     (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
 
-    prompt_file = workspace / "prompt-gemini.md"
-    prompt_file.write_text("hello gemini", encoding="utf-8")
-    log_file = workspace / "gemini.log"
+    prompt_file = workspace / "prompt-agy.md"
+    prompt_file.write_text("hello agy", encoding="utf-8")
+    log_file = workspace / "agy.log"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "agy",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-agy",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "agy-test-model",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+
+    assert "agy --print" in command
+    assert f"$(cat {prompt_file})" in command
+    assert "--dangerously-skip-permissions" in command
+    assert f"--add-dir {workspace}" in command
+    agy_segment = command.split("agy --print", 1)[1].split("< /dev/null", 1)[0]
+    assert "--model agy-test-model" not in agy_segment
+    assert "gemini" + " -p" not in command
+    assert "--approval-mode" not in command
+    assert "--sandbox=false" not in command
+    assert str(log_file) in command
+    assert "dispatch register" in command
+    assert "dispatch heartbeat --task-id task-agy --log-file" in command
+    assert "dispatch heartbeat --task-id task-agy --log-file" in command and "--final" in command
+    assert "MST_DISPATCH_HEARTBEAT_INTERVAL" in command
+    assert "2>&1 | tee" in command
+    assert "EXIT_CODE:" in command
+    assert "< /dev/null" in command
+    assert "export MST_SESSION_ID" in command
+    assert "MST_CONTEXT_JSON" in command
+    assert "session resolve" not in command
+
+
+def test_dispatch_build_legacy_gemini_alias_uses_agy(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    prompt_file = workspace / "prompt-legacy.md"
+    prompt_file.write_text("hello legacy provider", encoding="utf-8")
+    log_file = workspace / "legacy.log"
 
     proc = _run_mst(
         workspace,
@@ -99,32 +257,22 @@ def test_dispatch_build_gemini_includes_required_fragments(tmp_path):
         "--prompt-file",
         str(prompt_file),
         "--task-id",
-        "task-gemini",
+        "task-legacy",
         "--worktree-dir",
         str(workspace),
         "--log-file",
         str(log_file),
         "--model",
-        "gemini-test-model",
+        "legacy-model",
     )
 
     assert proc.returncode == 0, proc.stderr
     command = proc.stdout.strip()
-
-    assert "gemini -p" in command
-    assert f"$(cat {prompt_file})" in command
-    assert "--model gemini-test-model" in command
-    assert str(log_file) in command
-    assert "dispatch register" in command
-    assert "dispatch heartbeat --task-id task-gemini --log-file" in command
-    assert "dispatch heartbeat --task-id task-gemini --log-file" in command and "--final" in command
-    assert "MST_DISPATCH_HEARTBEAT_INTERVAL" in command
-    assert "2>&1 | tee" in command
-    assert "EXIT_CODE:" in command
-    assert "< /dev/null" in command
-    assert "export MST_SESSION_ID" in command
-    assert "MST_CONTEXT_JSON" in command
-    assert "session resolve" not in command
+    assert "agy --print" in command
+    assert "--dangerously-skip-permissions" in command
+    agy_segment = command.split("agy --print", 1)[1].split("< /dev/null", 1)[0]
+    assert "--model legacy-model" not in agy_segment
+    assert "PROVIDER_DEPRECATION:gemini->agy" in command
 
 
 def test_dispatch_build_executes_monitor_heartbeat_for_prompt_output(tmp_path):
@@ -473,7 +621,7 @@ def test_dispatch_build_gemini_execution_records_failure_evidence_and_fallback(
     if stub_output:
         stub_lines.append(f"printf '%s' {stub_output!r}")
     stub_lines.append(f"exit {exit_code}")
-    _write_stub_cli(bin_dir, "gemini", "\n".join(stub_lines) + "\n")
+    _write_stub_cli(bin_dir, "agy", "\n".join(stub_lines) + "\n")
 
     prompt_file = workspace / "prompt-gemini.md"
     prompt_file.write_text("hello gemini", encoding="utf-8")
@@ -521,8 +669,8 @@ def test_dispatch_build_gemini_execution_records_failure_evidence_and_fallback(
     assert state["exit_code"] == exit_code
     assert state["failure_kind"] == failure_kind
     assert state["fallback_condition"] == "codex_fallback_required"
-    assert f"GEMINI_FAILURE_KIND:{failure_kind}" in running_log
-    assert "GEMINI_CODEX_FALLBACK_CONDITION:codex_fallback_required" in running_log
-    assert f"GEMINI_EVIDENCE_ID:{task_id}:gemini-failure" in running_log
+    assert f"PROVIDER_FAILURE_KIND:{failure_kind}" in running_log
+    assert "PROVIDER_CODEX_FALLBACK_CONDITION:codex_fallback_required" in running_log
+    assert f"PROVIDER_EVIDENCE_ID:{task_id}:agy-failure" in running_log
     assert f"failure_kind={failure_kind}" in running_log
     assert "fallback=codex_fallback_required" in running_log

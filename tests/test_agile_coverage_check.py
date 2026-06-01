@@ -289,6 +289,33 @@ def test_coverage_fails_when_must_anchor_is_missing(tmp_path):
     assert "[coverage-check] missing objective anchor: OAC-001" in proc.stderr
 
 
+def test_coverage_fails_when_canonical_anchor_manifest_missing(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    original = tmp_path / "objective.md"
+    details_dir = workspace / ".gran-maestro" / "agile" / "AGI-001" / "objective" / "details"
+
+    original.write_text("# Intro\n", encoding="utf-8")
+    _write_details(details_dir, "detail.md", ["Intro"])
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "coverage-check",
+        str(original),
+        "--details-dir",
+        str(details_dir),
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    expected_manifest = details_dir.parent / "objective.ids.json"
+    assert proc.returncode == 1
+    assert payload["coverage"] == 1.0
+    assert payload["valid"] is False
+    assert payload["anchor_manifest"] == str(expected_manifest)
+    assert payload["anchor_errors"] == [f"anchor manifest not found: {expected_manifest}"]
+
+
 def test_coverage_passes_when_all_anchors_are_mapped(tmp_path):
     workspace = _make_workspace(tmp_path)
     original = REPO_ROOT / "tests" / "fixtures" / "req_889" / "anchor_traceability" / "original.md"

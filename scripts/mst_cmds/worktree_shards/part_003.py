@@ -11,6 +11,7 @@ def register(subparsers):
     worktree_remove = worktree_sub.add_parser("remove")
     worktree_remove.add_argument("--path", required=True)
     worktree_remove.add_argument("--force", action="store_true")
+    worktree_remove.add_argument("--json", action="store_true")
 
     worktree_resolve_base = worktree_sub.add_parser("resolve-base")
     worktree_resolve_base.add_argument("--req")

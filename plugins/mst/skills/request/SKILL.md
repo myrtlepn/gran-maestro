@@ -586,7 +586,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
 
       prereview-prompt.md N개 동시 Write: 각 `tasks/NN/prereview-prompt.md`를 `templates/spec-prereview-prompt.md` + 변수 치환으로 생성
 
-      에이전트 병렬 dispatch: `python3 {PLUGIN_ROOT}/scripts/mst.py host context --json`로 host를 확인한다. host=claude에서 claude-dev 2개+ 태스크는 `Task(run_in_background: true)` 직접 호출을 유지한다. host=codex에서는 claude-dev를 기본 배정하지 않으며, codex-dev/gemini-dev 병렬 태스크는 공통 dispatch runner(`mst.py dispatch build` + background process) 사용
+      에이전트 병렬 dispatch: `python3 {PLUGIN_ROOT}/scripts/mst.py host context --json`로 host를 확인한다. host=claude에서 claude-dev 2개+ 태스크는 `Task(run_in_background: true)` 직접 호출을 유지한다. host=codex에서는 claude-dev를 기본 배정하지 않으며, codex-dev/gemini-dev 병렬 태스크는 공통 dispatch runner(`mst.py dispatch build --require-worktree` + background process) 사용
 
       결과 수집: 태스크별 결과를 CRITICAL/MAJOR/MINOR로 분류. `NO_ISSUES` → 이슈 없음. 실패 응답 → "[Pre-review skip]" 후 건너뜀.
 

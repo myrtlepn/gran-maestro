@@ -490,8 +490,49 @@ def cmd_session_flow(args):
     projection_path = Path(_common.BASE_DIR) / "sessions" / parsed.mst_session_id / "execution-flow.json"
     projection = load_json(projection_path)
     if not isinstance(projection, dict):
-        print(f"Error: execution-flow projection not found: {projection_path}", file=sys.stderr)
-        return 1
+        ledger = execution_flow.load_verified_history_source(
+            Path(_common.BASE_DIR).parent,
+            _history_policy_home(Path(_common.BASE_DIR)),
+            parsed.mst_session_id,
+        )
+        if isinstance(ledger, dict) and ledger.get("verified") is True:
+            generated = execution_flow.generate_execution_flow_artifacts(ledger, projection_path.parent)
+        else:
+            generated = ledger if isinstance(ledger, dict) else {}
+
+        if isinstance(generated, dict) and generated.get("status") == "ok":
+            projection = generated.get("projection")
+        else:
+            result = dict(generated) if isinstance(generated, dict) else {}
+            result.setdefault("status", "validation_failed")
+            result.setdefault("accepted", False)
+            result.setdefault("fail_closed", True)
+            result.setdefault("trusted_output_generated", False)
+            result["view_kind"] = "dod017.execution-flow.cli-view"
+            result["display_only"] = True
+            result["derived_artifact"] = True
+            result["mst_session_id"] = parsed.mst_session_id
+            result["root_mst_id"] = parsed.root_mst_id
+            result["projection_path"] = str(projection_path)
+            result["projection_exists"] = False
+            result.setdefault(
+                "message",
+                "execution-flow projection is unavailable and cannot be generated from the current verified history ledger",
+            )
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            else:
+                print(f"Error: {result['message']}", file=sys.stderr)
+                diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), list) else []
+                for item in diagnostics[:5]:
+                    if isinstance(item, dict):
+                        code = item.get("code") or item.get("field") or "diagnostic"
+                        reason = item.get("reason") or ""
+                        print(f"- {code}: {reason}", file=sys.stderr)
+            return 2
+        if not isinstance(projection, dict):
+            print(f"Error: execution-flow projection not generated: {projection_path}", file=sys.stderr)
+            return 1
 
     current_head = _current_head_for_flow_view(Path(_common.BASE_DIR), parsed.mst_session_id, projection)
     result = execution_flow.render_cli_flow_view(projection, current_head)

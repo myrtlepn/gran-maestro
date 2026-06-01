@@ -1204,6 +1204,21 @@ def _resolve_provider_model(provider: str, explicit_model: str | None) -> str | 
     if isinstance(fallback, str) and fallback.strip():
         return fallback.strip()
     return None
+
+
+def _normalize_dispatch_provider(provider: str) -> tuple[str, str | None]:
+    normalized = str(provider or "").strip().lower()
+    if normalized == "gemini":
+        return "agy", "gemini"
+    return normalized, None
+
+
+def _provider_executable(provider: str) -> str:
+    if provider == "agy":
+        return "agy"
+    return provider
+
+
 def _stdin_kind() -> str:
     try:
         mode = os.fstat(0).st_mode
@@ -1288,6 +1303,85 @@ def _git_output(worktree_dir: Path, args: list[str]) -> subprocess.CompletedProc
         text=True,
         check=False,
     )
+
+
+def _absolute_git_path(base: Path, path_text: str) -> Path:
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = (base / path).resolve(strict=False)
+    return path.resolve(strict=False)
+
+
+def _git_text(worktree_dir: Path, args: list[str]) -> tuple[bool, str]:
+    result = _git_output(worktree_dir, args)
+    output = result.stdout.strip() or result.stderr.strip()
+    return result.returncode == 0, output
+
+
+def _git_worktree_roots(repo_root: Path) -> set[Path]:
+    ok, output = _git_text(repo_root, ["worktree", "list", "--porcelain"])
+    if not ok:
+        return set()
+    roots: set[Path] = set()
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            roots.add(Path(line[len("worktree "):]).resolve(strict=False))
+    return roots
+
+
+def validate_required_dispatch_worktree(target_value: str | Path | None) -> dict:
+    if not target_value or not str(target_value).strip():
+        return {
+            "ok": False,
+            "reason": "missing_worktree_dir",
+            "message": "작업 worktree 경로가 필요합니다 (--worktree-dir).",
+            "worktree_dir": None,
+        }
+
+    target_path = Path(str(target_value)).expanduser().resolve(strict=False)
+    ok_root, root_output = _git_text(target_path, ["rev-parse", "--show-toplevel"])
+    if not ok_root or not root_output:
+        return {
+            "ok": False,
+            "reason": "not_git_worktree",
+            "message": f"등록된 git worktree가 아닙니다: {target_path}",
+            "worktree_dir": str(target_path),
+        }
+
+    worktree_root = Path(root_output).resolve(strict=False)
+    ok_common, common_output = _git_text(worktree_root, ["rev-parse", "--git-common-dir"])
+    if not ok_common or not common_output:
+        return {
+            "ok": False,
+            "reason": "git_metadata_unavailable",
+            "message": f"worktree git metadata를 확인할 수 없습니다: {worktree_root}",
+            "worktree_dir": str(worktree_root),
+        }
+
+    common_dir = _absolute_git_path(worktree_root, common_output)
+    primary_root = common_dir.parent.resolve(strict=False)
+    if worktree_root == primary_root:
+        return {
+            "ok": False,
+            "reason": "primary_checkout",
+            "message": f"원본 primary checkout은 dispatch 작업 디렉토리로 사용할 수 없습니다: {worktree_root}",
+            "worktree_dir": str(worktree_root),
+        }
+
+    if worktree_root not in _git_worktree_roots(worktree_root):
+        return {
+            "ok": False,
+            "reason": "unregistered_worktree",
+            "message": f"git worktree list에 등록되지 않은 경로입니다: {worktree_root}",
+            "worktree_dir": str(worktree_root),
+        }
+
+    return {
+        "ok": True,
+        "reason": "registered_linked_worktree",
+        "message": "registered linked worktree",
+        "worktree_dir": str(worktree_root),
+    }
 
 
 def _git_status_entries(worktree_dir: Path) -> tuple[list[dict], str]:
@@ -1636,7 +1730,8 @@ def evaluate_shared_state_boundaries(
 
 
 def cmd_dispatch_build(args):
-    provider = str(args.provider).strip().lower()
+    requested_provider = str(args.provider).strip().lower()
+    provider, legacy_provider = _normalize_dispatch_provider(requested_provider)
     if provider == "claude":
         print(
             "Error: dispatch build does not support provider 'claude'. Use Task-based claude dispatch.",
@@ -1655,6 +1750,15 @@ def cmd_dispatch_build(args):
         return 1
 
     worktree_dir = Path(args.worktree_dir).resolve()
+    require_worktree = bool(getattr(args, "require_worktree", False))
+    if require_worktree:
+        worktree_validation = validate_required_dispatch_worktree(worktree_dir)
+        if not worktree_validation.get("ok"):
+            print(
+                f"Error: worktree guard failed: {worktree_validation.get('message')}",
+                file=sys.stderr,
+            )
+            return 2
     log_file = Path(args.log_file).resolve()
     task_id = str(args.task_id).strip()
     if not task_id:
@@ -1675,7 +1779,7 @@ def cmd_dispatch_build(args):
         f"--running-log-path {q(str(log_file))} --context-file {q(str(prompt_file))}"
     )
 
-    gemini_failure_cmd = ""
+    provider_failure_cmd = ""
     if provider == "codex":
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" codex exec --full-auto -m {q(resolved_model)} -C {q(str(worktree_dir))} '
@@ -1683,27 +1787,31 @@ def cmd_dispatch_build(args):
         )
     else:
         cli_cmd = (
-            f'MST_SESSION_ID="$MST_SESSION_ID" gemini -p \"$(cat {q(str(prompt_file))})\" --model {q(resolved_model)} '
-            "--approval-mode yolo --sandbox=false"
+            f'MST_SESSION_ID="$MST_SESSION_ID" agy --print \"$(cat {q(str(prompt_file))})\" '
+            f"--dangerously-skip-permissions --add-dir {q(str(worktree_dir))}"
         )
-        gemini_failure_cmd = (
-            'MST_GEMINI_FAILURE_KIND=""; '
-            f"if grep -Eiq '(429|rate.?limit|quota|resource exhausted)' {q(str(log_file))}; then MST_GEMINI_FAILURE_KIND=rate_limit; "
-            f"elif grep -Eiq '(timed? ?out|timeout|deadline exceeded)' {q(str(log_file))}; then MST_GEMINI_FAILURE_KIND=timeout; "
-            f"elif [ ! -s {q(str(log_file))} ]; then MST_GEMINI_FAILURE_KIND=empty_result; "
-            'elif [ "$EC" -ne 0 ]; then MST_GEMINI_FAILURE_KIND=nonzero_exit; fi; '
-            f"MST_GEMINI_EVIDENCE_ID={q(task_id + ':gemini-failure')}; "
-            'MST_GEMINI_CODEX_FALLBACK_CONDITION="${MST_GEMINI_FAILURE_KIND:+codex_fallback_required}"; '
-            f'echo "GEMINI_FAILURE_KIND:${{MST_GEMINI_FAILURE_KIND:-none}}" >> {q(str(log_file))}; '
-            f'echo "GEMINI_CODEX_FALLBACK_CONDITION:${{MST_GEMINI_CODEX_FALLBACK_CONDITION:-none}}" >> {q(str(log_file))}; '
-            f'echo "GEMINI_EVIDENCE_ID:$MST_GEMINI_EVIDENCE_ID" >> {q(str(log_file))}; '
+        legacy_note = ""
+        if legacy_provider:
+            legacy_note = f'echo "PROVIDER_DEPRECATION:{legacy_provider}->agy" >> {q(str(log_file))}; '
+        provider_failure_cmd = (
+            'MST_PROVIDER_FAILURE_KIND=""; '
+            f"if grep -Eiq '(429|rate.?limit|quota|resource exhausted)' {q(str(log_file))}; then MST_PROVIDER_FAILURE_KIND=rate_limit; "
+            f"elif grep -Eiq '(timed? ?out|timeout|deadline exceeded)' {q(str(log_file))}; then MST_PROVIDER_FAILURE_KIND=timeout; "
+            f"elif [ ! -s {q(str(log_file))} ]; then MST_PROVIDER_FAILURE_KIND=empty_result; "
+            'elif [ "$EC" -ne 0 ]; then MST_PROVIDER_FAILURE_KIND=nonzero_exit; fi; '
+            f"MST_PROVIDER_EVIDENCE_ID={q(task_id + ':agy-failure')}; "
+            'MST_PROVIDER_FALLBACK_CONDITION="${MST_PROVIDER_FAILURE_KIND:+codex_fallback_required}"; '
+            f'echo "PROVIDER_FAILURE_KIND:${{MST_PROVIDER_FAILURE_KIND:-none}}" >> {q(str(log_file))}; '
+            f'echo "PROVIDER_CODEX_FALLBACK_CONDITION:${{MST_PROVIDER_FALLBACK_CONDITION:-none}}" >> {q(str(log_file))}; '
+            f'echo "PROVIDER_EVIDENCE_ID:$MST_PROVIDER_EVIDENCE_ID" >> {q(str(log_file))}; '
+            f"{legacy_note}"
         )
     dispatch_attempt_cmd = (
-        'MST_DISPATCH_FAILURE_KIND="${MST_GEMINI_FAILURE_KIND:-}"; '
+        'MST_DISPATCH_FAILURE_KIND="${MST_PROVIDER_FAILURE_KIND:-}"; '
         f'if [ -z "$MST_DISPATCH_FAILURE_KIND" ] && grep -Eiq \'(timed? ?out|timeout|deadline exceeded)\' {q(str(log_file))}; then MST_DISPATCH_FAILURE_KIND=timeout; '
         f'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ ! -s {q(str(log_file))} ]; then MST_DISPATCH_FAILURE_KIND=empty_result; '
         'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ "$EC" -ne 0 ]; then MST_DISPATCH_FAILURE_KIND=nonzero_exit; fi; '
-        'MST_DISPATCH_FALLBACK_CONDITION="${MST_GEMINI_CODEX_FALLBACK_CONDITION:-none}"; '
+        'MST_DISPATCH_FALLBACK_CONDITION="${MST_PROVIDER_FALLBACK_CONDITION:-none}"; '
         "printf 'DISPATCH_ATTEMPT_METADATA: task_id=%s provider=%s model=%s "
         "prompt_file=%s output_log=%s mst_session_id=%s exit_code=%s failure_kind=%s fallback=%s\\n' "
         f"{q(task_id)} {q(provider)} {q(resolved_model)} {q(str(prompt_file))} {q(str(log_file))} "
@@ -1721,9 +1829,16 @@ def cmd_dispatch_build(args):
         '--failure-kind "${MST_DISPATCH_FAILURE_KIND:-none}" '
         '--fallback-condition "$MST_DISPATCH_FALLBACK_CONDITION"'
     )
+    validate_worktree_cmd = ""
+    if require_worktree:
+        validate_worktree_cmd = (
+            f"python3 {q(str(mst_script))} dispatch validate-worktree "
+            f"--worktree-dir {q(str(worktree_dir))} >/dev/null || exit $?; "
+        )
 
     command = (
         f"{session_bootstrap_cmd}; "
+        f"{validate_worktree_cmd}"
         f"{register_cmd}; "
         'HB_INTERVAL="${MST_DISPATCH_HEARTBEAT_INTERVAL:-120}"; '
         "set -o pipefail; "
@@ -1734,7 +1849,7 @@ def cmd_dispatch_build(args):
         f"{cli_cmd} < /dev/null 2>&1 | tee {q(str(log_file))}; "
         "EC=${PIPESTATUS[0]}; "
         "kill \"$HB_PID\" 2>/dev/null || true; wait \"$HB_PID\" 2>/dev/null || true; "
-        f"{gemini_failure_cmd}"
+        f"{provider_failure_cmd}"
         f"{dispatch_attempt_cmd}"
         f"echo \"EXIT_CODE:$EC\" >> {q(str(log_file))}; "
         f"{final_heartbeat_cmd}; "
@@ -1766,9 +1881,21 @@ def cmd_dispatch_build(args):
         return 0
     print(command)
     return 0
+
+
+def cmd_dispatch_validate_worktree(args):
+    payload = validate_required_dispatch_worktree(getattr(args, "worktree_dir", None))
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    elif payload.get("ok"):
+        print(payload.get("message") or "ok")
+    else:
+        print(payload.get("message") or "worktree validation failed", file=sys.stderr)
+    return 0 if payload.get("ok") else 2
 def cmd_dispatch_preflight(args):
-    provider = str(args.provider).strip().lower()
-    executable = provider
+    requested_provider = str(args.provider).strip().lower()
+    provider, legacy_provider = _normalize_dispatch_provider(requested_provider)
+    executable = _provider_executable(provider)
     if shutil.which(executable) is None:
         print(f"Error: required binary '{executable}' not found in PATH", file=sys.stderr)
         return 1
@@ -1786,10 +1913,8 @@ def cmd_dispatch_preflight(args):
             file=sys.stderr,
         )
 
-    print(
-        json.dumps(
-            {"provider": provider, "binary": executable, "model": resolved_model, "stdin": stdin_kind},
-            ensure_ascii=False,
-        )
-    )
+    payload = {"provider": provider, "binary": executable, "model": resolved_model, "stdin": stdin_kind}
+    if legacy_provider:
+        payload["deprecated_alias"] = legacy_provider
+    print(json.dumps(payload, ensure_ascii=False))
     return 0

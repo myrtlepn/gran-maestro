@@ -484,15 +484,20 @@ def register(subparsers):
     dispatch_sub = dispatch.add_subparsers(dest="subcommand")
 
     build = dispatch_sub.add_parser("build")
-    build.add_argument("--provider", choices=["codex", "gemini", "claude"], required=True)
+    build.add_argument("--provider", choices=["codex", "agy", "gemini", "claude"], required=True)
     build.add_argument("--prompt-file", required=True)
     build.add_argument("--task-id", required=True)
     build.add_argument("--worktree-dir", required=True)
     build.add_argument("--log-file", required=True)
     build.add_argument("--model")
+    build.add_argument("--require-worktree", action="store_true")
+
+    validate_worktree = dispatch_sub.add_parser("validate-worktree")
+    validate_worktree.add_argument("--worktree-dir", required=True)
+    validate_worktree.add_argument("--json", action="store_true")
 
     preflight = dispatch_sub.add_parser("preflight")
-    preflight.add_argument("--provider", choices=["codex", "gemini", "claude"], required=True)
+    preflight.add_argument("--provider", choices=["codex", "agy", "gemini", "claude"], required=True)
     preflight.add_argument("--model")
 
     register_cmd = dispatch_sub.add_parser("register")

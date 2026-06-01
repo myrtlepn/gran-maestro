@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import cleanup as cleanup_mod
+from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds.agile_governance import (
     _generate_drift_report_skeleton,
     _generate_recall_patch_manifest_skeleton,
@@ -53,6 +54,10 @@ ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
             "description": "...",
             "suggested_dod": "...",
             "severity": "critical|major|minor",
+            "requires_user_answer": "true|false",
+            "question": "...",
+            "recommended_answer": "...",
+            "recommendation_rationale": "...",
         }
     ]
 }
@@ -693,23 +698,6 @@ def cmd_agile_init(args):
         print(f"Error: {agi_id} already exists", file=sys.stderr)
         return 1
 
-    (session_dir / "objective" / "history").mkdir(parents=True, exist_ok=True)
-    (session_dir / "sprints").mkdir(parents=True, exist_ok=True)
-    (session_dir / "index").mkdir(parents=True, exist_ok=True)
-
-    objective_content = """# Objective
-
-## Project DoD
-
-- [ ] DOD-001: Define first executable objective item.
-<!-- dod:DOD-001 status:todo priority:must -->
-"""
-    objective_path = _agi_objective_path(agi_id)
-    objective_path.write_text(objective_content, encoding="utf-8")
-    save_json(_agi_links_path(agi_id), {"agi_id": agi_id, "pln": [], "req": []})
-    _agi_objective_changelog_path(agi_id).touch()
-    _agi_events_path(agi_id).touch()
-
     now = _now_iso()
     owner_ppid = _resolve_owner_ppid()
     owner_session_id = _resolve_owner_session_id(owner_ppid)
@@ -730,8 +718,62 @@ def cmd_agile_init(args):
         "created_at": now,
         "updated_at": now,
     }
-    save_json(_agi_session_path(agi_id), payload)
-    _append_agile_event(agi_id, "agile.init", {"steering_every": args.steering_every})
+    try:
+        created = session_mod.create_root_session_artifacts(
+            _common.BASE_DIR,
+            agi_id,
+            root_payload=payload,
+        )
+        mst_session_id = str(created["mst_session_id"])
+        session_mod.write_session_history_event(
+            _common.BASE_DIR,
+            mst_session_id,
+            {
+                "event_type": "agile.init",
+                "artifact_id": agi_id,
+                "resource_id": agi_id,
+                "status": "active",
+                "command": "agile init",
+                "steering_every": args.steering_every,
+                "idempotency_key": f"{mst_session_id}:agile.init:{agi_id}",
+                "created_at": now,
+            },
+        )
+    except Exception as exc:
+        if "created" in locals():
+            shutil.rmtree(session_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(Path(created["session_metadata_path"]).parent, ignore_errors=True)
+            except Exception:
+                pass
+        print(f"Error: failed to initialize canonical MST session for {agi_id} ({exc})", file=sys.stderr)
+        return 1
+
+    (session_dir / "objective" / "history").mkdir(parents=True, exist_ok=True)
+    (session_dir / "sprints").mkdir(parents=True, exist_ok=True)
+    (session_dir / "index").mkdir(parents=True, exist_ok=True)
+
+    objective_content = """# Objective
+
+## Project DoD
+
+- [ ] DOD-001: Define first executable objective item.
+<!-- dod:DOD-001 status:todo priority:must -->
+"""
+    objective_path = _agi_objective_path(agi_id)
+    objective_path.write_text(objective_content, encoding="utf-8")
+    save_json(_agi_links_path(agi_id), {"agi_id": agi_id, "pln": [], "req": []})
+    _agi_objective_changelog_path(agi_id).touch()
+    _agi_events_path(agi_id).touch()
+    _append_agile_event(
+        agi_id,
+        "agile.init",
+        {
+            "steering_every": args.steering_every,
+            "mst_session_id": mst_session_id,
+        },
+    )
+    payload = load_json(_agi_session_path(agi_id)) or payload
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

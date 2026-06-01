@@ -165,7 +165,7 @@ projectDiscussionApi.get("/discussion/:id", async (c) => {
   const participants = normalizeParticipants(rawSession);
   const participantKeys = participants.length > 0
     ? participants.map((p) => p.key)
-    : ["codex", "gemini", "claude"];
+    : ["codex", "agy", "gemini", "claude"];
 
   const rounds: Array<{
     round: number;
@@ -179,7 +179,7 @@ projectDiscussionApi.get("/discussion/:id", async (c) => {
     const roundDirs = (await listDirs(roundsDir)).sort();
     const keyList = participantKeys.length > 0
       ? participantKeys
-      : ["codex", "gemini", "claude"];
+      : ["codex", "agy", "gemini", "claude"];
     const criticKeys = Object.keys((session.critics || {}));
     for (const rd of roundDirs) {
       const roundPath = `${roundsDir}/${rd}`;

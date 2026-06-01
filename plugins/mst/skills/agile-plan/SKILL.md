@@ -15,7 +15,9 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/objective.md` (신규 생성)
 - `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/details/*.md` (신규 생성)
-- `{PROJECT_ROOT}/.gran-maestro/state/{MST_SESSION_ID}/snapshot.json` (상속된 `MST_SESSION_ID` 또는 동일한 structured context로 기록되는 상태 파일)
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/clarification-context.md`
+- `{PROJECT_ROOT}/.gran-maestro/agile/AGI-*/objective/clarification-questions.md`
+- `{PROJECT_ROOT}/.gran-maestro/state/{MST_SESSION_ID}/snapshot.json` (`agile init`이 반환한 `mst_session_id`, 상속된 `MST_SESSION_ID`, 또는 동일한 structured context로 기록되는 상태 파일)
 
 그 외 모든 경로에 대한 Write/Edit 사용은 금지합니다.
 
@@ -34,7 +36,7 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 
 - `templates/objective.md` 포맷으로 objective.md 저장 완료
 - `mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 완료
-- `python3 {PLUGIN_ROOT}/scripts/mst.py state set --skill agile-plan --step 3 --total 3 [--return-to ...]` 기록 완료 (`MST_SESSION_ID`는 현재 세션에서 상속되거나 structured context로 제공됨)
+- `MST_SESSION_ID={MST_SESSION_ID} python3 {PLUGIN_ROOT}/scripts/mst.py state set --skill agile-plan --step 3 --total 3 [--return-to ...]` 기록 완료 (`MST_SESSION_ID`는 Step 0의 `agile init` 출력에서 확보하거나 현재 세션에서 상속됨)
 - `--return-to`가 있으면 stop-hook continuation guard로 상위 스킬 복귀(re-feed), 없으면 독립 실행을 종료하고 `--resume` 안내
 - 어떤 종료 경로든 사용자에게 보이는 마지막 마무리는 반드시 `다음 단계 실행 명령:` 블록으로 끝난다.
   - `--return-to` 존재: 자동 복귀가 정상 경로임을 밝히고, 수동 fallback 명령으로 `/mst:resume --wakeup-hint stop-recover`를 마지막에 출력한다.
@@ -81,9 +83,15 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로} [--return-to parent/s
 #### 0.2 agile init 호출
 
 1. `python3 {PLUGIN_ROOT}/scripts/mst.py agile init --steering-every 3 --json` 실행
-2. 출력에서 `agi_id`를 파싱해 `AGI_ID`에 저장
-3. `[신규 세션] AGI-{NNN} 생성됨 (스티어링 설정은 agile에서 확정)` 출력
-4. Step 1로 진행
+2. 출력에서 `agi_id`를 파싱해 `AGI_ID`에 저장하고, `mst_session_id`를 파싱해 `MST_SESSION_ID`에 저장한다.
+3. 이후 모든 `mst.py state ...` 호출은 아래처럼 동일한 canonical identity를 명시해 실행한다.
+   ```bash
+   MST_SESSION_ID="{MST_SESSION_ID}" \
+   MST_CONTEXT_JSON='{"schema_version":1,"mst_session_id":"{MST_SESSION_ID}","root_mst_id":"{AGI_ID}"}' \
+   python3 {PLUGIN_ROOT}/scripts/mst.py state ...
+   ```
+4. `[신규 세션] AGI-{NNN} 생성됨 (MST_SESSION_ID={MST_SESSION_ID}, 스티어링 설정은 agile에서 확정)` 출력
+5. Step 1로 진행
 
 ### Step 0.5: 의도 분류 게이트
 
@@ -198,6 +206,40 @@ JTBD 직후 아래 항목을 점검한다. `WHO/WHAT/WHY`는 JTBD에서 이미 �
 운영 규칙:
 - 미해결 항목이 있으면 자연어 대화로 보완하고 체크리스트를 재점검한다.
 - 결과는 objective.md의 `프로젝트 NFR`, `설계 결정`, `프로젝트 완료 기준` 섹션에 반영한다.
+
+##### 1A.2.5 목적 구체화 적대적 질문 게이트 (MANDATORY)
+
+목적: JTBD/DoD 초기에 PM 자기과신으로 사용자 목적·범위·우선순위의 빈칸을 자동 보완하는 것을 막는다. 이 게이트는 D3의 후반 명료도 검증과 별개로, **사용자에게 물어야 할 질문**을 찾는 전방 안전망이다.
+
+1. Step 1A.1~1A.2 결과를 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/clarification-context.md`에 저장한다. 포함 항목은 JTBD 5문항 답변, DoD 후보, 현재 제약/MoSCoW/NFR/리스크의 알려진 값과 미확인 값이다.
+2. 독립 에이전트를 1회 이상 실행한다. 허용 호출은 `Skill(skill:"mst:codex")` 또는 `Task(subagent_type:"general-purpose")`이다. 프롬프트는 아래 형식을 따른다.
+   ```text
+   역할: objective clarification adversary.
+   Read로 clarification-context.md를 로드하고, 사용자에게 물어야 하는 critical/major 모호성만 JSON findings로 반환하시오.
+   각 finding에는 severity, requires_user_answer, question, recommended_answer, recommendation_rationale를 포함하시오.
+   ```
+3. `severity=critical|major` 또는 `requires_user_answer=true` 항목은 PM이 자동 보완하지 않는다. 반드시 아래 Critical/Major Clarification Batch Rule로 처리한다.
+4. `minor` 항목은 PM이 objective 초안의 참고 리스크로 반영할 수 있지만, 사용자 의도·범위·우선순위에 영향을 주면 major로 승격한다.
+
+##### Critical/Major Clarification Batch Rule (MANDATORY)
+
+적용 범위: Step 1A.2.5, Step 1A.9 Strategic Review, Step 1A.9.7 적대적 검토, Step 1A.10.5 D3에서 발견된 사용자 의존 모호성.
+
+1. `severity=critical|major`이거나 finding의 `requires_user_answer=true`인 항목은 PM이 추론 또는 자동 보완으로 닫을 수 없다.
+2. PM은 각 항목에 대해 `질문`, `PM 추천 답변`, `추천 근거`, `틀렸을 때 영향`을 작성하고 `{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/objective/clarification-questions.md`에 append한다.
+3. 질문 횟수를 줄이기 위해 최대 5개 항목을 하나의 배치로 묶는다. 사용자에게는 아래 표를 먼저 보여준다.
+   ```markdown
+   | ID | 확인할 모호성 | PM 추천 답변 | 추천 근거 | 틀렸을 때 영향 |
+   |----|---------------|--------------|-----------|----------------|
+   | CQ-1 | ... | ... | ... | ... |
+   ```
+4. `AUTO_MODE=false`: 배치당 확인 질문 1회만 실행한다. AskUserQuestion을 사용할 수 있으면 선택지는 최대 4개로 고정한다.
+   - `A. 추천안 모두 수락`: 표의 모든 PM 추천 답변을 사용자 승인 결정으로 반영
+   - `B. 일부만 수정`: 사용자가 `CQ-1=...; CQ-3=...`처럼 수정할 수 있게 안내하고, 수정된 항목만 재반영
+   - `C. 더 검토`: 현재 배치 전체를 `mst:discussion` 또는 `mst:ideation`으로 보강한 뒤 같은 배치를 재질문
+   - `D. 범위 제외/보류`: 해당 항목을 Won't/No-go Scope 또는 리스크 레지스터에 기록
+5. `AUTO_MODE=true`: critical/major 사용자 의존 모호성이 남아 있으면 자율로 진행하지 않는다. `auto-decisions.md`와 `clarification-questions.md`에 blocker를 기록하고 objective 확정을 중단한다.
+6. 사용자가 `A. 추천안 모두 수락`을 선택한 경우에도 기록에는 `(PM 추천 — 사용자 일괄 승인)`으로 남긴다. PM 단독 결정으로 기록하지 않는다.
 
 ##### 1A.3 구조화 수집 단계 (MANDATORY, 순서 고정)
 
@@ -371,7 +413,7 @@ soft limit:
    - 범위 위험 감지: scope creep 및 후속 리스크 예측
 2. **이슈 분류**
    - `CRITICAL` / `MAJOR` / `MINOR` / `NO_ISSUES`
-   - `CRITICAL` 또는 `MAJOR` 존재 시, 저장 전에 보완 질의 후 재검토
+   - `CRITICAL` 또는 `MAJOR` 존재 시, 저장 전에 Critical/Major Clarification Batch Rule로 보완 질의 후 재검토
 3. **Confidence Matrix 자가평가**
    - 축: `Clarity`, `Feasibility`, `Risk Coverage`, `Evidence Freshness`, `Testability`
    - 점수: 각 0.0~1.0, 종합 점수는 가중 평균
@@ -516,14 +558,15 @@ Step 1A.9.5 도메인 클러스터링 (및 Step 1A.9.6 완성된 모습 미리�
    역할: {perspective} 관점의 적대적 검토자.
    Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
    ```
-4. findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/objective/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, 반영 여부를 포함한다.
-5. 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. 수렴 전에는 critical finding과 PM이 필요하다고 판단한 major finding을 Step 1A.4 재귀 정제 루프의 추가 입력으로 반영하고 `current_round += 1` 후 재검토한다.
+4. findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/objective/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, `requires_user_answer`, `question`, `recommended_answer`, 반영 여부를 포함한다.
+5. 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. 수렴 전에는 먼저 critical/major 사용자 의존 finding을 Critical/Major Clarification Batch Rule로 처리한다. 사용자 의존성이 없는 나머지 finding만 Step 1A.4 재귀 정제 루프의 추가 입력으로 반영하고 `current_round += 1` 후 재검토한다.
 6. `AUTO_MODE=true`:
    - `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다.
-   - `severity=critical` finding은 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
+   - `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 보낸다. PM이 자동 반영하지 않는다.
+   - 그 외 finding만 자동 반영 가능하며 `{PROJECT_ROOT}/.gran-maestro/agile/AGI-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
 7. `AUTO_MODE=false`:
    - 기본 실행은 `edge` + `flow` 2종을 순차 실행한다. 설정에서 다른 perspective가 enabled여도 PM이 필요하다고 판단한 경우에만 추가 실행한다.
-   - `severity=critical` finding은 `AskUserQuestion`으로 사용자 confirm 후 objective/detail 보강에 반영한다. major/minor는 요약만 제시하고 사용자가 반영을 선택한 경우에만 재정제한다.
+   - `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 묶어 사용자 confirm 후 objective/detail 보강에 반영한다. minor는 요약만 제시하고 사용자가 반영을 선택한 경우에만 재정제한다.
 
 ##### 1A.10 objective.md + details/*.md 저장
 
@@ -677,7 +720,9 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 2. 값이 없으면 기본값 `0.1`을 사용한다.
 3. `objective/details/*.md` 각 파일마다 독립 에이전트로 D3 역방향 시뮬레이션을 실행한다.
 4. 판정은 기존 plan D3 Gate(`mst:plan` Step 3.9) 패턴을 따르되, 임계치는 `objective_detail_threshold`를 사용한다.
-5. 모호도 점수가 임계치를 초과하면(명료도 90% 미만) 보완 요구를 생성하고 수정 후 재검증한다.
+5. D3 출력에는 `severity`, `requires_user_answer`, `question`, `recommended_answer`, `recommendation_rationale`를 포함한다.
+6. `severity=critical|major` 또는 `requires_user_answer=true`인 사용자 의존 모호성은 Critical/Major Clarification Batch Rule로 처리한다. PM이 자동 보완하지 않는다.
+7. 그 외 모호도 점수가 임계치를 초과하면(명료도 90% 미만) 보완 요구를 생성하고 수정 후 재검증한다.
 
 저장 후:
 - `python3 {PLUGIN_ROOT}/scripts/mst.py agile update {AGI_ID} --status active --objective-version 1 --json` 실행
@@ -711,6 +756,7 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 `--doc` 모드도 아래 단계를 동일 적용한다.
 
 - 모호성 해소 체크리스트: Step 1A.2
+- 목적 구체화 적대적 질문 게이트: Step 1A.2.5
 - 구조화 수집 단계: Step 1A.3
 - Reference Lookup Protocol: Step 1A.3.4
 - 재귀 정제 루프/수렴 판정: Step 1A.4~1A.5
@@ -737,6 +783,8 @@ Step 1A.10 저장 직후, 각 detail 파일에 대해 독립적으로 D3 검증�
 objective 저장 후 반드시 상태 스냅샷을 기록한다. State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
 
 ```bash
+MST_SESSION_ID="{MST_SESSION_ID}" \
+MST_CONTEXT_JSON='{"schema_version":1,"mst_session_id":"{MST_SESSION_ID}","root_mst_id":"{AGI_ID}"}' \
 python3 {PLUGIN_ROOT}/scripts/mst.py state set \
   --skill agile-plan \
   --step 3 \
@@ -762,6 +810,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set \
   다음 단계 실행 명령:
     /mst:agile --resume {AGI_ID}
   ```
+
 ---
 
 ## Anti-Rationalization Checklist

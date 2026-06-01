@@ -58,6 +58,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string | SettingMeta> = {
   'agile.adversarial_review.perspectives.nfr.enabled': '비기능 요구사항 gap 관점 검토 활성화 여부',
   'agile.adversarial_review.max_rounds': '적대적 검토 최대 반복 라운드 수',
   'agile.adversarial_review.auto_apply_severity_threshold': { description: 'AUTO_MODE에서 자동 반영할 최소 severity', options: ['critical', 'major', 'minor'] },
+  'agile.adversarial_review.clarification_blocking_severities': '사용자 확인이 필요한 적대적 검토 severity 목록',
+  'agile.adversarial_review.clarification_batch_max_items': '한 번에 묶어 확인할 적대적 검토 항목 최대 개수',
   'agile.adversarial_review.parallel_in_auto_mode': 'AUTO_MODE에서 활성화된 관점을 병렬 실행할지 여부',
   'server.port': '대시보드 포트',
   'server.host': '대시보드 호스트',

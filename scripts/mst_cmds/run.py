@@ -641,7 +641,7 @@ def cmd_run(args):
 def register(subparsers):
     run = subparsers.add_parser("run", help="Run external CLI with dispatch state/heartbeat/log tee")
     run.add_argument("--task-id", required=True)
-    run.add_argument("--provider", choices=["codex", "gemini", "claude"], required=True)
+    run.add_argument("--provider", choices=["codex", "agy", "gemini", "claude"], required=True)
     run.add_argument("--skill", default="")
     run.add_argument("--model", required=True)
     run.add_argument("--log-dir", required=True)

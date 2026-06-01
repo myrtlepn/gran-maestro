@@ -157,6 +157,11 @@
       },
       "max_rounds": 3,
       "auto_apply_severity_threshold": "critical",
+      "clarification_blocking_severities": [
+        "critical",
+        "major"
+      ],
+      "clarification_batch_max_items": 5,
       "parallel_in_auto_mode": true
     },
     "retrospective": {

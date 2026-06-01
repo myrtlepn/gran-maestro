@@ -25,7 +25,7 @@ def test_background_dispatch_commands_close_stdin():
         path = REPO_ROOT / rel_path
         content = path.read_text(encoding="utf-8")
         for line_no, line in enumerate(content.splitlines(), start=1):
-            if "codex exec" not in line and "gemini -p" not in line:
+            if "codex exec" not in line and "agy --print" not in line:
                 continue
             stripped = line.strip()
             if stripped.startswith("#"):
@@ -34,9 +34,9 @@ def test_background_dispatch_commands_close_stdin():
                 "command:" in line
                 or stripped.startswith("MODEL=")
                 or stripped.startswith("codex exec ")
-                or stripped.startswith("gemini -p ")
+                or stripped.startswith("agy --print ")
                 or "&& codex exec " in line
-                or "&& gemini -p " in line
+                or "&& agy --print " in line
             )
             if not is_command_line:
                 continue

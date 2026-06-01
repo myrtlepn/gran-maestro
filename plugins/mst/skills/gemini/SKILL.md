@@ -77,6 +77,8 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
      --provider gemini \
      --model "$MODEL" \
      --log-dir "{task_dir}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- gemini -p "{prompt}" --model "$MODEL" --approval-mode yolo --sandbox=false
 
    # --prompt-file
@@ -85,6 +87,8 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
      --provider gemini \
      --model "$MODEL" \
      --log-dir "{task_dir}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- gemini -p "$(cat {prompt_file})" --model "$MODEL" --approval-mode yolo --sandbox=false
 
    # --trace 모드
@@ -94,6 +98,8 @@ Gemini CLI 호출의 단일 진입점. request 워크플로우(--trace 모드 �
      --model "$MODEL" \
      --log-dir "{task_dir}" \
      --trace "{REQ-ID}/{TASK-NUM}/{label}" \
+     --require-worktree \
+     --worktree-dir "{working_dir}" \
      -- gemini -p "$(cat {prompt_file})" --model "$MODEL" --approval-mode yolo --sandbox=false
    ```
 8. **결과 처리**: `--trace` → Trace 문서 자동 생성 후 exit code만 반환; 없음 → 결과 표시
@@ -113,6 +119,8 @@ python3 {PLUGIN_ROOT}/scripts/mst.py run \
   --model gemini-3.1-pro-preview \
   --log-dir .gran-maestro/requests/REQ-001/tasks/01 \
   --trace REQ-001/01/phase1-analysis \
+  --require-worktree \
+  --worktree-dir {worktree} \
   -- gemini -p "$(cat {prompt_file})" --model gemini-3.1-pro-preview --approval-mode yolo --sandbox=false
 ```
 

@@ -16,7 +16,7 @@ export interface AgentDefinition {
   /** Maximum fallback chain depth (default: 1) */
   maxFallbackDepth?: number;
   /** Provider for CLI-based agents */
-  provider?: 'claude' | 'codex' | 'gemini';
+  provider?: 'claude' | 'codex' | 'agy' | 'gemini';
   /** Capabilities for agent selection */
   capabilities?: string[];
   /** Condition for automatic spawning */

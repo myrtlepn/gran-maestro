@@ -32,6 +32,10 @@ ADVERSARIAL_REVIEW_OUTPUT_SCHEMA = {
             "description": "...",
             "suggested_dod": "...",
             "severity": "critical|major|minor",
+            "requires_user_answer": "true|false",
+            "question": "...",
+            "recommended_answer": "...",
+            "recommendation_rationale": "...",
         }
     ]
 }

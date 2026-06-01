@@ -35,6 +35,7 @@ def _set_base_dir(monkeypatch, tmp_path: Path) -> Path:
     base_dir = tmp_path / ".gran-maestro"
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(_common, "BASE_DIR", base_dir)
+    monkeypatch.setenv("MST_POLICY_HOME", str(base_dir / "policy"))
     return base_dir
 
 
@@ -72,8 +73,13 @@ def test_agile_init_writes_owner_metadata(tmp_path: Path, monkeypatch, capsys) -
     session = _read_json(session_path)
     assert "owner_ppid" in session
     assert "owner_session_id" in session
+    assert session["mst_session_id"].startswith("MST-AGI-001-")
+    assert session["root_mst_id"] == "AGI-001"
     assert session["owner_ppid"] == ppid
     assert session["owner_session_id"] == UUID_V4
+    assert (
+        base_dir / "sessions" / session["mst_session_id"] / "session.json"
+    ).is_file()
 
 
 def test_inject_owner_metadata_idempotent(tmp_path: Path) -> None:

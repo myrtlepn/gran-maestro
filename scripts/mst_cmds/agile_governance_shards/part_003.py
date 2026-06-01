@@ -366,16 +366,45 @@ def cmd_agile_objective_transition(args):
         print(f"Error: objective file missing ({objective_path})", file=sys.stderr)
         return 1
 
+    requested_status = str(args.status).strip().lower()
     current_content = objective_path.read_text(encoding="utf-8")
     before_items = _collect_objective_dod_items(current_content)
     updated_content, found, changed = _update_objective_dod_status(
         current_content,
         dod_id,
-        str(args.status).strip().lower(),
+        requested_status,
     )
     if not found:
         print(f"Error: DoD item not found ({dod_id})", file=sys.stderr)
         return 1
+    if requested_status in {"done", "completed"} or getattr(args, "deferred_promote", False):
+        from scripts.mst_cmds import agile_detail as _agile_detail
+
+        mst_session_id = str(getattr(args, "mst_session_id", "") or os.environ.get("MST_SESSION_ID") or "").strip() or None
+        sidecar_schema = _agile_detail.build_sidecar_schema_payload(
+            agi_id,
+            mst_session_id=mst_session_id,
+            validate_existing=True,
+        )
+        completion_blockers = list(sidecar_schema.get("errors") or [])
+        if completion_blockers:
+            output = {
+                "agi_id": agi_id,
+                "story": dod_id,
+                "dod": dod_id,
+                "status": "blocked",
+                "requested_status": requested_status,
+                "changed": False,
+                "completion_blockers": completion_blockers,
+                "sidecar_schema": sidecar_schema,
+            }
+            if args.json:
+                print(json.dumps(output, ensure_ascii=False, indent=2))
+            else:
+                print(f"Error: objective validation failed for done transition ({dod_id})", file=sys.stderr)
+                for error in completion_blockers:
+                    print(f"Error: {error}", file=sys.stderr)
+            return 1
 
     story_upper = str(args.story or "").upper()
     evidence_refs_arg = getattr(args, "evidence_ref", []) or []
@@ -577,6 +606,16 @@ def cmd_agile_objective_check(args):
         dod_id for dod_id, item in dod_items.items()
         if item.get("status", "").lower() not in {"done", "completed"}
     ])
+    from scripts.mst_cmds import agile_detail as _agile_detail
+
+    mst_session_id = str(getattr(args, "mst_session_id", "") or os.environ.get("MST_SESSION_ID") or "").strip() or None
+    sidecar_schema = _agile_detail.build_sidecar_schema_payload(
+        agi_id,
+        mst_session_id=mst_session_id,
+        validate_existing=True,
+    )
+    completion_blockers = list(sidecar_schema.get("errors") or [])
+    marker_all_done = len(incomplete) == 0
     status_only = {dod_id: item.get("status") for dod_id, item in dod_items.items()}
     legacy_dods = {}
     for dod_id, item in dod_items.items():
@@ -588,10 +627,13 @@ def cmd_agile_objective_check(args):
         legacy_dods[dod_id] = item_copy
     output = {
         "agi_id": agi_id,
-        "all_done": len(incomplete) == 0,
+        "all_done": marker_all_done and not completion_blockers,
+        "marker_all_done": marker_all_done,
         "incomplete": incomplete,
+        "completion_blockers": completion_blockers,
         "dods": legacy_dods,
         "stories": status_only,
+        "sidecar_schema": sidecar_schema,
     }
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2))

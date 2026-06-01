@@ -231,6 +231,18 @@ def register(subparsers):
     agile_coverage_check.add_argument("--downstream-trace", dest="downstream_trace")
     agile_coverage_check.add_argument("--json", action="store_true")
 
+    agile_sidecar_schema = agile_sub.add_parser("sidecar-schema")
+    agile_sidecar_schema.add_argument("agi_id", nargs="?")
+    agile_sidecar_schema.add_argument("--mst-session-id", dest="mst_session_id")
+    agile_sidecar_schema.add_argument("--validate-existing", action="store_true", dest="validate_existing")
+    agile_sidecar_schema.add_argument("--json", action="store_true")
+
+    agile_sidecar_build = agile_sub.add_parser("sidecar-build")
+    agile_sidecar_build.add_argument("agi_id")
+    agile_sidecar_build.add_argument("--refresh-anchors", action="store_true", dest="refresh_anchors")
+    agile_sidecar_build.add_argument("--d3-threshold", type=float, default=0.25, dest="d3_threshold")
+    agile_sidecar_build.add_argument("--json", action="store_true")
+
     agile_objective_transition = agile_sub.add_parser("objective-transition")
     agile_objective_transition.add_argument("agi_id")
     agile_objective_transition.add_argument("--story", required=True)
@@ -238,11 +250,13 @@ def register(subparsers):
     agile_objective_transition.add_argument("--deferred-promote", action="store_true")
     agile_objective_transition.add_argument("--sprint", type=int)
     agile_objective_transition.add_argument("--evidence-ref", action="append", default=[])
+    agile_objective_transition.add_argument("--mst-session-id", dest="mst_session_id")
     agile_objective_transition.add_argument("--json", action="store_true")
 
     agile_objective_check = agile_sub.add_parser("objective-check")
     agile_objective_check.add_argument("agi_id")
     agile_objective_check.add_argument("--dod-id", default=None)
+    agile_objective_check.add_argument("--mst-session-id", dest="mst_session_id")
     agile_objective_check.add_argument("--json", action="store_true")
 
     agile_objective_snapshot = agile_sub.add_parser("objective-snapshot")

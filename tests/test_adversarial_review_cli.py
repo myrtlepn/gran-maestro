@@ -106,6 +106,10 @@ def _assert_review_payload(payload: dict, perspective: str) -> None:
                 "description": "...",
                 "suggested_dod": "...",
                 "severity": "critical|major|minor",
+                "requires_user_answer": "true|false",
+                "question": "...",
+                "recommended_answer": "...",
+                "recommendation_rationale": "...",
             }
         ]
     }
@@ -238,13 +242,15 @@ def test_default_config_has_adversarial_review_schema():
     assert review["agents"]["claude"] == {"count": 0, "tier": "economy"}
     assert review["max_rounds"] == 3
     assert review["auto_apply_severity_threshold"] == "critical"
+    assert review["clarification_blocking_severities"] == ["critical", "major"]
+    assert review["clarification_batch_max_items"] == 5
     assert review["parallel_in_auto_mode"] is True
 
 
 def test_review_commands_do_not_read_context_files_before_printing():
     forbidden_calls = {"open", "read_text", "read"}
     targets = [
-        (REPO_ROOT / "scripts" / "mst_cmds" / "agile.py", "cmd_agile_review"),
+        (REPO_ROOT / "scripts" / "mst_cmds" / "agile_shards" / "part_003.py", "cmd_agile_review"),
         (REPO_ROOT / "scripts" / "mst_cmds" / "plan.py", "cmd_plan_review"),
         (REPO_ROOT / "scripts" / "mst_cmds" / "request.py", "cmd_request_review"),
     ]
@@ -269,7 +275,16 @@ def test_perspective_template_schema_blocks_are_valid_json():
         assert match, perspective
         schema = json.loads(match.group(1))
         finding = schema["findings"][0]
-        assert set(finding) == {"type", "description", "suggested_dod", "severity"}
+        assert set(finding) == {
+            "type",
+            "description",
+            "suggested_dod",
+            "severity",
+            "requires_user_answer",
+            "question",
+            "recommended_answer",
+            "recommendation_rationale",
+        }
         assert finding["severity"] == "critical|major|minor"
 
 

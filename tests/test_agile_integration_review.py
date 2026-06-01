@@ -90,6 +90,59 @@ def _write(path: Path, content: str):
     path.write_text(content, encoding="utf-8")
 
 
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) -> None:
+    objective_dir = workspace / ".gran-maestro" / "agile" / agi_id / "objective"
+    _write_json(
+        objective_dir / "objective.ids.json",
+        [
+            {
+                "id": "OAC-001",
+                "source_file": "details/review-evidence-and-gates.md",
+                "text": "required anchor",
+                "kind": "detail",
+                "grade": "MUST",
+                "domain_slug": "review-evidence-and-gates",
+                "dod_refs": ["DOD-005"],
+            }
+        ],
+    )
+    _write_json(
+        objective_dir / "handoff-manifest.json",
+        {"schema_version": 1, "agi_id": agi_id, "context_files": [], "skip_reasons": [], "created_at": "2026-06-01T00:00:00Z"},
+    )
+    _write_json(
+        objective_dir / "adversarial-review-findings.json",
+        {"schema_version": 1, "agi_id": agi_id, "rounds": [], "findings": [], "unresolved_blocking_count": 0},
+    )
+    _write_json(
+        objective_dir / "finding-trace.json",
+        {"schema_version": 1, "agi_id": agi_id, "findings": [], "unmapped_major_or_higher_count": 0},
+    )
+    _write_json(
+        objective_dir / "section-review-inventory.json",
+        {"schema_version": 1, "agi_id": agi_id, "sections": [], "unreviewed_required_count": 0},
+    )
+    _write_json(
+        objective_dir / "d3-findings.json",
+        {"schema_version": 1, "agi_id": agi_id, "threshold": 0.0, "details": [], "blocking_count": 0},
+    )
+    _write_json(
+        workspace / ".gran-maestro" / "state" / mst_session_id / "snapshot.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": mst_session_id,
+            "root_mst_id": agi_id,
+            "workflow": {"current_skill": "mst:agile", "current_step": 2, "status": "active"},
+            "history": {"last_event_id": "a" * 64},
+        },
+    )
+
+
 def _write_previous_result(workspace: Path, agi_id: str, sprint: int, payload: dict):
     _write(
         workspace
@@ -596,6 +649,7 @@ def test_result_sprint_kind_fields(tmp_path):
 def test_objective_transition_deferred_promote(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agi(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
 
     objective_path = workspace / ".gran-maestro" / "agile" / agi_id / "objective" / "objective.md"
     _write(
@@ -628,6 +682,7 @@ def test_objective_transition_deferred_promote(tmp_path):
             "--json",
         )
         assert proc.returncode == 0, proc.stderr
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
 
     transition_proc = _run_mst(
         workspace,
@@ -641,6 +696,8 @@ def test_objective_transition_deferred_promote(tmp_path):
         "--deferred-promote",
         "--sprint",
         "5",
+        "--mst-session-id",
+        mst_session_id,
         "--json",
     )
     assert transition_proc.returncode == 0, transition_proc.stderr

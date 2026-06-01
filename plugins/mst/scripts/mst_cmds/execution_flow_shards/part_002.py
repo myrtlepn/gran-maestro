@@ -406,6 +406,8 @@ def render_cli_flow_view(projection: dict[str, Any], current_head: dict[str, Any
             "view_kind": "dod017.execution-flow.cli-view",
             "display_only": True,
             "derived_artifact": True,
+            "mst_session_id": projection.get("mst_session_id"),
+            "root_mst_id": projection.get("root_mst_id"),
             "next_action_authority": False,
             "transition_authority": "dod016_transition_graph",
             "read_only": projection_status["read_only"],

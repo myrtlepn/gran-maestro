@@ -202,6 +202,14 @@ def test_detect_orphans_archives_branch_only_cleaned_meta_orphan(
     assert payload["orphans"][0]["worktree_listed"] is False
     assert payload["orphans"][0]["branch_exists"] is True
     assert payload["orphans"][0]["path_exists"] is False
+    assert payload["orphans"][0]["classification"] == "branch_only_orphan"
+    assert payload["orphans"][0]["reason"] == "orphan_resource_detected"
+    assert payload["orphans"][0]["next_action"] == "none"
+    assert payload["orphans"][0]["destructive_cleanup_performed"] is True
+    assert payload["orphans"][0]["ownership_evidence"]["branch_exists"] is True
+    assert {
+        item["kind"] for item in payload["orphans"][0]["affected_resources"]
+    } == {"worktree_path", "branch", "worktree_meta"}
     assert not meta_path.exists()
     archived = list((master_repo / ".gran-maestro" / "worktrees" / ".archive" / "lineage-unknown").glob("*/*.meta.json"))
     assert len(archived) == 1
@@ -409,6 +417,13 @@ def test_detect_orphans_scope_includes_fs_only_sprint_worktree(
     assert payload["orphans"][0]["meta_path"] is None
     assert payload["orphans"][0]["worktree_listed"] is True
     assert payload["orphans"][0]["path_exists"] is True
+    assert payload["orphans"][0]["classification"] == "registered_orphan_worktree"
+    assert payload["orphans"][0]["next_action"] == "rerun_with_clean_after_confirming_ownership_or_scope"
+    assert payload["orphans"][0]["destructive_cleanup_performed"] is False
+    assert payload["orphans"][0]["ownership_evidence"]["worktree_listed"] is True
+    assert {
+        item["kind"] for item in payload["orphans"][0]["affected_resources"]
+    } == {"worktree_path"}
 
 
 def test_detect_orphans_prefix_includes_matching_active_meta(

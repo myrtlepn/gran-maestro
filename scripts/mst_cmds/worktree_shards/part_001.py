@@ -1577,6 +1577,54 @@ def _resolve_worktree_source_root() -> Path:
     if (source_claude_dir / "hooks").is_dir() and (source_claude_dir / "settings.local.json").is_file():
         return project_root
     return _resolve_master_project_root()
+
+def _worktree_remove_payload(
+    *,
+    status: str,
+    classification: str,
+    worktree_path: Path,
+    reason: str,
+    next_action: str,
+    destructive_cleanup_allowed: bool,
+    destructive_cleanup_performed: bool,
+    child_worktree_path: Path | None = None,
+    details: dict | None = None,
+) -> dict[str, object]:
+    affected_resources: list[dict[str, object]] = [
+        {
+            "kind": "worktree",
+            "path": str(worktree_path),
+            "exists": worktree_path.exists(),
+        }
+    ]
+    if child_worktree_path is not None:
+        affected_resources.append(
+            {
+                "kind": "child_worktree",
+                "path": str(child_worktree_path),
+                "exists": child_worktree_path.exists(),
+            }
+        )
+    payload: dict[str, object] = {
+        "status": status,
+        "classification": classification,
+        "worktree_path": str(worktree_path),
+        "reason": reason,
+        "next_action": next_action,
+        "destructive_cleanup_allowed": destructive_cleanup_allowed,
+        "destructive_cleanup_performed": destructive_cleanup_performed,
+        "affected_resources": affected_resources,
+    }
+    if details:
+        payload["details"] = details
+    return payload
+
+def _emit_worktree_remove_payload(payload: dict[str, object], *, as_json: bool, message: str, stream=None) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    print(message, file=stream or sys.stderr)
+
 def cmd_worktree_create(args):
     # Worktree creation commands must resolve master cwd and reject nested targets.
     # Currently this policy applies only to cmd_worktree_create.
@@ -1639,6 +1687,7 @@ def cmd_worktree_remove(args):
     project_root = _normalize_target_path(Path(_common.BASE_DIR).parent)
     worktree_path = _normalize_target_path(args.path)
     force = getattr(args, "force", False)
+    as_json = bool(getattr(args, "json", False))
 
     try:
         child_worktree = _find_child_worktree_root(worktree_path, _list_worktree_roots(project_root))
@@ -1647,11 +1696,24 @@ def cmd_worktree_remove(args):
         return 1
 
     if child_worktree is not None:
-        print(
+        message = (
             "Error: child worktree detected. "
             f"worktree {worktree_path}에 자식 worktree {child_worktree}가 존재합니다. "
-            "자식부터 정리하세요.",
-            file=sys.stderr,
+            "자식부터 정리하세요."
+        )
+        _emit_worktree_remove_payload(
+            _worktree_remove_payload(
+                status="blocked",
+                classification="nested_child_worktree",
+                worktree_path=worktree_path,
+                child_worktree_path=child_worktree,
+                reason="child_worktree_present",
+                next_action="cleanup_child_worktree_first",
+                destructive_cleanup_allowed=False,
+                destructive_cleanup_performed=False,
+            ),
+            as_json=as_json,
+            message=message,
         )
         return 1
 
@@ -1672,11 +1734,24 @@ def cmd_worktree_remove(args):
 
     if status_result.stdout:
         if not force:
-            print(
+            message = (
                 "Error: uncommitted changes detected. "
                 f"worktree {worktree_path}에 미커밋 변경이 있습니다. "
-                "커밋 후 재시도하거나 --force 사용.",
-                file=sys.stderr,
+                "커밋 후 재시도하거나 --force 사용."
+            )
+            _emit_worktree_remove_payload(
+                _worktree_remove_payload(
+                    status="blocked",
+                    classification="dirty_worktree",
+                    worktree_path=worktree_path,
+                    reason="uncommitted_changes_present",
+                    next_action="commit_stash_inspect_or_explicit_owned_force_cleanup",
+                    destructive_cleanup_allowed=False,
+                    destructive_cleanup_performed=False,
+                    details={"status_porcelain": status_result.stdout.splitlines()},
+                ),
+                as_json=as_json,
+                message=message,
             )
             return 1
         print(
@@ -1716,7 +1791,23 @@ def cmd_worktree_remove(args):
         print(f"Error: failed to update worktree meta ({exc})", file=sys.stderr)
         return 1
 
-    print(str(worktree_path))
+    if as_json:
+        print(
+            json.dumps(
+                _worktree_remove_payload(
+                    status="ok",
+                    classification="removed",
+                    worktree_path=worktree_path,
+                    reason="worktree_removed",
+                    next_action="none",
+                    destructive_cleanup_allowed=True,
+                    destructive_cleanup_performed=True,
+                ),
+                ensure_ascii=False,
+            )
+        )
+    else:
+        print(str(worktree_path))
     return 0
 def _meta_worktree_path(meta_data: dict, project_root: Path) -> Path | None:
     raw_path = _coerce_nonempty_str(meta_data.get("path"))

@@ -146,6 +146,86 @@ def _detect_orphans_from_entries(project_root: Path, entries: list[dict]) -> lis
             }
         )
     return orphans
+
+def _orphan_classification(orphan: dict) -> str:
+    worktree_listed = bool(orphan.get("worktree_listed"))
+    branch_exists = bool(orphan.get("branch_exists"))
+    path_exists = bool(orphan.get("path_exists"))
+    meta_exists = bool(orphan.get("meta_path"))
+
+    if worktree_listed and path_exists:
+        return "registered_orphan_worktree"
+    if worktree_listed:
+        return "stale_git_worktree_record"
+    if branch_exists and path_exists:
+        return "path_branch_orphan"
+    if branch_exists:
+        return "branch_only_orphan"
+    if path_exists:
+        return "path_only_orphan"
+    if meta_exists:
+        return "metadata_only_orphan"
+    return "unknown_orphan"
+
+def _orphan_affected_resources(orphan: dict) -> list[dict[str, object]]:
+    resources: list[dict[str, object]] = []
+    if orphan.get("path"):
+        resources.append(
+            {
+                "kind": "worktree_path",
+                "path": orphan.get("path"),
+                "exists": bool(orphan.get("path_exists")),
+                "git_worktree_listed": bool(orphan.get("worktree_listed")),
+            }
+        )
+    if orphan.get("branch"):
+        resources.append(
+            {
+                "kind": "branch",
+                "name": orphan.get("branch"),
+                "exists": bool(orphan.get("branch_exists")),
+            }
+        )
+    if orphan.get("meta_path"):
+        resources.append(
+            {
+                "kind": "worktree_meta",
+                "path": orphan.get("meta_path"),
+                "exists": Path(str(orphan.get("meta_path"))).exists(),
+            }
+        )
+    return resources
+
+def _annotate_orphan_diagnostic(orphan: dict, *, clean_requested: bool) -> dict:
+    cleanup = orphan.get("cleanup") if isinstance(orphan.get("cleanup"), dict) else None
+    cleanup_ok = cleanup is not None and cleanup.get("ok") is True
+    cleanup_failed = cleanup is not None and cleanup.get("ok") is False
+
+    if cleanup_failed:
+        next_action = "inspect_failed_cleanup_steps_and_retry_after_fix"
+    elif cleanup_ok:
+        next_action = "none"
+    elif clean_requested:
+        next_action = "verify_no_cleanup_steps_required"
+    else:
+        next_action = "rerun_with_clean_after_confirming_ownership_or_scope"
+
+    orphan["classification"] = _orphan_classification(orphan)
+    orphan["reason"] = "orphan_resource_detected"
+    orphan["next_action"] = next_action
+    orphan["destructive_cleanup_allowed"] = bool(clean_requested)
+    orphan["destructive_cleanup_performed"] = bool(cleanup_ok)
+    orphan["affected_resources"] = _orphan_affected_resources(orphan)
+    orphan["ownership_evidence"] = {
+        "taskId": orphan.get("taskId"),
+        "meta_path": orphan.get("meta_path"),
+        "legacy_cleaned_meta": bool(orphan.get("legacy_cleaned_meta")),
+        "path_exists": bool(orphan.get("path_exists")),
+        "worktree_listed": bool(orphan.get("worktree_listed")),
+        "branch_exists": bool(orphan.get("branch_exists")),
+    }
+    return orphan
+
 def _detect_cleaned_orphans(project_root: Path) -> list[dict]:
     return _detect_orphans_from_entries(project_root, _iter_cleaned_meta_entries(project_root))
 def _detect_scoped_orphans(
@@ -331,6 +411,8 @@ def cmd_worktree_detect_orphans(args):
         for orphan in orphans:
             ok, steps = _clean_detected_orphan(project_root, orphan)
             orphan["cleanup"] = {"ok": ok, "steps": steps}
+    for orphan in orphans:
+        _annotate_orphan_diagnostic(orphan, clean_requested=bool(getattr(args, "clean", False)))
 
     cleaned = [
         orphan["taskId"]

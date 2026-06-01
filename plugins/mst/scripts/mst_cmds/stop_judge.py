@@ -200,6 +200,7 @@ MST_BARE_SNAPSHOT_SKILLS = {
     "debug",
     "discussion",
     "feedback",
+    "agy",
     "gemini",
     "ideation",
     "plan",

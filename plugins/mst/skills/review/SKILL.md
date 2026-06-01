@@ -141,6 +141,28 @@ review delegation은 PM 요약이 아니라 context file path와 diff evidence�
    - `review_iterations` 배열에 `{ "rv_id": "RV-NNN", "created_at": "<ISO8601>", "status": "in_progress" }` 항목 추가 (Step 5 완료 후 `"completed"`로 갱신).
    - `review_summary` = `{ "iteration": N, "status": "reviewing" }` 업데이트.
 
+### Step 1.5: 실행형 리뷰 Worktree 바인딩 (MANDATORY)
+
+> 이 Step의 목적: 정적 검증, 테스트, Pass B provider review가 원본 checkout에서 실행되지 않도록 등록된 review worktree를 먼저 확정한다 / 핵심 출력물: `REVIEW_WORKTREE`, `review.json.execution_worktree`
+
+- `strategy.review_mode == "fulltext"`이고 아래 Step에서 provider/테스트/빌드/정적 검증 명령을 실행하지 않는 순수 문서 검토만 수행하는 경우에만 worktree 생성을 skip할 수 있다. 이때 `review.json.execution_worktree_skip_reason="document_only_no_executable_review"`를 기록한다.
+- 그 외 모든 리뷰 iteration은 `RV-NNN` 전용 review role worktree를 생성 또는 재사용한 뒤 진행한다.
+
+```bash
+SESSION_BASE_BRANCH="{request.json.detected_base}"
+REQ_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$SESSION_BASE_BRANCH" --role integration --agi "${AGI_ID:-}")
+REVIEW_ROLE="review-RV-NNN"
+REVIEW_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$SESSION_BASE_BRANCH" --role "$REVIEW_ROLE" --agi "${AGI_ID:-}")
+REVIEW_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role "$REVIEW_ROLE" --agi "${AGI_ID:-}")
+python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$REVIEW_WORKTREE" --branch "$REVIEW_BRANCH" --base "$REQ_BRANCH"
+python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir "$REVIEW_WORKTREE" --json
+```
+
+- 위 preflight가 실패하면 `review.json.status="blocked"` 및 `reason="review_worktree_guard_failed"`를 기록하고 정적 검증/테스트/Pass B를 실행하지 않는다.
+- `review.json.execution_worktree`에는 `path`, `branch`, `base`, `validated: true`, `rv_id`를 기록한다.
+- Pass A에서 source/spec/context 파일은 `{PROJECT_ROOT}` 절대경로를 계속 사용할 수 있지만, 명령 실행 cwd는 반드시 `REVIEW_WORKTREE`다.
+- Pass B provider wrapper의 `--worktree-dir`, provider `-C`/cwd, running log metadata의 worktree 경로는 모두 `REVIEW_WORKTREE`와 일치해야 한다.
+
 ### Step 2: 컨텍스트 로드
 
 > 이 Step의 목적: AC 검증/리뷰에 필요한 입력 컨텍스트를 수집한다 / 핵심 출력물: AC 목록, 변경 파일 목록, config 기반 실행 파라미터
@@ -209,13 +231,13 @@ review delegation은 PM 요약이 아니라 context file path와 diff evidence�
 #### TS 타입체크 게이트
 
 - 실행 조건: `changed_files`에 `*.ts`/`*.tsx` 1개 이상 + `tsconfig*.json` 1개 이상 존재.
-- 실행: `package.json.scripts.typecheck` 존재 시 `npm run typecheck`, 미존재 시 `npx tsc --noEmit`.
+- 실행: `cd "$REVIEW_WORKTREE"` 후 `package.json.scripts.typecheck` 존재 시 `npm run typecheck`, 미존재 시 `npx tsc --noEmit`.
 - 실패 처리: `pass_a_result=fail`, `failure_class=implementation`, `static_validation_gate_result=fail` → Step 3/4 skip, Step 6(e) 경로.
 
 #### 빌드 게이트
 
 - 실행 조건: `package.json.scripts.build` 존재.
-- 실행: `npm run build`.
+- 실행: `cd "$REVIEW_WORKTREE"` 후 `npm run build`.
 - 실패 처리: TS 타입체크 게이트와 동일.
 
 #### spec 참조 파일 존재성 게이트
@@ -410,7 +432,7 @@ review delegation은 PM 요약이 아니라 context file path와 diff evidence�
 
 #### 실행/실패 분석 프로토콜 (MANDATORY)
 
-1. `npm test` 실행. 로그 저장: `{.../reviews/{RV-NNN}/full-backend-test.log}`.
+1. `cd "$REVIEW_WORKTREE"` 후 `npm test` 실행. 로그 저장: `{.../reviews/{RV-NNN}/full-backend-test.log}`.
 2. 실패 테스트 1개 이상이면 각 항목을 `explore` 기반 원인 분석.
 3. `intent`/`plan`/`spec` 3중 문맥과 비교해 의도성 판정:
    - `INTENTIONAL`: 의도적 동작 변경과 일치 → 테스트 기대값/fixture/assertion 수정 태스크 자동 디스패치.
@@ -649,7 +671,7 @@ Write → {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-
 ```bash
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex {tier} 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'set -o pipefail; codex exec --full-auto -m "$MODEL" -C {PROJECT_ROOT} "$(cat {PROMPT_FILE})" < /dev/null 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ_ID}-{RV_ID}-{role} --provider codex --model "$MODEL" --log-dir {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role} --trace {REQ_ID}/{RV_ID}/{role}-review --require-worktree --worktree-dir "$REVIEW_WORKTREE" -- codex exec --full-auto -m "$MODEL" -C "$REVIEW_WORKTREE" "$(cat {PROMPT_FILE})" < /dev/null',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -659,7 +681,7 @@ Bash(
 ```bash
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini {tier} 2>/dev/null);
-  command: 'set -o pipefail && cd {PROJECT_ROOT} && gemini -p "$(cat {PROMPT_FILE})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false < /dev/null 2>&1 | tee {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-running.log',
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ_ID}-{RV_ID}-{role} --provider gemini --model "$MODEL" --log-dir {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role} --trace {REQ_ID}/{RV_ID}/{role}-review --require-worktree --worktree-dir "$REVIEW_WORKTREE" -- gemini -p "$(cat {PROMPT_FILE})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )

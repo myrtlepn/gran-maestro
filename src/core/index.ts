@@ -13,7 +13,7 @@
 
 // CLI Adapter (design-decisions.md section 1)
 export type { CLIResult, CLIOptions, CLIAdapter } from './cli-adapter.ts';
-export { CodexAdapter, GeminiAdapter, createAdapter, runWithTimeout } from './cli-adapter.ts';
+export { AgyAdapter, CodexAdapter, GeminiAdapter, createAdapter, runWithTimeout } from './cli-adapter.ts';
 
 // Task FSM (design-decisions.md section 2)
 export type { TaskStatus, RequestPhase, TaskTransition, TaskState } from './task-fsm.ts';

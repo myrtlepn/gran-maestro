@@ -488,7 +488,7 @@ spec.md 헤더의 `Assigned Agent` 필드를 읽어 에이전트를 결정합니
 
 > **경계 케이스 기본값**: 태스크 유형이 모호한 경우 → `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent)` 값 사용 (`claude-dev` 하드코딩 금지).
 > **CLI guard**: `codex-dev` 배정 시 `codex` 명령어 사용 가능 여부를 사전 확인할 것.
-> **Host-aware delegation**: 실행 직전 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py host context --json)`로 `host`를 확인한다. `host=codex`이면 `Skill(...)` 반환 객체를 기대하지 말고 provider CLI를 `mst.py run`/`dispatch build`로 감싸 stdout/stderr/exit code/log artifact를 수집한다. `host=claude`이면 기존 `Skill("mst:*")` 또는 Claude Task 경로를 유지한다.
+> **Host-aware delegation**: 실행 직전 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py host context --json)`로 `host`를 확인한다. `host=codex`이면 `Skill(...)` 반환 객체를 기대하지 말고 provider CLI를 `mst.py run --require-worktree --worktree-dir {worktree_path}` 또는 `dispatch build --require-worktree`로 감싸 stdout/stderr/exit code/log artifact를 수집한다. `host=claude`이면 기존 `Skill("mst:*")` 또는 Claude Task 경로를 유지한다.
 
 `claude`와 `claude-dev`는 동일하게 처리됩니다 (하위 호환).
 
@@ -582,9 +582,9 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 # codex-dev인 경우 (OMX_AUTOPILOT=true 시 \$autopilot 프리픽스 삽입)
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})"',   # OMX_AUTOPILOT=true
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" < /dev/null',   # OMX_AUTOPILOT=true
   # 또는:
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})"',              # OMX_AUTOPILOT=false
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" < /dev/null',              # OMX_AUTOPILOT=false
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -592,7 +592,7 @@ Bash(
 # gemini-dev인 경우
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model gemini default 2>/dev/null);
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider gemini --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl -- gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider gemini --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- gemini -p "$(cat {prompt_file})"${MODEL:+ --model "$MODEL"} --approval-mode yolo --sandbox=false',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )
@@ -924,9 +924,11 @@ else:
 ##### 5b-5. PM 직접 개입 (재외주 소진 시)
 
 0. **실행 중 백그라운드 태스크 취소**: `background_task_ids`에서 `status: "running"` 항목을 `TaskStop(task_id)`로 취소 → `"cancelled"` 업데이트.
-1. PM이 에러 출력 분석 후 직접 코드 수정
-2. 사전검증(Step 5) 재실행
-3. PASS → `status: review` / 여전히 FAIL → 사용자 개입 요청
+1. **worktree preflight**: 직접 수정 전 반드시 `python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir {worktree_path} --json`를 실행한다. 실패하면 원본 checkout에서 수정하지 말고 `status="blocked"`, `reason="pm_direct_fix_worktree_guard_failed"`를 기록한다.
+2. PM이 에러 출력 분석 후 `{worktree_path}` 내부에서만 직접 코드 수정
+3. `request.json.tasks[].pm_direct_fix`에 `true`, `worktree_path`, `verification_command`, `expected_signal`, `changed_files`, `rollback_command`를 기록한다.
+4. 사전검증(Step 5) 재실행
+5. PASS → `status: review` / 여전히 FAIL → `git -C {worktree_path} checkout -- .` rollback 후 사용자 개입 요청
 
 #### Step 6: Phase 3 전환
 
@@ -1083,9 +1085,10 @@ Write 실패 시 warn만 출력하고 워크플로우를 차단하지 않는다 
      **PM 직접 수정 조건 미충족 시** → 재외주 경로(아래 c.)로 전환.
 
      **PM 직접 수정 절차**: MAJOR 이슈 중 조건 충족 이슈만 PM이 직접 수정하고 나머지는 재외주.
-     1. PM이 해당 worktree에서 직접 코드 수정
-     2. **검증 게이트**: spec §5 테스트 + 타입 체크 → PASS 필수. PASS 시 Step 5.5와 동일한 커밋 절차. FAIL 시 롤백(`git checkout -- .`) → 해당 MAJOR 이슈 태스크를 `request.json.tasks`에 신규 생성(`generated_by: "review"`, `status: "pending"`) → c. 경로로 진입.
-     3. `review-report.md`에 `pm_direct_fix: true`, 수정 파일 목록, 수정 내용 요약 기록.
+     1. `python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir {worktree_path} --json`를 실행해 `{worktree_path}`가 등록된 linked worktree이고 primary checkout이 아님을 확인한다. 실패하면 직접 수정 분기를 중단하고 재외주 경로(c.)로 전환한다.
+     2. PM이 해당 worktree에서만 직접 코드 수정
+     3. **검증 게이트**: spec §5 테스트 + 타입 체크 → PASS 필수. PASS 시 Step 5.5와 동일한 커밋 절차. FAIL 시 롤백(`git -C {worktree_path} checkout -- .`) → 해당 MAJOR 이슈 태스크를 `request.json.tasks`에 신규 생성(`generated_by: "review"`, `status: "pending"`) → c. 경로로 진입.
+     4. `review-report.md`에 `pm_direct_fix: true`, `worktree_path`, 수정 파일 목록, 수정 내용 요약, 검증 명령, expected signal, commit 또는 rollback evidence를 기록.
 
      **c. MAJOR 조건 미충족 또는 재외주 경로**:
      > ⚠️ **AUTO_MODE=true일 때 재외주는 무정지 실행**: AskUserQuestion 없이 즉시 아래 절차를 실행한다.

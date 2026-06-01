@@ -4,7 +4,7 @@ import { dirExists, listDirs, readJsonFile, readTextFile } from "../utils.ts";
 import { resolveBaseDir } from "../config.ts";
 
 const projectIdeationApi = new Hono();
-const LEGACY_AGENTS = new Set(["codex", "gemini", "claude"]);
+const LEGACY_AGENTS = new Set(["codex", "agy", "gemini", "claude"]);
 
 function getKeyRole(key: string): string {
   const match = key.match(/^(.+)\(([^()]+)\)$/);
@@ -183,8 +183,8 @@ projectIdeationApi.get("/ideation/:id", async (c) => {
   const participants = normalizeParticipants(rawSession);
   const participantKeys = participants.length > 0
     ? participants.map((p) => p.key)
-    : ["codex", "gemini", "claude"];
-  const keyList = participantKeys.length > 0 ? participantKeys : ["codex", "gemini", "claude"];
+    : ["codex", "agy", "gemini", "claude"];
+  const keyList = participantKeys.length > 0 ? participantKeys : ["codex", "agy", "gemini", "claude"];
 
   const opinions: Record<string, string | null> = {};
   for (const key of keyList) {

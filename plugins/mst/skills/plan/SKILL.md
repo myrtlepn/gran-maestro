@@ -20,6 +20,7 @@ argument-hint: "{플래닝 주제 또는 해결하고 싶은 질문/문제}"
 - `{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/plan.json`
 - `{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/auto-decisions.md`
 - `{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/ambiguity-log.md`
+- `{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/clarification-questions.md`
 - `{PROJECT_ROOT}/.gran-maestro/captures/CAP-*/capture.json` (status/consumed_at/linked_plan 업데이트용)
 
 **그 외 모든 경로에 대한 Write/Edit 사용은 절대 금지입니다.**
@@ -375,6 +376,26 @@ WHILE (미클리어 항목 존재):
 
 **AUTO_MODE=true**: AskUserQuestion 없이 PM이 각 항목을 자율 판단으로 해소. 각 항목 해소 결과를 auto-decisions.md에 즉시 기록. 외부 정보 필요 시 WebSearch 실행.
 
+#### Critical/Major Clarification Batch Rule (MANDATORY)
+
+적용 범위: Step 2.1 모호성 루프, Step 3.8.5 적대적 검토, Step 3.9 D3에서 발견된 사용자 의도·범위·우선순위·허용치 관련 모호성.
+
+1. `severity=critical|major`이거나 finding의 `requires_user_answer=true`인 항목은 PM이 `(PM 추론)` 또는 자동 보완으로 닫을 수 없다.
+2. PM은 각 항목에 대해 `질문`, `PM 추천 답변`, `추천 근거`, `틀렸을 때 영향`을 작성하고 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/clarification-questions.md`에 append한다.
+3. 질문 횟수를 줄이기 위해 최대 5개 항목을 하나의 배치로 묶는다. 사용자에게는 아래 표를 먼저 보여준다.
+   ```markdown
+   | ID | 확인할 모호성 | PM 추천 답변 | 추천 근거 | 틀렸을 때 영향 |
+   |----|---------------|--------------|-----------|----------------|
+   | CQ-1 | ... | ... | ... | ... |
+   ```
+4. `AUTO_MODE=false`: 배치당 AskUserQuestion 1회만 실행한다. 선택지는 최대 4개로 고정한다.
+   - `A. 추천안 모두 수락`: 표의 모든 PM 추천 답변을 사용자 승인 결정으로 반영
+   - `B. 일부만 수정`: 사용자가 `CQ-1=...; CQ-3=...`처럼 수정할 수 있게 안내하고, 수정된 항목만 재반영
+   - `C. 더 검토`: 현재 배치 전체를 `mst:discussion` 또는 `mst:ideation`으로 보강한 뒤 같은 배치를 재질문
+   - `D. 범위 제외/보류`: 해당 항목을 No-go Scope 또는 리스크 레지스터에 기록
+5. `AUTO_MODE=true`: critical/major 사용자 의존 모호성이 남아 있으면 자율로 진행하지 않는다. `auto-decisions.md`와 `clarification-questions.md`에 blocker를 기록하고 `/mst:request` 자동 호출을 중단한다.
+6. 사용자가 `A. 추천안 모두 수락`을 선택한 경우에도 기록에는 `(PM 추천 — 사용자 일괄 승인)`으로 남긴다. PM 단독 결정으로 기록하지 않는다.
+
 **`ambiguity-log.md` 형식**:
 ```markdown
 # 모호성 해소 로그 — PLN-NNN
@@ -709,7 +730,7 @@ Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JS
 
 #### 3.8.5.3: findings 기록 및 수렴
 
-findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/adversarial-review-findings.md`에 기록한다.
+findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/adversarial-review-findings.md`에 기록한다. 각 append 블록에는 `round`, `perspective`, `severity`, `finding`, `suggested_dod`, `requires_user_answer`, `question`, `recommended_answer`, 반영 여부를 포함한다.
 
 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다.
 - findings가 비어 있으면 Step 3.9로 진행한다.
@@ -720,12 +741,13 @@ findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN
 
 `AUTO_MODE=true`:
 - `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다.
-- `severity=critical` finding은 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
+- `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 보낸다. PM이 자동 반영하지 않는다.
+- 그 외 finding만 자동 반영 가능하며 `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/auto-decisions.md`에 근거와 반영 내용을 기록한다.
 
 `AUTO_MODE=false`:
 - 기본 실행은 `edge` + `flow` 2종을 순차 실행한다.
-- `severity=critical` finding은 `AskUserQuestion`으로 사용자 confirm 후 plan 초안에 반영한다.
-- major/minor finding은 요약으로 제시하되, 사용자가 반영을 선택한 경우에만 plan 초안에 반영한다.
+- `severity=critical|major` 또는 `requires_user_answer=true` finding은 Critical/Major Clarification Batch Rule로 묶어 사용자 confirm 후 plan 초안에 반영한다.
+- minor finding은 요약으로 제시하되, 사용자가 반영을 선택한 경우에만 plan 초안에 반영한다.
 
 ### Step 3.9: D3 Reverse Simulation Gate (MANDATORY)
 
@@ -759,6 +781,11 @@ AC별 출력 필수 항목:
 - `interpretation_branches`: 구현자가 다르게 해석할 수 있는 분기점
 - `ambiguity_type`: `AMBIGUOUS_SUBJECT | AMBIGUOUS_CONDITION | AMBIGUOUS_OUTCOME | MISSING_EDGE_CASE`
 - `is_ambiguous`: `true | false`
+- `severity`: `critical | major | minor`
+- `requires_user_answer`: `true | false`
+- `question`: 사용자 의도 확인이 필요할 때 물어볼 질문
+- `recommended_answer`: PM 추천 답변
+- `recommendation_rationale`: 추천 근거
 - `confidence`: `0.0~1.0`
 
 `is_ambiguous=true`로 판정된 AC만 full D3로 escalation. 동일 AC가 3회 연속 `confidence < 0.4`이면 아키텍트 리뷰 큐로 escalation path 전환.
@@ -776,7 +803,7 @@ AC별 출력 필수 항목:
 
 #### 3.9.4: 자동 재지시 루프 (AD-RV-003)
 
-임계치 초과 판정 시 사용자 에스컬레이션 대신 자동 재지시 루프를 수행한다. `agile_context_active=true`일 때만 강제 적용되며, 일반 plan에서도 동일 로직을 재사용할 수 있다.
+임계치 초과 판정 시 사용자 에스컬레이션 대신 자동 재지시 루프를 수행한다. 단, `severity=critical|major` 또는 `requires_user_answer=true`인 사용자 의존 모호성은 자동 재지시 대상이 아니라 Critical/Major Clarification Batch Rule 대상으로 처리한다. `agile_context_active=true`일 때만 강제 적용되며, 일반 plan에서도 동일 로직을 재사용할 수 있다.
 
 1. `d3-findings.md` 기록 후 재지시 메시지 생성: "모호 AC 목록과 보완 제안을 반영해 plan 초안을 수정한 뒤 Step 3.9를 재실행하세요."
 2. 재지시 루프 카운터 `d3_redirect_retries`를 증가시키고 3.9.2를 재실행.

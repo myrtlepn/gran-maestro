@@ -4,7 +4,7 @@ import {
   join,
   normalize,
 } from "https://deno.land/std@0.224.0/path/mod.ts";
-import { BASE_DIR } from "./config.ts";
+import { BASE_DIR, PLUGIN_ROOT } from "./config.ts";
 
 export type FlowEvent = Record<string, unknown> & {
   session_id?: string;
@@ -54,6 +54,19 @@ type Subscriber = (event: FlowEvent) => void;
 const FLOW_DETAIL_FILENAME = "flow-detail.ndjson";
 const EXECUTION_FLOW_FILENAME = "execution-flow.json";
 const POLL_INTERVAL_MS = 250;
+const REQUIRED_EXECUTION_FLOW_EVENT_FAMILIES = new Set([
+  "skill.enter",
+  "skill.step",
+  "skill.exit",
+  "skill.recover",
+  "continue.*",
+  "guard.*",
+  "terminal.*",
+  "context.compacted",
+  "context.rehydrated",
+  "action.*",
+  "blocker.*",
+]);
 
 const subscribers = new Map<string, Set<Subscriber>>();
 const sessionFilePositions = new Map<string, number>();
@@ -99,6 +112,22 @@ function lifecycleEventFamily(eventType: string | undefined): string {
   return eventType.split("_", 1)[0] || "unknown";
 }
 
+function executionFlowEventFamily(eventType: string | undefined): string {
+  if (!eventType) return "unknown";
+  if (
+    ["skill.enter", "skill.step", "skill.exit", "skill.recover"].includes(
+      eventType,
+    )
+  ) {
+    return eventType;
+  }
+  if (["context.compacted", "context.rehydrated"].includes(eventType)) {
+    return eventType;
+  }
+  if (eventType.includes(".")) return `${eventType.split(".", 1)[0]}.*`;
+  return eventType;
+}
+
 function flowEventIdentity(event: FlowEvent): string | undefined {
   return stringValue(event.idempotency_key) ?? stringValue(event.event_id);
 }
@@ -107,14 +136,16 @@ function normalizeLifecycleEvent(event: FlowEvent): FlowEvent {
   const eventType = stringValue(event.event_type);
   const canonical = eventCanonicalSessionId(event);
   const timestamp = flowTimestamp(event);
-  const identity = flowEventIdentity(event) ?? [canonical, eventType, timestamp].filter(Boolean).join(":");
+  const identity = flowEventIdentity(event) ??
+    [canonical, eventType, timestamp].filter(Boolean).join(":");
   return {
     schema_version: event.schema_version ?? 1,
     ...event,
     event_id: stringValue(event.event_id) ?? identity,
     idempotency_key: stringValue(event.idempotency_key) ?? identity,
     ordering_key: stringValue(event.ordering_key) ?? timestamp,
-    event_family: stringValue(event.event_family) ?? lifecycleEventFamily(eventType),
+    event_family: stringValue(event.event_family) ??
+      lifecycleEventFamily(eventType),
     replay_compatible: canonical ? event.replay_compatible ?? true : false,
   };
 }
@@ -135,7 +166,9 @@ function normalizeLifecycleEvents(events: FlowEvent[]): {
   for (const event of sourceOrderedEvents) {
     const item = normalizeLifecycleEvent(event);
     const orderingKey = stringValue(item.ordering_key) ?? flowTimestamp(item);
-    if (previousSourceOrder && orderingKey && orderingKey < previousSourceOrder) {
+    if (
+      previousSourceOrder && orderingKey && orderingKey < previousSourceOrder
+    ) {
       diagnostics.push({
         code: "out_of_order_lifecycle_event",
         severity: "warning",
@@ -147,14 +180,16 @@ function normalizeLifecycleEvents(events: FlowEvent[]): {
 
     const identity = flowEventIdentity(item);
     if (identity && seen.has(identity)) {
-      diagnostics.push({
-        code: "duplicate_lifecycle_event",
-        severity: "warning",
-        detail: "duplicate lifecycle event idempotency key ignored",
-        mst_session_id: eventCanonicalSessionId(item),
-        field: "idempotency_key",
-        idempotency_key: identity,
-      } as GraphConsistencyDiagnostic & { idempotency_key: string });
+      diagnostics.push(
+        {
+          code: "duplicate_lifecycle_event",
+          severity: "warning",
+          detail: "duplicate lifecycle event idempotency key ignored",
+          mst_session_id: eventCanonicalSessionId(item),
+          field: "idempotency_key",
+          idempotency_key: identity,
+        } as GraphConsistencyDiagnostic & { idempotency_key: string },
+      );
       continue;
     }
     if (identity) seen.add(identity);
@@ -220,6 +255,122 @@ async function listExecutionFlowFiles(baseDir: string): Promise<string[]> {
   return files;
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function listCanonicalSessionIds(baseDir: string): Promise<string[]> {
+  const sessionsDir = sessionsDirFor(baseDir);
+  const ids: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(sessionsDir)) {
+      if (entry.isDirectory && entry.name.startsWith("MST-")) {
+        ids.push(entry.name);
+      }
+    }
+  } catch {
+    return [];
+  }
+  return ids.sort();
+}
+
+async function historyHasExecutionFlowCoverage(
+  historyPath: string,
+): Promise<boolean> {
+  try {
+    const text = await Deno.readTextFile(historyPath);
+    const families = new Set<string>();
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      try {
+        const row = JSON.parse(line);
+        const event = objectRecord(objectRecord(row).event);
+        const eventType = stringValue(event.event_type) ??
+          stringValue(event.type);
+        families.add(executionFlowEventFamily(eventType));
+      } catch {
+        return false;
+      }
+    }
+    for (const family of REQUIRED_EXECUTION_FLOW_EVENT_FAMILIES) {
+      if (!families.has(family)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function policyHomeForSession(
+  baseDir: string,
+  mstSessionId: string,
+): Promise<string | undefined> {
+  try {
+    const explicit = Deno.env.get("MST_POLICY_HOME");
+    if (explicit?.trim()) return explicit;
+  } catch {
+    // Server may run without env read permission in narrow test harnesses.
+  }
+  const localPolicyHome = join(normalizeBaseDir(baseDir), "policy");
+  if (
+    await pathExists(
+      join(localPolicyHome, "ledger-heads", `${mstSessionId}.head`),
+    )
+  ) {
+    return localPolicyHome;
+  }
+  return undefined;
+}
+
+async function ensureExecutionFlowProjection(
+  baseDir: string,
+  mstSessionId: string,
+): Promise<void> {
+  const normalizedBase = normalizeBaseDir(baseDir);
+  const sessionDir = join(sessionsDirFor(normalizedBase), mstSessionId);
+  const projectionPath = join(sessionDir, EXECUTION_FLOW_FILENAME);
+  if (await pathExists(projectionPath)) return;
+  if (!(await pathExists(join(sessionDir, "session.json")))) return;
+
+  const historyPath = join(sessionDir, "history.ndjson");
+  if (!await historyHasExecutionFlowCoverage(historyPath)) return;
+
+  const env: Record<string, string> = {
+    MST_FLOW_DISABLE_ATEXIT: "1",
+  };
+  const policyHome = await policyHomeForSession(normalizedBase, mstSessionId);
+  if (policyHome) env.MST_POLICY_HOME = policyHome;
+
+  const command = new Deno.Command("python3", {
+    args: [
+      join(PLUGIN_ROOT, "scripts", "mst.py"),
+      "session",
+      "flow",
+      mstSessionId,
+      "--json",
+    ],
+    cwd: dirname(normalizedBase),
+    env,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  await command.output().catch(() => undefined);
+}
+
+async function ensureExecutionFlowProjections(baseDir: string): Promise<void> {
+  await Promise.all(
+    (await listCanonicalSessionIds(baseDir)).map((sessionId) =>
+      ensureExecutionFlowProjection(baseDir, sessionId)
+    ),
+  );
+}
+
 async function primeExistingFilePositions(baseDir: string): Promise<void> {
   for (const path of await listFlowFiles(baseDir)) {
     try {
@@ -268,7 +419,9 @@ function stringValue(value: unknown): string | undefined {
 
 function arrayRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
-    ? value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[]
+    ? value.filter((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+    ) as Record<string, unknown>[]
     : [];
 }
 
@@ -284,7 +437,9 @@ function eventSessionId(event: FlowEvent): string | undefined {
   return eventCanonicalSessionId(event) ?? eventLegacySessionId(event);
 }
 
-async function readCurrentHistoryHead(sessionDir: string): Promise<string | undefined> {
+async function readCurrentHistoryHead(
+  sessionDir: string,
+): Promise<string | undefined> {
   try {
     return (await Deno.readTextFile(join(sessionDir, "history.head"))).trim() ||
       undefined;
@@ -293,7 +448,9 @@ async function readCurrentHistoryHead(sessionDir: string): Promise<string | unde
   }
 }
 
-async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowView | null> {
+async function dashboardViewFromProjection(
+  path: string,
+): Promise<ExecutionFlowView | null> {
   try {
     const parsed = JSON.parse(await Deno.readTextFile(path));
     const projection = objectRecord(parsed);
@@ -314,7 +471,8 @@ async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowV
       stringValue(source.cumulative_hash);
     const stale = Boolean(
       currentHead && sourceHead &&
-        (sourceHead !== currentHead || (sourceHash && sourceHash !== currentHead)),
+        (sourceHead !== currentHead ||
+          (sourceHash && sourceHash !== currentHead)),
     );
 
     return {
@@ -342,9 +500,10 @@ async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowV
         current_history_head: currentHead ?? sourceHead,
       },
       coverage: {
-        recognized_event_families: Array.isArray(coverage.recognized_event_families)
-          ? coverage.recognized_event_families
-          : [],
+        recognized_event_families:
+          Array.isArray(coverage.recognized_event_families)
+            ? coverage.recognized_event_families
+            : [],
         missing_event_families: Array.isArray(coverage.missing_event_families)
           ? coverage.missing_event_families
           : [],
@@ -368,7 +527,8 @@ async function dashboardViewFromProjection(path: string): Promise<ExecutionFlowV
           : null,
         children: childWorktrees.length ? childWorktrees : nestedChildWorktrees,
       },
-      recovery_action: projection.recovery_action ?? objectRecord(projection.recovery).primary_action ?? null,
+      recovery_action: projection.recovery_action ??
+        objectRecord(projection.recovery).primary_action ?? null,
       views: projection.views ?? {},
       display_only: true,
       derived_artifact: true,
@@ -385,6 +545,7 @@ export async function getExecutionFlowViews(
   baseDir = BASE_DIR,
 ): Promise<ExecutionFlowView[]> {
   const views: ExecutionFlowView[] = [];
+  await ensureExecutionFlowProjections(baseDir);
   for (const path of await listExecutionFlowFiles(baseDir)) {
     const view = await dashboardViewFromProjection(path);
     if (view) views.push(view);
@@ -422,7 +583,10 @@ function fieldSessionMismatchDiagnostic(
 
 function worktreeSessionDiagnostics(
   mstSessionId: string,
-  worktrees: { session: Record<string, unknown> | null; children: Record<string, unknown>[] },
+  worktrees: {
+    session: Record<string, unknown> | null;
+    children: Record<string, unknown>[];
+  },
 ): GraphConsistencyDiagnostic[] {
   const diagnostics: GraphConsistencyDiagnostic[] = [];
   if (worktrees.session) {
@@ -493,7 +657,8 @@ export function getFlowViewConsistencyDiagnostics(
       diagnostics.push({
         code: "orphan_flow_event",
         severity: "warning",
-        detail: "event has canonical mst_session_id without execution-flow projection",
+        detail:
+          "event has canonical mst_session_id without execution-flow projection",
         mst_session_id: canonical,
         legacy_session_id: legacy,
       });
@@ -520,7 +685,9 @@ export function buildSessionGraphViews(
       };
       const recovery = objectRecord(view.recovery);
       const joinedEventState = normalizeLifecycleEvents(
-        events.filter((event) => eventCanonicalSessionId(event) === mstSessionId),
+        events.filter((event) =>
+          eventCanonicalSessionId(event) === mstSessionId
+        ),
       );
       const joinedEvents = joinedEventState.events;
       const diagnostics = [
@@ -543,7 +710,8 @@ export function buildSessionGraphViews(
         blocker: view.blocker ?? null,
         coverage: view.coverage ?? {},
         worktrees,
-        recovery_action: view.recovery_action ?? recovery.primary_action ?? null,
+        recovery_action: view.recovery_action ?? recovery.primary_action ??
+          null,
         projection_status: view.projection_status ?? {},
         graph_consistency: {
           status: diagnosticStatus(diagnostics),

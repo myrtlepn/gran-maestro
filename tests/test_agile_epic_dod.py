@@ -66,6 +66,91 @@ def _write_objective(workspace: Path, agi_id: str, content: str):
     paths["objective"].write_text(content, encoding="utf-8")
 
 
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_required_sidecars(workspace: Path, agi_id: str, mst_session_id: str) -> None:
+    objective_dir = workspace / ".gran-maestro" / "agile" / agi_id / "objective"
+    _write_json(
+        objective_dir / "objective.ids.json",
+        [
+            {
+                "id": "OAC-001",
+                "source_file": "details/review-evidence-and-gates.md",
+                "text": "required anchor",
+                "kind": "detail",
+                "grade": "MUST",
+                "domain_slug": "review-evidence-and-gates",
+                "dod_refs": ["DOD-001"],
+            }
+        ],
+    )
+    _write_json(
+        objective_dir / "handoff-manifest.json",
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "context_files": [],
+            "skip_reasons": [],
+            "created_at": "2026-06-01T00:00:00Z",
+        },
+    )
+    _write_json(
+        objective_dir / "adversarial-review-findings.json",
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "rounds": [],
+            "findings": [],
+            "unresolved_blocking_count": 0,
+        },
+    )
+    _write_json(
+        objective_dir / "finding-trace.json",
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "findings": [],
+            "unmapped_major_or_higher_count": 0,
+        },
+    )
+    _write_json(
+        objective_dir / "section-review-inventory.json",
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "sections": [],
+            "unreviewed_required_count": 0,
+        },
+    )
+    _write_json(
+        objective_dir / "d3-findings.json",
+        {
+            "schema_version": 1,
+            "agi_id": agi_id,
+            "threshold": 0.0,
+            "details": [],
+            "blocking_count": 0,
+        },
+    )
+    _write_json(
+        workspace / ".gran-maestro" / "state" / mst_session_id / "snapshot.json",
+        {
+            "schema_version": 1,
+            "mst_session_id": mst_session_id,
+            "root_mst_id": agi_id,
+            "workflow": {
+                "current_skill": "mst:agile",
+                "current_step": 2,
+                "status": "active",
+            },
+            "history": {"last_event_id": "a" * 64},
+        },
+    )
+
+
 def test_objective_check_dod_partial(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
@@ -158,6 +243,7 @@ def test_update_objective_dod_status_supports_spaced_marker_tokens():
 def test_objective_check_dod_all_done(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
 
     _write_objective(
         workspace,
@@ -170,8 +256,17 @@ def test_objective_check_dod_all_done(tmp_path):
             "<!-- dod:DOD-002 status:completed priority:should -->\n"
         ),
     )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
 
-    proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-check",
+        agi_id,
+        "--mst-session-id",
+        mst_session_id,
+        "--json",
+    )
     payload = json.loads(proc.stdout)
 
     assert proc.returncode == 0
@@ -179,9 +274,33 @@ def test_objective_check_dod_all_done(tmp_path):
     assert payload["incomplete"] == []
 
 
+def test_objective_check_blocks_all_done_when_required_sidecars_missing(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "- [x] DOD-001\n"
+            "<!-- dod:DOD-001 status:done priority:must -->\n"
+        ),
+    )
+
+    proc = _run_mst(workspace, "agile", "objective-check", agi_id, "--json")
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 0
+    assert payload["marker_all_done"] is True
+    assert payload["all_done"] is False
+    assert any("objective_anchor_manifest" in error for error in payload["completion_blockers"])
+
+
 def test_objective_transition_dod(tmp_path):
     workspace = _make_workspace(tmp_path)
     agi_id = _init_agile(workspace)
+    mst_session_id = f"MST-{agi_id}-20260601T000000000Z-test"
 
     _write_objective(
         workspace,
@@ -192,6 +311,7 @@ def test_objective_transition_dod(tmp_path):
             "<!-- dod:DOD-001 status:todo priority:must -->\n"
         ),
     )
+    _write_required_sidecars(workspace, agi_id, mst_session_id)
 
     proc = _run_mst(
         workspace,
@@ -202,6 +322,8 @@ def test_objective_transition_dod(tmp_path):
         "DOD-001",
         "--status",
         "done",
+        "--mst-session-id",
+        mst_session_id,
         "--json",
     )
     payload = json.loads(proc.stdout)
@@ -231,6 +353,41 @@ def test_objective_transition_dod(tmp_path):
     assert last["dod"] == "DOD-001"
     assert last["to_status"] == "done"
     assert last["priority"] == "must"
+
+
+def test_objective_transition_rejects_done_when_required_sidecars_missing(tmp_path):
+    workspace = _make_workspace(tmp_path)
+    agi_id = _init_agile(workspace)
+
+    _write_objective(
+        workspace,
+        agi_id,
+        (
+            "# Objective\n\n"
+            "- [ ] DOD-001\n"
+            "<!-- dod:DOD-001 status:todo priority:must -->\n"
+        ),
+    )
+
+    proc = _run_mst(
+        workspace,
+        "agile",
+        "objective-transition",
+        agi_id,
+        "--story",
+        "DOD-001",
+        "--status",
+        "done",
+        "--json",
+    )
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 1
+    assert payload["status"] == "blocked"
+    assert payload["changed"] is False
+    assert any("objective_anchor_manifest" in error for error in payload["completion_blockers"])
+    updated_objective = _agile_paths(workspace, agi_id)["objective"].read_text(encoding="utf-8")
+    assert "<!-- dod:DOD-001 status:todo priority:must -->" in updated_objective
 
 
 def test_objective_check_init_default_dod_pending(tmp_path):

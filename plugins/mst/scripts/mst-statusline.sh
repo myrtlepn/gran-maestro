@@ -290,6 +290,8 @@ def detect_provider(model_id):
         return "Claude"
     if "gpt" in value or "codex" in value or "openai" in value:
         return "OpenAI"
+    if "agy" in value or "antigravity" in value:
+        return "AGY"
     if "gemini" in value:
         return "Gemini"
     return "Unknown"

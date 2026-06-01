@@ -1,7 +1,7 @@
 /**
  * CLI Adapter abstraction layer for Gran Maestro.
  *
- * Wraps external CLI tools (Codex, Gemini) behind a unified interface
+ * Wraps external CLI tools (Codex, AGY) behind a unified interface
  * so the orchestration engine is decoupled from specific CLI flags and
  * invocation details.
  *
@@ -39,7 +39,7 @@ export interface CLIOptions {
   outputFormat?: 'text' | 'json';
   /** When true the CLI should not persist any state between runs. */
   ephemeral?: boolean;
-  /** Model identifier to pass via --model flag (e.g. "gemini-3-pro-preview", "gpt-5.3-codex"). */
+  /** Model identifier to pass via --model flag when the provider supports it. */
   model?: string;
   /** Sandbox mode used for Codex execution strategy selection. */
   sandboxMode?: 'workspace-write' | 'danger-full-access';
@@ -47,7 +47,7 @@ export interface CLIOptions {
 
 /** Provider-agnostic interface for invoking an external AI CLI. */
 export interface CLIAdapter {
-  /** Human-readable provider name (e.g. "codex", "gemini"). */
+  /** Human-readable provider name (e.g. "codex", "agy"). */
   name: string;
   /** Run a prompt through the CLI and return the structured result. */
   execute(prompt: string, options: CLIOptions): Promise<CLIResult>;
@@ -195,19 +195,19 @@ export class CodexAdapter implements CLIAdapter {
 }
 
 /**
- * Gemini CLI adapter.
+ * AGY CLI adapter.
  *
  * The exact CLI flags are subject to verification against the real binary
- * (`gemini --help`). The current implementation uses the best-known invocation.
+ * (`agy --help`). The current implementation uses the non-interactive print mode.
  */
-export class GeminiAdapter implements CLIAdapter {
-  name = 'gemini';
+export class AgyAdapter implements CLIAdapter {
+  name = 'agy';
 
   async execute(prompt: string, opts: CLIOptions): Promise<CLIResult> {
     const escapedPrompt = prompt.replace(/"/g, '\\"');
-    let cmd = `gemini -p "${escapedPrompt}" --approval-mode yolo --sandbox=false`;
-    if (opts.model) {
-      cmd += ` --model ${opts.model}`;
+    let cmd = `agy --print "${escapedPrompt}" --dangerously-skip-permissions`;
+    if (opts.workingDir) {
+      cmd += ` --add-dir "${opts.workingDir.replace(/"/g, '\\"')}"`;
     }
     if (opts.outputFormat === 'json') {
       cmd += ' --json';
@@ -217,7 +217,7 @@ export class GeminiAdapter implements CLIAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const result = await runWithTimeout('gemini --version', '.', 10_000);
+      const result = await runWithTimeout('agy --version', '.', 10_000);
       return result.success;
     } catch {
       return false;
@@ -225,9 +225,14 @@ export class GeminiAdapter implements CLIAdapter {
   }
 
   async version(): Promise<string> {
-    const result = await runWithTimeout('gemini --version', '.', 10_000);
+    const result = await runWithTimeout('agy --version', '.', 10_000);
     return result.stdout.trim();
   }
+}
+
+/** Deprecated compatibility alias for code that still imports GeminiAdapter. */
+export class GeminiAdapter extends AgyAdapter {
+  name = 'agy';
 }
 
 // ---------------------------------------------------------------------------
@@ -237,13 +242,15 @@ export class GeminiAdapter implements CLIAdapter {
 /**
  * Create a {@link CLIAdapter} for the given provider.
  *
- * @param provider - Either `"codex"` or `"gemini"`.
+ * @param provider - Either `"codex"` or `"agy"`; `"gemini"` is a deprecated alias.
  * @returns A concrete adapter instance.
  */
-export function createAdapter(provider: 'codex' | 'gemini'): CLIAdapter {
+export function createAdapter(provider: 'codex' | 'agy' | 'gemini'): CLIAdapter {
   switch (provider) {
     case 'codex':
       return new CodexAdapter();
+    case 'agy':
+      return new AgyAdapter();
     case 'gemini':
       return new GeminiAdapter();
     default:
