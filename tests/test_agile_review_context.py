@@ -59,3 +59,38 @@ def test_agile_review_uses_draft_context_when_draft_dir_is_provided(tmp_path: Pa
     assert str((draft_dir / "objective.md").resolve()) in payload["context_files"]
     assert str((draft_dir / "details" / "flow.md").resolve()) in payload["context_files"]
     assert str((objective_dir / "objective.md").resolve()) not in payload["context_files"]
+
+
+def test_agile_review_resolves_session_from_absolute_draft_dir_when_cwd_differs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    runner = tmp_path / "runner"
+    workspace.mkdir()
+    runner.mkdir()
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    (runner / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    init = _run_mst(workspace, "agile", "init", "--json")
+    assert init.returncode == 0, init.stderr
+    agi_id = json.loads(init.stdout)["agi_id"]
+
+    objective_dir = workspace / ".gran-maestro" / "agile" / agi_id / "objective"
+    draft_dir = objective_dir / "draft"
+    (draft_dir / "details").mkdir(parents=True, exist_ok=True)
+    (draft_dir / "objective.md").write_text("# Draft Objective\n", encoding="utf-8")
+
+    proc = _run_mst(
+        runner,
+        "agile",
+        "review",
+        "--agi",
+        agi_id,
+        "--perspective",
+        "edge",
+        "--draft-dir",
+        str(draft_dir),
+        "--json",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["context_source"] == "draft"
+    assert payload["draft_dir"] == str(draft_dir.resolve())

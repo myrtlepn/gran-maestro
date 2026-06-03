@@ -690,6 +690,20 @@ def _next_agile_id() -> str:
     next_id = last_id + 1
     save_json(counter_path, {"last_id": next_id})
     return f"AGI-{next_id:03d}"
+def _verify_agile_init_session(agi_id: str, mst_session_id: str) -> dict:
+    payload, _ = _load_agile_session(agi_id)
+    actual_mst_session_id = str(payload.get("mst_session_id") or "").strip()
+    if actual_mst_session_id != mst_session_id:
+        raise ValueError(
+            f"session identity mismatch for {agi_id}: expected {mst_session_id}, got {actual_mst_session_id or '<missing>'}"
+        )
+    session_mod.validate_mst_session_metadata_consistency(
+        _common.BASE_DIR,
+        mst_session_id,
+        require_root_metadata=True,
+        require_session_metadata=True,
+    )
+    return payload
 def cmd_agile_init(args):
     if args.steering_every < 1:
         print("Error: --steering-every must be >= 1", file=sys.stderr)
@@ -781,7 +795,16 @@ def cmd_agile_init(args):
             "mst_session_id": mst_session_id,
         },
     )
-    payload = load_json(_agi_session_path(agi_id)) or payload
+    try:
+        payload = _verify_agile_init_session(agi_id, mst_session_id)
+    except Exception as exc:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(Path(created["session_metadata_path"]).parent, ignore_errors=True)
+        except Exception:
+            pass
+        print(f"Error: agile init session verification failed for {agi_id} ({exc})", file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))

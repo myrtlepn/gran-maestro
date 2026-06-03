@@ -6,7 +6,10 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+from scripts.mst_cmds import _common
+from scripts.mst_cmds import agile as agile_cmds
 from scripts.mst_cmds import session as session_mod
 
 
@@ -136,6 +139,31 @@ def test_agile_init_session_flow_reports_incomplete_ledger(tmp_path: Path) -> No
         if isinstance(item, dict)
     }
     assert "missing_event_family" in codes
+
+
+def test_agile_init_fails_when_final_session_verification_fails(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    base_dir = tmp_path / ".gran-maestro"
+    base_dir.mkdir()
+    monkeypatch.setattr(_common, "BASE_DIR", base_dir)
+    monkeypatch.setenv("MST_POLICY_HOME", str(base_dir / "policy"))
+
+    def fail_verify(_agi_id: str, _mst_session_id: str) -> dict:
+        raise ValueError("forced missing root session")
+
+    monkeypatch.setattr(agile_cmds, "_verify_agile_init_session", fail_verify)
+
+    exit_code = agile_cmds.cmd_agile_init(SimpleNamespace(steering_every=3, json=True))
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "agile init session verification failed for AGI-001" in captured.err
+    assert not (base_dir / "agile" / "AGI-001" / "session.json").exists()
+    assert not any((base_dir / "sessions").glob("MST-AGI-001-*"))
 
 
 def test_session_flow_lazily_generates_projection_from_verified_history(

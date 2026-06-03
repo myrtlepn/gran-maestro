@@ -555,6 +555,30 @@ def cmd_agile_known_issues(args):
         print("Error: known-issues subcommand is required (add|resolve|list)", file=sys.stderr)
         return 1
     return fn(args)
+def _agile_base_dir_from_draft_dir(agi_id: str, draft_dir: Path) -> Optional[Path]:
+    resolved = draft_dir.resolve()
+    if (
+        resolved.name == "draft"
+        and resolved.parent.name == "objective"
+        and resolved.parent.parent.name == agi_id
+        and resolved.parent.parent.parent.name == "agile"
+        and resolved.parent.parent.parent.parent.name == ".gran-maestro"
+    ):
+        return resolved.parent.parent.parent.parent
+    return None
+def _load_agile_review_session(agi_id: str, draft_dir: Optional[Path]):
+    if draft_dir is not None:
+        draft_base_dir = _agile_base_dir_from_draft_dir(agi_id, draft_dir)
+        if draft_base_dir is not None:
+            session_path = draft_base_dir / "agile" / agi_id / "session.json"
+            data = load_json(session_path)
+            if not isinstance(data, dict):
+                raise ValueError(f"{agi_id} session not found: {session_path}")
+            payload_id = str(data.get("id") or data.get("agi_id") or "").strip()
+            if payload_id and payload_id != agi_id:
+                raise ValueError(f"{agi_id} session identity mismatch: {session_path}")
+            return data, session_path
+    return _load_agile_session(agi_id)
 def cmd_agile_review(args):
     perspective = str(args.perspective).strip()
     enabled_status = _validate_adversarial_review_enabled(perspective)
@@ -563,16 +587,16 @@ def cmd_agile_review(args):
 
     try:
         agi_id = _normalize_agi_id(args.agi_id)
-        _load_agile_session(agi_id)
+        draft_dir_arg = str(getattr(args, "draft_dir", "") or "").strip()
+        draft_dir = Path(draft_dir_arg).expanduser() if draft_dir_arg else None
+        if draft_dir is not None and not draft_dir.is_absolute():
+            draft_dir = (Path.cwd() / draft_dir).resolve()
+        _load_agile_review_session(agi_id, draft_dir)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     objective_path = _agi_objective_path(agi_id)
-    draft_dir_arg = str(getattr(args, "draft_dir", "") or "").strip()
-    draft_dir = Path(draft_dir_arg).expanduser() if draft_dir_arg else None
-    if draft_dir is not None and not draft_dir.is_absolute():
-        draft_dir = (Path.cwd() / draft_dir).resolve()
     if draft_dir is not None:
         draft_objective = draft_dir / "objective.md"
         if not draft_objective.exists() or not draft_objective.is_file():
