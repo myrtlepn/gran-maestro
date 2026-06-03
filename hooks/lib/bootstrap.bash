@@ -52,8 +52,19 @@ mst_validate_hook_script_dir_or_exit() {
 }
 
 mst_resolve_project_root() {
-  local git_top candidate parent
+  local git_top git_common_dir common_root candidate parent
   git_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  case "$git_common_dir" in
+    */.git)
+      common_root="${git_common_dir%/.git}"
+      if [ -d "${common_root}/.gran-maestro" ] && [ -e "${common_root}/.git" ]; then
+        printf '%s\n' "$common_root"
+        return 0
+      fi
+      ;;
+  esac
 
   if [ -f "${git_top}/.git" ]; then
     candidate="$git_top"

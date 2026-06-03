@@ -63,9 +63,62 @@ const MST_HOOK_MARKER_FILES = new Set([
   '.mst-hook-version',
   'stop-agile-gate-reasons.json',
 ]);
+const MST_WORKTREE_HOOK_COMMAND_RE =
+  /(\$CLAUDE_PROJECT_DIR|\$\(git rev-parse[^)]*\))\/\.claude\/hooks\/mst-(stop-hook|session-init|pre-tool-use|auto-chain-context)\.sh/;
 
 function isMstOwnedWorktreeHookFile(name: string): boolean {
   return (name.startsWith('mst-') && name.endsWith('.sh')) || MST_HOOK_MARKER_FILES.has(name);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function filterWorktreeSettings(settings: unknown): unknown {
+  if (!isRecord(settings)) return settings;
+
+  const filtered: Record<string, unknown> = { ...settings };
+  const hooks = filtered.hooks;
+  if (!isRecord(hooks)) return filtered;
+
+  const filteredHooks: Record<string, unknown> = {};
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) {
+      filteredHooks[event] = entries;
+      continue;
+    }
+
+    const keptEntries: unknown[] = [];
+    for (const entry of entries) {
+      if (!isRecord(entry)) {
+        keptEntries.push(entry);
+        continue;
+      }
+      const inner = entry.hooks;
+      if (!Array.isArray(inner)) {
+        keptEntries.push(entry);
+        continue;
+      }
+
+      const keptInner = inner.filter((hook) => {
+        if (!isRecord(hook) || typeof hook.command !== 'string') return true;
+        return !MST_WORKTREE_HOOK_COMMAND_RE.test(hook.command);
+      });
+      if (keptInner.length > 0) {
+        keptEntries.push({ ...entry, hooks: keptInner });
+      }
+    }
+    if (keptEntries.length > 0) {
+      filteredHooks[event] = keptEntries;
+    }
+  }
+
+  if (Object.keys(filteredHooks).length > 0) {
+    filtered.hooks = filteredHooks;
+  } else {
+    delete filtered.hooks;
+  }
+  return filtered;
 }
 
 export interface WorktreeInfo {
@@ -169,6 +222,49 @@ export class WorktreeManager {
     }
   }
 
+  private async copyWorktreeSupportFiles(worktreePath: string): Promise<void> {
+    const sourceHooksDir = resolve(this.projectRoot, '.claude/hooks');
+    const targetClaudeDir = resolve(worktreePath, '.claude');
+    const targetHooksDir = resolve(targetClaudeDir, 'hooks');
+    const denoFs = Deno as typeof Deno & {
+      copyFile: (src: string, dest: string) => Promise<void>;
+      chmod: (path: string, mode: number) => Promise<void>;
+    };
+
+    try {
+      let targetHooksCreated = false;
+      for await (const entry of Deno.readDir(sourceHooksDir)) {
+        if (!entry.isFile || isMstOwnedWorktreeHookFile(entry.name)) continue;
+        if (!targetHooksCreated) {
+          await Deno.mkdir(targetHooksDir, { recursive: true });
+          targetHooksCreated = true;
+        }
+
+        const sourcePath = resolve(sourceHooksDir, entry.name);
+        const targetPath = resolve(targetHooksDir, entry.name);
+        await denoFs.copyFile(sourcePath, targetPath);
+        await denoFs.chmod(targetPath, 0o755);
+      }
+    } catch {
+      // Non-fatal: custom hook copy failure should not block worktree creation.
+    }
+
+    try {
+      const sourceSettingsPath = resolve(this.projectRoot, '.claude/settings.local.json');
+      const raw = await Deno.readTextFile(sourceSettingsPath);
+      let output = raw;
+      try {
+        output = JSON.stringify(filterWorktreeSettings(JSON.parse(raw)), null, 2) + '\n';
+      } catch {
+        output = raw;
+      }
+      await Deno.mkdir(targetClaudeDir, { recursive: true });
+      await Deno.writeTextFile(resolve(targetClaudeDir, 'settings.local.json'), output);
+    } catch {
+      // Non-fatal: settings copy failure should not block worktree creation.
+    }
+  }
+
   /**
    * Create a new git worktree for a task.
    *
@@ -218,30 +314,7 @@ export class WorktreeManager {
       }
 
       info.state = 'active';
-      try {
-        const sourceHooksDir = resolve(this.projectRoot, '.claude/hooks');
-        const targetHooksDir = resolve(worktreePath, '.claude/hooks');
-        const denoFs = Deno as typeof Deno & {
-          copyFile: (src: string, dest: string) => Promise<void>;
-          chmod: (path: string, mode: number) => Promise<void>;
-        };
-        let targetHooksCreated = false;
-
-        for await (const entry of Deno.readDir(sourceHooksDir)) {
-          if (!entry.isFile || isMstOwnedWorktreeHookFile(entry.name)) continue;
-          if (!targetHooksCreated) {
-            await Deno.mkdir(targetHooksDir, { recursive: true });
-            targetHooksCreated = true;
-          }
-
-          const sourcePath = resolve(sourceHooksDir, entry.name);
-          const targetPath = resolve(targetHooksDir, entry.name);
-          await denoFs.copyFile(sourcePath, targetPath);
-          await denoFs.chmod(targetPath, 0o755);
-        }
-      } catch {
-        // Non-fatal: custom hook copy failure should not block worktree creation.
-      }
+      await this.copyWorktreeSupportFiles(worktreePath);
       await this.persistMeta(taskId, info);
       return worktreePath;
     } catch (err) {

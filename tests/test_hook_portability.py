@@ -39,6 +39,53 @@ def test_shared_bootstrap_uses_git_rev_parse_fallback():
     text = (HOOKS_DIR / "lib" / "bootstrap.bash").read_text(encoding="utf-8")
     assert re.search(r"^mst_resolve_project_root\(\)\s*\{", text, re.MULTILINE)
     assert "git rev-parse --show-toplevel" in text
+    assert "git rev-parse --path-format=absolute --git-common-dir" in text
+
+
+def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_shared_bootstrap_resolves_external_linked_worktree_to_common_project_root(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    assert _run_git(repo_root, "init").returncode == 0
+    assert _run_git(repo_root, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(repo_root, "config", "user.name", "Test User").returncode == 0
+    assert _run_git(repo_root, "commit", "--allow-empty", "-m", "initial").returncode == 0
+    assert _run_git(repo_root, "branch", "-M", "master").returncode == 0
+    (repo_root / ".gran-maestro").mkdir()
+
+    worktree_path = tmp_path / "external-worktree"
+    add_worktree = _run_git(
+        repo_root,
+        "worktree",
+        "add",
+        "-b",
+        "feature/external",
+        str(worktree_path),
+        "master",
+    )
+    assert add_worktree.returncode == 0, add_worktree.stderr
+
+    script = f"source {HOOKS_DIR / 'lib' / 'bootstrap.bash'}; mst_resolve_project_root"
+    proc = subprocess.run(
+        ["/bin/bash", "-lc", script],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(repo_root)
 
 
 @pytest.mark.parametrize("hook_name", HOOK_NAMES)

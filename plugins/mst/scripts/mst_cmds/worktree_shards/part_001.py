@@ -1573,10 +1573,17 @@ def resolve_child_merge_queue_state(
     }
 def _resolve_worktree_source_root() -> Path:
     project_root = _project_root()
-    source_claude_dir = project_root / ".claude"
-    if (source_claude_dir / "hooks").is_dir() and (source_claude_dir / "settings.local.json").is_file():
+
+    def has_support_files(root: Path) -> bool:
+        source_claude_dir = root / ".claude"
+        return (source_claude_dir / "hooks").is_dir() or (source_claude_dir / "settings.local.json").is_file()
+
+    master_root = _resolve_master_project_root()
+    if master_root != project_root and has_support_files(master_root):
+        return master_root
+    if has_support_files(project_root):
         return project_root
-    return _resolve_master_project_root()
+    return master_root
 
 def _worktree_remove_payload(
     *,

@@ -201,9 +201,56 @@ def test_worktree_create_succeeds_without_mst_hook_scripts(tmp_path: Path, maste
     assert not list((target_path / ".claude" / "hooks").glob("mst-*.sh"))
 
 
+def test_worktree_create_from_worktree_sources_master_settings(
+    master_repo: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    first_path = master_repo / ".gran-maestro" / "worktrees" / "REQ-900-T01"
+    second_path = master_repo / ".gran-maestro" / "worktrees" / "REQ-900-T02"
+
+    monkeypatch.setattr(_common, "BASE_DIR", master_repo / ".gran-maestro")
+    monkeypatch.chdir(master_repo)
+
+    first_exit = cmd_worktree_create(
+        argparse.Namespace(
+            path=str(first_path),
+            branch="feature/source-settings-first",
+            base="master",
+        )
+    )
+    first_captured = capsys.readouterr()
+    assert first_exit == 0, first_captured.err
+
+    master_settings = json.loads((master_repo / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    master_settings["env"]["CUSTOM_ENV"] = "master-updated"
+    master_settings["permissions"] = {"allow": ["Bash(git log:*)"]}
+    (master_repo / ".claude" / "settings.local.json").write_text(
+        json.dumps(master_settings, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(first_path)
+    second_exit = cmd_worktree_create(
+        argparse.Namespace(
+            path=str(second_path),
+            branch="feature/source-settings-second",
+            base="master",
+        )
+    )
+    second_captured = capsys.readouterr()
+
+    assert second_exit == 0, second_captured.err
+    copied_settings = json.loads((second_path / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    assert copied_settings["env"]["CUSTOM_ENV"] == "master-updated"
+    assert copied_settings["permissions"] == {"allow": ["Bash(git log:*)"]}
+
+
 def test_typescript_worktree_manager_does_not_bulk_copy_project_hooks() -> None:
     source = (REPO_ROOT / "src" / "core" / "worktree-manager.ts").read_text(encoding="utf-8")
 
     assert "isMstOwnedWorktreeHookFile" in source
     assert "if (!entry.isFile || isMstOwnedWorktreeHookFile(entry.name)) continue;" in source
     assert "await Deno.mkdir(targetHooksDir, { recursive: true });\n\n        for await" not in source
+    assert "filterWorktreeSettings" in source
+    assert "settings.local.json" in source
