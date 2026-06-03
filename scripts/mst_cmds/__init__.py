@@ -142,6 +142,8 @@ DISPATCH = {
     ("worktree", "slug"): worktree.cmd_worktree_slug,
     ("worktree", "branch-name"): worktree.cmd_worktree_branch_name,
     ("worktree", "path"): worktree.cmd_worktree_path,
+    ("worktree", "child-merge-queue"): worktree.cmd_worktree_child_merge_queue,
+    ("worktree", "reflect-accept"): worktree.cmd_worktree_reflect_accept,
     ("worktree", "detect-orphans"): worktree.cmd_worktree_detect_orphans,
     ("worktree", "classify-collision"): worktree.cmd_worktree_classify_collision,
     ("worktree", "archive-retention"): worktree.cmd_worktree_archive_retention,

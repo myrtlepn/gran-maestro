@@ -36,6 +36,20 @@ def register(subparsers):
     worktree_path.add_argument("--role", required=True)
     worktree_path.add_argument("--agi")
 
+    worktree_child_merge_queue = worktree_sub.add_parser("child-merge-queue")
+    worktree_child_merge_queue.add_argument("--mst-session-id")
+    worktree_child_merge_queue.add_argument("--session-branch", required=True)
+    worktree_child_merge_queue.add_argument("--children-json", default="[]")
+    worktree_child_merge_queue.add_argument("--durable-events-json", default="[]")
+    worktree_child_merge_queue.add_argument("--json", action="store_true")
+
+    worktree_reflect_accept = worktree_sub.add_parser("reflect-accept")
+    worktree_reflect_accept.add_argument("--accept-worktree", required=True)
+    worktree_reflect_accept.add_argument("--target-branch", required=True)
+    worktree_reflect_accept.add_argument("--accepted-commit", default="HEAD")
+    worktree_reflect_accept.add_argument("--target-before")
+    worktree_reflect_accept.add_argument("--json", action="store_true")
+
     worktree_check_boundary = worktree_sub.add_parser("check-boundary")
     worktree_check_boundary.add_argument("--req", required=True)
     worktree_check_boundary.add_argument("--phase", choices=["entry", "exit"], required=True)
@@ -71,9 +85,11 @@ def register(subparsers):
     worktree_migrate_archive.add_argument("--json", action="store_true")
 
     _register_worktree_dispatch("path", cmd_worktree_path)
+    _register_worktree_dispatch("child-merge-queue", cmd_worktree_child_merge_queue)
     _register_worktree_dispatch("check-boundary", cmd_worktree_check_boundary)
     _register_worktree_dispatch("detect-orphans", cmd_worktree_detect_orphans)
     _register_worktree_dispatch("classify-collision", cmd_worktree_classify_collision)
     _register_worktree_dispatch("archive-retention", cmd_worktree_archive_retention)
     _register_worktree_dispatch("migrate-cleaned-meta", cmd_worktree_migrate_cleaned_meta)
     _register_worktree_dispatch("migrate-archive", cmd_worktree_migrate_archive)
+    _register_worktree_dispatch("reflect-accept", cmd_worktree_reflect_accept)

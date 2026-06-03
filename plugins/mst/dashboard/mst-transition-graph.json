@@ -144,8 +144,126 @@
       "write_allowed": true
     }
   ],
-  "generated_at": "2026-05-20T00:00:00Z",
+  "generated_at": "2026-06-03T00:00:00Z",
   "kind": "mst-transition-graph-view",
+  "lifecycle_contract": {
+    "cleanup_boundary": {
+      "after": [
+        "target_branch_reflection"
+      ],
+      "not_responsibility": [
+        "commit",
+        "merge",
+        "target_ref_update"
+      ],
+      "responsibility": [
+        "worktree_remove",
+        "git_worktree_prune",
+        "meta_cleanup",
+        "branch_delete_or_archive"
+      ]
+    },
+    "id": "worktree-accept-cleanup-lifecycle",
+    "ordered_steps": [
+      {
+        "id": "worktree_create",
+        "label": "worktree 생성",
+        "next": "worktree_work",
+        "order": 1,
+        "required_evidence": [
+          "worktree_path",
+          "task_branch"
+        ]
+      },
+      {
+        "id": "worktree_work",
+        "label": "worktree 안에서 작업",
+        "next": "commit_intended_changes",
+        "order": 2,
+        "required_evidence": [
+          "worktree_path"
+        ]
+      },
+      {
+        "id": "commit_intended_changes",
+        "label": "의도한 변경만 커밋",
+        "next": "accept_child_to_session",
+        "order": 3,
+        "required_evidence": [
+          "phase2_commit_evidence",
+          "branch_head_matches_recorded_commit"
+        ]
+      },
+      {
+        "id": "accept_child_to_session",
+        "label": "accept/merge 단계에서 정해진 대상 브랜치로 merge",
+        "next": "target_branch_reflection",
+        "order": 4,
+        "required_evidence": [
+          "child_merge_queue",
+          "idempotency_key",
+          "child_to_session"
+        ],
+        "scope": {
+          "child_to_session": true,
+          "session_to_original": false
+        }
+      },
+      {
+        "id": "target_branch_reflection",
+        "label": "selected target branch reflection evidence 확인",
+        "next": "post_merge_cleanup",
+        "order": 5,
+        "required_evidence": [
+          "target_before",
+          "accepted_commit",
+          "target_after",
+          "accepted_commit_is_ancestor_of_target"
+        ]
+      },
+      {
+        "allowed_actions": [
+          "worktree_remove",
+          "git_worktree_prune",
+          "meta_cleanup",
+          "branch_delete_or_archive"
+        ],
+        "forbidden_actions": [
+          "commit",
+          "merge",
+          "target_ref_update"
+        ],
+        "id": "post_merge_cleanup",
+        "label": "merge 성공 후 cleanup에서 worktree 제거, prune, meta 정리",
+        "next": "phase5_done",
+        "order": 6,
+        "required_evidence": [
+          "cleanup_boundary",
+          "worktree_remove_result",
+          "meta_cleanup_result"
+        ]
+      },
+      {
+        "id": "phase5_done",
+        "label": "Phase 5 done",
+        "order": 7,
+        "required_evidence": [
+          "target_branch_reflection",
+          "cleanup_result"
+        ],
+        "terminal": true
+      }
+    ],
+    "scope_vocabulary": [
+      "request_child_accept",
+      "session_level_accept",
+      "terminal_success",
+      "child_to_session",
+      "session_to_original",
+      "forbidden_caller"
+    ],
+    "version": "2026-06-03.agi043"
+  },
   "nodes": [
     {
       "id": "active",
@@ -180,9 +298,9 @@
   ],
   "schema_version": 1,
   "source_graph": {
-    "hash": "ba8a9e4bc917a95570929c61d759b5250f225d5d51502cd80b412247ab657ea9",
+    "hash": "06b02dc08d3cfc076bf22bb433e12470001b2859ff86ae5433944b1c5c2b0fc9",
     "id": "mst-transition-graph",
-    "version": "2026-05-05.dod016-contract"
+    "version": "2026-06-03.agi043-lifecycle"
   },
   "source_graph_path": "templates/state-machine/mst-transition-graph.json"
 }

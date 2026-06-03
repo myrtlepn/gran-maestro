@@ -235,7 +235,7 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 - **최대 반복**: 설정 가능 (기본 5회)
 
 ### Phase 5: 수락/완료
-- **처리**: rebase + squash merge → worktree 정리 → 알림
+- **처리**: task worktree commit evidence 확인 → deterministic child merge queue → request/session target squash merge → selected target branch reflection evidence 확인 → post-merge cleanup(worktree remove/prune/meta 정리) → 알림
 - **산출물**: 최종 요약 (summary.md)
 
 </workflow_phases>

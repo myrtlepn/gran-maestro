@@ -56,6 +56,53 @@ def _run_mst(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    result = _run_git(repo_root, *args)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _ensure_git_repo(repo_root: Path) -> None:
+    if (repo_root / ".git").exists():
+        return
+    assert _run_git(repo_root, "init").returncode == 0
+    assert _run_git(repo_root, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(repo_root, "config", "user.name", "Test User").returncode == 0
+    _git(repo_root, "commit", "--allow-empty", "-m", "initial")
+    _git(repo_root, "branch", "-M", "main")
+
+
+def _phase2_evidence_task(repo_root: Path, req_id: str, task_id: str, status: str) -> dict:
+    _ensure_git_repo(repo_root)
+    branch = f"gran-maestro/main/{req_id}-{task_id}"
+    filename = f"{req_id}-{task_id}.txt"
+    _git(repo_root, "checkout", "-B", branch, "main")
+    (repo_root / filename).write_text(f"{req_id} {task_id}\n", encoding="utf-8")
+    _git(repo_root, "add", filename)
+    _git(repo_root, "commit", "-m", f"[{req_id}/{task_id}] test commit evidence")
+    commit_hash = _git(repo_root, "rev-parse", "HEAD")
+    _git(repo_root, "checkout", "main")
+    return {
+        "id": task_id,
+        "status": status,
+        "commit_hash": commit_hash,
+        "branch": branch,
+    }
+
+
+def _phase2_evidence_tasks(repo_root: Path, req_id: str, statuses: list[tuple[str, str]]) -> list[dict]:
+    return [_phase2_evidence_task(repo_root, req_id, task_id, status) for task_id, status in statuses]
+
+
 def _seed_mst_session_env(monkeypatch, root: str = "REQ-001") -> None:
     monkeypatch.setenv("MST_SESSION_ID", f"MST-{root}-20260101T000000000Z-abcdefgh")
 
@@ -122,12 +169,16 @@ def test_phase2_ready_accepts_completed_evidence_task(tmp_path, monkeypatch):
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "committed"},
-            {"id": "T03", "status": "committed"},
-            {"id": "T04", "status": "completed"},
-        ],
+        tasks=_phase2_evidence_tasks(
+            tmp_path,
+            req_id,
+            [
+                ("T01", "committed"),
+                ("T02", "committed"),
+                ("T03", "committed"),
+                ("T04", "completed"),
+            ],
+        ),
         extra={
             "phase2_result": {"status": "pass"},
             "review_summary": {"status": "pending_phase3_review"},
@@ -164,12 +215,16 @@ def test_phase2_status_ready_json_is_read_only(tmp_path):
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "completed"},
-            {"id": "T03", "status": "done"},
-            {"id": "T04", "status": "accepted"},
-        ],
+        tasks=_phase2_evidence_tasks(
+            tmp_path,
+            req_id,
+            [
+                ("T01", "committed"),
+                ("T02", "completed"),
+                ("T03", "done"),
+                ("T04", "accepted"),
+            ],
+        ),
     )
     request_path = base_dir / "requests" / req_id / "request.json"
     before_hash = _request_hash(request_path)
@@ -189,6 +244,74 @@ def test_phase2_status_ready_json_is_read_only(tmp_path):
     assert _request_hash(request_path) == before_hash
 
 
+def test_phase2_ready_rejects_status_only_task_without_commit_evidence(tmp_path):
+    base_dir = tmp_path / ".gran-maestro"
+    req_id = "REQ-871"
+    _seed_request(
+        base_dir,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[{"id": "T01", "status": "committed"}],
+    )
+    request_path = base_dir / "requests" / req_id / "request.json"
+    before_hash = _request_hash(request_path)
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert payload["ready"] is False
+    assert payload["advanced"] is False
+    assert payload["reason"] == "missing_commit_evidence"
+    assert payload["incomplete_tasks"] == [
+        {
+            "id": "T01",
+            "status": "committed",
+            "reason": "missing_commit_evidence",
+            "action": "record_task_commit_hash_before_phase3",
+            "commit_hash": None,
+            "branch": None,
+            "branch_head": None,
+            "worktree_path": None,
+        }
+    ]
+    assert _request_hash(request_path) == before_hash
+
+
+def test_phase2_ready_rejects_stale_commit_evidence(tmp_path):
+    base_dir = tmp_path / ".gran-maestro"
+    req_id = "REQ-872"
+    task = _phase2_evidence_task(tmp_path, req_id, "T01", "committed")
+    recorded_commit = task["commit_hash"]
+    _git(tmp_path, "checkout", task["branch"])
+    (tmp_path / "stale.txt").write_text("new head\n", encoding="utf-8")
+    _git(tmp_path, "add", "stale.txt")
+    _git(tmp_path, "commit", "-m", "advance task branch")
+    branch_head = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "checkout", "main")
+    _seed_request(
+        base_dir,
+        req_id,
+        phase=2,
+        status="phase2_execution",
+        tasks=[task],
+    )
+
+    result = _run_mst(tmp_path, "request", "phase2-status", req_id, "--json")
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert payload["ready"] is False
+    assert payload["advanced"] is False
+    assert payload["reason"] == "stale_commit_evidence"
+    assert payload["incomplete_tasks"][0]["id"] == "T01"
+    assert payload["incomplete_tasks"][0]["reason"] == "stale_commit_evidence"
+    assert payload["incomplete_tasks"][0]["commit_hash"] == recorded_commit
+    assert payload["incomplete_tasks"][0]["branch"] == task["branch"]
+    assert payload["incomplete_tasks"][0]["branch_head"] == branch_head
+
+
 def test_phase2_status_does_not_reconcile_dispatch_actions(tmp_path):
     base_dir = tmp_path / ".gran-maestro"
     req_id = "REQ-866"
@@ -197,7 +320,7 @@ def test_phase2_status_does_not_reconcile_dispatch_actions(tmp_path):
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[{"id": "T01", "status": "committed"}],
+        tasks=_phase2_evidence_tasks(tmp_path, req_id, [("T01", "committed")]),
         extra={
             "background_task_ids": [
                 {
@@ -304,7 +427,7 @@ def test_phase2_status_session_mismatch_does_not_invoke_transition_guard(tmp_pat
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[{"id": "T01", "status": "committed"}],
+        tasks=_phase2_evidence_tasks(tmp_path, req_id, [("T01", "committed")]),
         extra={"mst_session_id": "MST-REQ-870-20260101T000000000Z-mismatch"},
     )
     request_path = base_dir / "requests" / req_id / "request.json"
@@ -330,10 +453,11 @@ def test_phase2_ready_json_guard_returns_structured_guard_block_without_mutation
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "completed"},
-        ],
+        tasks=_phase2_evidence_tasks(
+            tmp_path,
+            req_id,
+            [("T01", "committed"), ("T02", "completed")],
+        ),
         extra={"mst_session_id": "MST-REQ-842-20260101T000000000Z-mismatch"},
     )
     request_path = base_dir / "requests" / req_id / "request.json"
@@ -372,10 +496,11 @@ def test_phase2_ready_preserves_terminal_review_summary(tmp_path, monkeypatch, t
         req_id,
         phase=2,
         status="phase2_execution",
-        tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "completed"},
-        ],
+        tasks=_phase2_evidence_tasks(
+            tmp_path,
+            req_id,
+            [("T01", "committed"), ("T02", "completed")],
+        ),
         extra={"review_summary": review_summary},
     )
     monkeypatch.setattr(mst, "BASE_DIR", base_dir)

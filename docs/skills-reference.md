@@ -198,13 +198,13 @@ PM이 분석·작성한 스펙을 검토 후 승인하여 실제 구현(Phase 2)
 
 ### /mst:accept
 
-**한 줄 설명**: 리뷰를 통과한 결과물을 최종 수락하여 main 브랜치에 머지합니다 (Phase 3 → Phase 5).
+**한 줄 설명**: 리뷰를 통과한 결과물을 정해진 target/session 브랜치에 반영하고 evidence 확인 후 정리합니다 (Phase 3 → Phase 5).
 
 **인자**: `[REQ-ID]`
 
 #### 목적
 
-Phase 3 리뷰 PASS 상태인 요청의 Worktree를 main 브랜치에 머지하고 정리합니다. 기본적으로 `/mst:approve`에서 자동 호출됩니다. `workflow.auto_accept_result=false` 설정 시 수동으로 호출합니다.
+Phase 3 리뷰 PASS 상태인 요청의 task worktree commit evidence를 확인하고, deterministic child merge queue 순서대로 request/session target에 반영한 뒤 selected target branch reflection evidence를 확인합니다. cleanup은 reflection 성공 이후 worktree remove/prune/meta 정리만 수행합니다. 기본적으로 `/mst:approve`에서 자동 호출됩니다. `workflow.auto_accept_result=false` 설정 시 수동으로 호출합니다.
 
 #### 사용 시점
 

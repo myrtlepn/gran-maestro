@@ -1,13 +1,37 @@
 {
   "evidence_producers": {
+    "accepted_commit": [
+      "worktree.reflect-accept"
+    ],
+    "accepted_commit_is_ancestor_of_target": [
+      "worktree.reflect-accept"
+    ],
     "action_scope": [
       "hook_boundary_classifier"
     ],
     "attempt_count": [
       "transition_validator"
     ],
+    "branch_head_matches_recorded_commit": [
+      "request_phase2_readiness_gate"
+    ],
+    "cancel_scope": [
+      "cancel_command"
+    ],
+    "child_merge_queue": [
+      "worktree.child-merge-queue"
+    ],
+    "child_to_session": [
+      "accept_scope_contract"
+    ],
     "classifier_failure_kind": [
       "hook_boundary_classifier"
+    ],
+    "cleanup_boundary": [
+      "cleanup_command_inventory"
+    ],
+    "cleanup_result": [
+      "accept_cleanup_step"
     ],
     "confirmed_action_scope": [
       "confirmation_command"
@@ -25,8 +49,14 @@
       "state_snapshot",
       "history_ledger"
     ],
+    "idempotency_key": [
+      "worktree.child-merge-queue"
+    ],
     "limit": [
       "transition_validator"
+    ],
+    "meta_cleanup_result": [
+      "cleanup_runtime"
     ],
     "mismatch_subject": [
       "validator"
@@ -45,20 +75,36 @@
     "objective_check_result": [
       "mst.py agile objective-check"
     ],
+    "phase2_commit_evidence": [
+      "request_phase2_readiness_gate"
+    ],
     "reject_loop_key": [
       "transition_validator"
     ],
     "root_mst_id": [
       "session_metadata"
     ],
-    "cancel_scope": [
-      "cancel_command"
+    "session_to_original": [
+      "accept_scope_contract"
+    ],
+    "target_after": [
+      "worktree.reflect-accept"
+    ],
+    "target_before": [
+      "worktree.reflect-accept"
+    ],
+    "target_branch_reflection": [
+      "worktree.reflect-accept"
     ],
     "user_cancel_request": [
       "cancel_command"
     ],
     "user_confirmation": [
       "confirmation_command"
+    ],
+    "worktree_remove_result": [
+      "worktree.remove",
+      "cleanup_runtime"
     ]
   },
   "guards": {
@@ -149,8 +195,126 @@
       ]
     }
   },
-  "hash": "ba8a9e4bc917a95570929c61d759b5250f225d5d51502cd80b412247ab657ea9",
+  "hash": "06b02dc08d3cfc076bf22bb433e12470001b2859ff86ae5433944b1c5c2b0fc9",
   "id": "mst-transition-graph",
+  "lifecycle_contract": {
+    "cleanup_boundary": {
+      "after": [
+        "target_branch_reflection"
+      ],
+      "not_responsibility": [
+        "commit",
+        "merge",
+        "target_ref_update"
+      ],
+      "responsibility": [
+        "worktree_remove",
+        "git_worktree_prune",
+        "meta_cleanup",
+        "branch_delete_or_archive"
+      ]
+    },
+    "id": "worktree-accept-cleanup-lifecycle",
+    "ordered_steps": [
+      {
+        "id": "worktree_create",
+        "label": "worktree 생성",
+        "next": "worktree_work",
+        "order": 1,
+        "required_evidence": [
+          "worktree_path",
+          "task_branch"
+        ]
+      },
+      {
+        "id": "worktree_work",
+        "label": "worktree 안에서 작업",
+        "next": "commit_intended_changes",
+        "order": 2,
+        "required_evidence": [
+          "worktree_path"
+        ]
+      },
+      {
+        "id": "commit_intended_changes",
+        "label": "의도한 변경만 커밋",
+        "next": "accept_child_to_session",
+        "order": 3,
+        "required_evidence": [
+          "phase2_commit_evidence",
+          "branch_head_matches_recorded_commit"
+        ]
+      },
+      {
+        "id": "accept_child_to_session",
+        "label": "accept/merge 단계에서 정해진 대상 브랜치로 merge",
+        "next": "target_branch_reflection",
+        "order": 4,
+        "required_evidence": [
+          "child_merge_queue",
+          "idempotency_key",
+          "child_to_session"
+        ],
+        "scope": {
+          "child_to_session": true,
+          "session_to_original": false
+        }
+      },
+      {
+        "id": "target_branch_reflection",
+        "label": "selected target branch reflection evidence 확인",
+        "next": "post_merge_cleanup",
+        "order": 5,
+        "required_evidence": [
+          "target_before",
+          "accepted_commit",
+          "target_after",
+          "accepted_commit_is_ancestor_of_target"
+        ]
+      },
+      {
+        "allowed_actions": [
+          "worktree_remove",
+          "git_worktree_prune",
+          "meta_cleanup",
+          "branch_delete_or_archive"
+        ],
+        "forbidden_actions": [
+          "commit",
+          "merge",
+          "target_ref_update"
+        ],
+        "id": "post_merge_cleanup",
+        "label": "merge 성공 후 cleanup에서 worktree 제거, prune, meta 정리",
+        "next": "phase5_done",
+        "order": 6,
+        "required_evidence": [
+          "cleanup_boundary",
+          "worktree_remove_result",
+          "meta_cleanup_result"
+        ]
+      },
+      {
+        "id": "phase5_done",
+        "label": "Phase 5 done",
+        "order": 7,
+        "required_evidence": [
+          "target_branch_reflection",
+          "cleanup_result"
+        ],
+        "terminal": true
+      }
+    ],
+    "scope_vocabulary": [
+      "request_child_accept",
+      "session_level_accept",
+      "terminal_success",
+      "child_to_session",
+      "session_to_original",
+      "forbidden_caller"
+    ],
+    "version": "2026-06-03.agi043"
+  },
   "lifecycle_mappings": {
     "blocked.resume_confirmed": {
       "auto_allowed": true,
@@ -237,7 +401,8 @@
     "rejected transitions define on_reject",
     "required evidence keys have producers",
     "generated graph view covers all graph states and transitions",
-    "auto_allowed does not bypass destructive or external action guards"
+    "auto_allowed does not bypass destructive or external action guards",
+    "worktree lifecycle order is worktree_create -> worktree_work -> commit_intended_changes -> accept_child_to_session -> target_branch_reflection -> post_merge_cleanup -> phase5_done"
   ],
   "states": {
     "active": {
@@ -387,5 +552,5 @@
       "write_allowed": true
     }
   },
-  "version": "2026-05-05.dod016-contract"
+  "version": "2026-06-03.agi043-lifecycle"
 }

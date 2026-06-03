@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 import re
 from dataclasses import asdict, dataclass
 
@@ -67,6 +69,39 @@ def _resolve(children: list[dict[str, object]], *, durable_events: list[dict[str
 def test_required_child_merge_contract_api_exists() -> None:
     _require_worktree_api("resolve_child_merge_queue_state")
     _require_worktree_api("child_merge_idempotency_key")
+    _require_worktree_api("cmd_worktree_child_merge_queue")
+
+
+def test_child_merge_queue_cli_exposes_ordering_and_blockers(capsys) -> None:
+    ready = _child("ready", req_id="REQ-879", task_id="02", priority=20)
+    late = _child("late", req_id="REQ-879", task_id="01", priority=10, state="late_arriving_child")
+
+    exit_code = worktree.cmd_worktree_child_merge_queue(
+        argparse.Namespace(
+            mst_session_id=MST_SESSION_ID,
+            session_branch=SESSION_BRANCH,
+            children_json=json.dumps([ready, late]),
+            durable_events_json="[]",
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["merge_queue_state"] == "blocked"
+    assert payload["session_final_merge_blocked"] is True
+    assert [entry["child_id"] for entry in payload["queue"]] == ["late", "ready"]
+    assert payload["queue"][0]["merge_state"] == "late_arriving_child"
+    assert payload["queue"][1]["idempotency_key"]
+    assert payload["blockers"] == [
+        {
+            "child_id": "late",
+            "state": "late_arriving_child",
+            "reason": "reconcile_child_before_final_merge",
+        }
+    ]
 
 
 def test_ordering_is_deterministic_by_priority_ready_time_request_task_and_child_identity() -> None:

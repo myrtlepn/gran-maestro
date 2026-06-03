@@ -584,6 +584,340 @@ def cmd_worktree_branch_name(args):
 def cmd_worktree_path(args):
     print(role_worktree_path(_project_root(), args.req, args.role, getattr(args, "agi", None)))
     return 0
+def _worktree_json_arg(value: str | None, default):
+    text = str(value or "").strip()
+    if not text:
+        return default
+    if text.startswith("@"):
+        return json.loads(Path(text[1:]).read_text(encoding="utf-8"))
+    return json.loads(text)
+def cmd_worktree_child_merge_queue(args):
+    try:
+        children = _worktree_json_arg(getattr(args, "children_json", None), [])
+        durable_events = _worktree_json_arg(getattr(args, "durable_events_json", None), [])
+    except Exception as exc:
+        payload = {
+            "ok": False,
+            "merge_queue_state": "invalid_input",
+            "reason": "invalid_child_merge_queue_json",
+            "error": str(exc),
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 1
+    payload = resolve_child_merge_queue_state(
+        mst_session_id=getattr(args, "mst_session_id", None) or os.environ.get("MST_SESSION_ID", ""),
+        session_branch=getattr(args, "session_branch", None) or "",
+        children=children if isinstance(children, list) else [],
+        durable_events=durable_events if isinstance(durable_events, list) else [],
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    elif payload.get("ok"):
+        print(payload.get("merge_queue_state") or "unknown")
+    else:
+        print(
+            f"Error: child merge queue {payload.get('merge_queue_state')}",
+            file=sys.stderr,
+        )
+    return 0 if payload.get("ok") else 1
+def _accept_reflection_git_stdout(path: Path, *args: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
+    return True, result.stdout.strip()
+def _accept_reflection_git_status(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(path),
+        capture_output=True,
+        text=True,
+    )
+def _accept_reflection_filtered_status_lines(status_output: str) -> list[str]:
+    filtered: list[str] = []
+    for raw_line in status_output.splitlines():
+        line = raw_line.rstrip()
+        if len(line) >= 4:
+            path_text = line[3:].strip().strip('"')
+            if path_text == ".gran-maestro" or path_text.startswith(".gran-maestro/"):
+                continue
+        filtered.append(line)
+    return filtered
+def _accept_reflection_blocked_payload(
+    *,
+    reason: str,
+    action: str,
+    target_branch: str | None,
+    accepted_commit: str | None = None,
+    target_before: str | None = None,
+    target_after: str | None = None,
+    target_worktree_path: str | None = None,
+    evidence: dict | None = None,
+) -> dict:
+    payload: dict[str, object] = {
+        "ok": False,
+        "merge_state": "target_reflection_blocked",
+        "reason": reason,
+        "action": action,
+        "target_branch": target_branch,
+        "target_before": target_before,
+        "accepted_commit": accepted_commit,
+        "target_after": target_after,
+        "target_worktree_path": target_worktree_path,
+        "cleanup_performed": False,
+        "evidence": dict(evidence or {}),
+    }
+    return payload
+def _accept_reflection_target_worktree(project_root: Path, target_branch: str) -> str | None:
+    ok, output = _accept_reflection_git_stdout(project_root, "worktree", "list", "--porcelain")
+    if not ok:
+        return None
+    current_path: str | None = None
+    target_ref = f"refs/heads/{target_branch}"
+    for raw_line in output.splitlines():
+        if raw_line.startswith("worktree "):
+            current_path = raw_line[len("worktree ") :].strip()
+        elif raw_line.startswith("branch ") and raw_line[len("branch ") :].strip() == target_ref:
+            return current_path
+    return None
+def reflect_accept_commit_to_target_branch(
+    project_root: Path,
+    *,
+    accept_worktree: Path,
+    target_branch: str,
+    accepted_commit: str = "HEAD",
+    target_before: str | None = None,
+) -> dict:
+    project_root = Path(project_root).resolve(strict=False)
+    accept_worktree = Path(accept_worktree).resolve(strict=False)
+    target_branch_value = str(target_branch or "").strip()
+    accepted_commit_value = str(accepted_commit or "HEAD").strip() or "HEAD"
+    target_before_value = str(target_before or "").strip() or None
+
+    if not target_branch_value or "\n" in target_branch_value or "\x00" in target_branch_value:
+        return _accept_reflection_blocked_payload(
+            reason="invalid_target_branch",
+            action="provide_selected_target_branch",
+            target_branch=target_branch_value or None,
+        )
+    if not accept_worktree.is_dir():
+        return _accept_reflection_blocked_payload(
+            reason="accept_worktree_missing",
+            action="rerun_accept_worktree_creation",
+            target_branch=target_branch_value,
+            evidence={"accept_worktree": str(accept_worktree)},
+        )
+
+    ok_accept, accept_sha = _accept_reflection_git_stdout(
+        accept_worktree,
+        "rev-parse",
+        "--verify",
+        f"{accepted_commit_value}^{{commit}}",
+    )
+    if not ok_accept:
+        return _accept_reflection_blocked_payload(
+            reason="accepted_commit_missing",
+            action="create_accept_squash_commit_before_reflection",
+            target_branch=target_branch_value,
+            evidence={"git_error": accept_sha, "accepted_commit": accepted_commit_value},
+        )
+
+    target_ref = f"refs/heads/{target_branch_value}"
+    ok_target, current_target_sha = _accept_reflection_git_stdout(
+        accept_worktree,
+        "rev-parse",
+        "--verify",
+        target_ref,
+    )
+    if not ok_target:
+        return _accept_reflection_blocked_payload(
+            reason="target_branch_missing",
+            action="inspect_selected_target_branch",
+            target_branch=target_branch_value,
+            accepted_commit=accept_sha,
+            evidence={"git_error": current_target_sha, "target_ref": target_ref},
+        )
+    if target_before_value and current_target_sha != target_before_value:
+        return _accept_reflection_blocked_payload(
+            reason="target_branch_drift",
+            action="rerun_accept_against_current_target_branch",
+            target_branch=target_branch_value,
+            accepted_commit=accept_sha,
+            target_before=target_before_value,
+            target_after=current_target_sha,
+            evidence={"current_target_sha": current_target_sha},
+        )
+
+    ancestor_result = _accept_reflection_git_status(
+        accept_worktree,
+        "merge-base",
+        "--is-ancestor",
+        current_target_sha,
+        accept_sha,
+    )
+    if ancestor_result.returncode == 1:
+        return _accept_reflection_blocked_payload(
+            reason="non_fast_forward_target_reflection",
+            action="resolve_target_branch_drift_before_accept",
+            target_branch=target_branch_value,
+            accepted_commit=accept_sha,
+            target_before=current_target_sha,
+            evidence={"target_ref": target_ref},
+        )
+    if ancestor_result.returncode != 0:
+        return _accept_reflection_blocked_payload(
+            reason="fast_forward_precheck_failed",
+            action="inspect_target_reflection_precheck",
+            target_branch=target_branch_value,
+            accepted_commit=accept_sha,
+            target_before=current_target_sha,
+            evidence={"git_error": ancestor_result.stderr.strip() or ancestor_result.stdout.strip()},
+        )
+
+    target_worktree_path = _accept_reflection_target_worktree(project_root, target_branch_value)
+    if target_worktree_path:
+        target_worktree = Path(target_worktree_path).resolve(strict=False)
+        ok_branch, current_branch = _accept_reflection_git_stdout(
+            target_worktree,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+        )
+        if not ok_branch or current_branch != target_branch_value:
+            return _accept_reflection_blocked_payload(
+                reason="target_worktree_branch_mismatch",
+                action="checkout_selected_target_branch_before_reflection",
+                target_branch=target_branch_value,
+                accepted_commit=accept_sha,
+                target_before=current_target_sha,
+                target_worktree_path=str(target_worktree),
+                evidence={"current_branch": current_branch if ok_branch else None},
+            )
+        status_result = _accept_reflection_git_status(target_worktree, "status", "--porcelain")
+        if status_result.returncode != 0:
+            return _accept_reflection_blocked_payload(
+                reason="target_worktree_status_failed",
+                action="inspect_selected_target_worktree",
+                target_branch=target_branch_value,
+                accepted_commit=accept_sha,
+                target_before=current_target_sha,
+                target_worktree_path=str(target_worktree),
+                evidence={"git_error": status_result.stderr.strip() or status_result.stdout.strip()},
+            )
+        status_lines = _accept_reflection_filtered_status_lines(status_result.stdout)
+        if status_lines:
+            return _accept_reflection_blocked_payload(
+                reason="dirty_target_worktree",
+                action="clean_selected_target_worktree_before_reflection",
+                target_branch=target_branch_value,
+                accepted_commit=accept_sha,
+                target_before=current_target_sha,
+                target_worktree_path=str(target_worktree),
+                evidence={"git_status": status_lines},
+            )
+        merge_result = _accept_reflection_git_status(target_worktree, "merge", "--ff-only", accept_sha)
+        if merge_result.returncode != 0:
+            return _accept_reflection_blocked_payload(
+                reason="target_worktree_ff_only_merge_failed",
+                action="inspect_selected_target_worktree_merge_failure",
+                target_branch=target_branch_value,
+                accepted_commit=accept_sha,
+                target_before=current_target_sha,
+                target_worktree_path=str(target_worktree),
+                evidence={"git_error": merge_result.stderr.strip() or merge_result.stdout.strip()},
+            )
+        reflection_method = "checked_out_worktree_ff_only"
+    else:
+        update_result = _accept_reflection_git_status(
+            accept_worktree,
+            "update-ref",
+            "-m",
+            "mst accept target reflection",
+            target_ref,
+            accept_sha,
+            current_target_sha,
+        )
+        if update_result.returncode != 0:
+            return _accept_reflection_blocked_payload(
+                reason="target_update_ref_failed",
+                action="inspect_selected_target_ref_lock",
+                target_branch=target_branch_value,
+                accepted_commit=accept_sha,
+                target_before=current_target_sha,
+                evidence={"git_error": update_result.stderr.strip() or update_result.stdout.strip()},
+            )
+        reflection_method = "atomic_update_ref_ff_only"
+
+    ok_after, target_after_sha = _accept_reflection_git_stdout(
+        accept_worktree,
+        "rev-parse",
+        "--verify",
+        target_ref,
+    )
+    reachability_result = _accept_reflection_git_status(
+        accept_worktree,
+        "merge-base",
+        "--is-ancestor",
+        accept_sha,
+        target_ref,
+    )
+    reachable = reachability_result.returncode == 0
+    if not ok_after or not reachable:
+        return _accept_reflection_blocked_payload(
+            reason="target_reflection_evidence_failed",
+            action="inspect_selected_target_reflection",
+            target_branch=target_branch_value,
+            accepted_commit=accept_sha,
+            target_before=current_target_sha,
+            target_after=target_after_sha if ok_after else None,
+            target_worktree_path=target_worktree_path,
+            evidence={
+                "git_error": None if ok_after else target_after_sha,
+                "reachability_error": reachability_result.stderr.strip() or reachability_result.stdout.strip(),
+            },
+        )
+
+    return {
+        "ok": True,
+        "merge_state": "target_reflected_ff_only",
+        "target_branch": target_branch_value,
+        "target_ref": target_ref,
+        "target_before": current_target_sha,
+        "accepted_commit": accept_sha,
+        "target_after": target_after_sha,
+        "target_worktree_path": target_worktree_path,
+        "reflection_method": reflection_method,
+        "reachability": {"accepted_commit_is_ancestor_of_target": True},
+        "cleanup_performed": False,
+    }
+def cmd_worktree_reflect_accept(args):
+    payload = reflect_accept_commit_to_target_branch(
+        _project_root(),
+        accept_worktree=Path(args.accept_worktree),
+        target_branch=args.target_branch,
+        accepted_commit=getattr(args, "accepted_commit", None) or "HEAD",
+        target_before=getattr(args, "target_before", None),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False))
+    elif payload.get("ok"):
+        print(
+            "target_reflected "
+            f"branch={payload.get('target_branch')} "
+            f"before={payload.get('target_before')} "
+            f"after={payload.get('target_after')}"
+        )
+    else:
+        print(
+            f"Error: {payload.get('reason')}. action={payload.get('action')}",
+            file=sys.stderr,
+        )
+    return 0 if payload.get("ok") else 1
 def _boundary_payload(
     ok: bool,
     violation: str | None,

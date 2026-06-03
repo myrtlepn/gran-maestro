@@ -21,6 +21,12 @@ def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _git(repo_root: Path, *args: str) -> str:
+    result = _run_git(repo_root, *args)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch) -> Path:
     repo_root = tmp_path / "repo"
@@ -117,6 +123,132 @@ def test_ac006_task_worktree_branch_and_base_names() -> None:
     assert worktree.task_branch_name("REQ-779", "T01", "feature/x", "AGI-026") == (
         "gran-maestro/feature-x/AGI-026/REQ-779-T01"
     )
+
+
+def test_accept_reflection_ff_merges_checked_out_target_worktree(repo: Path, capsys) -> None:
+    accept_path = repo / ".gran-maestro" / "worktrees" / "REQ-069" / "accept"
+    accept_path.parent.mkdir(parents=True, exist_ok=True)
+    assert _run_git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "gran-maestro/main/REQ-069-accept",
+        str(accept_path),
+        "main",
+    ).returncode == 0
+
+    target_before = _git(repo, "rev-parse", "main")
+    (accept_path / "accepted.txt").write_text("accepted\n", encoding="utf-8")
+    _git(accept_path, "add", "accepted.txt")
+    _git(accept_path, "commit", "-m", "[REQ-069] accept squash")
+    accepted_commit = _git(accept_path, "rev-parse", "HEAD")
+
+    exit_code = worktree.cmd_worktree_reflect_accept(
+        argparse.Namespace(
+            accept_worktree=str(accept_path),
+            target_branch="main",
+            accepted_commit=accepted_commit,
+            target_before=target_before,
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert payload["ok"] is True
+    assert payload["merge_state"] == "target_reflected_ff_only"
+    assert payload["reflection_method"] == "checked_out_worktree_ff_only"
+    assert payload["target_before"] == target_before
+    assert payload["target_after"] == accepted_commit
+    assert payload["reachability"]["accepted_commit_is_ancestor_of_target"] is True
+    assert payload["cleanup_performed"] is False
+    assert _git(repo, "rev-parse", "main") == accepted_commit
+    assert (repo / "accepted.txt").read_text(encoding="utf-8") == "accepted\n"
+
+
+def test_accept_reflection_updates_unchecked_target_ref_atomically(repo: Path, capsys) -> None:
+    _git(repo, "branch", "feature/target", "main")
+    accept_path = repo / ".gran-maestro" / "worktrees" / "REQ-069" / "accept-feature"
+    accept_path.parent.mkdir(parents=True, exist_ok=True)
+    assert _run_git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "gran-maestro/feature-target/REQ-069-accept",
+        str(accept_path),
+        "feature/target",
+    ).returncode == 0
+
+    target_before = _git(repo, "rev-parse", "feature/target")
+    (accept_path / "feature.txt").write_text("accepted feature\n", encoding="utf-8")
+    _git(accept_path, "add", "feature.txt")
+    _git(accept_path, "commit", "-m", "[REQ-069] feature accept squash")
+    accepted_commit = _git(accept_path, "rev-parse", "HEAD")
+
+    exit_code = worktree.cmd_worktree_reflect_accept(
+        argparse.Namespace(
+            accept_worktree=str(accept_path),
+            target_branch="feature/target",
+            accepted_commit=accepted_commit,
+            target_before=target_before,
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0, captured.err
+    assert payload["reflection_method"] == "atomic_update_ref_ff_only"
+    assert payload["target_worktree_path"] is None
+    assert payload["target_after"] == accepted_commit
+    assert payload["reachability"]["accepted_commit_is_ancestor_of_target"] is True
+    assert _git(repo, "rev-parse", "feature/target") == accepted_commit
+    assert not (repo / "feature.txt").exists()
+
+
+def test_accept_reflection_blocks_target_drift(repo: Path, capsys) -> None:
+    accept_path = repo / ".gran-maestro" / "worktrees" / "REQ-069" / "accept-drift"
+    accept_path.parent.mkdir(parents=True, exist_ok=True)
+    assert _run_git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "gran-maestro/main/REQ-069-drift-accept",
+        str(accept_path),
+        "main",
+    ).returncode == 0
+
+    target_before = _git(repo, "rev-parse", "main")
+    (accept_path / "accepted-drift.txt").write_text("accepted\n", encoding="utf-8")
+    _git(accept_path, "add", "accepted-drift.txt")
+    _git(accept_path, "commit", "-m", "[REQ-069] drift accept squash")
+    accepted_commit = _git(accept_path, "rev-parse", "HEAD")
+
+    (repo / "drift.txt").write_text("drift\n", encoding="utf-8")
+    _git(repo, "add", "drift.txt")
+    _git(repo, "commit", "-m", "target drift")
+
+    exit_code = worktree.cmd_worktree_reflect_accept(
+        argparse.Namespace(
+            accept_worktree=str(accept_path),
+            target_branch="main",
+            accepted_commit=accepted_commit,
+            target_before=target_before,
+            json=True,
+        )
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["merge_state"] == "target_reflection_blocked"
+    assert payload["reason"] == "target_branch_drift"
+    assert _git(repo, "rev-parse", "main") != accepted_commit
 
 
 def test_role_branch_names_are_deterministic() -> None:

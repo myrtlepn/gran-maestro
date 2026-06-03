@@ -46,6 +46,10 @@ def test_approve_phase2_gate_uses_read_only_status_and_advance_stdout_json_contr
 
     assert "request phase2-status {REQ_ID} --json" in content
     assert "request advance-phase2-if-ready {REQ_ID} --json" in content
+    assert "TASK_BRANCH=$(git -C {worktree_path} symbolic-ref --quiet --short HEAD)" in content
+    assert "--branch \"$TASK_BRANCH\"" in content
+    assert "--worktree-path \"{worktree_path}\"" in content
+    assert "status만 갱신해서는 Phase 3으로 전환되지 않는다" in content
     assert "Bash" in content
     assert "stdout JSON" in content
     assert "guard_blocked" in content

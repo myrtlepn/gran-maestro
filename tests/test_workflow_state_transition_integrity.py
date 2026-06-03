@@ -61,6 +61,43 @@ def _read_request(workspace: Path, req_id: str) -> dict:
     return json.loads(_request_path(workspace, req_id).read_text(encoding="utf-8"))
 
 
+def _run_git(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(workspace),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git(workspace: Path, *args: str) -> str:
+    result = _run_git(workspace, *args)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _ensure_git_repo(workspace: Path) -> None:
+    if (workspace / ".git").exists():
+        return
+    assert _run_git(workspace, "init").returncode == 0
+    assert _run_git(workspace, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(workspace, "config", "user.name", "Test User").returncode == 0
+    _git(workspace, "commit", "--allow-empty", "-m", "initial")
+    _git(workspace, "branch", "-M", "main")
+
+
+def _phase2_evidence_task(workspace: Path, req_id: str, task_id: str, status: str) -> dict[str, str]:
+    _ensure_git_repo(workspace)
+    branch = f"gran-maestro/main/{req_id}-{task_id}"
+    _git(workspace, "checkout", "-B", branch, "main")
+    (workspace / f"{req_id}-{task_id}.txt").write_text(f"{req_id} {task_id}\n", encoding="utf-8")
+    _git(workspace, "add", f"{req_id}-{task_id}.txt")
+    _git(workspace, "commit", "-m", f"[{req_id}/{task_id}] evidence")
+    commit_hash = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "checkout", "main")
+    return {"id": task_id, "status": status, "commit_hash": commit_hash, "branch": branch}
+
+
 def _run(
     workspace: Path,
     *args: str,
@@ -245,8 +282,8 @@ def test_request_lifecycle_fixture_preserves_review_and_accept_scope(tmp_path, m
         phase=2,
         status="phase2_execution",
         tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "completed"},
+            _phase2_evidence_task(tmp_path, req_id, "T01", "committed"),
+            _phase2_evidence_task(tmp_path, req_id, "T02", "completed"),
         ],
         extra={"review_summary": {"status": "pending_phase3_review"}},
     )

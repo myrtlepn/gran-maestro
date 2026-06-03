@@ -512,7 +512,7 @@ def build_generated_graph_view(
                     "write_allowed": transition.get("write_allowed"),
                 }
             )
-    return {
+    view = {
         "schema_version": 1,
         "kind": VIEW_KIND,
         "source_graph_path": source_graph_path,
@@ -527,6 +527,10 @@ def build_generated_graph_view(
         "nodes": nodes,
         "edges": edges,
     }
+    lifecycle_contract = graph.get("lifecycle_contract")
+    if isinstance(lifecycle_contract, dict):
+        view["lifecycle_contract"] = copy.deepcopy(lifecycle_contract)
+    return view
 def graph_consumer_identity(graph: dict[str, Any], consumer: str = "generated_view_builder") -> dict[str, Any]:
     return {
         "consumer": consumer,

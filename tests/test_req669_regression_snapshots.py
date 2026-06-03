@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import config as config_cmds
+from scripts.mst_cmds import transition_graph
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +47,23 @@ def test_accept_squash_merge_snapshot_uses_accept_worktree() -> None:
     assert '--role integration --agi "${AGI_ID:-}"' in content
     assert '--task T --agi "${AGI_ID:-}"' in content
     assert any("worktree create --path \"$ACCEPT_WORKTREE\"" in command for command in commands)
+    assert any("TARGET_BEFORE=$(git -C \"$ACCEPT_WORKTREE\" rev-parse --verify \"refs/heads/${BASE_BRANCH}\")" == command for command in commands)
     assert any("git -C \"$ACCEPT_WORKTREE\" merge --squash \"${REQ_BRANCH}\"" == command for command in commands)
+    assert "worktree child-merge-queue" in content
+    assert "--children-json \"@$CHILDREN_QUEUE_FILE\"" in content
+    assert "merge_queue_state" in content
+    assert "session_final_merge_blocked" in content
+    assert "idempotency_key" in content
+    assert 'git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}01"' not in content
+    assert 'git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}02"' not in content
+    assert "worktree reflect-accept" in content
+    assert "--target-before \"$TARGET_BEFORE\"" in content
+    assert "ACCEPT_REFLECTION_GATE_OK=true" in content
+    assert "target_reflected_ff_only" in content
+    assert "accepted_commit_is_ancestor_of_target" in content
+    assert "cleanup_performed" in content
+    assert "target branch reflection evidence 없이 cleanup 또는 Phase 5 완료 처리를 진행한다" in content
+    assert "ACCEPT_REFLECTION.merge_state==\"target_reflected_ff_only\"" in content
     assert ("git -C {PROJECT_ROOT} checkout " + "master") not in content
     assert "git -C {PROJECT_ROOT} merge --squash gran-maestro/REQ-NNN" not in content
 
@@ -99,6 +116,48 @@ def test_worktree_base_branch_config_read_write_snapshot(monkeypatch, capsys) ->
     assert 'd.setdefault("worktree", {})["base_branch"] = "{BASE_BRANCH_VALUE}"' in on_content
     assert 'v = d.get(\'worktree\', {}).get(\'base_branch\', \'\')' in on_content
     assert "os.replace(tmp, path)" in on_content
+
+
+def test_lifecycle_contract_alignment_across_docs_graph_and_dashboard() -> None:
+    expected_order = [
+        "worktree_create",
+        "worktree_work",
+        "commit_intended_changes",
+        "accept_child_to_session",
+        "target_branch_reflection",
+        "post_merge_cleanup",
+        "phase5_done",
+    ]
+    graph_path = ROOT / "templates" / "state-machine" / "mst-transition-graph.json"
+    dashboard_path = ROOT / "dashboard" / "mst-transition-graph.json"
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
+
+    lifecycle = graph["lifecycle_contract"]
+    ordered_steps = lifecycle["ordered_steps"]
+
+    assert [step["id"] for step in ordered_steps] == expected_order
+    assert [step["order"] for step in ordered_steps] == list(range(1, len(expected_order) + 1))
+    assert "child_to_session" in lifecycle["scope_vocabulary"]
+    assert "session_to_original" in lifecycle["scope_vocabulary"]
+    assert lifecycle["cleanup_boundary"]["after"] == ["target_branch_reflection"]
+    assert {"commit", "merge", "target_ref_update"}.issubset(
+        set(lifecycle["cleanup_boundary"]["not_responsibility"])
+    )
+    assert graph["hash"] == transition_graph.compute_graph_hash(graph)
+    assert dashboard["source_graph"]["hash"] == graph["hash"]
+    assert dashboard["lifecycle_contract"] == lifecycle
+
+    docs_claude = (ROOT / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
+    skills_ref = (ROOT / "docs" / "skills-reference.md").read_text(encoding="utf-8")
+    skills_ref_en = (ROOT / "docs" / "skills-reference.en.md").read_text(encoding="utf-8")
+    assert "task worktree commit evidence 확인 → deterministic child merge queue" in docs_claude
+    assert "selected target branch reflection evidence 확인 → post-merge cleanup" in docs_claude
+    assert "main 브랜치에 머지합니다" not in skills_ref
+    assert "deterministic child merge queue" in skills_ref
+    assert "Merges Phase 3 PASS worktrees into main branch" not in skills_ref_en
+    assert "selected target branch reflection evidence" in skills_ref_en
+    assert (ROOT / "CLAUDE.md").read_text(encoding="utf-8") == (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
 
 def test_config_get_backward_compatibility_contract(monkeypatch, capsys) -> None:

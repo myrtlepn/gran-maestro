@@ -65,6 +65,12 @@ def cmd_task_set_commit(args):
         if isinstance(task, dict) and task.get("id", "").upper() == task_id:
             task["commit_hash"] = args.commit_hash
             task["commit_message"] = args.commit_message or ""
+            branch = str(getattr(args, "branch", "") or "").strip()
+            worktree_path = str(getattr(args, "worktree_path", "") or "").strip()
+            if branch:
+                task["branch"] = branch
+            if worktree_path:
+                task["worktree_path"] = worktree_path
             break
     else:
         print(f"Error: task {task_id} not found in request.json", file=sys.stderr)
@@ -83,3 +89,5 @@ def register(subparsers):
     task_set_commit.add_argument("task_id")
     task_set_commit.add_argument("commit_hash", nargs="?")
     task_set_commit.add_argument("commit_message", nargs="?")
+    task_set_commit.add_argument("--branch")
+    task_set_commit.add_argument("--worktree-path")

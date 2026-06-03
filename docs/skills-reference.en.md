@@ -166,13 +166,13 @@ Reviews spec written by PM and approves to start actual implementation (Phase 2)
 
 ### /mst:accept
 
-**One-line description**: final accept review-passed outputs and merge to main branch (Phase 3 → Phase 5).
+**One-line description**: final accept review-passed outputs into the selected target/session branch, verify evidence, then clean up (Phase 3 → Phase 5).
 
 **Arguments**: `[REQ-ID]`
 
 #### Purpose
 
-Merges Phase 3 PASS worktrees into main branch and cleans up. Called automatically from `/mst:approve` by default. If `workflow.auto_accept_result=false`, call manually.
+Verifies task worktree commit evidence for a Phase 3 PASS request, applies children in deterministic merge-queue order to the request/session target, verifies selected target branch reflection evidence, then runs cleanup only for worktree removal, prune, and metadata cleanup. Called automatically from `/mst:approve` by default. If `workflow.auto_accept_result=false`, call manually.
 
 #### When to use
 

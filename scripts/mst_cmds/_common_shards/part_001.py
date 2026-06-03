@@ -706,16 +706,203 @@ WORKFLOW_MAX_ITERATIONS = 20
 WORKFLOW_STALL_LIMIT = 3
 WORKFLOW_TERMINAL_STATUSES = frozenset(status.lower() for status in TERMINAL)
 PHASE2_READY_TASK_STATUSES = frozenset({"committed", "completed", "done", "accepted"})
-def _phase2_incomplete_task(task) -> dict | None:
+def _phase2_task_id(task: dict) -> str | None:
+    task_id = task.get("id")
+    return str(task_id).strip() if isinstance(task_id, str) and task_id.strip() else None
+def _phase2_task_status(task: dict) -> str | None:
+    task_status = task.get("status")
+    return str(task_status).strip().lower() if isinstance(task_status, str) else None
+def _phase2_git_stdout(path: Path, *args: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
+    return True, result.stdout.strip()
+def _phase2_recorded_commit(task: dict) -> str | None:
+    for key in ("commit_hash", "task_commit", "source_commit", "integration_commit"):
+        value = task.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    commit = task.get("commit")
+    if isinstance(commit, dict):
+        value = commit.get("hash") or commit.get("commit_hash")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if isinstance(commit, str) and commit.strip():
+        return commit.strip()
+    return None
+def _phase2_task_branch(task: dict) -> str | None:
+    for key in ("branch", "task_branch"):
+        value = task.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    commit = task.get("commit")
+    if isinstance(commit, dict):
+        value = commit.get("branch") or commit.get("task_branch")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+def _phase2_task_worktree_path(task: dict) -> str | None:
+    for key in ("worktree_path", "task_worktree_path"):
+        value = task.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    commit = task.get("commit")
+    if isinstance(commit, dict):
+        value = commit.get("worktree_path")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    attempts = task.get("attempts")
+    if isinstance(attempts, list):
+        for attempt in reversed(attempts):
+            if not isinstance(attempt, dict):
+                continue
+            value = attempt.get("worktree_path")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+def _phase2_commit_failure(
+    task: dict,
+    *,
+    reason: str,
+    action: str,
+    recorded_commit: str | None,
+    branch: str | None = None,
+    branch_head: str | None = None,
+    worktree_path: str | None = None,
+    git_error: str | None = None,
+) -> dict:
+    payload = {
+        "id": _phase2_task_id(task),
+        "status": _phase2_task_status(task),
+        "reason": reason,
+        "action": action,
+        "commit_hash": recorded_commit,
+        "branch": branch,
+        "branch_head": branch_head,
+        "worktree_path": worktree_path,
+    }
+    if git_error:
+        payload["git_error"] = git_error
+    return payload
+def _phase2_commit_evidence_failure(task: dict, project_root: Path) -> dict | None:
+    recorded_commit = _phase2_recorded_commit(task)
+    branch = _phase2_task_branch(task)
+    worktree_path = _phase2_task_worktree_path(task)
+    if not recorded_commit:
+        return _phase2_commit_failure(
+            task,
+            reason="missing_commit_evidence",
+            action="record_task_commit_hash_before_phase3",
+            recorded_commit=None,
+            branch=branch,
+            worktree_path=worktree_path,
+        )
+    if "\n" in recorded_commit or "\x00" in recorded_commit:
+        return _phase2_commit_failure(
+            task,
+            reason="invalid_commit_evidence",
+            action="record_valid_task_commit_hash_before_phase3",
+            recorded_commit=recorded_commit,
+            branch=branch,
+            worktree_path=worktree_path,
+        )
+    verification_root = project_root
+    if worktree_path:
+        candidate = Path(worktree_path).expanduser()
+        if candidate.is_dir():
+            verification_root = candidate
+            ok_branch, current_branch = _phase2_git_stdout(candidate, "symbolic-ref", "--quiet", "--short", "HEAD")
+            if ok_branch:
+                if branch and branch != current_branch:
+                    return _phase2_commit_failure(
+                        task,
+                        reason="branch_evidence_mismatch",
+                        action="record_current_task_branch_before_phase3",
+                        recorded_commit=recorded_commit,
+                        branch=branch,
+                        worktree_path=str(candidate),
+                        git_error=f"current_branch={current_branch}",
+                    )
+                branch = branch or current_branch
+        elif not branch:
+            return _phase2_commit_failure(
+                task,
+                reason="missing_branch_evidence",
+                action="record_task_branch_or_worktree_path_before_phase3",
+                recorded_commit=recorded_commit,
+                worktree_path=worktree_path,
+            )
+    if not branch:
+        return _phase2_commit_failure(
+            task,
+            reason="missing_branch_evidence",
+            action="record_task_branch_or_worktree_path_before_phase3",
+            recorded_commit=recorded_commit,
+            worktree_path=worktree_path,
+        )
+    if "\n" in branch or "\x00" in branch:
+        return _phase2_commit_failure(
+            task,
+            reason="invalid_branch_evidence",
+            action="record_valid_task_branch_before_phase3",
+            recorded_commit=recorded_commit,
+            branch=branch,
+            worktree_path=worktree_path,
+        )
+    ok_commit, resolved_commit = _phase2_git_stdout(
+        verification_root,
+        "rev-parse",
+        "--verify",
+        f"{recorded_commit}^{{commit}}",
+    )
+    if not ok_commit:
+        return _phase2_commit_failure(
+            task,
+            reason="missing_commit_evidence",
+            action="record_existing_task_commit_before_phase3",
+            recorded_commit=recorded_commit,
+            branch=branch,
+            worktree_path=worktree_path,
+            git_error=resolved_commit,
+        )
+    if worktree_path and Path(worktree_path).expanduser().is_dir():
+        ok_head, branch_head = _phase2_git_stdout(verification_root, "rev-parse", "--verify", "HEAD")
+    else:
+        ok_head, branch_head = _phase2_git_stdout(project_root, "rev-parse", "--verify", f"refs/heads/{branch}")
+    if not ok_head:
+        return _phase2_commit_failure(
+            task,
+            reason="missing_branch_evidence",
+            action="restore_task_branch_before_phase3",
+            recorded_commit=resolved_commit,
+            branch=branch,
+            worktree_path=worktree_path,
+            git_error=branch_head,
+        )
+    if branch_head != resolved_commit:
+        return _phase2_commit_failure(
+            task,
+            reason="stale_commit_evidence",
+            action="record_current_task_branch_head_before_phase3",
+            recorded_commit=resolved_commit,
+            branch=branch,
+            branch_head=branch_head,
+            worktree_path=worktree_path,
+        )
+    return None
+def _phase2_incomplete_task(task, project_root: Path) -> dict | None:
     if not isinstance(task, dict):
         return {"id": None, "status": None}
-    task_id = task.get("id")
-    task_status = task.get("status")
-    status = str(task_status).strip().lower() if isinstance(task_status, str) else None
+    status = _phase2_task_status(task)
     if status in PHASE2_READY_TASK_STATUSES:
-        return None
+        return _phase2_commit_evidence_failure(task, project_root)
     return {
-        "id": str(task_id).strip() if isinstance(task_id, str) and task_id.strip() else None,
+        "id": _phase2_task_id(task),
         "status": status,
     }
 def phase2_completion_state(request_data: dict) -> dict:
@@ -735,16 +922,30 @@ def phase2_completion_state(request_data: dict) -> dict:
             "incomplete_tasks": [],
         }
 
+    project_root = Path(BASE_DIR).parent if BASE_DIR is not None else Path.cwd()
     incomplete_tasks = []
     for task in tasks:
-        incomplete = _phase2_incomplete_task(task)
+        incomplete = _phase2_incomplete_task(task, project_root)
         if incomplete is not None:
             incomplete_tasks.append(incomplete)
 
     if incomplete_tasks:
+        reasons = {
+            item.get("reason")
+            for item in incomplete_tasks
+            if isinstance(item, dict) and item.get("reason")
+        }
+        if reasons and all(reason == "missing_commit_evidence" for reason in reasons):
+            reason = "missing_commit_evidence"
+        elif "stale_commit_evidence" in reasons:
+            reason = "stale_commit_evidence"
+        elif reasons and not any("status" in item and not item.get("reason") for item in incomplete_tasks if isinstance(item, dict)):
+            reason = "commit_evidence_invalid"
+        else:
+            reason = "incomplete_tasks"
         return {
             "ready": False,
-            "reason": "incomplete_tasks",
+            "reason": reason,
             "incomplete_tasks": incomplete_tasks,
         }
 

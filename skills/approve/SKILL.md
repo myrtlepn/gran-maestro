@@ -744,7 +744,17 @@ while (실행 중인 태스크가 있음):
 
 Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock` 문제 방지).
 
-0. 이중 커밋 방지: `git -C {worktree_path} status --porcelain` → 출력 없으면 이미 clean. `status` → `committed` 전환 후 Step 5.7 진행.
+0. 이중 커밋 방지: `git -C {worktree_path} status --porcelain` → 출력 없으면 이미 clean. 이 경우에도 현재 branch/HEAD evidence를 저장한 뒤 `status` → `committed` 전환 후 Step 5.7 진행.
+   ```bash
+   if [ -z "$(git -C {worktree_path} status --porcelain)" ]; then
+     COMMIT_HASH=$(git -C {worktree_path} rev-parse --verify HEAD)
+     COMMIT_MSG=$(git -C {worktree_path} log -1 --format="%s")
+     TASK_BRANCH=$(git -C {worktree_path} symbolic-ref --quiet --short HEAD)
+     python3 {PLUGIN_ROOT}/scripts/mst.py task set-commit {REQ_ID}-T{TASK_ID_PAD} "$COMMIT_HASH" "$COMMIT_MSG" \
+       --branch "$TASK_BRANCH" \
+       --worktree-path "{worktree_path}"
+   fi
+   ```
 
 1. 전체 변경 스테이징: `git -C {worktree_path} add -A`
 
@@ -768,10 +778,13 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
    ```bash
    COMMIT_HASH=$(git -C {worktree_path} log -1 --format="%H")
    COMMIT_MSG=$(git -C {worktree_path} log -1 --format="%s")
-   python3 {PLUGIN_ROOT}/scripts/mst.py task set-commit {REQ_ID}-T{TASK_ID_PAD} "$COMMIT_HASH" "$COMMIT_MSG"
+   TASK_BRANCH=$(git -C {worktree_path} symbolic-ref --quiet --short HEAD)
+   python3 {PLUGIN_ROOT}/scripts/mst.py task set-commit {REQ_ID}-T{TASK_ID_PAD} "$COMMIT_HASH" "$COMMIT_MSG" \
+     --branch "$TASK_BRANCH" \
+     --worktree-path "{worktree_path}"
    ```
 
-5. 태스크 `status` → `committed`, `background_task_ids` status → `"completed"` 업데이트 → Step 5.7 진행.
+5. 태스크 `status` → `committed`, `background_task_ids` status → `"completed"` 업데이트 → Step 5.7 진행. Step 6의 readiness gate는 각 완료 task의 `commit_hash`와 `branch`/`worktree_path`가 현재 task branch HEAD와 일치하는지 검증하므로 status만 갱신해서는 Phase 3으로 전환되지 않는다.
 
 #### Step 5.7: 설계 의도 검증 루프 (PM 커밋 이후, Phase 3 이전)
 

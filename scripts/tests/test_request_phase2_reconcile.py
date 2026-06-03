@@ -35,6 +35,43 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    result = _run_git(repo_root, *args)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _ensure_git_repo(repo_root: Path) -> None:
+    if (repo_root / ".git").exists():
+        return
+    assert _run_git(repo_root, "init").returncode == 0
+    assert _run_git(repo_root, "config", "user.email", "tester@example.com").returncode == 0
+    assert _run_git(repo_root, "config", "user.name", "Test User").returncode == 0
+    _git(repo_root, "commit", "--allow-empty", "-m", "initial")
+    _git(repo_root, "branch", "-M", "main")
+
+
+def _phase2_evidence_task(repo_root: Path, req_id: str, task_id: str, status: str) -> dict:
+    _ensure_git_repo(repo_root)
+    branch = f"gran-maestro/main/{req_id}-{task_id}"
+    _git(repo_root, "checkout", "-B", branch, "main")
+    (repo_root / f"{req_id}-{task_id}.txt").write_text(f"{req_id} {task_id}\n", encoding="utf-8")
+    _git(repo_root, "add", f"{req_id}-{task_id}.txt")
+    _git(repo_root, "commit", "-m", f"[{req_id}/{task_id}] evidence")
+    commit_hash = _git(repo_root, "rev-parse", "HEAD")
+    _git(repo_root, "checkout", "main")
+    return {"id": task_id, "status": status, "commit_hash": commit_hash, "branch": branch}
+
+
 def _make_base_dir(tmp_path: Path) -> Path:
     base_dir = tmp_path / ".gran-maestro"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -907,8 +944,8 @@ def test_phase2_metadata_does_not_regress_advance_ready_gate(tmp_path: Path, mon
         phase=2,
         status="phase2_execution",
         tasks=[
-            {"id": "T01", "status": "committed"},
-            {"id": "T02", "status": "completed"},
+            _phase2_evidence_task(tmp_path, req_id, "T01", "committed"),
+            _phase2_evidence_task(tmp_path, req_id, "T02", "completed"),
         ],
         extra={
             "background_task_ids": [

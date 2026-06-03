@@ -8,6 +8,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ACCEPT_SKILL = REPO_ROOT / "skills" / "accept" / "SKILL.md"
+CLEANUP_SKILL = REPO_ROOT / "skills" / "cleanup" / "SKILL.md"
+CLEANUP_RUNTIME = REPO_ROOT / "scripts" / "mst_cmds" / "cleanup.py"
 PROJECT_ROOT_REF = r'(?:\{PROJECT_ROOT\}|\$PROJECT_ROOT|\$\{PROJECT_ROOT\}|"\$PROJECT_ROOT"|"\$\{PROJECT_ROOT\}")'
 FORBIDDEN_PROJECT_ROOT_DIRECT_PATTERNS = (
     re.compile(rf"\bgit\s+-C\s+{PROJECT_ROOT_REF}\s+commit\b"),
@@ -175,6 +177,21 @@ def test_accept_skill_does_not_hardcode_master_base_fallback() -> None:
     assert hardcoded_shell_fallback not in content
     assert hardcoded_doc_arrow not in content
     assert hardcoded_doc_sentence not in content
+
+
+def test_cleanup_surfaces_do_not_perform_commit_or_merge() -> None:
+    command_pattern = re.compile(
+        r"(?:\bgit\s+|\[\"git\",\s*)[^\n\]]*\b(?:commit|merge)\b"
+    )
+    cleanup_text = "\n".join(
+        [
+            CLEANUP_SKILL.read_text(encoding="utf-8"),
+            CLEANUP_RUNTIME.read_text(encoding="utf-8"),
+            _step_section(_accept_skill_text(), "4. **정리**", "4.5."),
+        ]
+    )
+
+    assert command_pattern.findall(cleanup_text) == []
 
 
 def test_accept_cleanup_records_worktree_failure_and_continues(tmp_path: Path) -> None:

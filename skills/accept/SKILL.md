@@ -24,13 +24,15 @@ Phase 3 리뷰를 통과한 결과물을 최종 수락합니다. request child a
 
 ### Exit
 
-- squash-merge 커밋 생성, 브랜치/워크트리 정리, Phase 5 완료 처리가 모두 끝나야 종료한다.
+- squash-merge 커밋 생성, 선택된 target branch 반영 evidence, 브랜치/워크트리 정리, Phase 5 완료 처리가 모두 끝나야 종료한다.
+- cleanup은 commit/merge/ref reflection 단계가 아니다. 선택된 target branch 반영 evidence가 성공한 뒤에만 worktree 제거, prune, meta 정리를 수행한다.
 - `request.json`이 `done` 상태로 갱신되고 후속 의존 REQ 처리(해당 시)가 반영되어야 한다.
 - `source_plan`이 있으면 Plan 상태 동기화 시도 결과(완료/스킵)를 남긴다.
 
 ### 금지 패턴
 
 - 리뷰 PASS 확인 없이 머지/정리 단계부터 실행한다.
+- target branch reflection evidence 없이 cleanup 또는 Phase 5 완료 처리를 진행한다.
 - squash-merge 후 `git branch -d`만 사용해 정리 실패를 방치한다.
 - `source_plan`이 있는데도 Step 6 동기화 확인을 생략하고 완료 처리한다.
 
@@ -200,18 +202,128 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      echo "[accept] request branch: ${REQ_BRANCH}"
      ```
    - **3-1. 각 태스크 worktree → REQ 브랜치 일반 머지 (태스크 커밋 이력 보존)**:
+     - hard-coded `T01`/`T02` 순서로 merge하지 않는다. `request.json.tasks`에서 child 목록을 만들고 `worktree child-merge-queue`가 반환한 deterministic queue 순서만 따른다.
+     - `merge_queue_state=="blocked"` 또는 `blockers`가 있으면 즉시 중단한다. blocked 상태에서는 squash merge, target branch reflection, cleanup, Phase 5 완료 처리를 수행하지 않는다.
+     - `merge_required=false`인 `already_merged`/`duplicate_child` 항목은 merge를 재실행하지 않는다. idempotency 판단은 `idempotency_key` evidence로만 한다.
      ```bash
      # 각 태스크 브랜치를 dedicated integration worktree에서 REQ 브랜치에 머지한다.
      INTEGRATION_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role integration --agi "${AGI_ID:-}")
-     git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}01"
-     git -C "$INTEGRATION_WORKTREE" merge --no-ff "${TASK_BRANCH_PREFIX}02"
-     # ... (태스크 수만큼 반복)
+     CHILDREN_QUEUE_FILE="{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/child-merge-children.json"
+     python3 - "$REQUEST_JSON" "REQ-NNN" "$TASK_BRANCH_PREFIX" "$CHILDREN_QUEUE_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+request_json = Path(sys.argv[1])
+req_id = sys.argv[2]
+task_branch_prefix = sys.argv[3]
+out_path = Path(sys.argv[4])
+payload = json.loads(request_json.read_text(encoding="utf-8"))
+
+def task_suffix(raw):
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    token = value.rsplit("-", 1)[-1]
+    if token.startswith("T") and token[1:].isdigit():
+        return token[1:]
+    return token
+
+children = []
+for index, task in enumerate(payload.get("tasks") or [], start=1):
+    if not isinstance(task, dict):
+        continue
+    raw_task_id = str(task.get("id") or task.get("task_id") or f"T{index:02d}").strip()
+    task_id = task_suffix(raw_task_id) or f"{index:02d}"
+    commit = task.get("commit") if isinstance(task.get("commit"), dict) else {}
+    attempts = [item for item in (task.get("attempts") or []) if isinstance(item, dict)]
+    latest_attempt = attempts[-1] if attempts else {}
+    child_branch = (
+        task.get("child_branch")
+        or task.get("branch")
+        or task.get("task_branch")
+        or commit.get("branch")
+        or commit.get("task_branch")
+        or latest_attempt.get("branch")
+        or latest_attempt.get("task_branch")
+        or f"{task_branch_prefix}{task_id}"
+    )
+    children.append(
+        {
+            "req_id": req_id,
+            "task_id": task_id,
+            "child_id": raw_task_id or f"{req_id}-T{task_id}",
+            "child_branch": child_branch,
+            "ready_at": task.get("completed_at") or task.get("committed_at") or task.get("updated_at") or "",
+            "priority": task.get("accept_priority", task.get("priority", index)),
+            "state": task.get("child_merge_state") or "ready",
+        }
+    )
+
+out_path.parent.mkdir(parents=True, exist_ok=True)
+out_path.write_text(json.dumps(children, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+     CHILD_MERGE_EVENTS_JSON="${CHILD_MERGE_EVENTS_JSON:-[]}"
+     CHILD_MERGE_QUEUE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree child-merge-queue \
+       --mst-session-id "${MST_SESSION_ID:-request-child-accept}" \
+       --session-branch "$REQ_BRANCH" \
+       --children-json "@$CHILDREN_QUEUE_FILE" \
+       --durable-events-json "$CHILD_MERGE_EVENTS_JSON" \
+       --json)
+     printf '%s\n' "$CHILD_MERGE_QUEUE"
+     python3 - "$CHILD_MERGE_QUEUE" "$INTEGRATION_WORKTREE" <<'PY'
+import json
+import subprocess
+import sys
+
+payload = json.loads(sys.argv[1])
+integration_worktree = sys.argv[2]
+allowed_states = {"ready", "idempotent_replay", "empty"}
+
+if not payload.get("ok") or payload.get("merge_queue_state") not in allowed_states:
+    print(
+        "[accept] Error: child merge queue blocked: "
+        f"state={payload.get('merge_queue_state')} blockers={payload.get('blockers')}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if payload.get("session_to_original") is not False:
+    print("[accept] Error: child accept must not authorize session_to_original", file=sys.stderr)
+    sys.exit(1)
+
+target_branch = payload.get("target_branch")
+queue = payload.get("queue") or []
+merge_required = any(bool(entry.get("merge_required")) for entry in queue)
+if payload.get("session_final_merge_blocked") is True and not merge_required:
+    print("[accept] Error: session_final_merge_blocked evidence is inconsistent", file=sys.stderr)
+    sys.exit(1)
+for entry in queue:
+    if entry.get("merge_target") != target_branch:
+        print("[accept] Error: child merge target mismatch", file=sys.stderr)
+        sys.exit(1)
+    if entry.get("child_to_session") is not True or entry.get("session_to_original") is not False:
+        print("[accept] Error: child merge scope mismatch", file=sys.stderr)
+        sys.exit(1)
+    if not entry.get("merge_required"):
+        continue
+    child_branch = str(entry.get("child_branch") or "").strip()
+    if not child_branch:
+        print("[accept] Error: child branch evidence missing", file=sys.stderr)
+        sys.exit(1)
+    message = (entry.get("commit_metadata") or {}).get("message") or f"Merge child {entry.get('child_id')} to session branch"
+    subprocess.run(["git", "-C", integration_worktree, "merge", "--no-ff", child_branch, "-m", message], check=True)
+    print(
+        "[accept] child merge ok: "
+        f"child_id={entry.get('child_id')} idempotency_key={entry.get('idempotency_key')}"
+    )
+PY
      ```
    - **3-2. REQ 브랜치 → base squash-merge (단일 커밋 생성)**:
      ```bash
      ACCEPT_WORKTREE=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree path --req REQ-NNN --role accept --agi "${AGI_ID:-}")
      ACCEPT_BRANCH=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree branch-name --req REQ-NNN --base "$BASE_BRANCH" --role accept --agi "${AGI_ID:-}")
      python3 {PLUGIN_ROOT}/scripts/mst.py worktree create --path "$ACCEPT_WORKTREE" --branch "$ACCEPT_BRANCH" --base "$BASE_BRANCH"
+     TARGET_BEFORE=$(git -C "$ACCEPT_WORKTREE" rev-parse --verify "refs/heads/${BASE_BRANCH}")
      git -C "$ACCEPT_WORKTREE" merge --squash "${REQ_BRANCH}"
      ```
      실제 실행은 감지 base 변수를 사용하며, 원본 `PROJECT_ROOT`에서는 checkout/merge를 수행하지 않는다.
@@ -235,6 +347,45 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      - T01: {태스크 1 제목}
      - T02: {태스크 2 제목}"
      ```
+     squash commit 생성 직후에는 선택된 target branch(`BASE_BRANCH`)에 해당 commit을 반영하고 도달성 evidence를 확인한다.
+     - target branch가 이미 checkout된 worktree가 있으면 그 worktree에서 `ff-only`로 반영한다.
+     - checkout된 target worktree가 없으면 old SHA(`TARGET_BEFORE`)를 지정한 atomic ref update로 반영한다.
+     - target drift, dirty target worktree, reachability evidence 누락은 blocker이며 cleanup/Phase 5로 진행하지 않는다.
+     ```bash
+     ACCEPT_COMMIT=$(git -C "$ACCEPT_WORKTREE" rev-parse --verify HEAD)
+     ACCEPT_REFLECTION=$(python3 {PLUGIN_ROOT}/scripts/mst.py worktree reflect-accept \
+       --accept-worktree "$ACCEPT_WORKTREE" \
+       --target-branch "$BASE_BRANCH" \
+       --accepted-commit "$ACCEPT_COMMIT" \
+       --target-before "$TARGET_BEFORE" \
+       --json)
+     printf '%s\n' "$ACCEPT_REFLECTION"
+     python3 - "$ACCEPT_REFLECTION" <<'PY'
+import json, sys
+payload = json.loads(sys.argv[1])
+if not payload.get("ok"):
+    print(
+        "[accept] Error: target branch reflection failed: "
+        f"{payload.get('reason')} action={payload.get('action')}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if payload.get("merge_state") != "target_reflected_ff_only":
+    print("[accept] Error: unexpected target reflection state", file=sys.stderr)
+    sys.exit(1)
+if payload.get("target_after") != payload.get("accepted_commit"):
+    print("[accept] Error: accepted commit is not the target branch HEAD", file=sys.stderr)
+    sys.exit(1)
+reachability = payload.get("reachability") or {}
+if reachability.get("accepted_commit_is_ancestor_of_target") is not True:
+    print("[accept] Error: accepted commit reachability evidence missing", file=sys.stderr)
+    sys.exit(1)
+if payload.get("cleanup_performed") is True:
+    print("[accept] Error: reflection helper must not perform cleanup", file=sys.stderr)
+    sys.exit(1)
+PY
+     ACCEPT_REFLECTION_GATE_OK=true
+     ```
    - **3-3. REQ 브랜치 삭제** (squash merge 후 `-D` 강제 삭제):
      ```bash
      # Step 4의 cleanup helper를 먼저 정의한 뒤 사용한다.
@@ -250,7 +401,9 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
      ```
    - `linked_intent` 미존재 시 skip (비차단); 파일 Edit 실패 시 warn만 출력, 워크플로우 차단 금지
 
-4. **정리**: 각 태스크의 worktree 및 임시 브랜치 정리
+4. **정리**: target branch reflection 성공 후 각 태스크의 worktree 및 임시 브랜치 정리
+   - 이 단계는 commit, merge, target branch ref update를 수행하지 않는다.
+   - `ACCEPT_REFLECTION_GATE_OK=true`가 아니면 정리를 시작하지 말고 Step 3-2의 blocker를 먼저 해결한다.
    > ⚠️ **squash merge 후 브랜치 삭제 규칙**: REQ 브랜치를 `{BASE_BRANCH}`에 squash merge하면 merge ancestor가
    > 생성되지 않으므로 `git branch -d`(soft delete)는 "not fully merged" 오류로 실패합니다.
    > 브랜치 삭제는 `git branch -D`를 사용하세요.
@@ -398,7 +551,7 @@ cleanup_task_safely() {
      - **미발견 시**: pending 유지 →
        "[Stitch] 화면 미확인 — /mst:stitch --list로 수동 확인 가능합니다." 출력
 
-5. **Phase 5 완료 처리**: `stitch_screens`의 `active` 항목 → `archived`로 변경; **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 5 done`; 실패 시 fallback으로 `current_phase`=5, `status`=`done` 직접 업데이트; 완료 알림
+5. **Phase 5 완료 처리**: `ACCEPT_REFLECTION_GATE_OK=true` 및 `ACCEPT_REFLECTION.merge_state=="target_reflected_ff_only"` evidence를 확인한 뒤에만 `stitch_screens`의 `active` 항목 → `archived`로 변경; **스크립트 우선**: `python3 {PLUGIN_ROOT}/scripts/mst.py request set-phase {REQ_ID} 5 done`; 실패 시 fallback으로 `current_phase`=5, `status`=`done` 직접 업데이트; 완료 알림
 > ⚠️ **CONTINUATION GUARD**: 서브스킬 반환 후 즉시 다음 Step 진행 (hook이 자동 강제).
 
 5.1. **워크플로우 상태 정리 (MANDATORY)**: Phase 5 완료 처리 직후, `python3 {PLUGIN_ROOT}/scripts/mst.py state get --json` 결과의 `agile_loop_active`를 먼저 확인한 뒤 아래 분기로 실행한다.
