@@ -6,9 +6,27 @@
 
 ## [Unreleased]
 
-### 개선
+---
+
+## [0.62.0] — 2026-06-04
+
+### 새 기능
 
 - **AGY provider 전환**: Gemini CLI 종료 예정에 맞춰 canonical provider/skill/agent를 `agy`, `/mst:agy`, `agy-dev`로 전환했습니다. 기존 `/mst:gemini`, `gemini`, `gemini-dev` 설정과 세션 값은 한 릴리스 동안 deprecated alias로 읽고 AGY 경로로 정규화합니다.
+- **Agile 실행 게이트 보강**: agile sidecar schema, source mapping, coverage check, integration review context를 추가해 objective 기반 실행이 누락된 도메인·DoD·통합 검증을 더 명확히 추적합니다.
+
+### 개선
+
+- **worktree accept/cleanup lifecycle 정렬**: workflow 문서, transition graph, accept/approve 스킬, CLI evidence가 `worktree 생성 → worktree 작업 → 의도 변경 커밋 → accept/merge target 반영 → cleanup 정리` 순서와 일치하도록 정리했습니다.
+- **linked worktree 지원 파일 처리 개선**: linked worktree 환경에서 필요한 보조 파일과 dispatch guard가 더 안정적으로 동작하도록 source/projection 파일을 맞췄습니다.
+- **plan/agile-plan 다음 명령 안내 보강**: planning 세션 종료 시 사용자가 바로 이어갈 수 있는 다음 명령을 더 일관되게 출력합니다.
+
+### 버그 수정
+
+- **cleanup 단계 merge 오해 차단**: cleanup이 commit, merge, ref update를 수행하지 않도록 회귀 테스트와 상태 전이 계약을 보강했습니다.
+- **accept target 반영 누락 방지**: request/session accept 이후 정해진 대상 브랜치 반영 evidence가 없으면 Phase 5 cleanup으로 넘어가지 않도록 검증을 추가했습니다.
+- **Phase 2 readiness 검증 강화**: task status만으로 Phase 3에 진입하지 않고 commit hash, branch, worktree evidence를 확인하도록 수정했습니다.
+- **Agile session 검증 회귀 수정**: agile 세션의 검증 상태가 누락되거나 잘못 판정되는 흐름을 보강했습니다.
 
 ---
 
