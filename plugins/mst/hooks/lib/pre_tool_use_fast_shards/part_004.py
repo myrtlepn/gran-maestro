@@ -30,6 +30,8 @@ def hardcoded_core_check(project_root: Path, home: Path, payload: dict) -> int:
         return core_block(SCHEDULE_WAKEUP_BLOCK_RULE_ID, SCHEDULE_WAKEUP_BLOCK_REASON)
 
     if tool_name == "AskUserQuestion" and schedule_wakeup_block_active(project_root, payload):
+        if ask_user_question_allowed(project_root, payload):
+            return 0
         return core_block(ASK_USER_QUESTION_BLOCK_RULE_ID, ASK_USER_QUESTION_BLOCK_REASON)
 
     if tool_name in {"Write", "Edit", "MultiEdit"} and file_path.startswith(policy_root + "/"):

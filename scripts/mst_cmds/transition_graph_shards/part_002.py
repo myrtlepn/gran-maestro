@@ -461,6 +461,8 @@ def classify_hook_attempt(boundary: str, fixture: dict[str, Any]) -> str | None:
         _fixture_value(fixture, "last_assistant_message", "assistant_message", "message", "reason") or ""
     ).lower()
     if boundary == "PreToolUse" and tool_name == "AskUserQuestion":
+        if fixture.get("awaiting_user_input") is True:
+            return "user_wait.prepared"
         return "user_wait"
     if boundary == "PreToolUse" and tool_name == "ScheduleWakeup":
         return "self_paced_stop"

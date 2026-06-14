@@ -831,6 +831,32 @@ def schedule_wakeup_block_active(project_root: Path, payload: Optional[dict] = N
     if last_active_at is None:
         return False
     return (now - last_active_at).total_seconds() <= SCHEDULE_WAKEUP_GRACE_SECONDS
+def ask_user_question_allowed(project_root: Path, payload: Optional[dict] = None, now: Optional[datetime] = None) -> bool:
+    state = load_workflow_state(project_root, payload)
+    if not isinstance(state, dict):
+        return False
+
+    now = now or utc_now()
+    updated_at = parse_utc(state.get("updated_at"))
+    if updated_at is not None and (now - updated_at).total_seconds() > SCHEDULE_WAKEUP_STATE_TTL_SECONDS:
+        return False
+
+    if state.get("awaiting_user_input") is not True:
+        return False
+
+    expected_hash = state.get("expected_question_hash")
+    if not isinstance(expected_hash, str) or not expected_hash.strip():
+        user_input = state.get("user_input")
+        if isinstance(user_input, dict):
+            expected_hash = user_input.get("expected_question_hash")
+    if not isinstance(expected_hash, str) or not expected_hash.strip():
+        return False
+
+    tool_input = {}
+    if isinstance(payload, dict) and isinstance(payload.get("tool_input"), dict):
+        tool_input = payload.get("tool_input")
+    actual_hash = sha256_text(canonical_json(tool_input))
+    return actual_hash == expected_hash.strip()
 def pending_confirm_ttl() -> int:
     raw = os.environ.get("MST_PENDING_CONFIRM_TTL_SECONDS") or os.environ.get("MST_CONFIRM_TTL_SECONDS") or "86400"
     try:

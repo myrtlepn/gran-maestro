@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gran-maestro.local/schemas/question-payload.schema.json",
+  "title": "Gran Maestro User Input Boundary Question Payload",
+  "type": "object",
+  "oneOf": [
+    { "required": ["question"] },
+    { "required": ["prompt"] },
+    { "required": ["questions"] }
+  ],
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "options": {
+      "$ref": "#/$defs/options"
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "oneOf": [
+          { "required": ["question"] },
+          { "required": ["prompt"] }
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "$ref": "#/$defs/options"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "required": ["label"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "preview": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    }
+  }
+}

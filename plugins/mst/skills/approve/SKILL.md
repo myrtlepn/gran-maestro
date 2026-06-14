@@ -55,7 +55,7 @@ DOD-007 canonical identity boundary: `MST_SESSION_ID` / `mst_session_id`만 cano
 DOD-009 session identity glossary: `mst_session_id` is the canonical state machine identity payload/context field issued by `mst.py` as `MST-{root_mst_id}-{started_at_compact}-{random}`; it partitions `.gran-maestro/state/{mst_session_id}/snapshot.json` and `.gran-maestro/sessions/{mst_session_id}/history.*`. `MST_SESSION_ID` is the environment variable carrying the same canonical identity through child invocation, subprocess, and hook execution. A root resource ID such as `AGI-030`, `PLN-638`, or `REQ-*` can be the root component inside `mst_session_id`, but it is not the full canonical session identity. A process diagnostic ID such as `owner_pid`, `MST_STATE_PPID`, hook `session_id`, or transcript UUID is diagnostic-only; diagnostic output is allowed, but those values are not canonical source, fallback, alias, migration requirement. legacy aliases such as `session_id`, `sessionId`, or `MST_SNAPSHOT_SESSION_ID` are compatibility diagnostics and not canonical source, fallback, alias, migration requirement. source precedence is validated history ledger, validated state snapshot, then prompt summary as diagnostic-only context.
 
 <!-- @include _shared/user-profile-read.md -->
-### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
+### MANDATORY Read: `~/.claude/user-profile.json` (User Input Boundary 컨텍스트, 비차단)
 
 1. `~/.claude/user-profile.json`을 Read한다.
    - 파일이 없으면 `user_profile_context = null`로 처리하고 **기존 동작을 유지**한다 (graceful fallback).
@@ -65,7 +65,7 @@ DOD-009 session identity glossary: `mst_session_id` is the canonical state machi
    - `domain_knowledge` (string[])
    - `communication_style` (string)
 3. JSON 파싱 실패 또는 타입 불일치 시 warn만 출력하고 `user_profile_context = null`로 처리한다 (워크플로우 차단 금지).
-4. 이후 `AskUserQuestion`과 사용자 설명 텍스트 작성 시:
+4. 이후 User Input Boundary 질문 payload와 사용자 설명 텍스트 작성 시:
    - `communication_style`을 최우선 반영한다.
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.

@@ -275,6 +275,11 @@ def register(subparsers):
     state_set_workflow.add_argument("--enqueue", type=_parse_bool_arg, default=False)
     state_set_workflow.add_argument("--agile-loop-active", dest="agile_loop_active", type=_parse_bool_arg)
     state_set_workflow.add_argument("--steering-disabled", dest="steering_disabled", type=_parse_bool_arg)
+    state_set_workflow.add_argument("--awaiting-user-input", dest="awaiting_user_input", type=_parse_bool_arg)
+    state_set_workflow.add_argument("--question-id", dest="question_id", default="")
+    state_set_workflow.add_argument("--expected-question-hash", dest="expected_question_hash", default="")
+    state_set_workflow.add_argument("--resume-skill", dest="resume_skill", default="")
+    state_set_workflow.add_argument("--resume-args", dest="resume_args", default="")
     state_set_workflow.add_argument("--root-mst-id", dest="root_mst_id", default="")
 
     state_sub.add_parser("get")

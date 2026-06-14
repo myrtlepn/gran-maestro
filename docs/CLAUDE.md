@@ -195,16 +195,20 @@ mcp__stitch__edit_screens(...)                     ← 사용 금지
 
 ## 사용자 입력 규칙
 
-스킬에서 사용자에게 입력을 요청할 때는 반드시 `AskUserQuestion` 도구를 사용합니다.
+스킬에서 사용자에게 입력을 요청할 때는 `User Input Boundary`를 사용합니다.
 
-- **평문 텍스트 출력 후 입력 대기 방식은 사용 금지**: 코드블록이나 일반 텍스트 끝에
-  "입력하세요:", "선택하세요:" 등으로 입력을 기다리는 방식은 구조화된 선택지를 제공하지 않음
-- **Other 자유 입력 자동 보장**: `AskUserQuestion`은 시스템 수준에서 "Other" 자유 입력을
-  자동으로 추가하므로, options 필드에 선택지가 있어도 자유 텍스트 입력이 항상 가능
-- **동적 목록 옵션 구성**: REQ 목록, 화면 목록 등 동적으로 결정되는 옵션은
-  최대 3개 항목 + 공통 옵션(전체 선택 등) 구조 사용, 나머지는 Other 자유 입력 유도
-- **options 필드 필수**: `AskUserQuestion` 호출 시 options 배열에 반드시 2개 이상의
-  구체적 선택지를 포함 (Other는 자동 추가이므로 별도 작성 불필요)
+- **직접 도구 판단 금지**: `AskUserQuestion`을 바로 호출하지 말고 먼저
+  `python3 {PLUGIN_ROOT}/scripts/mst.py question prepare ... --json`을 호출합니다.
+- **Host-aware 분기**: `mode=claude_tool`이면 반환된 payload로 `AskUserQuestion`을
+  호출하고, `mode=pending_artifact`이면 반환된 `user_message`를 보여준 뒤 정상
+  사용자 입력 대기 상태로 종료합니다. Codex/headless host에서는 `AskUserQuestion`을
+  직접 호출하지 않습니다.
+- **구조화 payload**: 질문 payload는 JSON 파일로 작성하고
+  `templates/question-payload.schema.json` 구조를 따릅니다. 선택지는 최대 4개이며,
+  Other/free-form 입력은 host UI 또는 pending artifact 답변 경로가 담당합니다.
+- **정상 대기와 임의 중단 분리**: workflow 중 임의 확인 질문/self-pause는 계속
+  금지합니다. 정상 질문은 `question prepare`가 기록한 `awaiting_user_input` 상태와
+  payload hash가 일치할 때만 허용됩니다.
 
 </skill_authoring_rules>
 

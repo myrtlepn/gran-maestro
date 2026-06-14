@@ -746,6 +746,23 @@ def cmd_state_set_workflow(args):
             if isinstance(payload.get("last_block_reason"), str)
             else ""
         )
+        payload["awaiting_user_input"] = (
+            payload.get("awaiting_user_input")
+            if isinstance(payload.get("awaiting_user_input"), bool)
+            else False
+        )
+        payload["question_id"] = (
+            payload.get("question_id")
+            if isinstance(payload.get("question_id"), str)
+            else ""
+        )
+        payload["expected_question_hash"] = (
+            payload.get("expected_question_hash")
+            if isinstance(payload.get("expected_question_hash"), str)
+            else ""
+        )
+        if not isinstance(payload.get("user_input"), dict):
+            payload["user_input"] = {}
 
         if args.agile_loop_active is not None:
             payload["agile_loop_active"] = bool(args.agile_loop_active)
@@ -753,6 +770,37 @@ def cmd_state_set_workflow(args):
                 payload["block_count"] = 0
         if args.steering_disabled is not None:
             payload["steering_disabled"] = bool(args.steering_disabled)
+        if args.awaiting_user_input is not None:
+            payload["awaiting_user_input"] = bool(args.awaiting_user_input)
+            if payload["awaiting_user_input"]:
+                payload["question_id"] = args.question_id or payload["question_id"]
+                payload["expected_question_hash"] = args.expected_question_hash or payload["expected_question_hash"]
+                payload["user_input"] = {
+                    **payload["user_input"],
+                    "awaiting": True,
+                    "question_id": payload["question_id"],
+                    "expected_question_hash": payload["expected_question_hash"],
+                    "resume_skill": args.resume_skill or payload["user_input"].get("resume_skill", ""),
+                    "resume_args": args.resume_args or payload["user_input"].get("resume_args", ""),
+                    "updated_at": now,
+                }
+            else:
+                payload["question_id"] = ""
+                payload["expected_question_hash"] = ""
+                payload["user_input"] = {
+                    **payload["user_input"],
+                    "awaiting": False,
+                    "updated_at": now,
+                }
+        elif not args.active:
+            payload["awaiting_user_input"] = False
+            payload["question_id"] = ""
+            payload["expected_question_hash"] = ""
+            payload["user_input"] = {
+                **payload["user_input"],
+                "awaiting": False,
+                "updated_at": now,
+            }
 
         payload["updated_at"] = now
 

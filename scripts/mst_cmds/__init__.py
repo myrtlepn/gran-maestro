@@ -57,6 +57,7 @@ from scripts.mst_cmds import on as on_cmd
 from scripts.mst_cmds import resolver
 from scripts.mst_cmds import current_work_handoff
 from scripts.mst_cmds import host
+from scripts.mst_cmds import question
 
 
 def set_base_dir(base_dir):
@@ -117,6 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     resolver.register(sub)
     current_work_handoff.register(sub)
     host.register(sub)
+    question.register(sub)
 
     return parser
 
@@ -307,4 +309,9 @@ DISPATCH = {
     ("resolve-next-action", None): resolver.resolve_next_action,
     ("current-work-handoff", None): current_work_handoff.cmd_current_work_handoff,
     ("host", "context"): host.cmd_host_context,
+    ("question", "prepare"): question.cmd_question_prepare,
+    ("question", "pending"): question.cmd_question_pending,
+    ("question", "answer"): question.cmd_question_answer,
+    ("question", "consume"): question.cmd_question_consume,
+    ("question", "list"): question.cmd_question_list,
 }

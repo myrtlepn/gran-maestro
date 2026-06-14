@@ -72,6 +72,30 @@ Maestro 모드 비활성 시 자동 활성화:
 > `{PLUGIN_ROOT}`는 이 스킬의 "Base directory"에서 `skills/{스킬명}/`을 제거한 **절대경로**입니다. 상대경로(`.claude/...`)는 절대 사용하지 않습니다.
 <!-- @end-include -->
 
+<!-- @include _shared/user-input-boundary.md -->
+### User Input Boundary (MANDATORY)
+
+사용자 입력이 필요한 지점에서는 host별 질문 도구를 직접 판단하지 말고 `question prepare`를 먼저 호출한다. 이 규칙은 기존 `AskUserQuestion` 직접 호출 지시보다 우선한다.
+
+1. 질문 payload를 JSON 파일로 작성한다. 구조는 `templates/question-payload.schema.json`을 따른다.
+2. 아래 CLI를 호출한다.
+   ```bash
+   python3 {PLUGIN_ROOT}/scripts/mst.py question prepare \
+     --skill {CURRENT_SKILL} \
+     --step "{CURRENT_STEP}" \
+     --resume-skill {CURRENT_SKILL} \
+     --resume-args "{RESUME_ARGS}" \
+     --payload-file {QUESTION_PAYLOAD_JSON} \
+     --json
+   ```
+3. 반환값에 따라 분기한다.
+   - `mode=claude_tool`: 반환된 `payload`로 `AskUserQuestion`을 호출한다.
+   - `mode=pending_artifact`: 반환된 `user_message`를 사용자에게 보여주고 종료한다. 이 상태는 정상적인 사용자 입력 대기이며 임의 중단이 아니다.
+   - `mode=auto_decision`: `AUTO_MODE=true` 경로로 질문 없이 계속하거나 blocker를 기록한다.
+4. Codex/headless host에서는 `AskUserQuestion`을 직접 호출하지 않는다. pending question은 `.gran-maestro/questions/Q-*.json`에 저장되고 `/mst:resume --answer Q-...`로 재개한다.
+5. workflow 중 임의 확인 질문이나 self-pause는 계속 금지한다. 정상 질문은 `question prepare`가 기록한 `awaiting_user_input` 상태와 payload hash가 일치할 때만 허용된다.
+<!-- @end-include -->
+
 State execution contract: state write commands inherit `MST_SESSION_ID` from the current session or receive equivalent structured context; do not inject process-scoped identity into canonical writes.
 
 Parent session inheritance contract: child invocation, subprocess, and hook execution inherit parent `MST_SESSION_ID`; children must not issue arbitrary `mst_session_id`. Hook payload `mst_session_id` is allowed only when it matches the inherited parent `MST_SESSION_ID`.
@@ -81,7 +105,7 @@ DOD-007 canonical identity boundary: `MST_SESSION_ID` / `mst_session_id`만 cano
 DOD-009 session identity glossary: `mst_session_id` is the canonical state machine identity payload/context field issued by `mst.py` as `MST-{root_mst_id}-{started_at_compact}-{random}`; it partitions `.gran-maestro/state/{mst_session_id}/snapshot.json` and `.gran-maestro/sessions/{mst_session_id}/history.*`. `MST_SESSION_ID` is the environment variable carrying the same canonical identity through child invocation, subprocess, and hook execution. A root resource ID such as `AGI-030`, `PLN-638`, or `REQ-*` can be the root component inside `mst_session_id`, but it is not the full canonical session identity. A process diagnostic ID such as `owner_pid`, `MST_STATE_PPID`, hook `session_id`, or transcript UUID is diagnostic-only; diagnostic output is allowed, but those values are not canonical source, fallback, alias, migration requirement. legacy aliases such as `session_id`, `sessionId`, or `MST_SNAPSHOT_SESSION_ID` are compatibility diagnostics and not canonical source, fallback, alias, migration requirement. source precedence is validated history ledger, validated state snapshot, then prompt summary as diagnostic-only context.
 
 <!-- @include _shared/user-profile-read.md -->
-### MANDATORY Read: `~/.claude/user-profile.json` (AskUserQuestion 컨텍스트, 비차단)
+### MANDATORY Read: `~/.claude/user-profile.json` (User Input Boundary 컨텍스트, 비차단)
 
 1. `~/.claude/user-profile.json`을 Read한다.
    - 파일이 없으면 `user_profile_context = null`로 처리하고 **기존 동작을 유지**한다 (graceful fallback).
@@ -91,7 +115,7 @@ DOD-009 session identity glossary: `mst_session_id` is the canonical state machi
    - `domain_knowledge` (string[])
    - `communication_style` (string)
 3. JSON 파싱 실패 또는 타입 불일치 시 warn만 출력하고 `user_profile_context = null`로 처리한다 (워크플로우 차단 금지).
-4. 이후 `AskUserQuestion`과 사용자 설명 텍스트 작성 시:
+4. 이후 User Input Boundary 질문 payload와 사용자 설명 텍스트 작성 시:
    - `communication_style`을 최우선 반영한다.
    - `experience_level`/`domain_knowledge`에 맞춰 용어 수준과 설명 깊이를 조절한다.
    - 누락 필드는 추정하지 않고, 존재하는 필드만 참고한다.
