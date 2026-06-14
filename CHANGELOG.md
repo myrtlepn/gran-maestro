@@ -8,6 +8,20 @@
 
 ---
 
+## [0.63.0] — 2026-06-14
+
+### 새 기능
+
+- **Host-aware User Input Boundary 추가**: AskUserQuestion을 사용할 수 없는 Codex/headless 환경에서도 질문을 `question prepare` payload로 구조화하고, 사용자에게 질문이 막힌 것처럼 보이지 않도록 pending 상태와 fallback 안내를 기록합니다.
+
+### 개선
+
+- **질문 컨텍스트 분리**: 여러 스킬이 공통 User Input Boundary include를 참조하도록 정리해, 질문 계약을 매번 긴 스킬 본문에 중복 주입하지 않고 필요한 컨텍스트만 전달합니다.
+- **상태·hook guard 진단 보강**: workflow state에 질문 pending 정보를 기록하고 PreToolUse/transition graph 테스트로 headless 질문 경계를 검증할 수 있게 했습니다.
+- **Codex projection 검증 강화**: 새 question CLI, payload schema, 회귀 테스트가 source와 projection 양쪽에 반영되도록 local install smoke 경로를 맞췄습니다.
+
+---
+
 ## [0.62.0] — 2026-06-04
 
 ### 새 기능
