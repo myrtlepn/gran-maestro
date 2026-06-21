@@ -27,9 +27,9 @@
       "Code"
     ],
     "defaultPrompt": [
-      "/mst:plan improve the login flow",
-      "/mst:request fix the dashboard error",
-      "/mst:list"
+      "$mst:plan improve the login flow",
+      "$mst:request fix the dashboard error",
+      "$mst:list"
     ],
     "brandColor": "#2563EB"
   }

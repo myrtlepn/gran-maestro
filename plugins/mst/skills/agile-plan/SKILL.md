@@ -7,7 +7,11 @@ argument-hint: "{프로젝트 목표 | --doc 파일경로 | --resume AGI-NNN} [-
 
 # maestro:agile-plan
 
-**목적**: `/mst:agile-plan`으로 JTBD + 프로젝트 DoD 중심의 objective.md를 생성한다. 이 스킬은 플래닝 전용이며 Story 생성/실행은 담당하지 않는다.
+**목적**: `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)으로 JTBD + 프로젝트 DoD 중심의 objective.md를 생성한다. 이 스킬은 플래닝 전용이며 Story 생성/실행은 담당하지 않는다.
+
+### Codex Projection Invocation Contract
+
+In Codex, explicit `$mst:agile-plan` invocation is the command identity for this skill and is equivalent to the Claude-facing `/mst:agile-plan` command. Once `$mst:agile-plan` or `/mst:agile-plan` is present in the raw request, keep that identity fixed through Exit.
 
 ## ⚠️ 실행 제약 (CRITICAL — 항상 준수)
 
@@ -156,8 +160,8 @@ Entry mode는 아래 순서로 deterministic하게 해석한다. 뒤 단계는 �
 상태 mutation에는 canonical `MST_SESSION_ID`/`mst_session_id`가 반드시 필요하다. canonical identity가 없거나 검증 실패하면 AGI/session/history/snapshot을 silent pass로 갱신하지 않고 structured non-success로 종료한다. Legacy-only input(`MST_STATE_PPID`, `owner_ppid`, `owner_session_id`, `owner_pid`, hook `session_id`, transcript UUID, `MST_SNAPSHOT_SESSION_ID`, `sessionId`, `session_id`)은 diagnostic-only이며 canonical fallback이 아니다.
 
 Regression fixture matrix는 최소한 아래 조합을 포함한다.
-- `/mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`: resume wins, doc ignored for mode, return-to is exit routing, auto only changes interaction policy.
-- `/mst:agile-plan --doc spec.md` with no canonical identity mutation request: doc mode wins over Q&A.
+- `$mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`(Codex) / `/mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`(Claude): resume wins, doc ignored for mode, return-to is exit routing, auto only changes interaction policy.
+- `$mst:agile-plan --doc spec.md`(Codex) / `/mst:agile-plan --doc spec.md`(Claude) with no canonical identity mutation request: doc mode wins over Q&A.
 - parent agile inherited `auto=true` without CLI `--auto`: AUTO_MODE=true, no AskUserQuestion wait.
 - missing canonical `MST_SESSION_ID` on state write: structured non-success, no snapshot mutation.
 
@@ -165,8 +169,8 @@ Regression fixture matrix는 최소한 아래 조합을 포함한다.
 
 이 preflight는 `mst.py agile init`, 파일 생성, state 기록, 에이전트 위임보다 먼저 수행한다.
 
-- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 고정한다.
-- `/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.
+- 원시 입력의 command identity가 `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)로 확정된 경우, 이 정체성을 Exit까지 고정한다.
+- `$mst:agile-plan`/`/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `$mst:plan`/`/mst:plan`, `$mst:request`/`/mst:request`, 내장 plan mode로 재분류하지 않는다.
 - Claude Code 내장 plan mode로 진입하지 않는다. 어떤 단계에서도 `EnterPlanMode`를 호출하지 않고, transcript/tool-call/captured output에 `Entered plan mode`를 출력하지 않는다.
 - 입력 형식이나 필수 정보 부족으로 objective/agile planning 입력으로 수용할 수 없으면, 아직 AGI 세션을 만들지 않은 상태로 수용 불가 사유를 보고하고 Step 0.5.3의 후보 제시 절차로만 이동한다.
 
@@ -193,11 +197,11 @@ Regression fixture matrix는 최소한 아래 조합을 포함한다.
 #### 0.5.0 command identity guard 확인 (MANDATORY)
 
 - Step 0.0에서 command identity/no-plan-mode preflight가 이미 완료됐는지 확인한다. 완료되지 않았으면 Step 0.0으로 돌아가며, AGI/session/state side effect를 만들지 않는다.
-- 원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 유지한다.
-- 이 guard는 `/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `/mst:plan` 및 `/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.
-- `/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.
+- 원시 입력의 command identity가 `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)로 확정된 경우, 이 정체성을 Exit까지 유지한다.
+- 이 guard는 `$mst:agile-plan`/`/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `$mst:plan`/`/mst:plan` 및 `$mst:request`/`/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.
+- `$mst:agile-plan`/`/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `$mst:plan`/`/mst:plan`, `$mst:request`/`/mst:request`, 내장 plan mode로 재분류하지 않는다.
 - Claude Code 내장 plan mode로 진입하지 않는다. 어떤 단계에서도 `EnterPlanMode`를 호출하지 않고, transcript/tool-call/captured output에 `Entered plan mode`를 출력하지 않는다.
-- 재현 fixture `/mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`는 agile-plan 절차의 objective/agile planning 입력으로 먼저 처리한다.
+- 재현 fixture `$mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`(Codex) 또는 `/mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`(Claude)는 agile-plan 절차의 objective/agile planning 입력으로 먼저 처리한다.
 - 입력 형식이나 필수 정보 부족으로 objective/agile planning 입력으로 수용할 수 없으면, agile-plan 응답 또는 산출물 안에 수용 불가 사유를 남기고 Step 0.5.2 또는 Step 0.5.3의 확인/후보 제시 절차를 따른다. 이 경우에도 다른 명령이나 내장 plan mode로 전환하지 않는다.
 
 - PM은 요청 텍스트를 읽고 아래 질문을 내부 판단한다.
@@ -231,7 +235,7 @@ Regression fixture matrix는 최소한 아래 조합을 포함한다.
 
 #### 0.5.3 메타/질문 처리 후 objective 선제시
 
-> 목적: `/mst:agile-plan` 호출 자체는 objective 정의 의도 신호이지만, args 본문이 메타/질문이거나 0.5.2에서 "다른 의도"로 응답한 경우, 요청 동작을 먼저 수행한 뒤 objective 후보를 선제시한다.
+> 목적: `$mst:agile-plan`/`/mst:agile-plan` 호출 자체는 objective 정의 의도 신호이지만, args 본문이 메타/질문이거나 0.5.2에서 "다른 의도"로 응답한 경우, 요청 동작을 먼저 수행한 뒤 objective 후보를 선제시한다.
 
 1. 사용자가 실제로 요청한 동작(답변·설명·소규모 조사 등)을 먼저 수행한다.
 2. 수행 결과를 바탕으로 **objective로 발전시킬 수 있는 후보 1~3개**를 선제시한다.

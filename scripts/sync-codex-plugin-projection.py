@@ -40,6 +40,133 @@ HOOK_PATHS = [
     Path("lib/pre_tool_use_fast_shards"),
 ]
 
+CODEX_AGILE_NOTE = """### Codex Projection Invocation Contract
+
+This generated Codex projection uses Codex-native explicit skill mentions for agile-plan child delegation.
+
+- Invoke agile-plan as `$mst:agile-plan ...`; do not emit the Claude-style `Skill(...)` call.
+- Do not inline agile-plan work from the agile skill when Step 1 or Step 3.4 requires delegation.
+- If the host cannot perform an explicit skill invocation, stop and print the `$mst:agile-plan ...` fallback command as the next action.
+
+"""
+
+CODEX_AGILE_PLAN_NOTE = """### Codex Projection Invocation Contract
+
+In Codex, explicit `$mst:agile-plan` invocation is the command identity for this skill and is equivalent to the Claude-facing `/mst:agile-plan` command. Once `$mst:agile-plan` or `/mst:agile-plan` is present in the raw request, keep that identity fixed through Exit.
+
+"""
+
+
+def replace_required(text: str, old: str, new: str, *, rel_path: Path) -> str:
+    if old not in text:
+        raise RuntimeError(f"Projection rewrite marker not found in {rel_path}: {old!r}")
+    return text.replace(old, new)
+
+
+def rewrite_agile_skill_for_codex(text: str, rel_path: Path) -> str:
+    purpose = (
+        "**목적**: 프로젝트 목표를 받아 JTBD+프로젝트 DoD 기반 objective 흐름을 "
+        "`agile-plan`으로 초기화하고, 프로젝트 건강 우선 스프린트 루프를 진행합니다."
+    )
+    text = replace_required(
+        text,
+        f"{purpose}\n\n핵심 우회 금지 규칙은 아래 Gate/체크리스트 섹션을 따른다.",
+        f"{purpose}\n\n{CODEX_AGILE_NOTE}핵심 우회 금지 규칙은 아래 Gate/체크리스트 섹션을 따른다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        'Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")',
+        "$mst:agile-plan {PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1 {AUTO_FLAG_IF_TRUE}",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        'Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")',
+        "$mst:agile-plan --resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        '확인 증거: Step 1에서 `Skill(skill: "mst:agile-plan", ...)` 호출 로그와 반환 마커가 존재.',
+        "확인 증거: Step 1에서 `$mst:agile-plan ...` 명시 호출 로그와 반환 마커가 존재.",
+        rel_path=rel_path,
+    )
+    return text
+
+
+def rewrite_agile_plan_skill_for_codex(text: str, rel_path: Path) -> str:
+    purpose = (
+        "**목적**: `/mst:agile-plan`으로 JTBD + 프로젝트 DoD 중심의 objective.md를 생성한다. "
+        "이 스킬은 플래닝 전용이며 Story 생성/실행은 담당하지 않는다."
+    )
+    text = replace_required(
+        text,
+        f"{purpose}\n\n## ⚠️ 실행 제약 (CRITICAL — 항상 준수)",
+        (
+            "**목적**: `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)으로 "
+            "JTBD + 프로젝트 DoD 중심의 objective.md를 생성한다. 이 스킬은 플래닝 전용이며 "
+            "Story 생성/실행은 담당하지 않는다."
+            f"\n\n{CODEX_AGILE_PLAN_NOTE}## ⚠️ 실행 제약 (CRITICAL — 항상 준수)"
+        ),
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "`/mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`: resume wins, doc ignored for mode, return-to is exit routing, auto only changes interaction policy.",
+        "`$mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`(Codex) / `/mst:agile-plan --resume AGI-NNN --doc spec.md --return-to agile/1 --auto`(Claude): resume wins, doc ignored for mode, return-to is exit routing, auto only changes interaction policy.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "`/mst:agile-plan --doc spec.md` with no canonical identity mutation request: doc mode wins over Q&A.",
+        "`$mst:agile-plan --doc spec.md`(Codex) / `/mst:agile-plan --doc spec.md`(Claude) with no canonical identity mutation request: doc mode wins over Q&A.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 고정한다.",
+        "원시 입력의 command identity가 `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)로 확정된 경우, 이 정체성을 Exit까지 고정한다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "`/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `/mst:plan`, `/mst:request`, Claude Code 내장 plan mode로 재분류하지 않는다.",
+        "`$mst:agile-plan`/`/mst:agile-plan` 입력 본문에 `현재 구현을 변경`, `수정`, `구현 변경`, `개선`, `리팩터링`, `계획`, `구현`, `방향` 같은 구현 변경 또는 계획 수립 표현이 있어도 `$mst:plan`/`/mst:plan`, `$mst:request`/`/mst:request`, 내장 plan mode로 재분류하지 않는다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "원시 입력의 command identity가 `/mst:agile-plan`으로 확정된 경우, 이 정체성을 Exit까지 유지한다.",
+        "원시 입력의 command identity가 `$mst:agile-plan`(Codex) 또는 `/mst:agile-plan`(Claude)로 확정된 경우, 이 정체성을 Exit까지 유지한다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "이 guard는 `/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `/mst:plan` 및 `/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.",
+        "이 guard는 `$mst:agile-plan`/`/mst:agile-plan` command identity가 확정된 요청에만 적용한다. 일반 `$mst:plan`/`/mst:plan` 및 `$mst:request`/`/mst:request` 요청의 command identity, 사용자 대면 라우팅, 산출물 절차는 변경하지 않는다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "재현 fixture `/mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`는 agile-plan 절차의 objective/agile planning 입력으로 먼저 처리한다.",
+        "재현 fixture `$mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`(Codex) 또는 `/mst:agile-plan 그럼 현재 구현을 변경하는 방향으로 수정해줘`(Claude)는 agile-plan 절차의 objective/agile planning 입력으로 먼저 처리한다.",
+        rel_path=rel_path,
+    )
+    text = replace_required(
+        text,
+        "> 목적: `/mst:agile-plan` 호출 자체는 objective 정의 의도 신호이지만, args 본문이 메타/질문이거나 0.5.2에서 \"다른 의도\"로 응답한 경우, 요청 동작을 먼저 수행한 뒤 objective 후보를 선제시한다.",
+        "> 목적: `$mst:agile-plan`/`/mst:agile-plan` 호출 자체는 objective 정의 의도 신호이지만, args 본문이 메타/질문이거나 0.5.2에서 \"다른 의도\"로 응답한 경우, 요청 동작을 먼저 수행한 뒤 objective 후보를 선제시한다.",
+        rel_path=rel_path,
+    )
+    return text
+
+
+CODEX_SKILL_REWRITES = {
+    Path("skills/agile/SKILL.md"): rewrite_agile_skill_for_codex,
+    Path("skills/agile-plan/SKILL.md"): rewrite_agile_plan_skill_for_codex,
+}
+
 
 def copy_path(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +195,14 @@ def reset_projection() -> None:
     PROJECTION_ROOT.mkdir(parents=True)
 
 
+def apply_codex_projection_rewrites() -> None:
+    for rel_path, rewrite in CODEX_SKILL_REWRITES.items():
+        path = PROJECTION_ROOT / rel_path
+        text = path.read_text(encoding="utf-8")
+        rewritten = rewrite(text, rel_path)
+        path.write_text(rewritten, encoding="utf-8")
+
+
 def main() -> int:
     reset_projection()
 
@@ -85,6 +220,8 @@ def main() -> int:
     hooks_root.mkdir()
     for rel in HOOK_PATHS:
         copy_path(REPO_ROOT / "hooks" / rel, hooks_root / rel)
+
+    apply_codex_projection_rewrites()
 
     print(f"Synced Codex plugin projection: {PROJECTION_ROOT}")
     return 0

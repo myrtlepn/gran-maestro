@@ -3,12 +3,14 @@
 [← README](../README.md)
 
 Gran Maestro 플러그인이 제공하는 41개 스킬의 전체 레퍼런스입니다.
-각 스킬은 `/mst:{name}` 형식으로 호출합니다.
+Claude Code에서는 각 스킬을 `/mst:{name}` 형식으로 호출합니다. Codex plugin surface에서는 모델에 노출되는 스킬명이 `mst:{name}`이므로 명시 호출은 `$mst:{name}` 형식을 사용합니다.
 
 ## Codex plugin skill invocation boundary
 
 Claude Code와 Codex는 같은 `skills/` source를 설치합니다. Claude Code는 `/mst:{name}` slash command UX와 hooks/agents를 함께 제공하고, Codex는 같은 skill catalog를 hookless plugin surface로 로드해 동일한 workflow 문서를 사용합니다. 실제 runtime 로드·업데이트·삭제는 사용자 소유 Claude/Codex 환경에서 명시적으로 수행해야 합니다.
 
+- Codex 명시 호출: `$mst:agile-plan`, `$mst:plan`, `$mst:request`처럼 skill list에 보이는 전체 이름을 사용합니다.
+- Codex projection 내부의 agile → agile-plan 위임도 `$mst:agile-plan ...`로 생성되며, Claude source의 `Skill(skill: "mst:agile-plan", ...)` 호출 문구를 그대로 복사하지 않습니다.
 - 검증 가능 범위: `skills/`, `agents/`, `.codex-plugin/`, `.agents/plugins/`, DOD evidence, smoke tests.
 - 검증 명령: `node scripts/claude-plugin-local-install-smoke.mjs`, `node scripts/codex-plugin-local-install-smoke.mjs`, `node scripts/generate-dod-012-docs-release-integration.mjs <output>`, `npm test`.
 - 금지 경계: DOD-012 validation은 `~/.codex/config.toml`, `~/.agents`, `~/.claude`, plugin cache, symlink, `.claude/hooks`를 수정하지 않습니다.

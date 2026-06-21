@@ -9,6 +9,14 @@ argument-hint: "{프로젝트 목표(JTBD+프로젝트 DoD 기반) 또는 --resu
 
 **목적**: 프로젝트 목표를 받아 JTBD+프로젝트 DoD 기반 objective 흐름을 `agile-plan`으로 초기화하고, 프로젝트 건강 우선 스프린트 루프를 진행합니다.
 
+### Codex Projection Invocation Contract
+
+This generated Codex projection uses Codex-native explicit skill mentions for agile-plan child delegation.
+
+- Invoke agile-plan as `$mst:agile-plan ...`; do not emit the Claude-style `Skill(...)` call.
+- Do not inline agile-plan work from the agile skill when Step 1 or Step 3.4 requires delegation.
+- If the host cannot perform an explicit skill invocation, stop and print the `$mst:agile-plan ...` fallback command as the next action.
+
 핵심 우회 금지 규칙은 아래 Gate/체크리스트 섹션을 따른다.
 
 ## ⚠️ 실행 제약 (CRITICAL — 항상 준수)
@@ -163,7 +171,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
 신규 세션(`--resume` 없음)은 Step 1 전체를 아래 1줄 호출로 수행한다:
 
 ```text
-Skill(skill: "mst:agile-plan", args: "{PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")
+$mst:agile-plan {PROJECT_GOAL_OR_DOC} {DOC_FLAG_IF_ANY} --return-to agile/1 {AUTO_FLAG_IF_TRUE}
 ```
 
 규칙:
@@ -999,7 +1007,7 @@ DoD 체크 갱신 제안 (pending)
 #### 3.4 방향 수정 (Objective 변경)
 
 1. 버전 스냅샷: `python3 {PLUGIN_ROOT}/scripts/mst.py agile objective-snapshot {AGI_ID} --reason "{사용자 입력 요약}" --json`
-2. `Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}")` 재호출
+2. `$mst:agile-plan --resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}` 재호출
 3. 재계획 결과 반영 후 2.2 루프로 복귀
 
 #### 3.5 변경 후 정합성 정책
@@ -1148,7 +1156,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
 
 ## Anti-Rationalization Checklist
 
-- 합리화 패턴: "간단한 목표니 Step 1 절차를 생략해도 된다." | 확인 증거: Step 1에서 `Skill(skill: "mst:agile-plan", ...)` 호출 로그와 반환 마커가 존재.
+- 합리화 패턴: "간단한 목표니 Step 1 절차를 생략해도 된다." | 확인 증거: Step 1에서 `$mst:agile-plan ...` 명시 호출 로그와 반환 마커가 존재.
 - 합리화 패턴: "objective.md가 이미 있으니 직접 편집해도 된다." | 확인 증거: 상태 변경 시 항상 `mst.py agile objective-transition` 실행 로그 존재.
 - 합리화 패턴: "Step 0 없이 바로 생성으로 진행해도 된다." | 확인 증거: `mst.py agile status`(resume) 또는 `mst:agile-plan`(신규) 실행 로그가 Step 0~1 흐름에 존재.
 - 합리화 패턴: "대략 N 스프린트면 되니 계획/보고에 넣어도 된다." | 확인 증거: objective.md, plan 입력, 중간/스티어링 보고 산출물 전체에서 스프린트 횟수 예측 문구 0건.
