@@ -13,11 +13,20 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MAIN_REPO_ROOT = REPO_ROOT.parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+
+
+def _find_main_repo_root(repo_root: Path) -> Path:
+    for candidate in (repo_root, *repo_root.parents):
+        if (candidate / ".gran-maestro" / "requests" / "REQ-923" / "request.json").is_file():
+            return candidate
+    return repo_root
+
+
+MAIN_REPO_ROOT = _find_main_repo_root(REPO_ROOT)
 REQUEST_JSON = MAIN_REPO_ROOT / ".gran-maestro" / "requests" / "REQ-923" / "request.json"
 DISPATCH_SOURCE = REPO_ROOT / "scripts" / "mst_cmds" / "dispatch_shards" / "part_001.py"
 RUN_SOURCE = REPO_ROOT / "scripts" / "mst_cmds" / "run.py"
@@ -84,7 +93,7 @@ def _inventory() -> dict[str, dict]:
         "files_pattern": {
             "routes": {"command_assembly"},
             "evidence": [
-                (REPO_ROOT / "skills" / "gemini" / "SKILL.md", "--files {pattern}"),
+                (REPO_ROOT / "skills" / "gemini" / "SKILL.md", "--files src/**/*.ts"),
             ],
         },
         "trace_label": {
@@ -119,7 +128,7 @@ def _inventory() -> dict[str, dict]:
             "routes": {"filesystem", "log_path", "dispatch_state"},
             "evidence": [
                 (DISPATCH_SOURCE, '--worktree-dir {q(str(worktree_dir))}'),
-                (RUN_SOURCE, '"worktree_dir": str(Path.cwd()),'),
+                (RUN_SOURCE, '"worktree_dir": str((worktree_dir or Path.cwd()).resolve(strict=False)),'),
             ],
         },
         "session": {
