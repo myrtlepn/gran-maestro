@@ -8,6 +8,15 @@
 
 ---
 
+## [0.63.1] — 2026-06-26
+
+### 버그 수정
+
+- **Codex skill invocation projection 수정**: Codex plugin 설치 후 `/mst:agile`, `/mst:agile-plan` 같은 skill 호출 경로가 projection에서도 올바르게 동작하도록 보강했습니다.
+- **Gemini legacy alias 호환 보강**: 기존 `gemini` provider 설정을 AGY 경로로 정규화할 때 사용자 설정 모델을 보존하고, AGY CLI가 없을 때 structured preflight evidence를 출력하도록 수정했습니다.
+
+---
+
 ## [0.63.0] — 2026-06-14
 
 ### 새 기능
