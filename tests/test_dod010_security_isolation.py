@@ -162,7 +162,7 @@ def _inventory() -> dict[str, dict]:
             "routes": {"command_assembly", "process_control"},
             "evidence": [
                 (DISPATCH_SOURCE, 'HB_INTERVAL="${MST_DISPATCH_HEARTBEAT_INTERVAL:-120}"'),
-                (DISPATCH_SOURCE, "_resolve_provider_model(provider, args.model)"),
+                (DISPATCH_SOURCE, "_resolve_provider_model(provider, args.model, requested_provider=legacy_provider)"),
             ],
         },
     }

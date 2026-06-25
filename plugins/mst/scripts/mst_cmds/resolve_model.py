@@ -25,6 +25,8 @@ from scripts.mst_cmds._common import (
     load_json,
 )
 
+PROVIDER_ALIASES = {"gemini": "agy"}
+
 def _load_resolve_model_config():
     plugin_root = _plugin_root()
     config_paths = [
@@ -48,21 +50,29 @@ def _resolve_provider_default_model(provider, provider_cfg):
     hardcoded = {
         "codex": "gpt-5.3-codex",
         "agy": "agy-default",
-        "gemini": "gemini-3.1-pro-preview",
         "claude": "claude-sonnet-4-6",
     }
     return hardcoded.get(provider, hardcoded["codex"])
 
 def cmd_resolve_model(args):
-    provider = str(args.provider or "").strip().lower()
+    requested_provider = str(args.provider or "").strip().lower()
+    provider = PROVIDER_ALIASES.get(requested_provider, requested_provider)
     tier_or_section = str(args.tier_or_section or "").strip().lower()
 
     config = _load_resolve_model_config()
     models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
     providers_cfg = models_cfg.get("providers", {}) if isinstance(models_cfg, dict) else {}
     provider_cfg = providers_cfg.get(provider) if isinstance(providers_cfg, dict) else None
+    if not isinstance(provider_cfg, dict) and provider != requested_provider:
+        provider_cfg = providers_cfg.get(requested_provider) if isinstance(providers_cfg, dict) else None
 
     fallback_model = _resolve_provider_default_model(provider, provider_cfg)
+
+    if provider != requested_provider:
+        print(
+            f"Warning: deprecated provider '{requested_provider}' normalized to '{provider}'",
+            file=sys.stderr,
+        )
 
     if not isinstance(provider_cfg, dict):
         print(f"Warning: unknown provider '{provider}', using fallback model", file=sys.stderr)
@@ -82,7 +92,9 @@ def cmd_resolve_model(args):
         is_section = isinstance(section_cfg, dict) and isinstance(section_cfg.get("agents"), dict)
         if is_section:
             agents_cfg = section_cfg.get("agents", {})
-            provider_agent_cfg = agents_cfg.get(provider, {})
+            provider_agent_cfg = agents_cfg.get(provider)
+            if not isinstance(provider_agent_cfg, dict) and provider != requested_provider:
+                provider_agent_cfg = agents_cfg.get(requested_provider)
             if isinstance(provider_agent_cfg, dict):
                 section_tier = provider_agent_cfg.get("tier")
                 if isinstance(section_tier, str):

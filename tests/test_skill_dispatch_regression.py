@@ -91,6 +91,7 @@ def test_skill_dispatch_smoke_for_ideation_discussion_debug(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     _write_stub_cli(bin_dir, "codex")
+    _write_stub_cli(bin_dir, "agy")
     _write_stub_cli(bin_dir, "gemini")
 
     env = dict(os.environ)
@@ -135,6 +136,7 @@ def test_skill_dispatch_extended_smoke_for_ideation_discussion_debug(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     _write_stub_cli(bin_dir, "codex")
+    _write_stub_cli(bin_dir, "agy")
     _write_stub_cli(bin_dir, "gemini")
 
     env = dict(os.environ)

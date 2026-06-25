@@ -48,7 +48,36 @@ def test_dispatch_preflight_fails_when_binary_missing(tmp_path):
     )
 
     assert proc.returncode != 0
+    assert proc.stdout == ""
     assert "codex" in proc.stderr.lower()
+
+
+def test_dispatch_preflight_agy_missing_cli_returns_structured_failure(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    env = dict(os.environ)
+    env["PATH"] = ""
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "preflight",
+        "--provider",
+        "agy",
+        "--model",
+        "agy-default",
+        env=env,
+    )
+
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert payload["provider"] == "agy"
+    assert payload["binary"] == "agy"
+    assert payload["failure_kind"] == "missing_cli"
+    assert payload["evidence_id"] == "dispatch-preflight:agy:missing_cli"
+    assert payload["skip_reason"] == "required_binary_missing"
+    assert "agy" in proc.stderr.lower()
 
 
 def test_dispatch_preflight_fails_when_model_cannot_resolve(tmp_path):
@@ -166,6 +195,52 @@ def test_dispatch_preflight_accepts_agy_and_legacy_gemini_alias(tmp_path):
     assert legacy_payload["provider"] == "agy"
     assert legacy_payload["binary"] == "agy"
     assert legacy_payload["deprecated_alias"] == "gemini"
+
+
+def test_dispatch_preflight_legacy_gemini_alias_preserves_configured_default_model(tmp_path):
+    workspace = tmp_path / "workspace"
+    gm = workspace / ".gran-maestro"
+    gm.mkdir(parents=True, exist_ok=True)
+    (gm / "config.resolved.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "providers": {
+                        "gemini": {
+                            "default_tier": "premium",
+                            "premium": "legacy-custom-model",
+                        }
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    _write_stub_binary(bin_dir, "agy")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "preflight",
+        "--provider",
+        "gemini",
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["provider"] == "agy"
+    assert payload["binary"] == "agy"
+    assert payload["model"] == "legacy-custom-model"
+    assert payload["deprecated_alias"] == "gemini"
 
 
 def test_dispatch_register_resolves_started_by_pid_from_session_anchor(tmp_path):

@@ -275,6 +275,57 @@ def test_dispatch_build_legacy_gemini_alias_uses_agy(tmp_path):
     assert "PROVIDER_DEPRECATION:gemini->agy" in command
 
 
+def test_dispatch_build_legacy_gemini_alias_preserves_configured_default_model(tmp_path):
+    workspace = tmp_path / "workspace"
+    gm = workspace / ".gran-maestro"
+    gm.mkdir(parents=True, exist_ok=True)
+    (gm / "config.resolved.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "providers": {
+                        "gemini": {
+                            "default_tier": "premium",
+                            "premium": "legacy-custom-model",
+                        }
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    prompt_file = workspace / "prompt-legacy-config.md"
+    prompt_file.write_text("hello legacy configured provider", encoding="utf-8")
+    log_file = workspace / "legacy-config.log"
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "gemini",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-legacy-config",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+    assert "agy --print" in command
+    assert "dispatch register --task-id task-legacy-config" in command
+    assert "--provider agy --model legacy-custom-model" in command
+    assert "agy-default" not in command
+    assert "PROVIDER_DEPRECATION:gemini->agy" in command
+
+
 def test_dispatch_build_executes_monitor_heartbeat_for_prompt_output(tmp_path):
     workspace = tmp_path / "workspace"
     (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)

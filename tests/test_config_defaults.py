@@ -99,6 +99,81 @@ def test_agy_is_canonical_provider_in_defaults():
     assert defaults["models"]["roles"]["reviewer"][1]["provider"] == "agy"
 
 
+def test_resolve_model_normalizes_legacy_gemini_provider_to_agy():
+    proc = _run_mst(REPO_ROOT, "resolve-model", "gemini", "default")
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "agy-default"
+    assert "deprecated provider 'gemini' normalized to 'agy'" in proc.stderr
+    assert "gemini-3.1" not in proc.stdout
+
+
+def test_resolve_model_preserves_legacy_gemini_provider_config(tmp_path):
+    workspace = tmp_path / "workspace"
+    config_dir = workspace / ".gran-maestro"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.resolved.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "providers": {
+                        "gemini": {
+                            "default_tier": "premium",
+                            "premium": "legacy-custom-model",
+                        }
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(workspace, "resolve-model", "gemini", "default")
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "legacy-custom-model"
+    assert "deprecated provider 'gemini' normalized to 'agy'" in proc.stderr
+
+
+def test_resolve_model_preserves_legacy_gemini_section_config(tmp_path):
+    workspace = tmp_path / "workspace"
+    config_dir = workspace / ".gran-maestro"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.resolved.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "providers": {
+                        "gemini": {
+                            "default_tier": "premium",
+                            "premium": "legacy-premium-model",
+                            "economy": "legacy-economy-model",
+                        }
+                    }
+                },
+                "ideation": {
+                    "agents": {
+                        "gemini": {
+                            "tier": "economy",
+                        }
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(workspace, "resolve-model", "gemini", "ideation")
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "legacy-economy-model"
+    assert "deprecated provider 'gemini' normalized to 'agy'" in proc.stderr
+
+
 def test_agile_field_types():
     defaults = _load_defaults()
     agile = defaults["agile"]

@@ -1177,14 +1177,23 @@ def _dispatch_stale_threshold(args) -> int:
         return _coerce_positive_int(args.stale_threshold, 60)
     dispatch_cfg = _load_dispatch_config()
     return _coerce_positive_int(dispatch_cfg.get("stale_threshold_sec"), 60)
-def _resolve_provider_model(provider: str, explicit_model: str | None) -> str | None:
+def _resolve_provider_model(
+    provider: str,
+    explicit_model: str | None,
+    *,
+    requested_provider: str | None = None,
+) -> str | None:
     if isinstance(explicit_model, str) and explicit_model.strip():
         return explicit_model.strip()
 
+    normalized_provider = str(provider or "").strip().lower()
+    requested = str(requested_provider or normalized_provider).strip().lower()
     config = resolve_model_mod._load_resolve_model_config()
     models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
     providers_cfg = models_cfg.get("providers", {}) if isinstance(models_cfg, dict) else {}
-    provider_cfg = providers_cfg.get(provider) if isinstance(providers_cfg, dict) else None
+    provider_cfg = providers_cfg.get(normalized_provider) if isinstance(providers_cfg, dict) else None
+    if not isinstance(provider_cfg, dict) and requested != normalized_provider:
+        provider_cfg = providers_cfg.get(requested) if isinstance(providers_cfg, dict) else None
 
     if isinstance(provider_cfg, dict):
         default_tier = provider_cfg.get("default_tier")
@@ -1200,7 +1209,7 @@ def _resolve_provider_model(provider: str, explicit_model: str | None) -> str | 
                 return resolved.strip()
         return None
 
-    fallback = resolve_model_mod._resolve_provider_default_model(provider, provider_cfg)
+    fallback = resolve_model_mod._resolve_provider_default_model(normalized_provider, provider_cfg)
     if isinstance(fallback, str) and fallback.strip():
         return fallback.strip()
     return None
@@ -1739,7 +1748,7 @@ def cmd_dispatch_build(args):
         )
         return 1
 
-    resolved_model = _resolve_provider_model(provider, args.model)
+    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=legacy_provider)
     if not isinstance(resolved_model, str) or not resolved_model:
         print(f"Error: failed to resolve model for provider '{provider}'", file=sys.stderr)
         return 1
@@ -1897,10 +1906,21 @@ def cmd_dispatch_preflight(args):
     provider, legacy_provider = _normalize_dispatch_provider(requested_provider)
     executable = _provider_executable(provider)
     if shutil.which(executable) is None:
+        if provider == "agy":
+            payload = {
+                "provider": provider,
+                "binary": executable,
+                "failure_kind": "missing_cli",
+                "evidence_id": f"dispatch-preflight:{provider}:missing_cli",
+                "skip_reason": "required_binary_missing",
+            }
+            if legacy_provider:
+                payload["deprecated_alias"] = legacy_provider
+            print(json.dumps(payload, ensure_ascii=False))
         print(f"Error: required binary '{executable}' not found in PATH", file=sys.stderr)
         return 1
 
-    resolved_model = _resolve_provider_model(provider, args.model)
+    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=legacy_provider)
     if not isinstance(resolved_model, str) or not resolved_model:
         print(f"Error: failed to resolve model for provider '{provider}'", file=sys.stderr)
         return 1
