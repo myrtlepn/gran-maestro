@@ -202,6 +202,44 @@ def format_table_row(req_id, data):
     title = (data.get("title") or "")[:55]
     return f"{req_id:<12} P{phase:<3} {status:<28} {title}"
 
+
+def _request_lifecycle_projection(req_id: str, data: dict) -> dict:
+    from scripts.mst_cmds.current_work_handoff import project_lifecycle_artifacts_for_session
+
+    session_id = str(data.get("mst_session_id") or "").strip()
+    if not session_id:
+        return {
+            "mst_session_id": None,
+            "count": 0,
+            "latest": None,
+            "items": [],
+        }
+    items = project_lifecycle_artifacts_for_session(
+        _common.BASE_DIR,
+        session_id,
+        include_terminal=True,
+    )
+    normalized_req_id = str(req_id or "").strip().upper()
+    scoped = []
+    for item in items:
+        linkage = item.get("attempt_linkage") if isinstance(item.get("attempt_linkage"), dict) else {}
+        root_mst_id = str(linkage.get("root_mst_id") or "").strip().upper()
+        task_id = str(item.get("task_id") or "").strip().upper()
+        if root_mst_id == normalized_req_id or task_id == normalized_req_id or task_id.startswith(f"{normalized_req_id}-"):
+            scoped.append(item)
+    return {
+        "mst_session_id": session_id,
+        "count": len(scoped),
+        "latest": scoped[0] if scoped else None,
+        "items": scoped,
+    }
+
+
+def _request_with_lifecycle(req_id: str, data: dict) -> dict:
+    enriched = copy.deepcopy(data)
+    enriched["native_lifecycle"] = _request_lifecycle_projection(req_id, data)
+    return enriched
+
 def cmd_request_list(args):
     rows = []
     include_completed = (args.scope == "all")
@@ -227,7 +265,10 @@ def cmd_request_inspect(args):
     req_id = args.req_id.upper()
     for rid, path, data in iter_request_dirs(include_completed=True):
         if rid == req_id:
-            print(json.dumps(data, ensure_ascii=False, indent=2))
+            enriched = _request_with_lifecycle(req_id, data)
+            print(json.dumps(enriched, ensure_ascii=False, indent=2))
+            if getattr(args, "json", False):
+                return 0
             # also show task specs if present
             tasks_dir = path / "tasks"
             if tasks_dir.exists():
@@ -244,14 +285,31 @@ def cmd_request_history(args):
     rows = []
     for req_id, path, data in iter_request_dirs(include_completed=True):
         if data.get("status") == "completed":
-            rows.append((req_id, data))
+            rows.append((req_id, _request_with_lifecycle(req_id, data)))
+    limit = max(0, int(getattr(args, "limit", 0)))
+    if limit:
+        rows = rows[-limit:]
     if not rows:
         print("No completed requests found.")
+        return 0
+    if getattr(args, "format", "table") == "json":
+        for req_id, data in rows:
+            print(json.dumps({"id": req_id, **data}, ensure_ascii=False, sort_keys=True))
         return 0
     print(f"{'ID':<12} {'Status':<28} {'Title'}")
     print("-" * 80)
     for req_id, data in rows:
         print(format_table_row(req_id, data))
+        lifecycle = data.get("native_lifecycle") if isinstance(data.get("native_lifecycle"), dict) else {}
+        latest = lifecycle.get("latest") if isinstance(lifecycle.get("latest"), dict) else None
+        if latest:
+            print(
+                "  delegation: "
+                f"transport={latest.get('execution_transport') or 'unknown'} "
+                f"provider_task={latest.get('provider_task_id') or 'N/A'} "
+                f"completion={latest.get('completion_signal') or 'N/A'} "
+                f"exit_code={latest.get('exit_code')!r}"
+            )
     return 0
 
 def cmd_request_filter(args):
@@ -396,9 +454,12 @@ def register(subparsers):
 
     req_inspect = req_sub.add_parser("inspect")
     req_inspect.add_argument("req_id")
+    req_inspect.add_argument("--json", action="store_true")
 
     req_history = req_sub.add_parser("history")
     req_history.add_argument("--all", action="store_true")
+    req_history.add_argument("--limit", type=int, default=0)
+    req_history.add_argument("--format", choices=["table", "json"], default="table")
 
     req_filter = req_sub.add_parser("filter")
     req_filter.add_argument("--phase", type=int)

@@ -27,6 +27,7 @@ def _init_workspace(path: Path) -> None:
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    env["MST_HOST"] = "headless"
     for key in (
         "MST_SESSION_ID",
         "MST_CONTEXT_JSON",
@@ -93,7 +94,9 @@ def test_child_dispatch_env_payload_match_preserves_single_root_id() -> None:
         _init_workspace(workspace)
         env = {
             "MST_SESSION_ID": ROOT_SESSION_ID,
-            "MST_CONTEXT_JSON": json.dumps({"mst_session_id": ROOT_SESSION_ID}),
+            "MST_CONTEXT_JSON": json.dumps(
+                {"mst_session_id": ROOT_SESSION_ID, "root_mst_id": "AGI-030"}
+            ),
             "MST_STATE_PPID": "424242",
         }
 
@@ -179,6 +182,7 @@ def test_dispatch_build_requires_existing_parent_session_without_resolve_fallbac
         prompt_file = workspace / "prompt.md"
         prompt_file.write_text("hello", encoding="utf-8")
         log_file = workspace / "dispatch.log"
+        before = _files(workspace)
 
         result = _run_mst(
             workspace,
@@ -198,25 +202,9 @@ def test_dispatch_build_requires_existing_parent_session_without_resolve_fallbac
             "gpt-test",
         )
 
-        assert result.returncode == 0, result.stderr
-        command = result.stdout.strip()
-        assert "session resolve" not in command
-        assert "MST_CONTEXT_JSON" in command
-
-        before = _files(workspace)
-        executed = subprocess.run(
-            ["bash", "-c", command],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            env=_env(),
-            check=False,
-            timeout=30,
-        )
-
-        assert executed.returncode == 2
+        assert result.returncode == 2
         assert _files(workspace) == before
-        assert "missing MST_SESSION_ID" in f"{executed.stdout}\n{executed.stderr}"
+        assert "requires canonical MST_SESSION_ID" in f"{result.stdout}\n{result.stderr}"
 
 
 def main() -> int:

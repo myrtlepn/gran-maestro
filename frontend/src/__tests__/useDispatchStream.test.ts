@@ -235,12 +235,201 @@ describe('useDispatchStream', () => {
     expect(hook.result.current.items).toHaveLength(1);
     expect(hook.result.current.items[0]).toEqual({
       task_id: '',
+      attempt_id: '',
       phase: 'running',
       provider: 'unknown',
       model: '',
+      execution_transport: 'external',
+      route_reason: '',
+      provider_task_id: null,
+      completion_signal: null,
+      exit_code: null,
+      fallback_from: null,
+      fallback_to: null,
+      provider_reconciliation_required: false,
+      reconciliation_required: false,
+      reconciliation_invariant_gap: false,
+      reconciliation_action: null,
+      mst_session_id: null,
+      root_mst_id: null,
+      parent_session_id: null,
+      running_log_path: null,
+      trace_path: null,
+      output_path: null,
+      terminal: false,
       heartbeat_age_sec: 0,
       stale: false
     });
+
+    hook.unmount();
+  });
+
+  it('AC-004: native/external lifecycle evidence and nullable exit codes survive normalization', () => {
+    const hook = renderHook(() => useDispatchStream('PROJ-1', 60));
+
+    MockEventSource.triggerMessage({
+      event: 'snapshot',
+      items: [
+        {
+          task_id: 'TASK-NATIVE',
+          attempt_id: 'native-a1',
+          phase: 'reconciling',
+          provider: 'codex',
+          model: 'gpt-5',
+          execution_transport: 'native',
+          route_reason: 'same_host_native_capable',
+          provider_task_id: 'provider-native-1',
+          completion_signal: null,
+          exit_code: null,
+          fallback_from: null,
+          fallback_to: null,
+          provider_reconciliation_required: true,
+          reconciliation_required: true,
+          reconciliation_invariant_gap: false,
+          reconciliation_action: {
+            action_id: 'provider-reconcile:abc',
+            status: 'pending',
+            lookup_key: 'provider-native-1',
+          },
+          heartbeat_age_sec: 12,
+          stale: false,
+        },
+        {
+          task_id: 'TASK-EXTERNAL',
+          attempt_id: 'external-a2',
+          phase: 'reconciling',
+          provider: 'claude',
+          execution_transport: 'external',
+          route_reason: 'external_fallback_after_definitive_not_created',
+          provider_task_id: null,
+          completion_signal: null,
+          exit_code: null,
+          fallback_from: 'native-a1',
+          fallback_to: null,
+          provider_reconciliation_required: true,
+          reconciliation_required: true,
+          reconciliation_invariant_gap: false,
+          reconciliation_action: {
+            kind: 'provider_reconcile',
+            action_id: 'provider-reconcile:external',
+            status: 'pending',
+            lookup_key: 'attempt:external-a2',
+            next_operation: 'reconcile_external_provider_group',
+          },
+          heartbeat_age_sec: 3,
+          stale: false,
+        },
+        {
+          task_id: 'TASK-RESOLVED',
+          attempt_id: 'external-a3',
+          phase: 'terminated',
+          provider: 'claude',
+          execution_transport: 'external',
+          completion_signal: 'process_cancelled',
+          exit_code: 143,
+          provider_reconciliation_required: false,
+          reconciliation_required: false,
+          reconciliation_invariant_gap: false,
+          reconciliation_action: {
+            kind: 'provider_reconcile',
+            action_id: 'provider-reconcile:resolved',
+            status: 'resolved',
+            completion_accepted: true,
+            resolved_at: '2026-07-11T10:00:00Z',
+            result: { provider_state: 'cancelled' },
+          },
+          terminal: true,
+          heartbeat_age_sec: 1,
+          stale: false,
+        },
+        {
+          task_id: 'TASK-CORRUPT',
+          attempt_id: 'native-a4',
+          phase: 'done',
+          provider: 'codex',
+          execution_transport: 'native',
+          completion_signal: 'completed',
+          provider_reconciliation_required: true,
+          reconciliation_required: false,
+          reconciliation_invariant_gap: true,
+          reconciliation_action: {
+            action_id: 'provider-reconcile:corrupt',
+            status: 'pending',
+            completion_accepted: false,
+          },
+          terminal: true,
+          heartbeat_age_sec: 1,
+          stale: false,
+        },
+      ],
+      stale_threshold_sec: 60,
+      as_of: '2026-07-11T10:00:00Z',
+    });
+    hook.rerender();
+
+    const native = hook.result.current.items.find((item) => item.task_id === 'TASK-NATIVE');
+    const external = hook.result.current.items.find((item) => item.task_id === 'TASK-EXTERNAL');
+    const resolved = hook.result.current.items.find((item) => item.task_id === 'TASK-RESOLVED');
+    const corrupt = hook.result.current.items.find((item) => item.task_id === 'TASK-CORRUPT');
+
+    expect(native).toMatchObject({
+      attempt_id: 'native-a1',
+      execution_transport: 'native',
+      route_reason: 'same_host_native_capable',
+      provider_task_id: 'provider-native-1',
+      completion_signal: null,
+      exit_code: null,
+      provider_reconciliation_required: true,
+      reconciliation_required: true,
+      reconciliation_invariant_gap: false,
+      reconciliation_action: {
+        action_id: 'provider-reconcile:abc',
+        status: 'pending',
+        lookup_key: 'provider-native-1',
+      },
+    });
+    expect(external).toMatchObject({
+      attempt_id: 'external-a2',
+      execution_transport: 'external',
+      route_reason: 'external_fallback_after_definitive_not_created',
+      exit_code: null,
+      fallback_from: 'native-a1',
+      provider_reconciliation_required: true,
+      reconciliation_required: true,
+      reconciliation_invariant_gap: false,
+      reconciliation_action: {
+        kind: 'provider_reconcile',
+        action_id: 'provider-reconcile:external',
+        status: 'pending',
+        lookup_key: 'attempt:external-a2',
+        next_operation: 'reconcile_external_provider_group',
+      },
+    });
+    expect(resolved).toMatchObject({
+      phase: 'terminated',
+      terminal: true,
+      provider_reconciliation_required: false,
+      reconciliation_required: false,
+      reconciliation_invariant_gap: false,
+      reconciliation_action: {
+        action_id: 'provider-reconcile:resolved',
+        status: 'resolved',
+        completion_accepted: true,
+      },
+    });
+    expect(corrupt).toMatchObject({
+      phase: 'done',
+      terminal: true,
+      provider_reconciliation_required: true,
+      reconciliation_required: false,
+      reconciliation_invariant_gap: true,
+      reconciliation_action: {
+        action_id: 'provider-reconcile:corrupt',
+        status: 'pending',
+        completion_accepted: false,
+      },
+    });
+    expect(native?.exit_code).not.toBe(0);
 
     hook.unmount();
   });

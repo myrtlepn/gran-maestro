@@ -36,7 +36,7 @@ Gran Maestro는 그 계획 수립 단계에서 AI를 사고 파트너로 만들�
 
 ## Quick Start
 
-**사전 요구사항**: Claude Code(v1.0.33 이상) 또는 Codex CLI plugin runtime, [Codex CLI](https://github.com/openai/codex). AGY CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider로 사용할 때만 필요하며, `agy --version`이 동작하도록 설치되어 있어야 합니다.
+**사전 요구사항**: Claude Code(v1.0.33 이상) 또는 Codex CLI plugin runtime. 기본 `same-host-native-first` 위임에서는 host와 provider가 같을 때 host의 native agent를 사용하므로, 위임만을 위한 별도 provider CLI는 필요하지 않습니다. Cross-provider/headless 실행, `external-only` opt-out, native capability 부재처럼 external lane을 사용할 때만 대상 provider CLI가 필요합니다. AGY는 external provider이므로 선택한 경우 `agy --version`이 동작해야 합니다.
 
 기존 `/mst:gemini`, `gemini`, `gemini-dev` 설정/세션 값은 한 릴리스 동안 deprecated alias로 읽고 AGY 경로로 정규화합니다. 새 설정과 문서는 `/mst:agy`, `agy`, `agy-dev`를 기준으로 작성하세요.
 
@@ -53,6 +53,14 @@ codex plugin add mst@gran-maestro
 ```
 
 설치 후 두 런타임은 같은 MST skill source를 사용합니다. Claude Code는 hooks/agents까지 등록하고, Codex는 hookless skill surface와 queue-driven supervision으로 같은 plan → request → approve → review → accept 흐름을 제공합니다. 기본 설정은 Codex-primary이며, Claude provider는 Claude 계열 preset 또는 `claude-dev` 배정으로 opt-in합니다.
+
+### Same-host native-first 위임
+
+기본값인 `delegation.transport_policy: "same-host-native-first"`에서는 Codex host → Codex provider가 Codex collaboration agent를, Claude Code host → Claude provider가 Claude Task/Agent를 먼저 사용합니다. Cross-provider, headless, `external-only`, native 비활성/scope 제외, capability unavailable 조건에서는 기존 managed wrapper의 external lane으로 전환하며, 대상 CLI까지 없으면 실행을 꾸며내지 않고 `blocked`(`missing_cli`)로 종료합니다.
+
+Native task가 생성되지 않았음이 확정된 경우에만 external fallback이 허용됩니다. Spawn 승인이나 provider task ID가 생긴 뒤 attach 실패·timeout·결과 불명·취소 미확인이 발생하면 상태를 `reconciling`으로 유지하고 새 native spawn이나 external 중복 실행을 차단합니다. Native task 자체의 실패도 terminal failure이며 transport fallback 사유가 아닙니다.
+
+기존 project-local `delegation.native_codex_subagents.enabled: false` opt-out은 migration/read alias로 보존됩니다. 새 설정의 canonical source는 `delegation.transport_policy`와 `delegation.native.{enabled,scope}`입니다. 자세한 설정과 migration 규칙은 [설정 관리](docs/configuration.md#delegation--agiledispatch)를 참고하세요.
 
 ```
 # 1. plan으로 상세화 → request로 스펙 생성

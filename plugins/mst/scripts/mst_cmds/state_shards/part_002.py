@@ -247,36 +247,23 @@ def _update_snapshot_history_head(state_base_dir: Path, session_id: str, snapsho
         updated["history"] = history
         _atomic_json_write(_snapshot_path_for_session(state_base_dir, session_id), updated)
 def _latest_dispatch_context_for_session(session_id: str) -> dict:
-    from scripts.mst_cmds.current_work_handoff import project_lifecycle_artifact_consumer_summary
+    from scripts.mst_cmds.current_work_handoff import project_lifecycle_artifacts_for_session
 
-    run_directory = _common.run_dir_no_create()
-    if not run_directory.is_dir():
+    lifecycle = project_lifecycle_artifacts_for_session(
+        _common.BASE_DIR,
+        session_id,
+        include_terminal=True,
+        limit=1,
+    )
+    if not lifecycle:
         return {}
-    candidates: list[tuple[str, dict]] = []
-    for path in sorted(run_directory.glob("*.json")):
-        payload = _common.load_json(path)
-        if not isinstance(payload, dict):
-            continue
-        if payload.get("mst_session_id") != session_id:
-            continue
-        task_id = str(payload.get("child_artifact_id") or payload.get("task_id") or path.stem).strip()
-        if not task_id:
-            continue
-        timestamp = str(payload.get("last_heartbeat") or payload.get("started_at") or "")
-        candidates.append(
-            (
-                timestamp,
-                {
-                    "child_artifact_id": task_id,
-                    "external_control_surface": "dispatch",
-                    "lifecycle_artifact_consumer": project_lifecycle_artifact_consumer_summary(payload),
-                },
-            )
-        )
-    if not candidates:
-        return {}
-    candidates.sort(key=lambda item: item[0])
-    return candidates[-1][1]
+    summary = lifecycle[0]
+    return {
+        "child_artifact_id": str(summary.get("task_id") or ""),
+        "external_control_surface": "dispatch",
+        "lifecycle_artifact_consumer": summary,
+        "native_lifecycle": lifecycle,
+    }
 def _recover_rehydration_bundle(
     *,
     session_id: str,
@@ -342,6 +329,9 @@ def _recover_rehydration_bundle(
         "critical_blocker": blocker if isinstance(blocker, dict) and blocker.get("critical") is True else None,
         "flow_view": flow_view,
     }
+    dispatch_context = _latest_dispatch_context_for_session(session_id)
+    lifecycle_consumer = dispatch_context.get("lifecycle_artifact_consumer")
+    lifecycle_consumer = lifecycle_consumer if isinstance(lifecycle_consumer, dict) else None
     current_work_handoff = _recover_current_work_handoff(
         session_id=session_id,
         root_mst_id=root_mst_id,
@@ -349,6 +339,7 @@ def _recover_rehydration_bundle(
         next_skill=next_skill,
         history_head=history_result.tail_hash,
         snapshot=snapshot,
+        lifecycle_consumer=lifecycle_consumer,
     )
     context = {
         "mst_session_id": session_id,
@@ -358,6 +349,8 @@ def _recover_rehydration_bundle(
         "execution_flow_handoff": execution_flow_handoff,
         "current_work_handoff": current_work_handoff,
     }
+    if dispatch_context:
+        context.update(dispatch_context)
     context_delivery_order = ["core_rehydration", "execution_flow_handoff", "prompt_summary"]
     env = {"MST_SESSION_ID": session_id}
     if isinstance(snapshot, dict) and snapshot.get("auto") is True:
@@ -418,7 +411,6 @@ def _recover_rehydration_bundle(
         "recovery_fingerprint": recovery_fingerprint,
         "created_new_session": False,
     }
-    dispatch_context = _latest_dispatch_context_for_session(session_id)
     if dispatch_context:
         envelope.update(dispatch_context)
     return envelope
@@ -430,6 +422,7 @@ def _recover_current_work_handoff(
     next_skill: dict,
     history_head: str,
     snapshot: Optional[dict],
+    lifecycle_consumer: Optional[dict] = None,
 ) -> dict:
     from scripts.mst_cmds.current_work_handoff import project_current_work_handoff
 
@@ -460,8 +453,7 @@ def _recover_current_work_handoff(
         command_hint = f"{command_hint} {next_source}"
     if command_hint and auto:
         command_hint = f"{command_hint} -a"
-    return project_current_work_handoff(
-        {
+    projection_context = {
             "schema_version": 1,
             "mst_session_id": session_id,
             "canonical_mst_session_id": session_id,
@@ -506,7 +498,9 @@ def _recover_current_work_handoff(
                 "writers": [],
             },
         }
-    )
+    if isinstance(lifecycle_consumer, dict):
+        projection_context["lifecycle_artifact_consumer"] = lifecycle_consumer
+    return project_current_work_handoff(projection_context)
 def _structured_legacy_alias_conflict(session_id: str) -> Optional[dict]:
     diagnostics = _common.legacy_session_diagnostics()
     snapshot_alias = diagnostics.get("MST_SNAPSHOT_SESSION_ID")

@@ -36,7 +36,7 @@ Text-only agreement leaves gaps unchecked — screens are visualized instantly w
 
 ## Quick Start
 
-**Prerequisites**: Claude Code (v1.0.33 or later) or the Codex CLI plugin runtime, plus [Codex CLI](https://github.com/openai/codex). AGY CLI is only needed when you opt into the frontend/UI or large-context helper provider, and `agy --version` must work on PATH.
+**Prerequisites**: Claude Code (v1.0.33 or later) or the Codex CLI plugin runtime. With the default `same-host-native-first` delegation policy, a matching host and provider use the host's native agents, so no separate provider CLI is required just for delegation. Install the target provider CLI only for the external lane, such as cross-provider/headless execution, the `external-only` opt-out, or unavailable native capability. AGY is an external provider, so `agy --version` must work when you select it.
 
 Existing `/mst:gemini`, `gemini`, and `gemini-dev` settings/session values are read as deprecated aliases for one release and normalized to the AGY path. New configuration and docs should use `/mst:agy`, `agy`, and `agy-dev`.
 
@@ -53,6 +53,14 @@ codex plugin add mst@gran-maestro
 ```
 
 After installation, both runtimes use the same MST skill source. Claude Code registers hooks and agents as well; Codex exposes the hookless skill surface and uses queue-driven supervision for the same plan → request → approve → review → accept workflow. Defaults are Codex-primary; the Claude provider is opt-in through Claude presets or `claude-dev` assignment.
+
+### Same-host native-first delegation
+
+With the default `delegation.transport_policy: "same-host-native-first"`, Codex host → Codex provider uses Codex collaboration agents first, while Claude Code host → Claude provider uses Claude Task/Agent first. Cross-provider, headless, `external-only`, native-disabled/scope-excluded, and capability-unavailable routes use the existing managed-wrapper external lane. If its target CLI is also missing, the route fails closed as `blocked` (`missing_cli`) instead of pretending to execute.
+
+External fallback is allowed only when the host definitively reports that no native task was created. After a spawn acknowledgement or provider task ID, attach failure, timeout, an unknown result, or unconfirmed cancellation keeps the attempt in `reconciling` and blocks both a new native spawn and duplicate external execution. A native task failure is also a terminal failure, not a transport-fallback reason.
+
+An existing project-local `delegation.native_codex_subagents.enabled: false` opt-out remains supported as a migration/read alias. New configuration uses `delegation.transport_policy` and `delegation.native.{enabled,scope}` as the canonical source. See [Configuration Management](docs/configuration.en.md#delegation--agiledispatch) for settings and migration rules.
 
 ```
 # 1. Expand multiple requests as plans

@@ -42,3 +42,16 @@ def test_no_hardcoded_workflow_terminal_in_common() -> None:
     source = common_py.read_text(encoding="utf-8")
 
     assert 'WORKFLOW_TERMINAL_STATUSES = {"done"' not in source
+
+
+def test_execution_transitions_are_transport_neutral() -> None:
+    from scripts._state_schema import TRANSITIONS
+
+    execution_transitions = [row for row in TRANSITIONS if row.get("from") == "executing"]
+    contract = " ".join(
+        f"{row.get('condition', '')} {row.get('guard', '')}" for row in execution_transitions
+    )
+    assert "completion signal" in contract
+    assert "native completion_signal=completed" in contract
+    assert "external exit_code=0" in contract
+    assert all(not row["condition"].startswith("CLI exit code") for row in execution_transitions)

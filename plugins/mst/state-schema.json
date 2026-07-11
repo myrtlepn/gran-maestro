@@ -52,15 +52,15 @@
       "to": "executing"
     },
     {
-      "condition": "CLI exit code === 0",
+      "condition": "Delegation completion signal indicates success",
       "from": "executing",
-      "guard": "commit exists in worktree",
+      "guard": "commit exists in worktree and native completion_signal=completed or external exit_code=0",
       "to": "pre_check"
     },
     {
-      "condition": "CLI exit code !== 0 and retries exhausted",
+      "condition": "Delegation completion signal indicates definitive failure and retries exhausted",
       "from": "executing",
-      "guard": "retry_count >= max_retries",
+      "guard": "retry_count >= max_retries and outcome is not reconciling",
       "to": "failed"
     },
     {
@@ -118,7 +118,7 @@
     {
       "condition": "/mc invoked",
       "from": "*",
-      "guard": "CLI process receives SIGTERM",
+      "guard": "external process termination or native provider cancellation is confirmed",
       "to": "cancelled"
     },
     {

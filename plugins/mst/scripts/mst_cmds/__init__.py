@@ -58,6 +58,7 @@ from scripts.mst_cmds import resolver
 from scripts.mst_cmds import current_work_handoff
 from scripts.mst_cmds import host
 from scripts.mst_cmds import question
+from scripts.mst_cmds import native_delegation
 
 
 def set_base_dir(base_dir):
@@ -119,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     current_work_handoff.register(sub)
     host.register(sub)
     question.register(sub)
+    native_delegation.register(sub)
 
     return parser
 
@@ -288,6 +290,12 @@ DISPATCH = {
     ("skill", "build"): skill.cmd_skill_build,
     ("skill", "scaffold"): skill.cmd_skill_scaffold,
     ("dispatch", "build"): dispatch.cmd_dispatch_build,
+    ("dispatch", "authorize-external"): dispatch.cmd_dispatch_authorize_external,
+    ("dispatch", "validate-authorization"): dispatch.cmd_dispatch_validate_authorization,
+    ("dispatch", "claim-external"): dispatch.cmd_dispatch_claim_external,
+    ("dispatch", "run-external"): dispatch.cmd_dispatch_run_external,
+    ("dispatch", "heartbeat-external"): dispatch.cmd_dispatch_heartbeat_external,
+    ("dispatch", "finalize-external"): dispatch.cmd_dispatch_finalize_external,
     ("dispatch", "validate-worktree"): dispatch.cmd_dispatch_validate_worktree,
     ("dispatch", "preflight"): dispatch.cmd_dispatch_preflight,
     ("dispatch", "register"): dispatch.cmd_dispatch_register,
@@ -309,6 +317,19 @@ DISPATCH = {
     ("resolve-next-action", None): resolver.resolve_next_action,
     ("current-work-handoff", None): current_work_handoff.cmd_current_work_handoff,
     ("host", "context"): host.cmd_host_context,
+    ("delegation", "route"): native_delegation.cmd_delegation_route,
+    ("delegation", "capability"): native_delegation.cmd_delegation_capability,
+    ("delegation", "start"): native_delegation.cmd_delegation_start,
+    ("delegation", "claim-spawn"): native_delegation.cmd_delegation_claim_spawn,
+    ("delegation", "acknowledge"): native_delegation.cmd_delegation_acknowledge,
+    ("delegation", "attach"): native_delegation.cmd_delegation_attach,
+    ("delegation", "heartbeat"): native_delegation.cmd_delegation_heartbeat,
+    ("delegation", "complete"): native_delegation.cmd_delegation_complete,
+    ("delegation", "fallback"): native_delegation.cmd_delegation_fallback,
+    ("delegation", "cancel"): native_delegation.cmd_delegation_cancel,
+    ("delegation", "recover"): native_delegation.cmd_delegation_recover,
+    ("delegation", "reconcile-action"): native_delegation.cmd_delegation_reconcile_action,
+    ("delegation", "external-run"): native_delegation.cmd_delegation_external_run,
     ("question", "prepare"): question.cmd_question_prepare,
     ("question", "pending"): question.cmd_question_pending,
     ("question", "answer"): question.cmd_question_answer,

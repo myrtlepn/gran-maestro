@@ -1,4 +1,4 @@
-import { setRegistry, PLUGIN_ROOT } from "../config.ts";
+import { PLUGIN_ROOT, setRegistry } from "../config.ts";
 import { projectConfigApi } from "./config.ts";
 
 const TEST_PROJECT_ID = "proj-config-test";
@@ -44,56 +44,140 @@ function setupRegistry(baseDir: string): void {
   });
 }
 
-runSerialTest("PUT /api/config stores overrides in config.json and merged result in config.resolved.json", async () => {
-  const baseDir = await Deno.makeTempDir({ prefix: "config-route-test-" });
+runSerialTest(
+  "PUT /api/config stores overrides in config.json and merged result in config.resolved.json",
+  async () => {
+    const baseDir = await Deno.makeTempDir({ prefix: "config-route-test-" });
 
-  await writeJson(`${baseDir}/config.json`, {
-    code_review: { enabled: false },
-  });
-
-  setupRegistry(baseDir);
-
-  try {
-    const nextConfig = {
-      stitch: { enabled: false },
-      code_review: { enabled: true },
-      plan_review: { enabled: false },
-    };
-
-    const response = await projectConfigApi.request("http://localhost/config", {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(nextConfig),
+    await writeJson(`${baseDir}/config.json`, {
+      code_review: { enabled: false },
     });
 
-    assertEquals(response.status, 200);
-    const payload = await response.json() as { ok: boolean };
-    assertEquals(payload.ok, true);
+    setupRegistry(baseDir);
 
-    const writtenOverrides = await readJson<Record<string, unknown>>(`${baseDir}/config.json`);
-    const resolved = await readJson<Record<string, unknown>>(`${baseDir}/config.resolved.json`);
-    const defaults = await readJson<Record<string, unknown>>(`${PLUGIN_ROOT}/templates/defaults/config.json`);
+    try {
+      const nextConfig = {
+        stitch: { enabled: false },
+        code_review: { enabled: true },
+        plan_review: { enabled: false },
+      };
 
-    assertEquals(writtenOverrides, {
-      stitch: { enabled: false },
-      plan_review: { enabled: false },
+      const response = await projectConfigApi.request(
+        "http://localhost/config",
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(nextConfig),
+        },
+      );
+
+      assertEquals(response.status, 200);
+      const payload = await response.json() as { ok: boolean };
+      assertEquals(payload.ok, true);
+
+      const writtenOverrides = await readJson<Record<string, unknown>>(
+        `${baseDir}/config.json`,
+      );
+      const resolved = await readJson<Record<string, unknown>>(
+        `${baseDir}/config.resolved.json`,
+      );
+      const defaults = await readJson<Record<string, unknown>>(
+        `${PLUGIN_ROOT}/templates/defaults/config.json`,
+      );
+
+      assertEquals(writtenOverrides, {
+        stitch: { enabled: false },
+        plan_review: { enabled: false },
+      });
+
+      assertEquals(getByPath(resolved, "stitch.enabled"), false);
+      assertEquals(getByPath(resolved, "code_review.enabled"), true);
+      assertEquals(getByPath(resolved, "plan_review.enabled"), false);
+
+      assertEquals(
+        getByPath(resolved, "workflow.default_agent"),
+        getByPath(defaults, "workflow.default_agent"),
+      );
+    } finally {
+      setRegistry({ projects: [] });
+      await Deno.remove(baseDir, { recursive: true });
+    }
+  },
+);
+
+runSerialTest(
+  "Settings API round-trips canonical native delegation edits",
+  async () => {
+    const baseDir = await Deno.makeTempDir({
+      prefix: "config-native-route-test-",
     });
+    setupRegistry(baseDir);
 
-    assertEquals(getByPath(resolved, "stitch.enabled"), false);
-    assertEquals(getByPath(resolved, "code_review.enabled"), true);
-    assertEquals(getByPath(resolved, "plan_review.enabled"), false);
+    try {
+      const nextConfig = {
+        delegation: {
+          transport_policy: "external-only",
+          native: {
+            enabled: false,
+            scope: "review-only",
+          },
+        },
+      };
+      const putResponse = await projectConfigApi.request(
+        "http://localhost/config",
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(nextConfig),
+        },
+      );
 
-    assertEquals(
-      getByPath(resolved, "workflow.default_agent"),
-      getByPath(defaults, "workflow.default_agent"),
-    );
-  } finally {
-    setRegistry({ projects: [] });
-    await Deno.remove(baseDir, { recursive: true });
-  }
-});
+      assertEquals(putResponse.status, 200);
+      assertEquals(await putResponse.json(), { ok: true });
+
+      const getResponse = await projectConfigApi.request(
+        "http://localhost/config",
+      );
+      assertEquals(getResponse.status, 200);
+      const roundTrip = await getResponse.json() as {
+        merged: Record<string, unknown>;
+        overrides: Record<string, unknown>;
+      };
+
+      for (const config of [roundTrip.merged, roundTrip.overrides]) {
+        assertEquals(
+          getByPath(config, "delegation.transport_policy"),
+          "external-only",
+        );
+        assertEquals(getByPath(config, "delegation.native.enabled"), false);
+        assertEquals(
+          getByPath(config, "delegation.native.scope"),
+          "review-only",
+        );
+      }
+
+      const resolved = await readJson<Record<string, unknown>>(
+        `${baseDir}/config.resolved.json`,
+      );
+      assertEquals(
+        getByPath(resolved, "delegation.transport_policy"),
+        "external-only",
+      );
+      assertEquals(getByPath(resolved, "delegation.native.enabled"), false);
+      assertEquals(
+        getByPath(resolved, "delegation.native.scope"),
+        "review-only",
+      );
+    } finally {
+      setRegistry({ projects: [] });
+      await Deno.remove(baseDir, { recursive: true });
+    }
+  },
+);
 
 function getByPath(root: Record<string, unknown>, path: string): unknown {
   const keys = path.split(".");
@@ -112,7 +196,10 @@ function getByPath(root: Record<string, unknown>, path: string): unknown {
 function assertEquals(actual: unknown, expected: unknown): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
-      `Assertion failed: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `Assertion failed: expected ${JSON.stringify(expected)}, got ${
+        JSON.stringify(actual)
+      }`,
     );
   }
 }
+// deno test --allow-read --allow-write --allow-env --no-config src/routes/config.test.ts

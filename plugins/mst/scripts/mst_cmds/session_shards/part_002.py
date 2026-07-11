@@ -426,7 +426,20 @@ def cmd_session_inspect(args):
             return 1
         sj = load_json(sess_path)
         if sj:
-            print(json.dumps(sj, ensure_ascii=False, indent=2))
+            from scripts.mst_cmds.current_work_handoff import project_lifecycle_artifacts_for_session
+
+            payload = dict(sj)
+            lifecycle = project_lifecycle_artifacts_for_session(
+                _common.BASE_DIR,
+                parsed.mst_session_id,
+                include_terminal=True,
+            )
+            payload["native_lifecycle"] = {
+                "count": len(lifecycle),
+                "latest": lifecycle[0] if lifecycle else None,
+                "items": lifecycle,
+            }
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     sess_id = raw_session_id.upper()

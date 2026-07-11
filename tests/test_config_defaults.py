@@ -73,6 +73,9 @@ def test_codex_primary_defaults_do_not_require_claude_provider():
     assert defaults["agile"]["dispatch"]["provider"] == "codex"
     assert defaults["delegation"]["host"] == "auto"
     assert defaults["delegation"]["default_provider"] == "codex"
+    assert defaults["delegation"]["transport_policy"] == "same-host-native-first"
+    assert defaults["delegation"]["native"] == {"enabled": True, "scope": "all"}
+    assert "native_codex_subagents" not in defaults["delegation"]
 
     assignments = defaults["agent_assignments"]
     assert "docs" in assignments["codex-dev"]
@@ -97,6 +100,25 @@ def test_agy_is_canonical_provider_in_defaults():
     assert defaults["delegation"]["provider_priority"] == ["codex", "agy", "claude"]
     assert defaults["models"]["roles"]["developer"][1]["provider"] == "agy"
     assert defaults["models"]["roles"]["reviewer"][1]["provider"] == "agy"
+
+
+def test_native_delegation_setting_options_are_canonical():
+    options_path = REPO_ROOT / "templates" / "defaults" / "setting-options.json"
+    options = json.loads(options_path.read_text(encoding="utf-8"))
+
+    assert options["delegation.transport_policy"] == ["same-host-native-first", "external-only"]
+    assert "all" in options["delegation.native.scope"]
+    assert not any("native_codex_subagents" in key for key in options)
+
+
+def test_codex_primary_presets_use_canonical_native_first_policy():
+    preset_dir = REPO_ROOT / "templates" / "defaults" / "presets" / "provider"
+    for profile in ("budget", "efficient", "performance"):
+        preset = json.loads((preset_dir / f"codex-primary-{profile}.json").read_text(encoding="utf-8"))
+        delegation = preset["delegation"]
+        assert delegation["transport_policy"] == "same-host-native-first"
+        assert delegation["native"] == {"enabled": True, "scope": "all"}
+        assert "native_codex_subagents" not in delegation
 
 
 def test_resolve_model_normalizes_legacy_gemini_provider_to_agy():

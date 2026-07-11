@@ -5,6 +5,15 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react()],
+  esbuild: {
+    supported: {
+      // Lower template literals through esbuild instead of mutating emitted
+      // JavaScript text. This preserves cooked/raw string semantics while
+      // preventing vendor literal whitespace from landing at physical EOLs
+      // in committed production chunks (`git diff --check`).
+      'template-literal': false,
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

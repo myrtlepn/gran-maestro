@@ -41,14 +41,14 @@ export const TRANSITIONS = [
   {
     "from": "executing",
     "to": "pre_check",
-    "condition": "CLI exit code === 0",
-    "guard": "commit exists in worktree"
+    "condition": "Delegation completion signal indicates success",
+    "guard": "commit exists in worktree and native completion_signal=completed or external exit_code=0"
   },
   {
     "from": "executing",
     "to": "failed",
-    "condition": "CLI exit code !== 0 and retries exhausted",
-    "guard": "retry_count >= max_retries"
+    "condition": "Delegation completion signal indicates definitive failure and retries exhausted",
+    "guard": "retry_count >= max_retries and outcome is not reconciling"
   },
   {
     "from": "pre_check",
@@ -106,7 +106,7 @@ export const TRANSITIONS = [
     "from": "*",
     "to": "cancelled",
     "condition": "/mc invoked",
-    "guard": "CLI process receives SIGTERM"
+    "guard": "external process termination or native provider cancellation is confirmed"
   },
   {
     "from": "*",

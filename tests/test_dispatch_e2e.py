@@ -44,6 +44,17 @@ def _wait_for_file(path: Path, timeout_sec: float = 5.0) -> None:
     raise AssertionError(f"state file was not created in time: {path}")
 
 
+def _wait_for_phase(path: Path, phase: str, timeout_sec: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if path.exists():
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if state.get("phase") == phase:
+                return state
+        time.sleep(0.05)
+    raise AssertionError(f"state did not reach phase {phase}: {path}")
+
+
 def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
     workspace = tmp_path / "workspace"
     base = workspace / ".gran-maestro"
@@ -56,6 +67,7 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["MST_SESSION_ID"] = SESSION_ID
+    env["MST_HOST"] = "headless"
 
     task_id = "dispatch-e2e-task-001"
     prompt_file = workspace / "prompt.md"
@@ -95,7 +107,7 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
 
     try:
         _wait_for_file(state_file)
-        running_state = json.loads(state_file.read_text(encoding="utf-8"))
+        running_state = _wait_for_phase(state_file, "running")
         assert running_state.get("phase") == "running"
         assert running_state.get("mst_session_id") == SESSION_ID
         assert running_state.get("root_mst_id") == ROOT_MST_ID
@@ -165,7 +177,8 @@ def test_dispatch_e2e_build_register_heartbeat_list_kill_cycle(tmp_path):
         assert listed_after.returncode == 0, listed_after.stderr
         rows_after = json.loads(listed_after.stdout)
         by_task_after = {row["task_id"]: row for row in rows_after}
-        assert by_task_after[task_id]["status"] == "terminated"
+        assert by_task_after[task_id]["status"] == "cancelled"
+        assert terminated_state.get("completion_signal") == "process_cancelled"
 
         active_tasks = {row["task_id"] for row in rows_after if row.get("status") in {"running", "stale"}}
         assert task_id not in active_tasks

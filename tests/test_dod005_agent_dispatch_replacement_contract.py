@@ -55,15 +55,26 @@ def test_dod005_inventory_classifies_target_direct_cli_surfaces() -> None:
     assert any("agy --print" in line for line in inventory["skills/approve/SKILL.md"])
     assert any("codex exec" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
     assert any("agy --print" in line for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"])
+    assert any(
+        DIRECT_CLI_TOKENS[-1] in line
+        for line in inventory["scripts/mst_cmds/dispatch_shards/part_001.py"]
+    )
 
     approve_doc = _text("skills/approve/SKILL.md")
     request_doc = _text("skills/request/SKILL.md")
     dispatch_runner = _text("scripts/mst_cmds/dispatch_shards/part_001.py")
 
-    assert "`Skill` 호출은 직렬이므로 병렬 실행 시 CLI 직접 호출 필요" in approve_doc
+    assert "shared routing protocol" in approve_doc
+    assert "Same-host `native_candidate`" in approve_doc
+    assert "`route=external`일 때만" in approve_doc
     assert "`Skill(mst:agy)` 전환 불가" in approve_doc
     assert "직접 `codex exec` + master 커밋으로 전환한다" in request_doc
-    assert "dispatch build does not support provider 'claude'. Use Task-based claude dispatch." in dispatch_runner
+    assert "--permission-mode acceptEdits" in dispatch_runner
+    assert "dangerously-skip-permissions" not in "\n".join(
+        line
+        for line in dispatch_runner.splitlines()
+        if DIRECT_CLI_TOKENS[-1] in line or "permission-mode" in line
+    )
 
 
 def test_dod005_replacement_categories_are_explicit_in_scope_docs() -> None:

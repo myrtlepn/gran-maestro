@@ -75,6 +75,26 @@ def cmd_dispatch_register(args):
             getattr(args, "parent_session_id", None),
         ),
     }
+    if (
+        isinstance(existing_payload, dict)
+        and existing_payload.get("execution_transport") == "external"
+        and _safe_text(existing_payload.get("attempt_id")) == attempt_id
+    ):
+        for field in (
+            "execution_transport",
+            "route_reason",
+            "route_decision",
+            "route_fingerprint",
+            "prompt_file",
+            "prompt_hash",
+            "scope",
+            "read_only",
+            "worktree_guard",
+            "fallback_allowed",
+            "spawn_allowed",
+        ):
+            if field in existing_payload:
+                payload[field] = existing_payload[field]
     payload["provider_task_id"] = _safe_text(
         getattr(args, "provider_task_id", None) or os.environ.get("MST_PROVIDER_TASK_ID")
     )
@@ -332,16 +352,133 @@ def cmd_dispatch_kill(args):
 
     rows: list[dict]
     if args.stale:
-        rows = [row for row in _collect_dispatch_rows(stale_threshold) if row.get("status") == "stale"]
+        rows = [
+            row
+            for row in _collect_dispatch_rows(stale_threshold)
+            if row.get("status") in {"stale", "orphaned"}
+        ]
     else:
         state_path = _dispatch_state_path(str(args.task_id).strip())
         row = _build_status_row(state_path, stale_threshold, datetime.now(timezone.utc))
         rows = [row] if row is not None else []
 
     terminated = 0
+    cancel_requested = 0
+    reconcile_requested = 0
+    blocked = 0
     for row in rows:
         task_id = str(row.get("task_id", ""))
         pid = row.get("pid")
+        if row.get("execution_transport") == "native":
+            try:
+                if args.stale and row.get("status") == "orphaned":
+                    native_delegation_mod.recover_native_attempt(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        parent_heartbeat=str(row.get("parent_heartbeat") or "") or None,
+                        idempotency_key=f"dispatch-recover:{task_id}",
+                    )
+                    reconcile_requested += 1
+                else:
+                    native_delegation_mod.cancel_native_attempt(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        idempotency_key=f"dispatch-kill:{task_id}",
+                    )
+                    cancel_requested += 1
+            except native_delegation_mod.LifecycleConflict as exc:
+                print(f"[dispatch] warning: native cancel request failed for task '{task_id}' ({exc})", file=sys.stderr)
+            continue
+        if row.get("execution_transport") == "external" and row.get("external_claim_id"):
+            if signal_name == "KILL":
+                blocked += 1
+                print(
+                    f"[dispatch] warning: SIGKILL is unsafe for protected external task '{task_id}'; use TERM so the wrapper can stop and reap its provider group",
+                    file=sys.stderr,
+                )
+                continue
+            try:
+                cancelling = native_delegation_mod.request_external_cancel(
+                    base_dir=_common.BASE_DIR,
+                    task_id=task_id,
+                    expected_attempt_id=str(row.get("attempt_id") or ""),
+                    signal_name=signal_name,
+                    idempotency_key=f"dispatch-external-kill:{task_id}:{signal_name}",
+                )
+                pid_int = int(cancelling.get("pid"))
+                cancel_requested += 1
+                expected_start = str(cancelling.get("pid_start_time") or "")
+                observed_start = _process_start_time(pid_int)
+                if not expected_start:
+                    blocked += 1
+                    native_delegation_mod.mark_external_cancel_reconciling(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        reason="runner_start_identity_missing",
+                        idempotency_key=f"dispatch-external-identity-blocked:{task_id}:missing",
+                    )
+                    print(
+                        f"[dispatch] warning: external runner identity is not attributable for task '{task_id}'; cancellation remains pending reconciliation",
+                        file=sys.stderr,
+                    )
+                    continue
+                if not observed_start:
+                    reconciled = native_delegation_mod.reconcile_external_cancel_after_runner_loss(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        idempotency_key=f"dispatch-external-reconcile:{task_id}:{signal_name}",
+                    )
+                    if str(reconciled.get("phase") or "") in {"terminated", "done", "failed"}:
+                        terminated += 1
+                    else:
+                        reconcile_requested += 1
+                    continue
+                if expected_start != observed_start:
+                    blocked += 1
+                    native_delegation_mod.mark_external_cancel_reconciling(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        reason="runner_start_identity_mismatch",
+                        idempotency_key=f"dispatch-external-identity-blocked:{task_id}:mismatch",
+                    )
+                    print(
+                        f"[dispatch] warning: external runner PID identity changed for task '{task_id}'; cancellation remains pending reconciliation",
+                        file=sys.stderr,
+                    )
+                    continue
+                os.kill(pid_int, signal_value)
+                terminated += 1
+            except (TypeError, ValueError, native_delegation_mod.LifecycleConflict) as exc:
+                print(
+                    f"[dispatch] warning: external cancel request failed for task '{task_id}' ({exc})",
+                    file=sys.stderr,
+                )
+            except ProcessLookupError:
+                try:
+                    reconciled = native_delegation_mod.reconcile_external_cancel_after_runner_loss(
+                        base_dir=_common.BASE_DIR,
+                        task_id=task_id,
+                        expected_attempt_id=str(row.get("attempt_id") or ""),
+                        idempotency_key=f"dispatch-external-reconcile:{task_id}:{signal_name}",
+                    )
+                    if str(reconciled.get("phase") or "") in {"terminated", "done", "failed"}:
+                        terminated += 1
+                    else:
+                        reconcile_requested += 1
+                except native_delegation_mod.LifecycleConflict as exc:
+                    reconcile_requested += 1
+                    print(
+                        f"[dispatch] warning: external runner vanished and reconciliation is pending for task '{task_id}' ({exc})",
+                        file=sys.stderr,
+                    )
+            except Exception as exc:
+                print(f"[dispatch] warning: failed to signal task '{task_id}' ({exc})", file=sys.stderr)
+            continue
         try:
             pid_int = int(pid)
         except (TypeError, ValueError):
@@ -371,8 +508,18 @@ def cmd_dispatch_kill(args):
         except Exception as exc:
             print(f"[dispatch] warning: failed to update state for task '{task_id}' ({exc})", file=sys.stderr)
 
-    print(json.dumps({"terminated": terminated}, ensure_ascii=False))
-    return 0
+    print(
+        json.dumps(
+            {
+                "terminated": terminated,
+                "cancel_requested": cancel_requested,
+                "reconcile_requested": reconcile_requested,
+                "blocked": blocked,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 2 if blocked else 0
 def _dispatch_run_dir_no_create() -> Path:
     return _common.run_dir_no_create()
 def _cleanup_archive_dir(now: datetime) -> Path:
@@ -387,10 +534,15 @@ def _has_valid_started_by_pid(payload: dict) -> bool:
         return False
     return True
 def _cleanup_marker_reason(payload: dict, archive_after_seconds: int, now: datetime, include_legacy: bool) -> str | None:
-    if include_legacy and not _has_valid_started_by_pid(payload):
+    execution_transport = str(payload.get("execution_transport") or "external").strip().lower()
+    phase = str(payload.get("phase", "")).strip().lower()
+    if execution_transport == "native" and phase != "done":
+        # Native attempts deliberately have no process PID/started_by_pid.
+        # They are never legacy markers while provider reconciliation is live.
+        return None
+    if execution_transport != "native" and include_legacy and not _has_valid_started_by_pid(payload):
         return "legacy"
 
-    phase = str(payload.get("phase", "")).strip().lower()
     if phase != "done":
         return None
 
@@ -491,6 +643,80 @@ def register(subparsers):
     build.add_argument("--log-file", required=True)
     build.add_argument("--model")
     build.add_argument("--require-worktree", action="store_true")
+    build.add_argument("--expected-attempt-id")
+
+    authorize_external = dispatch_sub.add_parser("authorize-external")
+    authorize_external.add_argument("--provider", choices=["codex", "agy", "gemini", "claude"], required=True)
+    authorize_external.add_argument("--prompt-file", required=True)
+    authorize_external.add_argument("--task-id", required=True)
+    authorize_external.add_argument("--worktree-dir", required=True)
+    authorize_external.add_argument("--running-log-path")
+    authorize_external.add_argument("--trace-path")
+    authorize_external.add_argument("--output-path")
+    authorize_external.add_argument("--attempt-id")
+    authorize_external.add_argument("--idempotency-key", required=True)
+    authorize_external.add_argument("--model")
+    authorize_external.add_argument("--scope", default="implementation")
+    authorize_external.add_argument(
+        "--capability-status",
+        choices=sorted(native_delegation_mod.CAPABILITY_STATUSES),
+        default="unknown",
+    )
+    authorize_external.add_argument("--read-only", action="store_true")
+
+    validate_authorization = dispatch_sub.add_parser("validate-authorization")
+    validate_authorization.add_argument("--provider", choices=["codex", "claude"], required=True)
+    validate_authorization.add_argument("--prompt-file", required=True)
+    validate_authorization.add_argument("--task-id", required=True)
+    validate_authorization.add_argument("--worktree-dir", required=True)
+    validate_authorization.add_argument("--expected-attempt-id", required=True)
+    validate_authorization.add_argument("--model", required=True)
+
+    claim_external = dispatch_sub.add_parser("claim-external")
+    claim_external.add_argument("--provider", choices=["codex", "claude"], required=True)
+    claim_external.add_argument("--prompt-file", required=True)
+    claim_external.add_argument("--prompt-snapshot-path", required=True)
+    claim_external.add_argument("--task-id", required=True)
+    claim_external.add_argument("--worktree-dir", required=True)
+    claim_external.add_argument("--expected-attempt-id", required=True)
+    claim_external.add_argument("--model", required=True)
+    claim_external.add_argument("--scope", required=True)
+    claim_external.add_argument("--read-only", choices=["true", "false"], required=True)
+    claim_external.add_argument("--running-log-path", required=True)
+    claim_external.add_argument("--trace-path", required=True)
+    claim_external.add_argument("--output-path", required=True)
+    claim_external.add_argument("--pid", required=True)
+    claim_external.add_argument("--started-by-pid")
+    claim_external.add_argument("--idempotency-key", required=True)
+
+    run_external = dispatch_sub.add_parser("run-external")
+    run_external.add_argument("--task-id", required=True)
+    run_external.add_argument("--expected-attempt-id", required=True)
+    run_external.add_argument("--idempotency-key", required=True)
+    run_external.add_argument("--binary")
+    run_external.add_argument("--timeout", type=int)
+
+    heartbeat_external = dispatch_sub.add_parser("heartbeat-external")
+    heartbeat_external.add_argument("--task-id", required=True)
+    heartbeat_external.add_argument("--expected-attempt-id", required=True)
+    heartbeat_external.add_argument("--pid", required=True)
+    heartbeat_external.add_argument("--log-file", required=True)
+
+    finalize_external = dispatch_sub.add_parser("finalize-external")
+    finalize_external.add_argument("--task-id", required=True)
+    finalize_external.add_argument("--expected-attempt-id", required=True)
+    finalize_external.add_argument("--pid", required=True)
+    finalize_external.add_argument("--exit-code", required=True)
+    finalize_external.add_argument("--io-exit-code", required=True)
+    finalize_external.add_argument(
+        "--completion-signal",
+        choices=["process_exit", "process_timeout", "process_cancelled"],
+        required=True,
+    )
+    finalize_external.add_argument("--running-log-path", required=True)
+    finalize_external.add_argument("--trace-path", required=True)
+    finalize_external.add_argument("--output-path", required=True)
+    finalize_external.add_argument("--idempotency-key", required=True)
 
     validate_worktree = dispatch_sub.add_parser("validate-worktree")
     validate_worktree.add_argument("--worktree-dir", required=True)

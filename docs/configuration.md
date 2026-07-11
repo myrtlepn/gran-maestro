@@ -34,6 +34,7 @@ Gran Maestro 설정의 source of truth는 프로젝트 내부 `.gran-maestro/con
 - [hook](#hook)
 - [worktree](#worktree)
 - [retry](#retry)
+- [delegation / agile.dispatch](#delegation--agiledispatch)
 - [history / archive](#history--archive)
 - [discussion / ideation](#discussion--ideation)
 - [collaborative_debug](#collaborative_debug)
@@ -173,7 +174,7 @@ Git worktree 생성 및 관리 설정입니다.
 
 ## delegation / agile.dispatch
 
-Host와 provider를 분리해 위임 명령을 선택합니다. `host=auto`이면 `/mst:on`과 `mst.py host context`가 Codex 또는 Claude Code 런타임을 감지하고, provider는 실제 실행 CLI를 결정합니다.
+Host와 provider를 분리하고 중앙 route planner가 `native_candidate`, `external`, `blocked` 중 하나를 선택합니다. `host=auto`이면 `/mst:on`과 `mst.py host context`가 Codex 또는 Claude Code 런타임을 감지합니다. 기본 `same-host-native-first` 정책에서는 Codex/Codex와 Claude/Claude 조합이 host native agent를 우선하므로, 같은 host 위임만을 위한 별도 provider CLI가 필요하지 않습니다.
 
 호환성: 기존 `gemini`, `gemini-dev`, `gemini-reviewer` 설정 키와 세션 값은 한 릴리스 동안 AGY alias로 읽습니다. 새 config는 `agy`, `agy-dev`, `agy-reviewer`를 사용하세요.
 
@@ -181,11 +182,57 @@ Host와 provider를 분리해 위임 명령을 선택합니다. `host=auto`이�
 |----|--------|------|
 | `delegation.host` | `"auto"` | 위임 명령 선택 기준 host (`auto` / `codex` / `claude` / `headless`) |
 | `delegation.default_provider` | `"codex"` | Assigned Agent가 모호할 때 사용할 기본 provider |
-| `delegation.provider_priority` | `["codex","agy","claude"]` | fallback 또는 추천 순서 |
-| `delegation.native_codex_subagents.enabled` | `false` | Codex native subagent를 MST wrapper 대신 사용할지 여부 |
+| `delegation.provider_priority` | `["codex","agy","claude"]` | provider 선택 우선순위/추천 순서. 활성 attempt의 transport fail-closed 규칙을 덮어쓰지 않음 |
+| `delegation.transport_policy` | `"same-host-native-first"` | `same-host-native-first` 또는 native를 건너뛰는 `external-only` |
+| `delegation.native.enabled` | `true` | same-host native candidate 허용 여부 |
+| `delegation.native.scope` | `"all"` | native 허용 scope (`all`, `review-and-exploration-only`, `review-only`, `exploration-only`, `implementation-only`, `none`) |
 | `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
-Codex provider는 `mst.py run --provider codex -- codex exec ...`로 stdout/stderr/exit code를 수집합니다. Claude provider는 `/mst:claude` managed path를 통해서만 사용합니다.
+### Route 선택과 CLI 요구사항
+
+| 조건 | Route | 동작 |
+|------|-------|------|
+| Codex host → Codex provider 또는 Claude host → Claude provider이고 policy/scope가 허용됨 | `native_candidate` | host capability handshake 뒤 Codex collaboration 또는 Claude Task/Agent 사용 |
+| Cross-provider, headless, `external-only`, `native.enabled=false`, scope 제외, capability unavailable | `external` | 기존 provider managed wrapper 사용. 대상 provider CLI 필요 |
+| External 조건인데 대상 provider CLI도 없음 | `blocked` | `missing_cli` structured non-success와 exit code 2. 실행/fallback을 꾸며내지 않음 |
+
+`capability_status=unknown`인 same-host route는 곧바로 external로 내리지 않고 native capability handshake를 요구합니다. Native spawn이 `definitive_not_created`로 확정된 경우에만 같은 provider의 external wrapper fallback을 허용합니다. Spawn 승인 또는 provider task ID 이후 attach 실패·timeout·결과 불명·취소 미확인은 `reconciling`으로 남기고 새 native spawn과 external 중복 실행을 모두 차단합니다. Native task 자체의 실패도 terminal failure이며 transport fallback 사유가 아닙니다.
+
+Route planner는 transport를 실행하지 않고 JSON 결정만 반환합니다.
+
+```bash
+python3 scripts/mst.py delegation route --host codex --provider codex --capability-status available --pretty
+python3 scripts/mst.py delegation route --host claude --provider codex --capability-status unavailable --pretty
+```
+
+`delegation start/claim-spawn/acknowledge/attach/heartbeat/complete/fallback/cancel/recover/external-run`은 host bridge가 native/external lifecycle evidence를 기록할 때 사용하는 관리용 CLI입니다. `start`는 native spawn 권한을 주지 않으며, 원자적 `claim-spawn`의 단일 승자가 받은 private one-shot token file로만 host spawn 결과를 `acknowledge`할 수 있습니다. raw token은 JSON/argv에 노출되지 않습니다. `external-run`은 중앙 route가 미리 저장한 external attempt와 필수 `--expected-attempt-id`가 있어야 하며, 자체적으로 새 external attempt를 만들지 않습니다. `dispatch build`가 만든 Codex/Claude wrapper는 `dispatch run-external` 단일 감독자만 호출합니다. 감독자는 authorization을 소비한 뒤 side effect가 없는 anonymous exec gate의 PID·PGID·start identity를 CAS로 attach하고, 같은 task lock에서 취소보다 먼저 exec release가 확정된 경우에만 실제 provider를 시작합니다. 이어 claim 시점에 캡처한 정확한 prompt byte 전달, provider process group의 bounded TERM→KILL 회수, fresh single-link inode로 claim해 계속 보유한 non-following output descriptor를 통한 결과 게시, terminal finalize를 한 경계에서 수행합니다. prompt snapshot은 감사용이며 provider 입력으로 다시 열지 않고, output pathname도 provider 실행 뒤 쓰기 위해 다시 열지 않습니다. prompt/snapshot/running/trace/output 상호 alias와 MST state·lock·history reserved path alias는 provider spawn 전에 실패합니다. 분리형 `claim-external`/`heartbeat-external`/`finalize-external` CLI는 `central_runner_required`로 차단됩니다. 자동 authorization을 사용하는 호환 호출도 canonical `MST_SESSION_ID`가 없으면 command 생성 단계에서 실패합니다. `blocked`나 `reconciling` 상태에서 사용자가 별도 wrapper를 직접 재실행하면 중복 side effect가 생길 수 있으므로, provider 상태를 reconcile한 뒤 기존 attempt를 이어가야 합니다.
+
+### Canonical 설정과 legacy opt-out migration
+
+새 프로젝트의 canonical 설정은 다음과 같습니다.
+
+```json
+{
+  "delegation": {
+    "host": "auto",
+    "transport_policy": "same-host-native-first",
+    "native": {
+      "enabled": true,
+      "scope": "all"
+    }
+  }
+}
+```
+
+Native 위임을 명시적으로 끄고 기존 wrapper만 사용하려면 `transport_policy: "external-only"`와 `native.enabled: false`를 함께 설정하세요. 이 opt-out에서는 대상 provider CLI가 없으면 route가 `blocked`됩니다.
+
+기존 project-local `delegation.native_codex_subagents`는 한 릴리스 동안 migration/read alias로 지원합니다. 예전 `enabled: false`는 `transport_policy: "external-only"`와 `native.enabled: false`로, legacy `scope`는 `native.scope`로 보존됩니다. `transport_policy` 또는 `native.enabled`를 명시한 canonical 값과 legacy 값이 충돌하면 canonical 값이 우선하고 warning을 출력합니다.
+
+```bash
+python3 scripts/mst.py config migrate --apply
+```
+
+Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도 결과가 바뀌지 않습니다. 새 config에는 `native_codex_subagents`를 추가하지 마세요.
 
 ---
 

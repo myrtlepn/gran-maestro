@@ -40,50 +40,34 @@ def test_dispatch_list_and_kill_stale(tmp_path):
         stale_task = "task-stale"
         active_task = "task-active"
 
-        stale_reg = _run_mst(
-            workspace,
-            "dispatch",
-            "register",
-            "--task-id",
-            stale_task,
-            "--pid",
-            str(stale_proc.pid),
-            "--provider",
-            "codex",
-            "--model",
-            "gpt-test",
-            "--worktree-dir",
-            str(workspace),
-        )
-        assert stale_reg.returncode == 0, stale_reg.stderr
-
-        active_reg = _run_mst(
-            workspace,
-            "dispatch",
-            "register",
-            "--task-id",
-            active_task,
-            "--pid",
-            str(active_proc.pid),
-            "--provider",
-            "gemini",
-            "--model",
-            "gemini-test",
-            "--worktree-dir",
-            str(workspace),
-        )
-        assert active_reg.returncode == 0, active_reg.stderr
-
         stale_path = run_dir / f"{stale_task}.json"
         active_path = run_dir / f"{active_task}.json"
-
-        stale_data = json.loads(stale_path.read_text(encoding="utf-8"))
-        stale_data["last_heartbeat"] = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
-        _write_state(stale_path, stale_data)
-
-        active_data = json.loads(active_path.read_text(encoding="utf-8"))
-        active_data["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-        _write_state(active_path, active_data)
+        _write_state(
+            stale_path,
+            {
+                "task_id": stale_task,
+                "pid": stale_proc.pid,
+                "provider": "codex",
+                "model": "gpt-test",
+                "phase": "running",
+                "status": "running",
+                "worktree_dir": str(workspace),
+                "last_heartbeat": (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
+            },
+        )
+        _write_state(
+            active_path,
+            {
+                "task_id": active_task,
+                "pid": active_proc.pid,
+                "provider": "agy",
+                "model": "agy-test",
+                "phase": "running",
+                "status": "running",
+                "worktree_dir": str(workspace),
+                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
         started = time.monotonic()
         listed = _run_mst(
@@ -135,3 +119,120 @@ def test_dispatch_list_and_kill_stale(tmp_path):
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=2)
+
+
+def test_dispatch_lists_and_cancels_pidless_native_without_os_signal(tmp_path):
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / ".gran-maestro" / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    task_id = "native-stale"
+    state_path = run_dir / f"{task_id}.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "attempt_id": "native-a1",
+                "execution_transport": "native",
+                "provider": "codex",
+                "provider_task_id": "provider-native-1",
+                "phase": "running",
+                "status": "running",
+                "pid": None,
+                "last_heartbeat": (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
+                "idempotency_keys": {},
+                "lifecycle_events": [],
+                "attempts": [],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    listed = _run_mst(
+        workspace,
+        "dispatch",
+        "list",
+        "--format",
+        "json",
+        "--stale-threshold",
+        "60",
+    )
+    assert listed.returncode == 0, listed.stderr
+    row = json.loads(listed.stdout)[0]
+    assert row["status"] == "orphaned"
+    assert row["execution_transport"] == "native"
+    assert row["provider_task_id"] == "provider-native-1"
+    assert row["pid"] is None
+
+    cancelled = _run_mst(workspace, "dispatch", "kill", "--task-id", task_id)
+    assert cancelled.returncode == 0, cancelled.stderr
+    summary = json.loads(cancelled.stdout)
+    assert summary == {
+        "terminated": 0,
+        "cancel_requested": 1,
+        "reconcile_requested": 0,
+        "blocked": 0,
+    }
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["phase"] == "reconciling"
+    assert state["cancel_status"] == "unconfirmed"
+    assert state["os_signal_attempted"] is False
+
+
+def test_dispatch_native_status_uses_provider_state_and_parent_heartbeat(tmp_path):
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / ".gran-maestro" / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+
+    def write(task_id: str, *, provider_state: str, parent_age: int) -> None:
+        _write_state(
+            run_dir / f"{task_id}.json",
+            {
+                "task_id": task_id,
+                "attempt_id": f"{task_id}-a1",
+                "execution_transport": "native",
+                "provider": "codex",
+                "provider_task_id": f"provider-{task_id}",
+                "provider_state": provider_state,
+                "phase": "running",
+                "status": "running",
+                "pid": None,
+                "last_heartbeat": (now - timedelta(seconds=120)).isoformat(),
+                "parent_heartbeat": (now - timedelta(seconds=parent_age)).isoformat(),
+            },
+        )
+
+    write("native-provider-live", provider_state="running", parent_age=5)
+    write("native-orphan", provider_state="running", parent_age=120)
+    write("native-unknown", provider_state="unknown", parent_age=5)
+
+    listed = _run_mst(
+        workspace,
+        "dispatch",
+        "list",
+        "--format",
+        "json",
+        "--stale-threshold",
+        "60",
+    )
+    assert listed.returncode == 0, listed.stderr
+    rows = {row["task_id"]: row for row in json.loads(listed.stdout)}
+    assert rows["native-provider-live"]["status"] == "running"
+    assert rows["native-orphan"]["status"] == "orphaned"
+    assert rows["native-unknown"]["status"] == "reconciling"
+    assert rows["native-orphan"]["reconciliation_required"] is True
+
+    reconciled = _run_mst(
+        workspace,
+        "dispatch",
+        "kill",
+        "--stale",
+        "--stale-threshold",
+        "60",
+    )
+    assert reconciled.returncode == 0, reconciled.stderr
+    assert json.loads(reconciled.stdout)["reconcile_requested"] == 1
+    orphan_state = json.loads((run_dir / "native-orphan.json").read_text(encoding="utf-8"))
+    assert orphan_state["reconciliation_action"]["provider_task_id"] == "provider-native-orphan"
+    assert orphan_state["reconciliation_action"]["status"] == "pending"

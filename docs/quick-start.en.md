@@ -8,45 +8,51 @@
 
 > **Run from your project directory.** Gran Maestro analyzes your existing codebase to operate. Launch Claude Code or the Codex CLI plugin runtime from your project root before using the plugin.
 
-Gran Maestro defaults to Codex-primary. Codex CLI is required; AGY CLI is only needed when you opt into the frontend/UI or large-context helper provider.
+Gran Maestro defaults to Codex-primary and `same-host-native-first`. Codex host → Codex provider and Claude Code host → Claude provider delegation use the host's native agents first, so no separate provider CLI is required solely for same-host delegation. The Codex runtime is still required to run the Codex plugin itself.
 
 Existing `/mst:gemini`, `gemini`, and `gemini-dev` values remain deprecated aliases for one release, but new configuration should use `/mst:agy`, `agy`, and `agy-dev`.
 
+If you plan to use an external lane, install and authenticate only the CLI for that provider.
+
 ```bash
-# Codex CLI
+# Optional: external Codex lane
 npm install -g @openai/codex
 
-# AGY CLI
-# Install Antigravity/AGY CLI, then confirm agy --version works.
+# Optional: the AGY provider always uses the external lane
+# Install Antigravity/AGY CLI, then verify it.
 agy --version
 ```
 
-**Gran Maestro calls each CLI directly.** It does not proxy through another server or intercept APIs; it behaves exactly like running the commands yourself in terminal. Authentication and data only pass between each CLI and its service, so trusting Codex/AGY is sufficient.
+### Native-first and external lanes
 
-### CLI settings are applied as-is
+| Example | Default route | Additional provider CLI |
+|---------|---------------|-------------------------|
+| Codex host → Codex provider | Codex collaboration native agent | not required for same-host delegation alone |
+| Claude Code host → Claude provider | Claude Task/Agent | not required for same-host delegation alone |
+| Codex host → Claude provider or Claude Code host → Codex provider | managed external wrapper | target provider CLI required |
+| headless, `external-only`, native disabled/scope excluded/capability unavailable | managed external wrapper | target provider CLI required |
+| AGY provider | managed external wrapper | AGY CLI required |
 
-Because Gran Maestro uses the CLI capabilities directly, your per-agent configuration also applies identically while running Gran Maestro.
+If an external route cannot find its target CLI, it fails closed as `blocked` (`missing_cli`). After a native spawn, external fallback is allowed only when the host definitively reports that no task was created. Attach failure, timeout, an unknown result, or unconfirmed cancellation after spawn acknowledgement/provider task ID leaves the attempt in `reconciling` and blocks both a new native spawn and duplicate external execution. A native task failure is not automatically rerun on another transport.
 
-- **Codex**: agent instruction files such as `AGENTS.md`, `CODEX.md` in the project root are applied when Codex is invoked.
-- **AGY**: project instruction files and local settings supported by AGY/Antigravity CLI are applied when AGY is invoked.
+An existing project-local `delegation.native_codex_subagents.enabled: false` remains a supported opt-out and can be migrated to the canonical settings. To use only the external wrapper in new configuration, set:
 
-When you align agent-specific settings (model configuration, system prompts, forbidden behaviors), consistency and quality remain stable inside Gran Maestro.
-
-### Run each CLI once directly after installation
-
-After installation, run each CLI directly at least once. The first run starts an interactive auth flow (login/API key registration), and if this is incomplete, Gran Maestro may fail in non-interactive mode when invoking the CLI.
-
-```bash
-codex   # first run: complete auth flow
-agy  # first run: complete AGY auth flow
+```
+/mst:settings delegation.transport_policy external-only
+/mst:settings delegation.native.enabled false
 ```
 
-Authentication methods:
+### If you selected an external CLI, run it once
 
-- Codex: interactive login on first run or set `OPENAI_API_KEY` environment variable
-- AGY: complete the login or API-key setup required by your AGY CLI
+Run each CLI selected for an external lane once to finish authentication. Skip this step if you use only native same-host routes.
 
-> **Tip.** After install, verify PATH registration with `which codex` and `which agy`.
+```bash
+codex   # only for an external Codex lane
+claude  # only for an external Claude lane
+agy     # when using the AGY provider
+```
+
+The external wrapper does not use a proxy server; it uses the target CLI's authentication and local settings directly. Codex instruction files such as project-root `AGENTS.md`/`CODEX.md` and project settings supported by AGY or Claude CLI also apply to that external execution. Verify that each selected CLI is on PATH with the corresponding `which codex`, `which claude`, or `which agy` command.
 
 ## 1. Installation
 

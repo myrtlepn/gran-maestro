@@ -24,6 +24,7 @@ You can also edit it through the dashboard **Settings** tab with a web UI.
 - [hook](#hook)
 - [worktree](#worktree)
 - [retry](#retry)
+- [delegation / agile.dispatch](#delegation--agiledispatch)
 - [history / archive](#history--archive)
 - [discussion / ideation](#discussion--ideation)
 - [collaborative_debug](#collaborative-debug)
@@ -128,7 +129,7 @@ Controls retry behavior on failure.
 
 ## delegation / agile.dispatch
 
-Separates runtime host from execution provider. With `host=auto`, `/mst:on` and `mst.py host context` detect Codex or Claude Code; provider selects the actual delegated CLI.
+Separates runtime host from execution provider, then uses a central route planner to select `native_candidate`, `external`, or `blocked`. With `host=auto`, `/mst:on` and `mst.py host context` detect Codex or Claude Code. Under the default `same-host-native-first` policy, Codex/Codex and Claude/Claude use host-native agents first, so no separate provider CLI is required solely for same-host delegation.
 
 Compatibility: existing `gemini`, `gemini-dev`, and `gemini-reviewer` config keys/session values are read as AGY aliases for one release. New config should use `agy`, `agy-dev`, and `agy-reviewer`.
 
@@ -136,11 +137,57 @@ Compatibility: existing `gemini`, `gemini-dev`, and `gemini-reviewer` config key
 |----|--------|------|
 | `delegation.host` | `"auto"` | host used to choose delegation commands (`auto` / `codex` / `claude` / `headless`) |
 | `delegation.default_provider` | `"codex"` | default provider when the assigned agent is ambiguous |
-| `delegation.provider_priority` | `["codex","agy","claude"]` | fallback or recommendation order |
-| `delegation.native_codex_subagents.enabled` | `false` | whether Codex native subagents replace the MST wrapper |
+| `delegation.provider_priority` | `["codex","agy","claude"]` | provider selection/recommendation order; does not override fail-closed transport rules for an active attempt |
+| `delegation.transport_policy` | `"same-host-native-first"` | `same-host-native-first` or `external-only`, which skips native routing |
+| `delegation.native.enabled` | `true` | whether same-host native candidates are allowed |
+| `delegation.native.scope` | `"all"` | native scope (`all`, `review-and-exploration-only`, `review-only`, `exploration-only`, `implementation-only`, `none`) |
 | `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
-The Codex provider uses `mst.py run --provider codex -- codex exec ...` so stdout, stderr, exit code, and lifecycle logs return to the parent. The Claude provider remains available through `/mst:claude` managed delegation.
+### Route selection and CLI requirements
+
+| Condition | Route | Behavior |
+|-----------|-------|----------|
+| Codex host → Codex provider or Claude host → Claude provider with policy/scope enabled | `native_candidate` | use Codex collaboration or Claude Task/Agent after the host capability handshake |
+| Cross-provider, headless, `external-only`, `native.enabled=false`, excluded scope, or unavailable capability | `external` | use the existing provider managed wrapper; target provider CLI required |
+| External condition and target provider CLI is also missing | `blocked` | `missing_cli` structured non-success with exit code 2; no pretend execution/fallback |
+
+For a same-host route with `capability_status=unknown`, the planner requires a native capability handshake instead of immediately selecting external. Same-provider external-wrapper fallback is allowed only when native spawn is confirmed as `definitive_not_created`. After spawn acknowledgement or a provider task ID, attach failure, timeout, an unknown result, or unconfirmed cancellation keeps the attempt in `reconciling` and blocks both a new native spawn and duplicate external execution. A native task failure is terminal and is not a transport-fallback reason.
+
+The route planner returns only a JSON decision; it does not execute either transport.
+
+```bash
+python3 scripts/mst.py delegation route --host codex --provider codex --capability-status available --pretty
+python3 scripts/mst.py delegation route --host claude --provider codex --capability-status unavailable --pretty
+```
+
+`delegation start/claim-spawn/acknowledge/attach/heartbeat/complete/fallback/cancel/recover/external-run` are management commands used by the host bridge to record native/external lifecycle evidence. `start` does not grant native spawn authority: only the single winner of the atomic `claim-spawn` call may acknowledge the host result through its private one-shot token file. The raw token is not exposed in JSON or argv. `external-run` requires a centrally persisted external attempt and the matching `--expected-attempt-id`; it never creates a new external attempt by itself. Codex/Claude wrappers produced by `dispatch build` invoke only the single `dispatch run-external` supervisor. After consuming authorization, that supervisor starts a side-effect-free anonymous exec gate, CAS-attaches its PID, PGID, and start identity, and releases the actual provider only when exec authorization linearizes before cancellation under the same task lock. It then delivers the exact prompt bytes captured at claim time, performs bounded TERM-to-KILL provider-group cleanup, publishes output through a non-following descriptor retained from a fresh single-link claim inode, and finalizes terminal evidence in one ownership boundary. The prompt snapshot is audit-only and is never reopened as provider input, and the output pathname is not reopened for writing after provider execution. Prompt/snapshot/running/trace/output aliases and aliases into reserved MST state, lock, or history paths fail before provider spawn. Split `claim-external`/`heartbeat-external`/`finalize-external` CLI calls fail with `central_runner_required`. Compatibility calls that use automatic authorization fail during command construction when no canonical `MST_SESSION_ID` exists. Manually starting another wrapper while an attempt is `blocked` or `reconciling` can duplicate side effects; reconcile provider state and continue the existing attempt instead.
+
+### Canonical configuration and legacy opt-out migration
+
+New projects use this canonical configuration:
+
+```json
+{
+  "delegation": {
+    "host": "auto",
+    "transport_policy": "same-host-native-first",
+    "native": {
+      "enabled": true,
+      "scope": "all"
+    }
+  }
+}
+```
+
+To explicitly disable native delegation and use only the existing wrapper, set both `transport_policy: "external-only"` and `native.enabled: false`. Under this opt-out, the route is `blocked` if the target provider CLI is absent.
+
+Existing project-local `delegation.native_codex_subagents` remains supported for one release as a migration/read alias. Legacy `enabled: false` is preserved as `transport_policy: "external-only"` plus `native.enabled: false`, and legacy `scope` becomes `native.scope`. If legacy values conflict with explicit canonical `transport_policy` or `native.enabled` values, the canonical values win and a warning is emitted.
+
+```bash
+python3 scripts/mst.py config migrate --apply
+```
+
+Migration replaces the legacy key with the canonical structure and is idempotent. Do not add `native_codex_subagents` to new configuration.
 
 ---
 

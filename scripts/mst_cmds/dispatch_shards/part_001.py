@@ -17,8 +17,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import cleanup as cleanup_mod
+from scripts.mst_cmds import host as host_mod
 from scripts.mst_cmds import resolve_model as resolve_model_mod
 from scripts.mst_cmds import session as session_mod
+from scripts.mst_cmds import native_delegation as native_delegation_mod
 from scripts.mst_cmds._common import (
     _parse_utc_datetime,
     _plugin_root,
@@ -33,6 +35,7 @@ _DELEGATE_MONITOR_KEY = "delegate_monitor"
 _DELEGATE_EVENT_TTL = timedelta(minutes=10)
 _DELEGATE_EVENT_COOLDOWN = timedelta(minutes=2)
 _DELEGATE_TAIL_BYTES = 2048
+_PERSISTED_EXTERNAL_AUTH_PROVIDERS = {"codex", "claude"}
 _DELEGATE_ALLOWED_ACTIONS = ["observe", "wait", "mark_blocked", "terminate_gracefully"]
 _DELEGATE_FORBIDDEN_REASONS = [
     "stdin_write_disallowed",
@@ -67,12 +70,25 @@ def _process_start_time(pid: int) -> str:
     try:
         text = stat_path.read_text(encoding="utf-8")
     except OSError:
+        text = ""
+    if text:
+        parts = text.rsplit(") ", 1)
+        if len(parts) == 2:
+            fields = parts[1].split()
+            if len(fields) > 19:
+                return "proc:" + fields[19]
+    try:
+        observed = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
         return ""
-    parts = text.rsplit(") ", 1)
-    if len(parts) != 2:
-        return ""
-    fields = parts[1].split()
-    return fields[19] if len(fields) > 19 else ""
+    value = observed.stdout.strip() if observed.returncode == 0 else ""
+    return "ps:" + value if value else ""
 def _pid_is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -132,15 +148,6 @@ _LIFECYCLE_ATTEMPT_FIELDS = (
     "current_attempt",
     "security_evidence",
 )
-
-_LIFECYCLE_TERMINAL_STATUSES = {
-    "completed",
-    "failed",
-    "empty_result",
-    "fallback_completed",
-    "blocked",
-}
-
 
 def _json_object_or_empty(raw: str) -> dict:
     try:
@@ -503,9 +510,7 @@ def _restore_attempt_as_current(payload: dict, attempt_id: str) -> dict:
 
 
 def _is_terminal_lifecycle(payload: dict) -> bool:
-    phase = _safe_text(payload.get("phase")).lower()
-    status = _safe_text(payload.get("status")).lower()
-    return phase in _TERMINAL_PHASES or status in _LIFECYCLE_TERMINAL_STATUSES
+    return native_delegation_mod.lifecycle_is_terminal(payload)
 
 
 def _incoming_final_status(args, payload: dict) -> tuple[str, int | None, dict | None]:
@@ -1258,12 +1263,56 @@ def _build_status_row(path: Path, stale_threshold: int, now: datetime) -> dict |
     task_id = str(payload.get("task_id") or path.stem)
     phase = str(payload.get("phase", "running"))
     payload_status = _safe_text(payload.get("status")).lower()
+    terminal = _is_terminal_lifecycle(payload)
+    reconciliation_action = (
+        payload.get("reconciliation_action")
+        if isinstance(payload.get("reconciliation_action"), dict)
+        else None
+    )
+    reconciliation_actionable = bool(
+        reconciliation_action
+        and (
+            _safe_text(reconciliation_action.get("status")).lower() == "pending"
+            or reconciliation_action.get("completion_accepted") is False
+        )
+    )
+    reconciliation_invariant_gap = bool(
+        terminal
+        and (
+            payload.get("provider_reconciliation_required") is True
+            or reconciliation_actionable
+        )
+    )
     last_heartbeat = str(payload.get("last_heartbeat", ""))
     age_sec = _heartbeat_age_seconds(last_heartbeat, now)
-    is_stale = phase not in _TERMINAL_PHASES and age_sec >= stale_threshold
+    is_stale = not terminal and age_sec >= stale_threshold
+    execution_transport = str(payload.get("execution_transport") or "external").strip().lower()
+    provider_state = _safe_text(payload.get("provider_state")).lower() or "unknown"
+    parent_heartbeat = str(payload.get("parent_heartbeat") or "")
+    parent_age_sec = _heartbeat_age_seconds(parent_heartbeat, now)
+    reconciliation_required = False
 
-    if phase in _TERMINAL_PHASES:
+    if terminal:
         status = payload_status or phase
+    elif execution_transport == "native":
+        provider_live = provider_state in {"running", "active", "queued", "attached", "spawned"}
+        provider_terminal = provider_state in {"completed", "failed", "cancelled", "canceled", "terminal", "not_found"}
+        if parent_age_sec >= stale_threshold:
+            status = "orphaned"
+            reconciliation_required = True
+        elif provider_live:
+            status = "running"
+        elif provider_terminal or is_stale or provider_state in {"unknown", "indeterminate"}:
+            status = "reconciling"
+            reconciliation_required = True
+        else:
+            status = payload_status or "reconciling"
+            reconciliation_required = status == "reconciling"
+    elif payload.get("provider_reconciliation_required") or (
+        reconciliation_actionable
+    ):
+        status = payload_status or phase or "reconciling"
+        reconciliation_required = True
     elif is_stale:
         status = "stale"
     else:
@@ -1271,14 +1320,33 @@ def _build_status_row(path: Path, stale_threshold: int, now: datetime) -> dict |
 
     return {
         "task_id": task_id,
+        "attempt_id": payload.get("attempt_id"),
         "pid": payload.get("pid"),
+        "pid_start_time": payload.get("pid_start_time"),
         "provider": payload.get("provider"),
+        "provider_task_id": payload.get("provider_task_id"),
+        "external_claim_id": payload.get("external_claim_id"),
+        "provider_pid": payload.get("provider_pid"),
+        "provider_pgid": payload.get("provider_pgid"),
+        "provider_pid_start_time": payload.get("provider_pid_start_time"),
+        "provider_exec_release_status": payload.get("provider_exec_release_status"),
+        "provider_exec_authorized_at": payload.get("provider_exec_authorized_at"),
+        "provider_exec_released_at": payload.get("provider_exec_released_at"),
+        "execution_transport": execution_transport,
+        "completion_signal": payload.get("completion_signal"),
+        "exit_code": payload.get("exit_code"),
         "skill": payload.get("skill", ""),
         "model": payload.get("model"),
         "phase": phase,
         "status": status,
         "last_heartbeat": last_heartbeat,
         "age_sec": age_sec,
+        "parent_heartbeat": parent_heartbeat or None,
+        "parent_age_sec": parent_age_sec,
+        "provider_state": provider_state,
+        "reconciliation_required": reconciliation_required,
+        "reconciliation_invariant_gap": reconciliation_invariant_gap,
+        "reconciliation_action": reconciliation_action,
         "worktree_dir": payload.get("worktree_dir"),
     }
 def _collect_dispatch_rows(stale_threshold: int) -> list[dict]:
@@ -1738,15 +1806,354 @@ def evaluate_shared_state_boundaries(
     }
 
 
+def _dispatch_prompt_hash(prompt_file: Path) -> str:
+    return "sha256:" + hashlib.sha256(prompt_file.read_bytes()).hexdigest()
+
+
+def _load_dispatch_external_authorization(task_id: str) -> dict:
+    if _common.BASE_DIR is None:
+        raise native_delegation_mod.LifecycleConflict(".gran-maestro base directory is required")
+    path = native_delegation_mod.native_state_path(_common.BASE_DIR, task_id)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise native_delegation_mod.LifecycleConflict(
+            f"persisted external authorization not found for task {task_id}"
+        ) from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise native_delegation_mod.LifecycleConflict(
+            f"persisted external authorization is unreadable for task {task_id}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise native_delegation_mod.LifecycleConflict(
+            f"persisted external authorization is invalid for task {task_id}"
+        )
+    return payload
+
+
+def validate_dispatch_external_authorization(
+    *,
+    task_id: str,
+    provider: str,
+    expected_attempt_id: str,
+    worktree_dir: Path | str,
+    prompt_file: Path | str,
+    model: str | None = None,
+    running_log_path: Path | str | None = None,
+) -> dict:
+    """Bind dispatch build/execution to one current persisted external attempt."""
+
+    normalized_provider, _legacy = _normalize_dispatch_provider(provider)
+    expected = _safe_text(expected_attempt_id)
+    if not expected:
+        raise native_delegation_mod.LifecycleConflict(
+            "dispatch build requires --expected-attempt-id for Codex/Claude external execution"
+        )
+
+    state = _load_dispatch_external_authorization(task_id)
+    native_delegation_mod._validate_persisted_session_identity(state)
+    current_attempt = _safe_text(state.get("attempt_id"))
+    if current_attempt != expected:
+        raise native_delegation_mod.LifecycleConflict(
+            f"dispatch authorization attempt CAS mismatch: expected {expected}, current {current_attempt or 'missing'}"
+        )
+    if state.get("current_attempt") is not True:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization is not the current attempt")
+
+    phase = _safe_text(state.get("phase")).lower()
+    if phase == "reconciling" or state.get("provider_reconciliation_required"):
+        raise native_delegation_mod.LifecycleConflict(
+            "dispatch authorization is reconciling; external execution is forbidden"
+        )
+    if state.get("execution_transport") != "external":
+        raise native_delegation_mod.LifecycleConflict(
+            "dispatch authorization points to a native current attempt"
+        )
+    if phase != "planned":
+        raise native_delegation_mod.LifecycleConflict(
+            f"dispatch authorization cannot execute from phase '{phase or 'missing'}'"
+        )
+    status = _safe_text(state.get("status")).lower()
+    if status in {"stale", "orphaned", "reconciling", "cancel_requested"}:
+        raise native_delegation_mod.LifecycleConflict(
+            f"dispatch authorization has non-runnable status '{status}'"
+        )
+    expires_at = native_delegation_mod._parse_iso_datetime(state.get("external_claim_expires_at"))
+    if expires_at is not None and datetime.now(timezone.utc) >= expires_at:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization is stale and expired")
+    if state.get("external_claim_id") or state.get("external_claimed_at"):
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization was already claimed")
+    if _safe_text(state.get("task_id")) != task_id:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization task mismatch")
+    if _safe_text(state.get("provider")).lower() != normalized_provider:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization provider mismatch")
+    persisted_model = state.get("model")
+    requested_model = str(model) if model is not None else None
+    if (str(persisted_model) if persisted_model is not None else None) != requested_model:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization model mismatch")
+
+    requested_worktree = Path(worktree_dir).resolve(strict=False)
+    persisted_worktree = Path(_safe_text(state.get("worktree_dir"))).resolve(strict=False)
+    if requested_worktree != persisted_worktree:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization worktree mismatch")
+
+    requested_prompt = Path(prompt_file).resolve(strict=False)
+    persisted_prompt_text = _safe_text(state.get("prompt_file"))
+    if not persisted_prompt_text or Path(persisted_prompt_text).resolve(strict=False) != requested_prompt:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization prompt path mismatch")
+    if not requested_prompt.is_file():
+        raise native_delegation_mod.LifecycleConflict(f"prompt file not found: {requested_prompt}")
+    if _safe_text(state.get("prompt_hash")) != _dispatch_prompt_hash(requested_prompt):
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization prompt hash mismatch")
+
+    if running_log_path is not None:
+        requested_log = Path(running_log_path).resolve(strict=False)
+        persisted_log_text = _safe_text(state.get("running_log_path"))
+        if not persisted_log_text or Path(persisted_log_text).resolve(strict=False) != requested_log:
+            raise native_delegation_mod.LifecycleConflict(
+                "dispatch authorization running_log_path mismatch"
+            )
+
+    guard = state.get("worktree_guard")
+    if not isinstance(guard, dict) or guard.get("ok") is not True:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization is missing worktree evidence")
+
+    decision = native_delegation_mod._validate_persisted_route(state)
+    if decision.get("route") != "external":
+        raise native_delegation_mod.LifecycleConflict("persisted route does not authorize external dispatch")
+    decision_provider = _safe_text(decision.get("provider")).lower()
+    if decision_provider and _normalize_dispatch_provider(decision_provider)[0] != normalized_provider:
+        raise native_delegation_mod.LifecycleConflict("dispatch authorization route provider mismatch")
+    return state
+
+
+def _emit_dispatch_authorization_failure(exc: Exception) -> int:
+    print(
+        json.dumps(
+            {
+                "status": "blocked",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            },
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
+    return 2
+
+
+def cmd_dispatch_authorize_external(args):
+    """Persist a central-planner external decision before dispatch build."""
+
+    session_id = None
+    if os.environ.get("MST_SESSION_ID", "").strip() or os.environ.get("MST_CONTEXT_JSON", "").strip():
+        try:
+            child_env = _dispatch_required_session_context()
+        except ValueError as exc:
+            return _emit_dispatch_authorization_failure(
+                native_delegation_mod.LifecycleConflict(str(exc))
+            )
+        session_id = child_env["MST_SESSION_ID"]
+        os.environ["MST_SESSION_ID"] = session_id
+        os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
+
+    requested_provider = str(args.provider).strip().lower()
+    provider, _legacy_provider = _normalize_dispatch_provider(requested_provider)
+    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=_legacy_provider)
+    if not isinstance(resolved_model, str) or not resolved_model:
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(
+                f"failed to resolve model for provider '{provider}'"
+            )
+        )
+    prompt_file = Path(args.prompt_file).resolve(strict=False)
+    worktree_dir = Path(args.worktree_dir).resolve(strict=False)
+    if not prompt_file.is_file():
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(f"prompt file not found: {prompt_file}")
+        )
+    if _common.BASE_DIR is None:
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(".gran-maestro base directory is required")
+        )
+
+    host = str(host_mod.build_host_context(host="auto").get("host") or "headless")
+    external_available = shutil.which(_provider_executable(provider)) is not None
+    try:
+        route = native_delegation_mod.resolve_delegation_route(
+            base_dir=_common.BASE_DIR,
+            host=host,
+            provider=provider,
+            scope=args.scope,
+            capability_status=args.capability_status,
+            external_adapter_available=external_available,
+        )
+        if route.get("route") != "external":
+            raise native_delegation_mod.LifecycleConflict(
+                "central delegation route does not authorize external dispatch "
+                f"(route={route.get('route')}, reason={route.get('reason_code')})"
+            )
+        state = native_delegation_mod.start_external_attempt(
+            base_dir=_common.BASE_DIR,
+            task_id=args.task_id,
+            provider=provider,
+            worktree_dir=worktree_dir,
+            idempotency_key=args.idempotency_key,
+            route_reason=str(route.get("reason_code") or "external_authorized"),
+            scope=args.scope,
+            read_only=bool(args.read_only),
+            prompt_file=prompt_file,
+            running_log_path=args.running_log_path,
+            trace_path=args.trace_path,
+            output_path=args.output_path,
+            model=resolved_model,
+            mst_session_id=session_id,
+            attempt_id=args.attempt_id,
+            route_decision=route,
+        )
+    except (native_delegation_mod.LifecycleConflict, native_delegation_mod.ExternalAdapterUnavailable) as exc:
+        return _emit_dispatch_authorization_failure(exc)
+
+    print(json.dumps(state, ensure_ascii=False))
+    return 0
+
+
+def cmd_dispatch_validate_authorization(args):
+    try:
+        state = validate_dispatch_external_authorization(
+            task_id=str(args.task_id).strip(),
+            provider=args.provider,
+            expected_attempt_id=args.expected_attempt_id,
+            worktree_dir=args.worktree_dir,
+            prompt_file=args.prompt_file,
+            model=args.model,
+        )
+    except native_delegation_mod.LifecycleConflict as exc:
+        return _emit_dispatch_authorization_failure(exc)
+    print(
+        json.dumps(
+            {
+                "status": "authorized",
+                "task_id": state.get("task_id"),
+                "attempt_id": state.get("attempt_id"),
+                "provider": state.get("provider"),
+                "execution_transport": state.get("execution_transport"),
+                "route_fingerprint": state.get("route_fingerprint"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+def _dispatch_split_external_disabled(command_name: str) -> int:
+    print(
+        json.dumps(
+            {
+                "status": "central_runner_required",
+                "blocked_command": command_name,
+                "action": "use_dispatch_run_external",
+            },
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
+    return 2
+
+
+def cmd_dispatch_claim_external(args):
+    """Reject the obsolete split claim/spawn protocol."""
+
+    return _dispatch_split_external_disabled("claim-external")
+
+
+def cmd_dispatch_run_external(args):
+    """Run a protected external attempt through the single Python supervisor."""
+
+    try:
+        child_env = _dispatch_required_session_context()
+    except ValueError as exc:
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(str(exc))
+        )
+    session_id = child_env["MST_SESSION_ID"]
+    os.environ["MST_SESSION_ID"] = session_id
+    os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
+    timeout = args.timeout
+    if timeout is None:
+        raw_timeout = os.environ.get("MST_EXTERNAL_RUN_TIMEOUT", "").strip()
+        if raw_timeout:
+            try:
+                timeout = max(0, int(raw_timeout))
+            except ValueError:
+                return _emit_dispatch_authorization_failure(
+                    native_delegation_mod.LifecycleConflict(
+                        "MST_EXTERNAL_RUN_TIMEOUT must be an integer number of seconds"
+                    )
+                )
+
+    def monitor_callback(current: dict, running_log: Path) -> dict:
+        try:
+            owner_pid = int(current.get("pid"))
+        except (TypeError, ValueError):
+            owner_pid = os.getpid()
+        result = evaluate_delegate_io_attention(
+            current,
+            {"combined": running_log},
+            process_identity={
+                "pid": owner_pid,
+                "pid_start_time": str(current.get("pid_start_time") or ""),
+                "pid_alive": _pid_is_alive(owner_pid),
+            },
+        )
+        monitored = result.get("state") if isinstance(result, dict) else None
+        if not isinstance(monitored, dict):
+            return {}
+        return {
+            field: monitored[field]
+            for field in ("delegate_monitor", "delegate_io_attention_events")
+            if field in monitored
+        }
+
+    try:
+        state = native_delegation_mod.run_persisted_external_adapter(
+            base_dir=_common.BASE_DIR,
+            task_id=str(args.task_id).strip(),
+            expected_attempt_id=args.expected_attempt_id,
+            idempotency_key=args.idempotency_key,
+            binary=args.binary,
+            timeout=timeout,
+            monitor_callback=monitor_callback,
+        )
+    except (
+        TypeError,
+        ValueError,
+        native_delegation_mod.LifecycleConflict,
+        native_delegation_mod.ExternalAdapterUnavailable,
+    ) as exc:
+        return _emit_dispatch_authorization_failure(exc)
+    _append_dispatch_history_event(session_id, state, "dispatch.external_run")
+    print(json.dumps(state, ensure_ascii=False))
+    if state.get("phase") == "done":
+        return 0
+    try:
+        provider_exit = int(state.get("exit_code") or 0)
+    except (TypeError, ValueError):
+        provider_exit = 0
+    return provider_exit if 0 < provider_exit <= 255 else 3
+
+
+def cmd_dispatch_heartbeat_external(args):
+    return _dispatch_split_external_disabled("heartbeat-external")
+
+
+def cmd_dispatch_finalize_external(args):
+    return _dispatch_split_external_disabled("finalize-external")
+
+
 def cmd_dispatch_build(args):
     requested_provider = str(args.provider).strip().lower()
     provider, legacy_provider = _normalize_dispatch_provider(requested_provider)
-    if provider == "claude":
-        print(
-            "Error: dispatch build does not support provider 'claude'. Use Task-based claude dispatch.",
-            file=sys.stderr,
-        )
-        return 1
 
     resolved_model = _resolve_provider_model(provider, args.model, requested_provider=legacy_provider)
     if not isinstance(resolved_model, str) or not resolved_model:
@@ -1774,31 +2181,164 @@ def cmd_dispatch_build(args):
         print("Error: task id is required", file=sys.stderr)
         return 1
 
+    authorization = None
+    expected_attempt_id = _safe_text(getattr(args, "expected_attempt_id", None))
+    if provider in _PERSISTED_EXTERNAL_AUTH_PROVIDERS:
+        if expected_attempt_id:
+            try:
+                authorization = validate_dispatch_external_authorization(
+                    task_id=task_id,
+                    provider=provider,
+                    expected_attempt_id=expected_attempt_id,
+                    worktree_dir=worktree_dir,
+                    prompt_file=prompt_file,
+                    model=resolved_model,
+                    running_log_path=log_file,
+                )
+            except native_delegation_mod.LifecycleConflict as exc:
+                return _emit_dispatch_authorization_failure(exc)
+        else:
+            host = str(host_mod.build_host_context(host="auto").get("host") or "headless")
+            if host == provider:
+                return _emit_dispatch_authorization_failure(
+                    native_delegation_mod.LifecycleConflict(
+                        "same-host dispatch build requires a persisted external/fallback "
+                        "authorization and --expected-attempt-id"
+                    )
+                )
+            route = native_delegation_mod.resolve_delegation_route(
+                base_dir=_common.BASE_DIR,
+                host=host,
+                provider=provider,
+                scope="implementation",
+                capability_status="unknown",
+                external_adapter_available=shutil.which(_provider_executable(provider)) is not None,
+            )
+            if route.get("route") != "external":
+                return _emit_dispatch_authorization_failure(
+                    native_delegation_mod.LifecycleConflict(
+                        "headless/cross-provider dispatch build is not externally routable "
+                        f"(route={route.get('route')}, reason={route.get('reason_code')})"
+                    )
+                )
+
+            # Compatibility callers historically invoked `dispatch build`
+            # directly. Keep that surface, but never emit the old unclaimed
+            # `dispatch register` wrapper for Codex/Claude. Persist the same
+            # centrally-routed authorization that the explicit
+            # `authorize-external` command creates, then let the generated
+            # wrapper atomically consume it with `claim-external`.
+            try:
+                session_id = None
+                if os.environ.get("MST_SESSION_ID", "").strip() or os.environ.get(
+                    "MST_CONTEXT_JSON", ""
+                ).strip():
+                    child_env = _dispatch_required_session_context()
+                    session_id = child_env["MST_SESSION_ID"]
+                if not session_id:
+                    raise native_delegation_mod.LifecycleConflict(
+                        "dispatch build auto-authorization requires canonical MST_SESSION_ID"
+                    )
+                authorization = native_delegation_mod.start_external_attempt(
+                    base_dir=_common.BASE_DIR,
+                    task_id=task_id,
+                    provider=provider,
+                    worktree_dir=worktree_dir,
+                    idempotency_key=f"{task_id}:dispatch-build-auto-authorize:v1",
+                    route_reason=str(route.get("reason_code") or "external_authorized"),
+                    scope="implementation" if require_worktree else "analysis",
+                    read_only=not require_worktree,
+                    prompt_file=prompt_file,
+                    running_log_path=log_file,
+                    model=resolved_model,
+                    mst_session_id=session_id,
+                    route_decision=route,
+                )
+            except (ValueError, native_delegation_mod.LifecycleConflict) as exc:
+                return _emit_dispatch_authorization_failure(exc)
+            expected_attempt_id = _safe_text(authorization.get("attempt_id"))
+            if not expected_attempt_id:
+                return _emit_dispatch_authorization_failure(
+                    native_delegation_mod.LifecycleConflict(
+                        "auto-authorized external attempt is missing attempt_id"
+                    )
+                )
+
     mst_script = _common._mst_script_path().resolve()
     q = shlex.quote
     session_bootstrap_cmd = _dispatch_session_bootstrap_cmd(
         _skill_dispatch_session_id(prompt_file, log_file, worktree_dir)
     )
 
-    register_cmd = (
-        f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch register '
-        f"--task-id {q(task_id)} --pid $$ --provider {q(provider)} "
-        f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))} "
-        f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}" '
-        f"--running-log-path {q(str(log_file))} --context-file {q(str(prompt_file))}"
-    )
+    protected_external = authorization is not None and provider in _PERSISTED_EXTERNAL_AUTH_PROVIDERS
+    trace_path = None
+    output_path = None
+    prompt_snapshot_path = None
+    if protected_external:
+        trace_path = Path(_safe_text(authorization.get("trace_path"))).resolve(strict=False)
+        output_path = Path(_safe_text(authorization.get("output_path"))).resolve(strict=False)
+        prompt_snapshot_path = Path(
+            _safe_text(authorization.get("prompt_snapshot_path"))
+        ).resolve(strict=False)
+        if (
+            not _safe_text(authorization.get("trace_path"))
+            or not _safe_text(authorization.get("output_path"))
+            or not _safe_text(authorization.get("prompt_snapshot_path"))
+        ):
+            return _emit_dispatch_authorization_failure(
+                native_delegation_mod.LifecycleConflict(
+                    "dispatch authorization is missing prompt/trace/output artifact bindings"
+                )
+            )
+        register_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch claim-external '
+            f"--task-id {q(task_id)} --provider {q(provider)} "
+            f"--expected-attempt-id {q(expected_attempt_id)} --model {q(resolved_model)} "
+            f"--worktree-dir {q(str(worktree_dir))} --prompt-file {q(str(prompt_file))} "
+            f"--prompt-snapshot-path {q(str(prompt_snapshot_path))} "
+            f"--scope {q(str(authorization.get('scope') or 'implementation'))} "
+            f"--read-only {'true' if authorization.get('read_only') else 'false'} "
+            f"--running-log-path {q(str(log_file))} --trace-path {q(str(trace_path))} "
+            f"--output-path {q(str(output_path))} --pid $$ "
+            f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}" '
+            f"--idempotency-key {q(task_id + ':' + expected_attempt_id + ':claim:v1')} "
+            ">/dev/null || exit $?"
+        )
+    else:
+        register_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch register '
+            f"--task-id {q(task_id)} --pid $$ --provider {q(provider)} "
+            f"--model {q(resolved_model)} --worktree-dir {q(str(worktree_dir))} "
+            f'--started-by-pid "${{MST_STATE_PPID:-$PPID}}" '
+            f"--running-log-path {q(str(log_file))} --context-file {q(str(prompt_file))}"
+        )
 
     provider_failure_cmd = ""
+    authorization_read_only = bool(
+        isinstance(authorization, dict) and authorization.get("read_only")
+    )
     if provider == "codex":
+        permission_args = "--sandbox read-only" if authorization_read_only else "--full-auto"
         cli_cmd = (
-            f'MST_SESSION_ID="$MST_SESSION_ID" codex exec --full-auto -m {q(resolved_model)} -C {q(str(worktree_dir))} '
-            f"\"$(cat {q(str(prompt_file))})\""
+            f'MST_SESSION_ID="$MST_SESSION_ID" codex exec {permission_args} -m {q(resolved_model)} '
+            f"-C {q(str(worktree_dir))} -"
         )
+        prompt_redirect = f"< {q(str(prompt_snapshot_path if protected_external else prompt_file))}"
+    elif provider == "claude":
+        # Contract literals retained for security/inventory checks:
+        # --permission-mode plan / --permission-mode acceptEdits
+        permission_mode = "plan" if authorization_read_only else "acceptEdits"
+        cli_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" claude -p '  # MST_EXTERNAL_FALLBACK_ONLY
+            f"--model {q(resolved_model)} --permission-mode {permission_mode} --add-dir {q(str(worktree_dir))}"
+        )
+        prompt_redirect = f"< {q(str(prompt_snapshot_path if protected_external else prompt_file))}"
     else:
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" agy --print \"$(cat {q(str(prompt_file))})\" '
             f"--dangerously-skip-permissions --add-dir {q(str(worktree_dir))}"
         )
+        prompt_redirect = "< /dev/null"
         legacy_note = ""
         if legacy_provider:
             legacy_note = f'echo "PROVIDER_DEPRECATION:{legacy_provider}->agy" >> {q(str(log_file))}; '
@@ -1819,30 +2359,78 @@ def cmd_dispatch_build(args):
         'MST_DISPATCH_FAILURE_KIND="${MST_PROVIDER_FAILURE_KIND:-}"; '
         f'if [ -z "$MST_DISPATCH_FAILURE_KIND" ] && grep -Eiq \'(timed? ?out|timeout|deadline exceeded)\' {q(str(log_file))}; then MST_DISPATCH_FAILURE_KIND=timeout; '
         f'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ ! -s {q(str(log_file))} ]; then MST_DISPATCH_FAILURE_KIND=empty_result; '
+        'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ "${IO_EC:-0}" -ne 0 ]; then MST_DISPATCH_FAILURE_KIND=output_io; '
         'elif [ -z "$MST_DISPATCH_FAILURE_KIND" ] && [ "$EC" -ne 0 ]; then MST_DISPATCH_FAILURE_KIND=nonzero_exit; fi; '
         'MST_DISPATCH_FALLBACK_CONDITION="${MST_PROVIDER_FALLBACK_CONDITION:-none}"; '
         "printf 'DISPATCH_ATTEMPT_METADATA: task_id=%s provider=%s model=%s "
-        "prompt_file=%s output_log=%s mst_session_id=%s exit_code=%s failure_kind=%s fallback=%s\\n' "
+        "prompt_file=%s output_log=%s mst_session_id=%s exit_code=%s io_exit_code=%s failure_kind=%s fallback=%s\\n' "
         f"{q(task_id)} {q(provider)} {q(resolved_model)} {q(str(prompt_file))} {q(str(log_file))} "
-        '"$MST_SESSION_ID" "$EC" "${MST_DISPATCH_FAILURE_KIND:-none}" "$MST_DISPATCH_FALLBACK_CONDITION" '
+        '"$MST_SESSION_ID" "$EC" "${IO_EC:-0}" "${MST_DISPATCH_FAILURE_KIND:-none}" "$MST_DISPATCH_FALLBACK_CONDITION" '
         f">> {q(str(log_file))}; "
     )
 
-    heartbeat_cmd = (
-        f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat '
-        f"--task-id {q(task_id)} --log-file {q(str(log_file))} "
-        f"--running-log-path {q(str(log_file))}"
-    )
-    final_heartbeat_cmd = (
-        f'{heartbeat_cmd} --final --exit-code "$EC" '
-        '--failure-kind "${MST_DISPATCH_FAILURE_KIND:-none}" '
-        '--fallback-condition "$MST_DISPATCH_FALLBACK_CONDITION"'
-    )
+    if protected_external:
+        heartbeat_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat-external '
+            f"--task-id {q(task_id)} --expected-attempt-id {q(expected_attempt_id)} "
+            f"--pid $$ --log-file {q(str(log_file))}"
+        )
+        final_heartbeat_cmd = (
+            'MST_EXTERNAL_COMPLETION_SIGNAL=process_exit; '
+            'if [ "$EC" -eq 124 ]; then MST_EXTERNAL_COMPLETION_SIGNAL=process_timeout; '
+            'elif [ "$EC" -eq 130 ] || [ "$EC" -eq 137 ] || [ "$EC" -eq 143 ]; '
+            'then MST_EXTERNAL_COMPLETION_SIGNAL=process_cancelled; fi; '
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch finalize-external '
+            f"--task-id {q(task_id)} --expected-attempt-id {q(expected_attempt_id)} "
+            f'--pid $$ --exit-code "$EC" --io-exit-code "${{IO_EC:-0}}" '
+            f'--completion-signal "$MST_EXTERNAL_COMPLETION_SIGNAL" '
+            f"--running-log-path {q(str(log_file))} --trace-path {q(str(trace_path))} "
+            f"--output-path {q(str(output_path))} "
+            f"--idempotency-key {q(task_id + ':' + expected_attempt_id + ':finalize:v1')}"
+        )
+    else:
+        heartbeat_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch heartbeat '
+            f"--task-id {q(task_id)} --log-file {q(str(log_file))} "
+            f"--running-log-path {q(str(log_file))}"
+        )
+        final_heartbeat_cmd = (
+            f'{heartbeat_cmd} --final --exit-code "$EC" '
+            '--failure-kind "${MST_DISPATCH_FAILURE_KIND:-none}" '
+            '--fallback-condition "$MST_DISPATCH_FALLBACK_CONDITION"'
+        )
     validate_worktree_cmd = ""
     if require_worktree:
         validate_worktree_cmd = (
             f"python3 {q(str(mst_script))} dispatch validate-worktree "
             f"--worktree-dir {q(str(worktree_dir))} >/dev/null || exit $?; "
+        )
+
+    if protected_external:
+        execution_cmd = (
+            'PROVIDER_PID=; MST_CANCEL_SIGNAL=; '
+            'mst_forward_provider() { MST_CANCEL_SIGNAL="$1"; '
+            'if [ -n "$PROVIDER_PID" ]; then '
+            'kill "-$1" -- "-$PROVIDER_PID" 2>/dev/null '
+            '|| kill "-$1" "$PROVIDER_PID" 2>/dev/null || true; fi; }; '
+            "trap 'mst_forward_provider TERM' TERM; "
+            "trap 'mst_forward_provider INT' INT; "
+            "set -m; "
+            f"{cli_cmd} {prompt_redirect} > {q(str(log_file))} 2>&1 & PROVIDER_PID=$!; "
+            "set +m; "
+            'wait "$PROVIDER_PID"; EC=$?; '
+            'if [ -n "$MST_CANCEL_SIGNAL" ]; then '
+            'wait "$PROVIDER_PID" 2>/dev/null || true; '
+            'if [ "$MST_CANCEL_SIGNAL" = INT ]; then EC=130; else EC=143; fi; fi; '
+            "trap - TERM INT; "
+            "IO_EC=0; "
+            f"cp {q(str(log_file))} {q(str(output_path))} || IO_EC=$?; "
+        )
+    else:
+        execution_cmd = (
+            f"{cli_cmd} {prompt_redirect} 2>&1 | tee {q(str(log_file))}; "
+            'PIPE_STATUSES=("${PIPESTATUS[@]}"); '
+            'EC="${PIPE_STATUSES[0]:-1}"; IO_EC="${PIPE_STATUSES[1]:-1}"; '
         )
 
     command = (
@@ -1855,15 +2443,31 @@ def cmd_dispatch_build(args):
         "while kill -0 $$ 2>/dev/null; do sleep \"$HB_INTERVAL\" & SLEEP_PID=$!; "
         "wait \"$SLEEP_PID\" || exit 0; SLEEP_PID=; "
         f"{heartbeat_cmd} || true; done) & HB_PID=$!; "
-        f"{cli_cmd} < /dev/null 2>&1 | tee {q(str(log_file))}; "
-        "EC=${PIPESTATUS[0]}; "
+        f"{execution_cmd}"
         "kill \"$HB_PID\" 2>/dev/null || true; wait \"$HB_PID\" 2>/dev/null || true; "
         f"{provider_failure_cmd}"
         f"{dispatch_attempt_cmd}"
         f"echo \"EXIT_CODE:$EC\" >> {q(str(log_file))}; "
-        f"{final_heartbeat_cmd}; "
-        "exit $EC"
+        'MST_FINALIZE_EC=0; '
+        f"{final_heartbeat_cmd} || MST_FINALIZE_EC=$?; "
+        'if [ "$EC" -ne 0 ]; then exit "$EC"; fi; '
+        'if [ "$MST_FINALIZE_EC" -ne 0 ]; then exit "$MST_FINALIZE_EC"; fi; '
+        "exit 0"
     )
+    if protected_external:
+        # A single Python supervisor owns claim, exact prompt-byte delivery,
+        # provider process-group reaping, atomic output publication, and
+        # finalization.  The generated shell never reopens lifecycle paths.
+        central_run_cmd = (
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch run-external '
+            f"--task-id {q(task_id)} --expected-attempt-id {q(expected_attempt_id)} "
+            f"--idempotency-key {q(task_id + ':' + expected_attempt_id + ':run:v2')}"
+        )
+        command = (
+            f"{session_bootstrap_cmd}; "
+            f"{validate_worktree_cmd}"
+            f"{central_run_cmd}"
+        )
     if os.environ.get("MST_SESSION_ID", "").strip() and os.environ.get("MST_CONTEXT_JSON", "").strip():
         try:
             child_env = session_mod.child_env_with_required_session_context()

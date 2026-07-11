@@ -346,15 +346,21 @@ def test_mst_loop_script_help():
 
 
 def test_mst_loop_script_content():
-    """scripts/mst-loop.sh가 queue count 체크와 claude 호출을 포함한다."""
+    """scripts/mst-loop.sh가 headless queue supervisor 계약을 사용한다."""
     script = ROOT / "scripts/mst-loop.sh"
     content = script.read_text(encoding="utf-8")
     assert "queue count" in content, "mst-loop.sh must call 'queue count'"
     assert "max-iterations" in content, "mst-loop.sh must support --max-iterations"
-    assert "dangerously-skip-permissions" in content, (
-        "mst-loop.sh must use --dangerously-skip-permissions"
+    assert "queue drain-headless" in content, "mst-loop.sh must use the headless queue supervisor"
+    assert "--host" in content and "--runner" in content, (
+        "mst-loop.sh must forward the supervisor host and runner"
     )
-    assert "/mst:resume" in content, "mst-loop.sh must call /mst:resume"
+    assert "dangerously-skip-permissions" not in content, (
+        "mst-loop.sh must not bypass provider permission policy"
+    )
+    assert "/mst:resume" not in content, (
+        "mst-loop.sh must not recursively enter the interactive resume skill"
+    )
 
 
 def test_mst_loop_docs_exist():

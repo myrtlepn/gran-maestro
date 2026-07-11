@@ -420,6 +420,7 @@ def test_child_dispatch_inherits_parent_session_and_auto_policy() -> None:
             "--model",
             "gpt-test",
             context=context,
+            extra_env={"MST_HOST": "headless"},
         )
         register_result = _run_mst(
             workspace,

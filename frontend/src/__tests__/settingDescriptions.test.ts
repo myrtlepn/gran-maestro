@@ -44,4 +44,32 @@ describe('setting descriptions', () => {
     expect(SETTING_DESCRIPTIONS).toHaveProperty('models.providers.agy.default_tier')
     expect(SETTING_DESCRIPTIONS).not.toHaveProperty('models.providers.gemini.default_tier')
   })
+
+  it('exposes canonical native delegation controls and explains legacy aliases', () => {
+    const transportPolicy = SETTING_DESCRIPTIONS['delegation.transport_policy']
+    const nativeScope = SETTING_DESCRIPTIONS['delegation.native.scope']
+
+    expect(transportPolicy).toMatchObject({
+      options: ['same-host-native-first', 'external-only'],
+    })
+    expect(nativeScope).toMatchObject({
+      options: [
+        'all',
+        'review-and-exploration-only',
+        'review-only',
+        'exploration-only',
+        'implementation-only',
+        'none',
+      ],
+    })
+    expect(SETTING_DESCRIPTIONS).toHaveProperty('delegation.native.enabled')
+
+    for (const key of [
+      'delegation.native_codex_subagents.enabled',
+      'delegation.native_codex_subagents.scope',
+    ]) {
+      expect(SETTING_DESCRIPTIONS[key]).toMatch(/legacy|alias/i)
+      expect(SETTING_DESCRIPTIONS[key]).toMatch(/delegation\.native/)
+    }
+  })
 })

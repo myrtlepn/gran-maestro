@@ -8,45 +8,51 @@
 
 > **프로젝트 디렉토리에서 실행하세요.** Gran Maestro는 기존 프로젝트의 코드베이스를 분석하여 동작합니다. 프로젝트 루트에서 Claude Code 또는 Codex CLI plugin runtime을 실행한 뒤 플러그인을 사용하세요.
 
-Gran Maestro의 기본값은 Codex-primary입니다. Codex CLI는 필수이고, AGY CLI는 프론트엔드/UI 또는 대용량 컨텍스트 보조 provider를 사용할 때 설치하면 됩니다.
+Gran Maestro의 기본값은 Codex-primary와 `same-host-native-first`입니다. Codex host → Codex provider 또는 Claude Code host → Claude provider 위임은 host의 native agent를 먼저 사용하므로, 같은 host 위임만을 위한 별도 provider CLI 설치는 필요하지 않습니다. 단, Codex plugin 자체를 실행하려면 Codex runtime이 필요합니다.
 
 기존 `/mst:gemini`, `gemini`, `gemini-dev` 값은 한 릴리스 동안 deprecated alias로 동작하지만, 새 설정은 `/mst:agy`, `agy`, `agy-dev`를 사용하세요.
 
+External lane을 사용할 계획이라면 해당 provider CLI만 선택적으로 설치하고 인증하세요.
+
 ```bash
-# Codex CLI
+# 선택: external Codex lane
 npm install -g @openai/codex
 
-# AGY CLI
-# Antigravity/AGY CLI를 설치한 뒤 agy --version이 동작하는지 확인하세요.
+# 선택: AGY provider는 항상 external lane
+# Antigravity/AGY CLI를 설치한 뒤 확인하세요.
 agy --version
 ```
 
-**Gran Maestro는 각 CLI를 직접 호출합니다.** 별도 서버를 경유하거나 API를 중간에서 가로채지 않으며, 여러분이 직접 터미널에서 실행하는 것과 완전히 동일하게 동작합니다. 인증 정보와 데이터는 각 CLI와 해당 서비스 사이에서만 오가므로 Gran Maestro를 신뢰할 필요 없이 Codex/AGY를 신뢰하는 것으로 충분합니다.
+### Native-first와 external lane
 
-### 각 CLI 설정이 그대로 적용됩니다
+| 예시 | 기본 경로 | 추가 provider CLI |
+|------|-----------|-------------------|
+| Codex host → Codex provider | Codex collaboration native agent | 같은 host 위임만으로는 불필요 |
+| Claude Code host → Claude provider | Claude Task/Agent | 같은 host 위임만으로는 불필요 |
+| Codex host → Claude provider 또는 Claude Code host → Codex provider | managed external wrapper | 대상 provider CLI 필요 |
+| headless, `external-only`, native 비활성/scope 제외/capability unavailable | managed external wrapper | 대상 provider CLI 필요 |
+| AGY provider | managed external wrapper | AGY CLI 필요 |
 
-Gran Maestro는 CLI의 기능을 그대로 활용하기 때문에, 각 에이전트에 맞게 설정한 내용이 Gran Maestro 실행 중에도 동일하게 적용됩니다.
+External route에서 대상 CLI를 찾지 못하면 `blocked`(`missing_cli`)로 fail-closed 처리합니다. Native spawn 뒤에는 host가 task 미생성을 확정한 경우에만 external fallback합니다. Spawn 승인/provider task ID 이후 attach 실패·timeout·결과 불명·취소 미확인은 `reconciling`으로 남기고, 새 native spawn과 external 중복 실행을 모두 차단합니다. Native task 자체의 실패도 다른 transport로 자동 재실행하지 않습니다.
 
-- **Codex**: 프로젝트 루트의 `AGENTS.md`, `CODEX.md` 등 에이전트 지시 파일이 Codex 호출 시 그대로 반영됩니다.
-- **AGY**: AGY/Antigravity CLI가 지원하는 프로젝트 지시 파일과 로컬 설정이 AGY 호출 시 그대로 반영됩니다.
+기존 project-local `delegation.native_codex_subagents.enabled: false`는 opt-out으로 계속 읽고 canonical 설정으로 migration할 수 있습니다. 새 설정에서 external wrapper만 사용하려면 다음 canonical 키를 사용하세요.
 
-각 CLI의 개성(모델 설정, 시스템 프롬프트, 금지 동작 등)을 잘 조율해 두면 Gran Maestro 내에서도 동일한 품질과 일관성이 유지됩니다.
-
-### 설치 후 반드시 한 번 직접 실행하세요
-
-설치 후 **각 CLI를 직접 한 번 실행해 보세요.** 첫 실행 시 인증 플로우(로그인, API 키 등록 등)가 대화형으로 진행되며, 이 과정을 완료하지 않으면 Gran Maestro가 내부에서 CLI를 비대화형으로 호출할 때 인증 오류가 발생합니다.
-
-```bash
-codex   # 첫 실행 — 인증 플로우 완료
-agy  # 첫 실행 — AGY 인증 플로우 완료
+```
+/mst:settings delegation.transport_policy external-only
+/mst:settings delegation.native.enabled false
 ```
 
-인증 방법:
+### External CLI를 선택했다면 한 번 직접 실행하세요
 
-- Codex: 첫 실행 시 대화형 로그인 또는 `OPENAI_API_KEY` 환경변수 설정
-- AGY: 사용 중인 AGY CLI가 요구하는 로그인 또는 API 키 설정
+External lane에 사용할 CLI는 설치 후 한 번 직접 실행해 인증을 완료하세요. Native same-host 경로만 사용한다면 이 단계는 건너뛸 수 있습니다.
 
-> **Tip.** 설치 후 `which codex`, `which agy` 명령으로 PATH에 정상 등록되었는지도 확인하세요.
+```bash
+codex   # external Codex lane을 사용할 때만
+claude  # external Claude lane을 사용할 때만
+agy     # AGY provider를 사용할 때
+```
+
+External wrapper는 별도 프록시 서버를 거치지 않으며 대상 CLI의 인증과 로컬 설정을 그대로 사용합니다. 프로젝트 루트의 `AGENTS.md`/`CODEX.md` 같은 Codex 지시 파일과 AGY/Claude CLI가 지원하는 프로젝트 설정도 해당 external 실행에 적용됩니다. 설치 후 `which codex`, `which claude`, `which agy` 중 사용할 CLI가 PATH에 등록됐는지 확인하세요.
 
 ## 1. 설치
 

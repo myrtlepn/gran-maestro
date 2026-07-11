@@ -1,3 +1,4 @@
+import json
 import os
 import stat
 import subprocess
@@ -8,6 +9,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
+SESSION_ID = "MST-REQ-939-20260712T000000000Z-nohang01"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
@@ -43,6 +45,8 @@ def test_dispatch_built_command_does_not_hang_with_inherited_pipe_stdin(tmp_path
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["MST_HOST"] = "headless"
+    env["MST_SESSION_ID"] = SESSION_ID
 
     prompt_file = workspace / "prompt.md"
     prompt_file.write_text("no-hang test", encoding="utf-8")
@@ -97,6 +101,13 @@ def test_dispatch_built_command_does_not_hang_with_inherited_pipe_stdin(tmp_path
                 proc.kill()
                 proc.wait(timeout=2)
 
-        assert log_file.exists()
-        content = log_file.read_text(encoding="utf-8")
-        assert "EXIT_CODE:0" in content
+            assert log_file.exists()
+            content = log_file.read_text(encoding="utf-8")
+            assert "stub-codex-ok" in content
+            state = json.loads(
+                (workspace / ".gran-maestro" / "run" / f"{task_id}.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert state["exit_code"] == 0
+            assert state["completion_signal"] == "process_exit"

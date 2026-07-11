@@ -370,18 +370,50 @@ def _normalize_agy_config_aliases(config):
 def _load_config_for_get():
     resolved = load_json(BASE_DIR / "config.resolved.json")
     if isinstance(resolved, dict):
-        return _normalize_agy_config_aliases(resolved)
+        return _apply_native_delegation_read_alias(_normalize_agy_config_aliases(resolved), resolved)
 
     plugin_root = _plugin_root()
     defaults = load_json(plugin_root / "templates" / "defaults" / "config.json")
     overrides = load_json(BASE_DIR / "config.json")
     if isinstance(defaults, dict) and isinstance(overrides, dict):
-        return _normalize_agy_config_aliases(deep_merge(defaults, overrides))
+        merged = _normalize_agy_config_aliases(deep_merge(defaults, overrides))
+        return _apply_native_delegation_read_alias(merged, overrides)
     if isinstance(defaults, dict):
         return _normalize_agy_config_aliases(defaults)
     if isinstance(overrides, dict):
-        return _normalize_agy_config_aliases(overrides)
+        return _apply_native_delegation_read_alias(_normalize_agy_config_aliases(overrides), overrides)
     return {}
+
+
+def _apply_native_delegation_read_alias(config, provenance):
+    if not isinstance(config, dict) or not isinstance(provenance, dict):
+        return config
+    source = provenance.get("delegation")
+    target = config.get("delegation")
+    if not isinstance(source, dict) or not isinstance(target, dict):
+        return config
+    legacy = source.get("native_codex_subagents")
+    if not isinstance(legacy, dict):
+        return config
+
+    source_native = source.get("native") if isinstance(source.get("native"), dict) else {}
+    target_native = target.get("native") if isinstance(target.get("native"), dict) else {}
+    policy_explicit = "transport_policy" in source
+    enabled_explicit = "enabled" in source_native
+    scope_explicit = "scope" in source_native
+    legacy_enabled = legacy.get("enabled") is not False
+
+    if not policy_explicit and not enabled_explicit:
+        target["transport_policy"] = "same-host-native-first" if legacy_enabled else "external-only"
+        target_native["enabled"] = legacy_enabled
+    elif policy_explicit and not enabled_explicit:
+        target_native["enabled"] = source.get("transport_policy") == "same-host-native-first"
+    elif enabled_explicit and not policy_explicit:
+        target["transport_policy"] = "same-host-native-first" if source_native.get("enabled") else "external-only"
+    if not scope_explicit and isinstance(legacy.get("scope"), str):
+        target_native["scope"] = legacy["scope"]
+    target["native"] = target_native
+    return config
 def _flat_diff(old, new, prefix=""):
     changes = {}
     if not isinstance(old, dict) or not isinstance(new, dict):

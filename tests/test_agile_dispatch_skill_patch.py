@@ -15,7 +15,10 @@ DISPOSITION_SKIP_REASON = (
 )
 ALLOWED_CLAUDE_PRINT_MODE_PATHS = {
     "tests/test_dod005_agent_dispatch_replacement_contract.py": "negative_fixture_allowlist",
+    "tests/test_dispatch_build.py": "external_adapter_contract_fixture",
 }
+CANONICAL_CLAUDE_EXTERNAL_ADAPTER_PATH = "scripts/mst_cmds/dispatch_shards/part_001.py"
+CLAUDE_EXTERNAL_FALLBACK_MARKER = "MST_EXTERNAL_FALLBACK_ONLY"
 CLAUDE_PRINT_MODE_SCAN_ROOTS = ("skills", "scripts", "hooks", "docs", "tests")
 CLAUDE_PRINT_MODE_DIRECT_RE = re.compile(r"claude\s+(-p|--print)\b")
 CLAUDE_PRINT_MODE_ARGV_RE = re.compile(
@@ -26,6 +29,10 @@ CLAUDE_PRINT_MODE_ARGV_RE = re.compile(
 
 def _skill_text() -> str:
     return AGILE_SKILL_MD.read_text(encoding="utf-8")
+
+
+def _text(relative_path: str) -> str:
+    return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
 
 
 def _disposition_rows() -> dict[str, dict]:
@@ -192,8 +199,13 @@ def test_dod006_claude_print_mode_hits_are_allowlisted_nonruntime_only():
 
     unexpected: list[str] = []
     seen_allowlist: set[str] = set()
+    canonical_adapter_hits: list[tuple[int, str]] = []
 
     for relative_path, line_number, line in hits:
+        if relative_path == CANONICAL_CLAUDE_EXTERNAL_ADAPTER_PATH:
+            assert CLAUDE_EXTERNAL_FALLBACK_MARKER in line
+            canonical_adapter_hits.append((line_number, line))
+            continue
         if relative_path in ALLOWED_CLAUDE_PRINT_MODE_PATHS:
             seen_allowlist.add(relative_path)
             assert relative_path.startswith("tests/")
@@ -201,8 +213,31 @@ def test_dod006_claude_print_mode_hits_are_allowlisted_nonruntime_only():
             continue
         unexpected.append(f"{relative_path}:{line_number}: {line}")
 
+    assert len(canonical_adapter_hits) == 1
     assert seen_allowlist == set(ALLOWED_CLAUDE_PRINT_MODE_PATHS)
     assert not unexpected, "unexpected direct Claude print-mode hits:\n" + "\n".join(unexpected)
+
+    dispatch_runner = (PROJECT_ROOT / CANONICAL_CLAUDE_EXTERNAL_ADAPTER_PATH).read_text(
+        encoding="utf-8"
+    )
+    adapter_match = re.search(
+        r'^    elif provider == "claude":\n(?P<body>.*?)(?=^    else:)',
+        dispatch_runner,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert adapter_match is not None
+    adapter_contract = adapter_match.group("body")
+    assert adapter_contract.count(CLAUDE_EXTERNAL_FALLBACK_MARKER) == 1
+    assert CLAUDE_PRINT_MODE_DIRECT_RE.search(adapter_contract)
+    assert "--permission-mode acceptEdits" in adapter_contract
+    assert "--dangerously-skip-permissions" not in adapter_contract
+    assert "--add-dir {q(str(worktree_dir))}" in adapter_contract
+
+    shared_route_contract = _text("skills/_shared/delegation-routing.md")
+    claude_skill = _text("skills/claude/SKILL.md")
+    assert "`route=external`: 이 경우에만" in shared_route_contract
+    assert "**External lane only** — `route=external`인 경우에만" in claude_skill
+    assert "provider argv assembly" in claude_skill
 
 
 def test_dod006_claude_print_mode_scanner_detects_argv_style_invocations():

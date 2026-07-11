@@ -7,9 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from scripts.mst_cmds.dod008_evidence import project_dod008_evidence
+from scripts.mst_cmds.native_delegation import lifecycle_is_terminal
 
 
 MAX_STACK_ITEMS = 20
+MAX_LIFECYCLE_ITEMS = 50
+MAX_LIFECYCLE_ITEMS_HARD_LIMIT = 200
 ALLOWED_FRESHNESS_STATUS = (
     "fresh",
     "stale",
@@ -270,8 +273,86 @@ def _next_action(context: dict[str, Any], mst_session_id: str) -> dict[str, Any]
     }
 
 
-def _dispatch_completion(context: dict[str, Any], mst_session_id: str, next_action: dict[str, Any]) -> dict[str, Any]:
-    raw = context.get("dispatch_completion") if isinstance(context.get("dispatch_completion"), dict) else {}
+def _completion_from_lifecycle(lifecycle_consumer: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(lifecycle_consumer, dict):
+        return {}
+    gaps = lifecycle_consumer.get("gaps")
+    if lifecycle_consumer.get("consumer_status") == "gap" or (
+        isinstance(gaps, list) and bool(gaps)
+    ):
+        linkage = lifecycle_consumer.get("attempt_linkage")
+        linkage = linkage if isinstance(linkage, dict) else {}
+        final_status = lifecycle_consumer.get("final_status")
+        final_status = final_status if isinstance(final_status, dict) else {}
+        return {
+            "status": "unknown",
+            "task_id": _safe_text(linkage.get("task_id"))
+            or _safe_text(lifecycle_consumer.get("task_id")),
+            "parent_mst_session_id": _safe_text(linkage.get("parent_session_id")),
+            "completion_evidence_path": "",
+            "next_action_idempotency_key": "",
+            "completed_at": _safe_text(final_status.get("terminated_at")),
+        }
+    status = _safe_text(lifecycle_consumer.get("lifecycle_status"))
+    if status in {"completed", "fallback_completed"}:
+        completion_status = "completed"
+    elif status in {
+        "failed",
+        "missing_result",
+        "unchanged_result",
+        "preexisting_result",
+        "missing_output_baseline",
+    }:
+        completion_status = "failed"
+    elif status == "empty_result":
+        completion_status = "empty_result"
+    elif status in {"blocked", "orphaned", "reconciling", "cancel_requested", "cancelled"}:
+        completion_status = "blocked"
+    else:
+        return {}
+    linkage = lifecycle_consumer.get("attempt_linkage")
+    linkage = linkage if isinstance(linkage, dict) else {}
+    artifacts = lifecycle_consumer.get("artifacts")
+    artifacts = artifacts if isinstance(artifacts, dict) else {}
+    output = artifacts.get("output") if isinstance(artifacts.get("output"), dict) else {}
+    trace = artifacts.get("trace") if isinstance(artifacts.get("trace"), dict) else {}
+    final_status = lifecycle_consumer.get("final_status")
+    final_status = final_status if isinstance(final_status, dict) else {}
+    attempt_id = _safe_text(linkage.get("attempt_id"))
+    return {
+        "status": completion_status,
+        "task_id": _safe_text(linkage.get("task_id")) or _safe_text(lifecycle_consumer.get("task_id")),
+        "parent_mst_session_id": _safe_text(linkage.get("parent_session_id")),
+        "completion_evidence_path": _safe_text(output.get("path")) or _safe_text(trace.get("path")),
+        "next_action_idempotency_key": f"delegation-{attempt_id}-continuation" if attempt_id else "",
+        "completed_at": _safe_text(final_status.get("terminated_at")),
+    }
+
+
+def _dispatch_completion(
+    context: dict[str, Any],
+    mst_session_id: str,
+    next_action: dict[str, Any],
+    lifecycle_consumer: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    lifecycle_gaps = (
+        lifecycle_consumer.get("gaps")
+        if isinstance(lifecycle_consumer, dict)
+        and isinstance(lifecycle_consumer.get("gaps"), list)
+        else []
+    )
+    lifecycle_invalid = bool(
+        isinstance(lifecycle_consumer, dict)
+        and (
+            lifecycle_consumer.get("consumer_status") == "gap"
+            or lifecycle_gaps
+        )
+    )
+    raw: dict[str, Any] = {}
+    if not lifecycle_invalid and isinstance(context.get("dispatch_completion"), dict):
+        raw = context["dispatch_completion"]
+    if not raw or lifecycle_invalid:
+        raw = _completion_from_lifecycle(lifecycle_consumer)
     completion_status = _safe_text(raw.get("status"))
     if completion_status not in ALLOWED_COMPLETION_STATUS:
         completion_status = "unknown"
@@ -585,6 +666,7 @@ def _append_missing_path_gap(
     field: str,
     *,
     required: bool,
+    verify_exists: bool = True,
 ) -> dict[str, Any]:
     projection = _artifact_path_projection(payload.get(field))
     if not projection["path"]:
@@ -597,7 +679,7 @@ def _append_missing_path_gap(
                 )
             )
         return projection
-    if projection["exists"] is not True:
+    if verify_exists and projection["exists"] is not True:
         gaps.append(
             _gap(
                 "missing_referenced_file",
@@ -614,8 +696,25 @@ def _attempt_summary(attempt: dict[str, Any], current_attempt_id: str) -> dict[s
     return {
         "attempt_id": attempt_id,
         "status": _safe_text(attempt.get("status")) or "unknown",
+        "phase": _safe_text(attempt.get("phase")) or "unknown",
+        "provider": _safe_text(attempt.get("provider")) or None,
+        "provider_task_id": _safe_text(attempt.get("provider_task_id")) or None,
+        "execution_transport": _safe_text(attempt.get("execution_transport")) or None,
+        "completion_signal": _safe_text(attempt.get("completion_signal")) or None,
+        "exit_code": attempt.get("exit_code"),
+        "provider_reconciliation_required": bool(
+            attempt.get("provider_reconciliation_required")
+        ),
+        "reconciliation_action": (
+            dict(attempt["reconciliation_action"])
+            if isinstance(attempt.get("reconciliation_action"), dict)
+            else None
+        ),
         "fallback_from": _safe_text(attempt.get("fallback_from")) or None,
         "fallback_to": _safe_text(attempt.get("fallback_to")) or None,
+        "running_log_path": _safe_text(attempt.get("running_log_path")) or None,
+        "trace_path": _safe_text(attempt.get("trace_path")) or None,
+        "output_path": _safe_text(attempt.get("output_path")) or None,
         "is_current": bool(attempt_id and attempt_id == current_attempt_id),
     }
 
@@ -632,7 +731,21 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
     if not current_attempt_payload and attempts and isinstance(attempts[-1], dict):
         current_attempt_payload = dict(attempts[-1])
     lifecycle_status = _safe_text(payload.get("status")) or "unknown"
-    final_statuses = {"completed", "failed", "empty_result", "blocked", "fallback_completed"}
+    native_evidence_failures = {
+        "missing_result",
+        "unchanged_result",
+        "preexisting_result",
+        "missing_output_baseline",
+    }
+    final_statuses = {
+        "completed",
+        "failed",
+        "empty_result",
+        "blocked",
+        "fallback_completed",
+        "cancelled",
+        *native_evidence_failures,
+    }
 
     gaps: list[dict[str, Any]] = []
     for field in ("task_id", "attempt_id", "parent_session_id", "mst_session_id", "root_mst_id", "status", "started_at", "last_heartbeat"):
@@ -648,12 +761,48 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
             )
         )
 
+    is_native = _safe_text(payload.get("execution_transport")).lower() == "native"
+    output_required = lifecycle_status in {"completed", "fallback_completed", "empty_result"}
+    raw_stderr_evidence = (
+        payload.get("stderr_evidence")
+        if isinstance(payload.get("stderr_evidence"), dict)
+        else {}
+    )
+    stderr_evidence = {
+        "sha256": _safe_text(raw_stderr_evidence.get("sha256")) or None,
+        "byte_count": raw_stderr_evidence.get("byte_count"),
+        "truncated": bool(raw_stderr_evidence.get("truncated")),
+        "redacted_tail": _safe_text(raw_stderr_evidence.get("redacted_tail")),
+    }
+    central_external_stderr = bool(
+        not is_native
+        and payload.get("external_claim_id")
+        and stderr_evidence["sha256"]
+        and isinstance(stderr_evidence["byte_count"], int)
+        and int(stderr_evidence["byte_count"]) >= 0
+    )
     artifacts = {
         "running_log": _append_missing_path_gap(gaps, payload, "running_log_path", required=True),
         "stdout_log": _append_missing_path_gap(gaps, payload, "stdout_log_path", required=False),
-        "stderr_log": _append_missing_path_gap(gaps, payload, "stderr_log_path", required=lifecycle_status == "failed"),
+        "stderr_log": _append_missing_path_gap(
+            gaps,
+            payload,
+            "stderr_log_path",
+            required=(
+                lifecycle_status == "failed"
+                and not is_native
+                and not central_external_stderr
+            ),
+        ),
+        "stderr_evidence": stderr_evidence if central_external_stderr else None,
         "trace": _append_missing_path_gap(gaps, payload, "trace_path", required=True),
-        "output": _append_missing_path_gap(gaps, payload, "output_path", required=lifecycle_status in final_statuses),
+        "output": _append_missing_path_gap(
+            gaps,
+            payload,
+            "output_path",
+            required=output_required,
+            verify_exists=output_required,
+        ),
     }
 
     context_files = payload.get("context_files_read") if isinstance(payload.get("context_files_read"), list) else []
@@ -684,11 +833,76 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
         for attempt in attempts
         if isinstance(attempt, dict)
     ]
+    terminal = _lifecycle_is_terminal(payload)
+    reconciliation_action = (
+        payload.get("reconciliation_action")
+        if isinstance(payload.get("reconciliation_action"), dict)
+        else None
+    )
+    if terminal:
+        if payload.get("provider_reconciliation_required") is True:
+            gaps.append(
+                _gap(
+                    "terminal_reconciliation_required",
+                    field="provider_reconciliation_required",
+                    message="terminal lifecycle state cannot require provider reconciliation",
+                )
+            )
+        if reconciliation_action and (
+            _safe_text(reconciliation_action.get("status")).lower() == "pending"
+            or reconciliation_action.get("completion_accepted") is False
+        ):
+            gaps.append(
+                _gap(
+                    "terminal_pending_reconciliation",
+                    field="reconciliation_action",
+                    message="terminal lifecycle state cannot retain an actionable reconciliation",
+                )
+            )
+        elif reconciliation_action:
+            action_status = _safe_text(reconciliation_action.get("status")).lower()
+            result = (
+                reconciliation_action.get("result")
+                if isinstance(reconciliation_action.get("result"), dict)
+                else None
+            )
+            required_result_fields = (
+                "provider_state",
+                "completion_signal",
+                "phase",
+                "status",
+                "observed_at",
+                "evidence_source",
+            )
+            if (
+                action_status not in {"resolved", "completed"}
+                or reconciliation_action.get("completion_accepted") is not True
+                or not _safe_text(reconciliation_action.get("resolved_at"))
+                or result is None
+                or any(not _safe_text(result.get(field)) for field in required_result_fields)
+            ):
+                gaps.append(
+                    _gap(
+                        "terminal_reconciliation_resolution_incomplete",
+                        field="reconciliation_action",
+                        message="terminal reconciliation evidence must be resolved and complete",
+                    )
+                )
     failure = None
-    if lifecycle_status in {"failed", "empty_result", "blocked"}:
+    if lifecycle_status in {
+        "failed",
+        "empty_result",
+        "blocked",
+        "orphaned",
+        "reconciling",
+        "cancel_requested",
+        "cancelled",
+        *native_evidence_failures,
+    }:
         evidence_paths = [
             artifacts["output"]["path"],
             artifacts["stderr_log"]["path"],
+            artifacts["running_log"]["path"] if central_external_stderr else None,
             artifacts["trace"]["path"],
         ]
         failure = {
@@ -702,7 +916,16 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
         consumer_status = "gap"
     elif lifecycle_status in {"completed", "fallback_completed"}:
         consumer_status = "success"
-    elif lifecycle_status in {"failed", "empty_result", "blocked"}:
+    elif lifecycle_status in {
+        "failed",
+        "empty_result",
+        "blocked",
+        "orphaned",
+        "reconciling",
+        "cancel_requested",
+        "cancelled",
+        *native_evidence_failures,
+    }:
         consumer_status = "non_success"
     else:
         consumer_status = "gap"
@@ -713,6 +936,25 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
             "allowed_consumer_status": list(ALLOWED_LIFECYCLE_CONSUMER_STATUS),
             "task_id": _safe_text(payload.get("task_id")),
             "lifecycle_status": lifecycle_status,
+            "provider": _safe_text(payload.get("provider")) or None,
+            "host": _safe_text(payload.get("host")) or None,
+            "provider_task_id": _safe_text(payload.get("provider_task_id")) or None,
+            "execution_transport": _safe_text(payload.get("execution_transport")) or None,
+            "completion_signal": _safe_text(payload.get("completion_signal")) or None,
+            "exit_code": payload.get("exit_code"),
+            "reconciliation_action": (
+                dict(payload["reconciliation_action"])
+                if isinstance(payload.get("reconciliation_action"), dict)
+                else None
+            ),
+            "provider_reconciliation_required": bool(
+                payload.get("provider_reconciliation_required")
+            ),
+            "fallback_from": _safe_text(payload.get("fallback_from")) or None,
+            "fallback_to": _safe_text(payload.get("fallback_to")) or None,
+            "running_log_path": _safe_text(payload.get("running_log_path")) or None,
+            "trace_path": _safe_text(payload.get("trace_path")) or None,
+            "output_path": _safe_text(payload.get("output_path")) or None,
             "attempt_linkage": {
                 "task_id": _safe_text(payload.get("task_id")),
                 "attempt_id": current_attempt_id,
@@ -736,6 +978,95 @@ def project_lifecycle_artifact_consumer_summary(fixture_or_context: Any) -> dict
             "gaps": gaps,
         }
     )
+
+
+def _lifecycle_timestamp(payload: dict[str, Any]) -> str:
+    for field in ("updated_at", "observed_at", "terminated_at", "last_heartbeat", "started_at"):
+        value = _safe_text(payload.get(field))
+        if value:
+            return value
+    return ""
+
+
+def _lifecycle_is_terminal(payload: dict[str, Any]) -> bool:
+    return lifecycle_is_terminal(payload)
+
+
+def _native_history_payloads(base_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+    path = base_dir / "history" / "native-delegation.ndjson"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    payloads: list[tuple[Path, dict[str, Any]]] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        event = row.get("event") if isinstance(row.get("event"), dict) else row
+        if isinstance(event, dict):
+            payloads.append((path, dict(event)))
+    return payloads
+
+
+def project_lifecycle_artifacts_for_session(
+    base_dir: Path | str,
+    mst_session_id: str,
+    *,
+    include_terminal: bool = True,
+    terminal_only: bool = False,
+    limit: int = MAX_LIFECYCLE_ITEMS,
+) -> list[dict[str, Any]]:
+    """Project bounded lifecycle evidence selected only by canonical session ID.
+
+    Current run-state files take precedence over the append-only native history
+    mirror because they retain the complete attempts/reconciliation payload.
+    History remains the read-only fallback after terminal run-state cleanup.
+    """
+    canonical_session_id = _safe_mst_session_id(mst_session_id)
+    if not canonical_session_id:
+        return []
+    root = Path(base_dir).resolve(strict=False)
+    selected: dict[str, tuple[Path, dict[str, Any]]] = {}
+    for source_path, payload in _native_history_payloads(root):
+        if _safe_mst_session_id(payload.get("mst_session_id")) != canonical_session_id:
+            continue
+        task_id = _safe_text(payload.get("task_id"))
+        if not task_id:
+            continue
+        previous = selected.get(task_id)
+        if previous is None or _lifecycle_timestamp(payload) >= _lifecycle_timestamp(previous[1]):
+            selected[task_id] = (source_path, payload)
+
+    run_dir = root / "run"
+    if run_dir.is_dir():
+        for path in sorted(run_dir.glob("*.json")):
+            payload = _load_context(path)
+            if _safe_mst_session_id(payload.get("mst_session_id")) != canonical_session_id:
+                continue
+            task_id = _safe_text(payload.get("task_id")) or path.stem
+            if task_id:
+                selected[task_id] = (path, payload)
+
+    bounded_limit = max(1, min(int(limit), MAX_LIFECYCLE_ITEMS_HARD_LIMIT))
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for source_path, payload in selected.values():
+        terminal = _lifecycle_is_terminal(payload)
+        if terminal_only and not terminal:
+            continue
+        if not include_terminal and terminal:
+            continue
+        summary = dict(project_lifecycle_artifact_consumer_summary(payload))
+        summary["source_path"] = str(source_path)
+        summary["terminal"] = terminal
+        candidates.append((_lifecycle_timestamp(payload), summary))
+    candidates.sort(key=lambda item: (item[0], str(item[1].get("task_id") or "")), reverse=True)
+    return [_hashable_json(summary) for _, summary in candidates[:bounded_limit]]
 
 
 def resolve_continuation_guard(fixture_or_context: Any, *, hook_event: str) -> dict[str, Any]:
@@ -776,10 +1107,16 @@ def project_current_work_handoff(fixture_or_context: Any) -> dict[str, Any]:
     stack = _bounded_stack(context, mst_session_id)
     workflow = _active_workflow(context, mst_session_id)
     action = _next_action(context, mst_session_id)
-    handoff = _dispatch_completion(context, mst_session_id, action)
+    existing_consumer = context.get("lifecycle_artifact_consumer")
+    if isinstance(existing_consumer, dict):
+        lifecycle_consumer = dict(existing_consumer)
+    elif _load_lifecycle_artifact_payload(context):
+        lifecycle_consumer = project_lifecycle_artifact_consumer_summary(context)
+    else:
+        lifecycle_consumer = None
+    handoff = _dispatch_completion(context, mst_session_id, action, lifecycle_consumer)
     continuation = _continuation_projection(action, handoff)
     freshness = _projection_freshness(context, mst_session_id, generated_at)
-    lifecycle_consumer = project_lifecycle_artifact_consumer_summary(context) if _load_lifecycle_artifact_payload(context) else None
     blockers = _unique_blockers(
         _source_blockers(context, mst_session_id)
         + _automatic_blockers(
@@ -838,6 +1175,14 @@ def _cli_context(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "current_head", None):
         context.setdefault("current_history_head", _safe_text(args.current_head))
     context.setdefault("schema_version", 1)
+    if session_id and not isinstance(context.get("lifecycle_artifact_consumer"), dict):
+        from scripts.mst_cmds import _common
+
+        base_dir = _common.BASE_DIR
+        if isinstance(base_dir, Path):
+            lifecycle = project_lifecycle_artifacts_for_session(base_dir, session_id, limit=1)
+            if lifecycle:
+                context["lifecycle_artifact_consumer"] = lifecycle[0]
     return context
 
 

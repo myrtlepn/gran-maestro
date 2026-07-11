@@ -43,6 +43,8 @@
   "agile.dispatch.provider": ["codex", "agy", "claude"],
   "delegation.host": ["auto", "codex", "claude", "headless"],
   "delegation.default_provider": ["codex", "agy", "claude"],
+  "delegation.transport_policy": ["same-host-native-first", "external-only"],
+  "delegation.native.scope": ["all", "review-and-exploration-only", "review-only", "exploration-only", "implementation-only", "none"],
   "concurrency.queue_strategy": ["fifo", "priority"],
   "realtime.protocol": ["sse"],
   "debug.log_level": ["info", "debug", "trace"],

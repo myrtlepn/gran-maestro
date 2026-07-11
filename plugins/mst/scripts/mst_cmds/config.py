@@ -321,6 +321,50 @@ def _default_section_claude_tier(defaults, section):
             return tier
     return None
 
+def _migrate_legacy_native_delegation(migrated, warn):
+    delegation = migrated.get("delegation") if isinstance(migrated, dict) else None
+    if not isinstance(delegation, dict):
+        return
+    legacy = delegation.get("native_codex_subagents")
+    if not isinstance(legacy, dict):
+        return
+
+    legacy_enabled = legacy.get("enabled") is not False
+    legacy_scope = legacy.get("scope") if isinstance(legacy.get("scope"), str) else "all"
+    legacy_policy = "same-host-native-first" if legacy_enabled else "external-only"
+    policy_explicit = "transport_policy" in delegation
+    native = delegation.get("native") if isinstance(delegation.get("native"), dict) else {}
+    enabled_explicit = "enabled" in native
+    scope_explicit = "scope" in native
+    canonical_execution_explicit = policy_explicit or enabled_explicit
+    conflict = False
+
+    if not canonical_execution_explicit:
+        delegation["transport_policy"] = legacy_policy
+        native["enabled"] = legacy_enabled
+    else:
+        effective_policy = delegation.get("transport_policy")
+        if not isinstance(effective_policy, str):
+            effective_policy = "same-host-native-first" if bool(native.get("enabled")) else "external-only"
+            delegation["transport_policy"] = effective_policy
+        effective_enabled = native.get("enabled")
+        if not isinstance(effective_enabled, bool):
+            effective_enabled = effective_policy == "same-host-native-first"
+            native["enabled"] = effective_enabled
+        if effective_policy != legacy_policy or effective_enabled != legacy_enabled:
+            conflict = True
+            warn(
+                "delegation.native_codex_subagents conflict with explicit canonical delegation policy; "
+                "canonical values preserved"
+            )
+
+    if not scope_explicit:
+        native["scope"] = legacy_scope
+    delegation["native"] = native
+    if not conflict:
+        warn("delegation.native_codex_subagents migrated to canonical delegation policy")
+    del delegation["native_codex_subagents"]
+
 def _migrate_config(config, defaults):
     migrated = copy.deepcopy(config) if isinstance(config, dict) else {}
     warnings = []
@@ -329,6 +373,7 @@ def _migrate_config(config, defaults):
         warnings.append(message)
 
     _normalize_agy_aliases(migrated, warn)
+    _migrate_legacy_native_delegation(migrated, warn)
 
     defaults_models = defaults.get("models", {}) if isinstance(defaults, dict) else {}
     default_providers = defaults_models.get("providers", {}) if isinstance(defaults_models, dict) else {}

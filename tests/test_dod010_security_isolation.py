@@ -67,6 +67,7 @@ def _context(extra: Optional[dict] = None) -> dict:
 
 def _env(*, context: Optional[dict] = None) -> dict[str, str]:
     env = os.environ.copy()
+    env["MST_HOST"] = "headless"
     env["MST_SESSION_ID"] = SID
     env["MST_CONTEXT_JSON"] = json.dumps(
         _context() if context is None else context,
@@ -190,6 +191,7 @@ def _write_stub_codex(bin_dir: Path, args_path: Path) -> None:
                 "import sys",
                 f'path = pathlib.Path({json.dumps(str(args_path))})',
                 "path.write_text(json.dumps(sys.argv[1:], ensure_ascii=False), encoding='utf-8')",
+                "path.with_suffix(path.suffix + '.stdin').write_bytes(sys.stdin.buffer.read())",
                 "print('stub-codex-ok')",
             ]
         )
@@ -278,11 +280,12 @@ def test_malicious_fixture_matrix_blocks_sentinel_execution_and_preserves_argv(
     env.pop("MST_CONTEXT_JSON", None)
     env["PATH"] = f"{tmp_path / 'bin'}:{env.get('PATH', '')}"
 
+    task_id = f"dod010-malicious-{case_id}"
     command = _build_dispatch_command(
         workspace,
         prompt_file=prompt_file,
         log_file=log_file,
-        task_id=f"dod010-malicious-{case_id}",
+        task_id=task_id,
         env=env,
     )
 
@@ -300,10 +303,20 @@ def test_malicious_fixture_matrix_blocks_sentinel_execution_and_preserves_argv(
     assert not (workspace / "SENTINEL_FROM_BACKTICK").exists()
 
     argv = json.loads(args_path.read_text(encoding="utf-8"))
-    assert argv[:5] == ["exec", "--full-auto", "-m", "gpt-test-dod010", "-C"]
-    assert argv[-1] == prompt_text
+    assert argv[:6] == ["exec", "--sandbox", "read-only", "-m", "gpt-test-dod010", "-C"]
+    assert argv[-1] == "-"
+    assert prompt_text not in argv
+    assert args_path.with_suffix(args_path.suffix + ".stdin").read_bytes() == prompt_file.read_bytes()
     assert log_file.exists()
-    assert "DISPATCH_ATTEMPT_METADATA:" in log_file.read_text(encoding="utf-8")
+    assert "stub-codex-ok" in log_file.read_text(encoding="utf-8")
+    state = json.loads(
+        (workspace / ".gran-maestro" / "run" / f"{task_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["external_command_metadata"]["prompt_transport"] == "stdin_claimed_fd"
+    assert state["prompt_execution"]["status"] == "verified"
+    assert state["output_publish"]["descriptor_bound"] is True
 
 
 def test_untrusted_input_inventory_covers_required_sources_and_routes() -> None:

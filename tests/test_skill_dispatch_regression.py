@@ -28,6 +28,7 @@ def _write_stub_cli(bin_dir: Path, name: str) -> None:
     path.write_text(
         "#!/bin/sh\n"
         "cat >/dev/null\n"
+        "printf 'stub-provider-result\\n'\n"
         "exit 0\n",
         encoding="utf-8",
     )
@@ -74,7 +75,13 @@ def _dispatch_and_execute(
     assert executed.returncode == 0, executed.stderr
 
     assert output_file.exists()
-    assert "EXIT_CODE:0" in output_file.read_text(encoding="utf-8")
+    assert "stub-provider-result" in output_file.read_text(encoding="utf-8")
+    state = json.loads(
+        (workspace / ".gran-maestro" / "run" / f"{task_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["exit_code"] == 0
 
     state_file = workspace / ".gran-maestro" / "run" / f"{task_id}.json"
     assert state_file.exists()
@@ -97,6 +104,7 @@ def test_skill_dispatch_smoke_for_ideation_discussion_debug(tmp_path):
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["MST_SESSION_ID"] = SESSION_ID
+    env["MST_HOST"] = "headless"
 
     cases = [
         ("ideation", "IDN-001", "codex"),
@@ -142,6 +150,7 @@ def test_skill_dispatch_extended_smoke_for_ideation_discussion_debug(tmp_path):
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["MST_SESSION_ID"] = SESSION_ID
+    env["MST_HOST"] = "headless"
 
     ideation_dir = base / "ideation" / "IDN-001"
     ideation_dir.mkdir(parents=True, exist_ok=True)

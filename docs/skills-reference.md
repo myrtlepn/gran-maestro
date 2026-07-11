@@ -41,7 +41,7 @@ Claude Code와 Codex는 같은 `skills/` source를 설치합니다. Claude Code�
   - [/mst:discussion](#mstdiscussion)
   - [/mst:debug](#mstdebug)
   - [/mst:explore](#mstexplore)
-- [CLI 직접 호출](#cli-직접-호출)
+- [Provider 위임](#provider-위임)
   - [/mst:codex](#mstcodex)
   - [/mst:agy](#mstagy)
   - [/mst:claude](#mstclaude)
@@ -70,7 +70,7 @@ Claude Code와 Codex는 같은 `skills/` source를 설치합니다. Claude Code�
 | 오케스트레이션 | 9 | 워크플로우 시작·승인·피드백·취소·복구·리뷰 등 핵심 흐름 |
 | 모니터링 | 4 | 요청/태스크 현황 조회 및 대시보드 |
 | 분석 도구 | 4 | 아이디어·토론·디버그·탐색 — 모드 독립적으로 사용 가능 |
-| CLI 직접 호출 | 3 | Codex/AGY/Claude 서브에이전트 직접 디스패치 |
+| Provider 위임 | 3 | Same-host native agent 우선, 필요할 때만 Codex/AGY/Claude external wrapper 디스패치 |
 | 설계 도구 | 4 | UI·DB·피드백 설계 전문 에이전트 |
 | 관리 | 7 | 모드 전환, 설정, 세션 정리, OMX 설치, Extension 설치 |
 
@@ -607,27 +607,42 @@ PM(Claude)이 탐색 목표를 분석하여 Codex(코드 구조/구현 패턴)�
 
 ---
 
-## CLI 직접 호출
+## Provider 위임
 
-외부 AI CLI 도구와 Claude 서브에이전트를 직접 디스패치하는 스킬입니다. Maestro 모드 활성 여부에 관계없이 사용 가능합니다.
+Codex, AGY, Claude provider 작업을 디스패치하는 스킬입니다. Maestro 모드 활성 여부에 관계없이 사용할 수 있으며, Codex/Claude는 중앙 route 결정 후 same-host native agent를 우선합니다.
+
+### 공통 native-first route 계약
+
+| 조건 | 실행 경로 |
+|------|-----------|
+| Codex host → Codex provider | Codex collaboration native agent 우선 |
+| Claude Code host → Claude provider | Claude Task/Agent 우선 |
+| Cross-provider, headless, `external-only`, native 비활성/scope 제외/capability unavailable | 기존 managed external wrapper. 대상 provider CLI 필요 |
+| External wrapper가 필요한데 대상 CLI가 없음 | `blocked`(`missing_cli`) structured non-success |
+
+Same-host native 경로만 사용한다면 위임을 위한 별도 provider CLI는 필요하지 않습니다. Native spawn이 task 미생성으로 확정된 경우에만 external fallback을 허용합니다. Spawn 승인 또는 provider task ID 이후 attach 실패·timeout·결과 불명·취소 미확인은 `reconciling` 상태로 유지하고 새 native spawn과 external 중복 실행을 차단합니다. Native task 자체의 실패도 terminal failure이며 다른 transport로 자동 재실행하지 않습니다.
+
+Canonical 설정은 `delegation.transport_policy: "same-host-native-first"`와 `delegation.native.{enabled,scope}`입니다. 기존 `delegation.native_codex_subagents.enabled: false` opt-out은 migration/read alias로 보존되며, 새 opt-out은 `transport_policy: "external-only"`와 `native.enabled: false`를 사용합니다.
 
 ---
 
 ### /mst:codex
 
-**한 줄 설명**: Codex CLI를 호출하여 코드 작업을 실행합니다.
+**한 줄 설명**: Codex provider에 코드 작업을 위임합니다.
 
 **인자**: `{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--json] [--trace {REQ/TASK/label}]`
 
 #### 목적
 
-Codex CLI 호출의 단일 진입점입니다. Gran Maestro 워크플로우 내·외부 모든 Codex 호출이 이 스킬을 경유합니다.
+Codex provider 작업의 managed entrypoint입니다. Codex host에서는 native collaboration agent를 먼저 사용하고, route가 external일 때만 Codex CLI wrapper를 사용합니다. Route와 lifecycle evidence는 어느 transport에서도 동일한 task/attempt에 연결됩니다.
 
 #### 사용 시점
 
-- Codex CLI를 직접 실행하고 싶을 때
+- Codex provider에 명시적으로 작업을 위임하고 싶을 때
 - 워크플로우 내 PM이 Codex에게 구현 태스크를 디스패치할 때
 - `--prompt-file`로 긴 프롬프트를 파일로 전달할 때
+
+Codex host의 native 경로에는 별도 `codex` provider process가 필요하지 않습니다. Claude/headless host, `external-only`, native capability 부재 등 external route에서는 `codex` CLI가 필요하며, 없으면 `blocked`로 종료합니다.
 
 #### 사용 예시
 
@@ -649,6 +664,8 @@ Codex CLI 호출의 단일 진입점입니다. Gran Maestro 워크플로우 내�
 
 AGY CLI 호출의 단일 진입점입니다. 대용량 문서, 프론트엔드 전체 분석, 넓은 컨텍스트가 필요한 작업에 적합합니다.
 
+AGY에는 same-host native bridge가 없으므로 항상 managed external lane을 사용하며 `agy` CLI가 필요합니다. CLI가 없으면 provider를 바꿔 실행한 것처럼 처리하지 않고 `blocked`로 종료합니다.
+
 `/mst:gemini`는 deprecated compatibility wrapper로 한 릴리스 동안 동일 인자를 `/mst:agy`로 넘깁니다.
 
 #### 사용 시점
@@ -668,19 +685,21 @@ AGY CLI 호출의 단일 진입점입니다. 대용량 문서, 프론트엔드 �
 
 ### /mst:claude
 
-**한 줄 설명**: Claude 서브에이전트를 호출하여 코드 작업을 실행합니다.
+**한 줄 설명**: Claude provider에 코드 작업을 위임합니다.
 
 **인자**: `{프롬프트} [--prompt-file {경로}] [--dir {경로}] [--trace {REQ/TASK/label}]`
 
 #### 목적
 
-PM Conductor의 "I conduct, I don't code" 원칙을 유지하면서, 별도 Claude 서브에이전트 프로세스를 스폰하여 구현 작업을 분리합니다. Codex/AGY CLI가 설치되지 않은 환경이나 Claude의 파일 편집 도구(Read/Write/Edit/Bash/Glob/Grep)가 필요한 작업에 활용합니다.
+PM Conductor의 "I conduct, I don't code" 원칙을 유지하면서 Claude provider에 구현 작업을 분리합니다. Claude Code host에서는 Claude Task/Agent를 먼저 사용하고, route가 external일 때만 Claude CLI managed wrapper를 사용합니다.
 
 #### 사용 시점
 
-- Codex나 AGY CLI가 설치되지 않은 환경에서 구현 작업을 위임할 때
+- Claude provider에 명시적으로 구현 작업을 위임할 때
 - Gran Maestro 워크플로우 내 `claude-dev` 태스크를 디스패치할 때
 - 파일 읽기/쓰기/편집 도구가 필요한 태스크를 서브에이전트에게 분리 실행할 때
+
+Claude Code host의 native 경로에는 별도 `claude` provider process가 필요하지 않습니다. Codex/headless host, `external-only`, native capability 부재 등 external route에서는 `claude` CLI가 필요하며, 없으면 `blocked`로 종료합니다.
 
 #### 사용 예시
 
@@ -1081,7 +1100,7 @@ Gran Maestro는 사용자의 자연어 발화에서 의도를 감지하여 해�
 |--------------------------|--------------|
 | "화면 디자인해줘", "목업 만들어줘", "Stitch로 그려줘", "UI 시안", "페이지 설계" | `/mst:stitch` |
 
-### CLI 직접 호출 트리거
+### Provider 위임 트리거
 
 | 자연어 키워드 / 발화 패턴 | 자동 실행 스킬 |
 |--------------------------|--------------|

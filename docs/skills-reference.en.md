@@ -39,7 +39,7 @@ Claude Code and Codex install the same `skills/` source. Claude Code provides th
   - [/mst:ideation](#mstideation)
   - [/mst:discussion](#mstdiscussion)
   - [/mst:debug](#mstdebug)
-- [Direct CLI execution](#direct-cli-execution)
+- [Provider delegation](#provider-delegation)
   - [/mst:codex](#mstcodex)
   - [/mst:agy](#mstagy)
   - [/mst:claude](#mstclaude)
@@ -65,7 +65,7 @@ Claude Code and Codex install the same `skills/` source. Claude Code provides th
 | Orchestration | 8 | core flow control: start, approve, feedback, cancel, recover |
 | Monitoring | 4 | request/task status viewing and dashboard |
 | Analysis tools | 3 | ideation, discussion, debug — can be used independently of workflow mode |
-| Direct CLI calls | 3 | dispatching Codex/AGY/Claude sub-agents directly |
+| Provider delegation | 3 | same-host native agents first, with Codex/AGY/Claude external wrappers only when required |
 | Design tools | 4 | UI, DB, feedback design specialist agents |
 | Management | 5 | mode transition, settings, session cleanup |
 
@@ -484,27 +484,42 @@ Configured AI team members investigate bugs independently in parallel while PM (
 
 ---
 
-## Direct CLI execution
+## Provider delegation
 
-Skills for directly dispatching external AI CLI tools and Claude sub-agents. Can be used regardless of Maestro mode.
+Skills for dispatching Codex, AGY, and Claude provider work. They can be used regardless of Maestro mode; Codex and Claude make the central route decision and prefer same-host native agents.
+
+### Shared native-first route contract
+
+| Condition | Execution route |
+|-----------|-----------------|
+| Codex host → Codex provider | Codex collaboration native agent first |
+| Claude Code host → Claude provider | Claude Task/Agent first |
+| Cross-provider, headless, `external-only`, native disabled/scope excluded/capability unavailable | existing managed external wrapper; target provider CLI required |
+| External wrapper required but target CLI missing | `blocked` (`missing_cli`) structured non-success |
+
+No separate provider CLI is required if you use only same-host native routes. External fallback is allowed only when native spawn is definitively confirmed not to have created a task. Attach failure, timeout, an unknown result, or unconfirmed cancellation after spawn acknowledgement/provider task ID keeps the attempt in `reconciling` and blocks both a new native spawn and duplicate external execution. A native task failure is terminal and is not automatically rerun on another transport.
+
+Canonical settings are `delegation.transport_policy: "same-host-native-first"` and `delegation.native.{enabled,scope}`. The existing `delegation.native_codex_subagents.enabled: false` opt-out remains a migration/read alias; new opt-outs use `transport_policy: "external-only"` plus `native.enabled: false`.
 
 ---
 
 ### /mst:codex
 
-**One-line description**: call Codex CLI to execute coding work.
+**One-line description**: delegate coding work to the Codex provider.
 
 **Arguments**: `{prompt} [--prompt-file {path}] [--dir {path}] [--json] [--trace {REQ/TASK/label}]`
 
 #### Purpose
 
-Single entry point for Codex CLI calls. Every Codex call inside and outside Gran Maestro workflow goes through this skill.
+Managed entry point for Codex provider work. On a Codex host it uses a native collaboration agent first; it uses the Codex CLI wrapper only when the route is external. Route and lifecycle evidence remain linked to the same task/attempt on either transport.
 
 #### When to use
 
-- when you want to execute Codex CLI directly
+- when you want to delegate work explicitly to the Codex provider
 - when PM dispatches implementation tasks to Codex within workflow
 - when you need to pass a long prompt via `--prompt-file`
+
+The native route on a Codex host does not require a separate `codex` provider process. External routes, including Claude/headless host, `external-only`, or unavailable native capability, require the `codex` CLI and become `blocked` when it is absent.
 
 #### Examples
 
@@ -526,6 +541,8 @@ Single entry point for Codex CLI calls. Every Codex call inside and outside Gran
 
 Single entry point for AGY CLI calls. Suitable for large-context tasks such as full frontend analysis or documentation-heavy work.
 
+AGY has no same-host native bridge, so it always uses the managed external lane and requires the `agy` CLI. If the CLI is absent, the route becomes `blocked` rather than pretending that another provider ran the task.
+
 `/mst:gemini` is a deprecated compatibility wrapper for one release and forwards the same arguments to `/mst:agy`.
 
 #### When to use
@@ -545,19 +562,21 @@ Single entry point for AGY CLI calls. Suitable for large-context tasks such as f
 
 ### /mst:claude
 
-**One-line description**: call Claude sub-agent for code work.
+**One-line description**: delegate coding work to the Claude provider.
 
 **Arguments**: `{prompt} [--prompt-file {path}] [--dir {path}] [--trace {REQ/TASK/label}]`
 
 #### Purpose
 
-Maintains the PM Conductor principle "I conduct, I don't code" by spawning a separate Claude sub-agent process and separating implementation tasks. Useful when Codex/AGY are unavailable or when tasks require Claude file tools (Read/Write/Edit/Bash/Glob/Grep).
+Maintains the PM Conductor principle "I conduct, I don't code" by separating implementation work onto the Claude provider. On a Claude Code host it uses Claude Task/Agent first; it uses the managed Claude CLI wrapper only when the route is external.
 
 #### When to use
 
-- when implementing tasks via Claude sub-agent in environments without Codex/AGY CLI
+- when you want to delegate implementation explicitly to the Claude provider
 - when dispatching `claude-dev` tasks inside Gran Maestro workflow
 - when read/write/edit-style tasks should be executed by sub-agent
+
+The native route on a Claude Code host does not require a separate `claude` provider process. External routes, including Codex/headless host, `external-only`, or unavailable native capability, require the `claude` CLI and become `blocked` when it is absent.
 
 #### Examples
 
@@ -845,7 +864,7 @@ Gran Maestro detects intent from Korean utterances and executes the matching ski
 |--------------------------|--------------|
 | "design screen", "make mockup", "draw with Stitch", "UI draft", "plan page" | `/mst:stitch` |
 
-### Direct CLI trigger
+### Provider delegation trigger
 
 | Natural language keywords / patterns | auto-triggered skill |
 |--------------------------|--------------|

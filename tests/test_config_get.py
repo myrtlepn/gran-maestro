@@ -147,3 +147,81 @@ def test_nested_object_key(tmp_path):
     assert proc.returncode == 0
     assert json.loads(proc.stdout) == config["workflow"]["high_pass_guard"]
     assert proc.stderr == ""
+
+
+def test_legacy_native_opt_out_has_canonical_read_alias(tmp_path):
+    workspace = tmp_path / "workspace"
+    config_dir = workspace / ".gran-maestro"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "delegation": {
+                    "native_codex_subagents": {
+                        "enabled": False,
+                        "scope": "review-and-exploration-only",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(
+        workspace,
+        "config",
+        "get",
+        "delegation.transport_policy",
+        "delegation.native.enabled",
+        "delegation.native.scope",
+        "--json",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [
+        {"key": "delegation.transport_policy", "value": "external-only"},
+        {"key": "delegation.native.enabled", "value": False},
+        {"key": "delegation.native.scope", "value": "review-and-exploration-only"},
+    ]
+
+
+def test_partial_canonical_scope_preserves_legacy_execution_opt_out(tmp_path):
+    workspace = tmp_path / "workspace"
+    config_dir = workspace / ".gran-maestro"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "delegation": {
+                    "native": {"scope": "all"},
+                    "native_codex_subagents": {"enabled": False},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_mst(
+        workspace,
+        "config",
+        "get",
+        "delegation.transport_policy",
+        "delegation.native.enabled",
+        "delegation.native.scope",
+        "--json",
+    )
+    assert proc.returncode == 0, proc.stderr
+    values = {item["key"]: item["value"] for item in json.loads(proc.stdout)}
+    assert values == {
+        "delegation.transport_policy": "external-only",
+        "delegation.native.enabled": False,
+        "delegation.native.scope": "all",
+    }
+
+    migrated = _run_mst(workspace, "config", "migrate", "--apply")
+    assert migrated.returncode == 0, migrated.stderr
+    persisted = json.loads((config_dir / "config.json").read_text(encoding="utf-8"))
+    assert persisted["delegation"] == {
+        "transport_policy": "external-only",
+        "native": {"enabled": False, "scope": "all"},
+    }

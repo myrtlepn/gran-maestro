@@ -217,9 +217,10 @@
     "host": "auto",
     "default_provider": "codex",
     "provider_priority": ["codex", "agy", "claude"],
-    "native_codex_subagents": {
-      "enabled": false,
-      "scope": "review-and-exploration-only"
+    "transport_policy": "same-host-native-first",
+    "native": {
+      "enabled": true,
+      "scope": "all"
     },
     "codex_sandbox": "workspace-write",
     "monitor_interval_ms": 180000,

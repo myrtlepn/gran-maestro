@@ -115,6 +115,26 @@ def test_normal_marker_preserved(tmp_path):
     assert not list((workspace / ".gran-maestro" / "archive" / "run").glob("*/normal-running.json"))
 
 
+def test_legacy_cleanup_preserves_pidless_native_attempt(tmp_path):
+    workspace = _workspace(tmp_path)
+    marker = _write_marker(
+        workspace,
+        "native-running",
+        execution_transport="native",
+        pid=None,
+        provider_task_id="provider-native-1",
+    )
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    payload.pop("started_by_pid")
+    marker.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    proc = _run_mst(workspace, "dispatch", "cleanup", "--legacy")
+
+    assert proc.returncode == 0, proc.stderr
+    assert marker.exists()
+    assert not list((workspace / ".gran-maestro" / "archive" / "run").glob("*/native-running.json"))
+
+
 def test_dry_run_no_archive(tmp_path):
     workspace = _workspace(tmp_path)
     legacy = _write_marker(workspace, "dry-legacy")
