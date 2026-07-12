@@ -8,6 +8,21 @@
 
 ---
 
+## [0.64.0] — 2026-07-13
+
+### 새 기능
+
+- **Same-host native-first 위임**: Codex→Codex와 Claude Code→Claude 작업은 host native agent를 우선 사용해, 같은 host 위임만을 위한 별도 provider CLI 없이 실행할 수 있습니다.
+- **위임 lifecycle·복구 추적**: native/external/blocked route와 attempt ownership, fallback, reconciliation evidence를 일관되게 기록해 중복 실행을 방지합니다.
+
+### 개선
+
+- **안전한 external fallback**: native task 미생성이 확정된 경우에만 external로 전환하고, attach 실패·timeout·취소 미확인 상태는 `reconciling`으로 유지하며 대상 CLI가 없으면 structured `blocked`로 종료합니다.
+- **위임 대시보드 가시성 강화**: 실행 transport, attempt, provider task, fallback, reconciliation, 완료·exit 상태를 Dispatch 화면에서 확인할 수 있습니다.
+- **설정 migration·opt-out 지원**: 기존 `delegation.native_codex_subagents`를 canonical 설정으로 이관하고 `external-only`와 native scope 제어를 제공합니다.
+
+---
+
 ## [0.63.1] — 2026-06-26
 
 ### 버그 수정
