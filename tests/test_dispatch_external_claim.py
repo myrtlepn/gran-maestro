@@ -2286,6 +2286,202 @@ def test_missing_provider_start_identity_reaps_group_before_terminal_failure(
     assert not late_side_effect.exists()
 
 
+def test_external_provider_output_redacts_structured_context_and_drops_orca_wrapper(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    base = workspace / ".gran-maestro"
+    base.mkdir(parents=True)
+    prompt = workspace / "prompt.md"
+    prompt.write_text("redact protected launch context", encoding="utf-8")
+    output = workspace / "result.md"
+    provider = tmp_path / "codex"
+    provider.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "if [ \"$MST_CONTEXT_JSON\" = \"$EXPECTED_CONTEXT\" ]; then\n"
+        "  printf 'context_source=authoritative\\n'\n"
+        "else\n"
+        "  printf 'context_source=stale\\n'\n"
+        "fi\n"
+        "printf 'context=%s\\n' \"$MST_CONTEXT_JSON\"\n"
+        "printf 'orca=%s\\n' \"${ORCA_CLI_COMMAND-unset}\"\n",
+        encoding="utf-8",
+    )
+    provider.chmod(provider.stat().st_mode | stat.S_IEXEC)
+    task_id = "REQ-943-protected-env-output"
+    context = json.dumps(
+        {
+            "schema_version": 1,
+            "mst_session_id": SESSION_ID,
+            "root_mst_id": "REQ-943",
+            "private": {"continuation": "secret-context-value"},
+        },
+        separators=(",", ":"),
+    )
+    prepared = start_external_attempt(
+        base_dir=base,
+        task_id=task_id,
+        provider="codex",
+        worktree_dir=workspace,
+        idempotency_key=f"{task_id}:authorize",
+        route_reason="headless_host",
+        scope="analysis",
+        read_only=True,
+        prompt_file=prompt,
+        output_path=output,
+        model=MODEL,
+        mst_session_id=SESSION_ID,
+    )
+    bound_context = native_delegation_mod.load_persisted_mst_context(
+        base_dir=base,
+        task_id=task_id,
+        expected_attempt_id=prepared["attempt_id"],
+    )
+
+    state = run_external_adapter(
+        base_dir=base,
+        task_id=task_id,
+        expected_attempt_id=prepared["attempt_id"],
+        provider="codex",
+        prompt_file=prompt,
+        worktree_dir=workspace,
+        output_path=output,
+        idempotency_key=f"{task_id}:run",
+        binary=provider,
+        model=MODEL,
+        scope="analysis",
+        read_only=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "MST_SESSION_ID": SESSION_ID,
+            "MST_CONTEXT_JSON": context,
+            "EXPECTED_CONTEXT": bound_context,
+            "ORCA_CLI_COMMAND": "orca --token wrapper-secret-value",
+        },
+    )
+
+    published = output.read_text(encoding="utf-8")
+    running = Path(state["running_log_path"]).read_text(encoding="utf-8")
+    persisted = json.dumps(state, ensure_ascii=False)
+    assert state["phase"] == "done"
+    assert "[REDACTED_MST_CONTEXT_JSON]" in published
+    assert "context_source=authoritative" in published
+    assert "orca=unset" in published
+    for protected in (context, "secret-context-value", "wrapper-secret-value"):
+        assert protected not in published
+        assert protected not in running
+        assert protected not in persisted
+
+
+@pytest.mark.parametrize(
+    ("inherited_context", "expected_error"),
+    [
+        ("{", "MST_CONTEXT_JSON must be valid JSON"),
+        (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "mst_session_id": SESSION_ID,
+                    "root_mst_id": "REQ-940",
+                }
+            ),
+            "MST_CONTEXT_JSON root_mst_id mismatch",
+        ),
+    ],
+)
+def test_public_legacy_direct_runner_validates_inherited_context_before_provider_spawn(
+    tmp_path: Path,
+    inherited_context: str,
+    expected_error: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    base = workspace / ".gran-maestro"
+    base.mkdir(parents=True)
+    prompt = workspace / "prompt.md"
+    prompt.write_text("validate legacy inherited context", encoding="utf-8")
+    output = workspace / "result.md"
+    task_id = "REQ-939-legacy-context-boundary"
+    prepared = start_external_attempt(
+        base_dir=base,
+        task_id=task_id,
+        provider="codex",
+        worktree_dir=workspace,
+        idempotency_key=f"{task_id}:authorize",
+        route_reason="headless_host",
+        scope="analysis",
+        read_only=True,
+        prompt_file=prompt,
+        output_path=output,
+        model=MODEL,
+        mst_session_id=SESSION_ID,
+    )
+    state_path = base / "run" / f"{task_id}.json"
+    _update_state_file(
+        state_path,
+        launch_surface="direct",
+        requested_launch_surface="direct",
+        mst_context_snapshot_path=None,
+        mst_context_snapshot_hash=None,
+    )
+    provider_spawned = tmp_path / "provider-spawned"
+    provider = tmp_path / "codex"
+    provider.write_text(
+        f"#!/bin/sh\ntouch {provider_spawned}\nprintf unexpected\n",
+        encoding="utf-8",
+    )
+    provider.chmod(provider.stat().st_mode | stat.S_IEXEC)
+
+    executed = subprocess.run(
+        [
+            sys.executable,
+            str(MST_SCRIPT),
+            "delegation",
+            "external-run",
+            "--task-id",
+            task_id,
+            "--expected-attempt-id",
+            str(prepared["attempt_id"]),
+            "--provider",
+            "codex",
+            "--prompt-file",
+            str(prompt),
+            "--worktree-dir",
+            str(workspace),
+            "--output-path",
+            str(output),
+            "--idempotency-key",
+            f"{task_id}:run",
+            "--binary",
+            str(provider),
+            "--model",
+            MODEL,
+            "--scope",
+            "analysis",
+            "--read-only",
+        ],
+        cwd=workspace,
+        env={
+            **os.environ,
+            "MST_SESSION_ID": SESSION_ID,
+            "MST_CONTEXT_JSON": inherited_context,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert executed.returncode == 2
+    error = json.loads(executed.stdout)
+    assert error["error_type"] == "LifecycleConflict"
+    assert expected_error in error["message"]
+    assert not provider_spawned.exists()
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted["phase"] == "planned"
+    assert not persisted.get("external_claim_id")
+
+
 def test_central_runner_rejects_output_identity_change_before_atomic_publish(
     tmp_path: Path,
 ) -> None:

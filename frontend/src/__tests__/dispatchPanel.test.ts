@@ -12,6 +12,10 @@ function item(overrides: Partial<DispatchStreamItem>): DispatchStreamItem {
     provider: 'codex',
     model: 'gpt-5',
     execution_transport: 'native',
+    requested_launch_surface: 'direct',
+    launch_surface: 'direct',
+    launch_surface_status: 'disabled',
+    orca_launch_status: null,
     route_reason: 'same_host_native_capable',
     provider_task_id: 'provider-task-1',
     completion_signal: null,
@@ -73,6 +77,34 @@ describe('DispatchRunCard', () => {
     expect(html).toContain('completion: completed')
     expect(html).toContain('exit: 0')
     expect(html).toContain('fallback: native-a1 → external-a2')
+  })
+
+  it('shows the Orca launch surface independently from external transport', () => {
+    const html = renderToStaticMarkup(createElement(DispatchRunCard, {
+      item: item({
+        execution_transport: 'external',
+        requested_launch_surface: 'orca',
+        launch_surface: 'orca',
+        launch_surface_status: 'ready',
+        orca_launch_status: 'created',
+      }),
+    }))
+
+    expect(html).toContain('external')
+    expect(html).toContain('orca · created')
+  })
+
+  it('shows an Orca preflight fallback instead of hiding it as direct', () => {
+    const html = renderToStaticMarkup(createElement(DispatchRunCard, {
+      item: item({
+        execution_transport: 'external',
+        requested_launch_surface: 'orca',
+        launch_surface: 'direct',
+        launch_surface_status: 'preflight_failed',
+      }),
+    }))
+
+    expect(html).toContain('orca · fallback · preflight_failed')
   })
 
   it('distinguishes resolved reconciliation evidence from a terminal invariant gap', () => {

@@ -294,6 +294,7 @@ DISPATCH = {
     ("dispatch", "validate-authorization"): dispatch.cmd_dispatch_validate_authorization,
     ("dispatch", "claim-external"): dispatch.cmd_dispatch_claim_external,
     ("dispatch", "run-external"): dispatch.cmd_dispatch_run_external,
+    ("dispatch", "launch-external"): dispatch.cmd_dispatch_launch_external,
     ("dispatch", "heartbeat-external"): dispatch.cmd_dispatch_heartbeat_external,
     ("dispatch", "finalize-external"): dispatch.cmd_dispatch_finalize_external,
     ("dispatch", "validate-worktree"): dispatch.cmd_dispatch_validate_worktree,

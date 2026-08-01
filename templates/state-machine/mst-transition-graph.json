@@ -195,7 +195,7 @@
       ]
     }
   },
-  "hash": "06b02dc08d3cfc076bf22bb433e12470001b2859ff86ae5433944b1c5c2b0fc9",
+  "hash": "67ba9d2d25c5908bd2cc20432bcd745b98dd55b52402c4cfaf84d22b2c698236",
   "id": "mst-transition-graph",
   "lifecycle_contract": {
     "cleanup_boundary": {
@@ -212,6 +212,46 @@
         "git_worktree_prune",
         "meta_cleanup",
         "branch_delete_or_archive"
+      ]
+    },
+    "delegation_launch_surface": {
+      "authoritative_owner": "mst_protected_external_lifecycle",
+      "execution_transport": "external",
+      "launch_surfaces": [
+        "direct",
+        "orca"
+      ],
+      "orca_contract": {
+        "cleanup": {
+          "failed_cancelled_unknown": "preserve_terminal",
+          "provider_reconciliation": "return_controller_and_preserve_terminal",
+          "successful_cleanup_ready": "out_of_tab_controller_close_tab",
+          "successful_provider_finalized": "persist_history_then_mark_cleanup_ready",
+          "worker_pre_run_failure": "record_reconciliation_then_return_controller",
+          "worker_stale_heartbeat": "bounded_reconciliation_then_preserve_terminal"
+        },
+        "create_boundary": {
+          "after_invocation": "reconcile_without_fallback_or_duplicate_execution",
+          "before_invocation": "original_route_fallback_allowed"
+        },
+        "reacquisition_identity": [
+          "exact_path_selector",
+          "deterministic_terminal_title"
+        ],
+        "protected_context": {
+          "enforcement": "provider_spawn_boundary_all_entrypoints",
+          "precedence": "bound_artifact_over_inherited_environment",
+          "orca_cli_command": "not_forwarded_to_provider",
+          "provider_output": "exact_context_value_redacted_before_persistence",
+          "structured_context": "private_hash_bound_artifact_then_provider_environment"
+        },
+        "runtime_scope": "local_only",
+        "worktree_selector": "path:<absolute-mst-worktree>"
+      },
+      "providers": [
+        "codex",
+        "claude",
+        "agy"
       ]
     },
     "id": "worktree-accept-cleanup-lifecycle",
@@ -313,7 +353,7 @@
       "session_to_original",
       "forbidden_caller"
     ],
-    "version": "2026-06-03.agi043"
+    "version": "2026-08-01.req943-safety"
   },
   "lifecycle_mappings": {
     "blocked.resume_confirmed": {
@@ -552,5 +592,5 @@
       "write_allowed": true
     }
   },
-  "version": "2026-06-03.agi043-lifecycle"
+  "version": "2026-08-01.req943-lifecycle-v2"
 }

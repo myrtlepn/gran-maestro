@@ -63,6 +63,7 @@ describe('setting descriptions', () => {
       ],
     })
     expect(SETTING_DESCRIPTIONS).toHaveProperty('delegation.native.enabled')
+    expect(SETTING_DESCRIPTIONS).toHaveProperty('delegation.orca.enabled')
 
     for (const key of [
       'delegation.native_codex_subagents.enabled',

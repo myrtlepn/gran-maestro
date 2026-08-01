@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import signal
+import shlex
 import shutil
 import stat
 import subprocess
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from scripts.mst_cmds import _common
+from scripts.mst_cmds import orca_delegation as orca_delegation_mod
 
 
 NATIVE_PROVIDERS = {"codex", "claude"}
@@ -254,7 +256,7 @@ def _atomic_save(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _atomic_write_private_bytes(path: Path, content: bytes) -> dict[str, Any]:
-    """Write immutable-by-default claim evidence without following symlinks."""
+    """Write an immutable private artifact without following symlinks."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
@@ -272,7 +274,7 @@ def _atomic_write_private_bytes(path: Path, content: bytes) -> dict[str, Any]:
         os.chmod(temp, 0o400)
         os.replace(temp, path)
     except OSError as exc:
-        raise LifecycleConflict(f"cannot persist external prompt snapshot: {exc}") from exc
+        raise LifecycleConflict(f"cannot persist private lifecycle artifact: {exc}") from exc
     finally:
         if fd is not None:
             os.close(fd)
@@ -282,7 +284,7 @@ def _atomic_write_private_bytes(path: Path, content: bytes) -> dict[str, Any]:
             pass
     evidence = _file_evidence(path)
     if not evidence or not evidence.get("exists"):
-        raise LifecycleConflict("external prompt snapshot evidence is missing")
+        raise LifecycleConflict("private lifecycle artifact evidence is missing")
     return evidence
 
 
@@ -638,6 +640,17 @@ def _append_history(base_dir: Path | str, payload: dict[str, Any], event: str) -
         "root_mst_id": payload.get("root_mst_id"),
         "parent_session_id": payload.get("parent_session_id"),
         "execution_transport": payload.get("execution_transport"),
+        "launch_surface": payload.get("launch_surface"),
+        "requested_launch_surface": payload.get("requested_launch_surface"),
+        "launch_surface_status": payload.get("launch_surface_status"),
+        "orca_launch_status": payload.get("orca_launch_status"),
+        "orca_worktree_selector": payload.get("orca_worktree_selector"),
+        "orca_terminal_title": payload.get("orca_terminal_title"),
+        "orca_terminal_handle": payload.get("orca_terminal_handle"),
+        "orca_create_invoked_at": payload.get("orca_create_invoked_at"),
+        "orca_reconciliation_required": payload.get("orca_reconciliation_required"),
+        "orca_reconciliation": payload.get("orca_reconciliation"),
+        "orca_cleanup_status": payload.get("orca_cleanup_status"),
         "host": payload.get("host"),
         "provider": payload.get("provider"),
         "provider_task_id": payload.get("provider_task_id"),
@@ -801,6 +814,124 @@ def _validate_persisted_session_identity(state: dict[str, Any]) -> None:
     )
     if inherited and identity["mst_session_id"] != inherited:
         raise LifecycleConflict("persisted delegation MST_SESSION_ID mismatch")
+
+
+def _normalize_mst_context_json(
+    raw_context: str | None,
+    *,
+    mst_session_id: str,
+    root_mst_id: str,
+) -> str:
+    raw = str(raw_context or "").strip()
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise LifecycleConflict(f"MST_CONTEXT_JSON must be valid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise LifecycleConflict("MST_CONTEXT_JSON must be a JSON object")
+    else:
+        payload = {}
+    if payload.get("schema_version") not in {None, 1}:
+        raise LifecycleConflict("MST_CONTEXT_JSON schema_version mismatch")
+    persisted_session = str(payload.get("mst_session_id") or "").strip()
+    if persisted_session and persisted_session != mst_session_id:
+        raise LifecycleConflict("MST_CONTEXT_JSON mst_session_id mismatch")
+    persisted_root = str(payload.get("root_mst_id") or "").strip()
+    if persisted_root and root_mst_id and persisted_root != root_mst_id:
+        raise LifecycleConflict("MST_CONTEXT_JSON root_mst_id mismatch")
+    normalized = dict(payload)
+    normalized["schema_version"] = 1
+    normalized["mst_session_id"] = mst_session_id
+    if root_mst_id:
+        normalized["root_mst_id"] = root_mst_id
+    return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _mst_context_binding(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    attempt_id: str,
+    mst_session_id: str,
+    root_mst_id: str,
+    raw_context: str | None,
+) -> tuple[Path, bytes, str]:
+    normalized = _normalize_mst_context_json(
+        raw_context,
+        mst_session_id=mst_session_id,
+        root_mst_id=root_mst_id,
+    )
+    content = normalized.encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
+    path = _artifact_path(
+        base_dir,
+        task_id,
+        None,
+        f"mst-context-{hashlib.sha256(attempt_id.encode('utf-8')).hexdigest()[:16]}.json",
+    )
+    return path, content, f"sha256:{digest}"
+
+
+def load_persisted_mst_context(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    inherited_context: str | None = None,
+) -> str:
+    """Load the bound context, with a direct-only legacy inherited fallback."""
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "load_mst_context")
+        _validate_persisted_session_identity(state)
+        path_text = str(state.get("mst_context_snapshot_path") or "").strip()
+        expected_hash = str(state.get("mst_context_snapshot_hash") or "").strip()
+        session_id = str(state.get("mst_session_id") or "").strip()
+        root_id = str(state.get("root_mst_id") or "").strip()
+        launch_surface = str(state.get("launch_surface") or "direct").strip()
+        requested_launch_surface = str(
+            state.get("requested_launch_surface") or "direct"
+        ).strip()
+    if not path_text or not expected_hash.startswith("sha256:"):
+        legacy_binding_absent = not path_text and not expected_hash
+        if (
+            legacy_binding_absent
+            and launch_surface != "orca"
+            and requested_launch_surface != "orca"
+            and str(inherited_context or "").strip()
+        ):
+            return _normalize_mst_context_json(
+                str(inherited_context),
+                mst_session_id=session_id,
+                root_mst_id=root_id,
+            )
+        raise LifecycleConflict("external attempt is missing its MST context binding")
+    path = Path(path_text)
+    artifact_root = (_base_path(base_dir) / "run" / "artifacts" / task_id).resolve(
+        strict=False
+    )
+    resolved = path.resolve(strict=False)
+    if not _path_is_within(resolved, artifact_root):
+        raise LifecycleConflict("MST context snapshot escapes the task artifact root")
+    try:
+        observed = path.lstat()
+        content = path.read_bytes()
+    except OSError as exc:
+        raise LifecycleConflict(f"MST context snapshot is unreadable: {exc}") from exc
+    if not stat.S_ISREG(observed.st_mode) or int(observed.st_nlink) != 1:
+        raise LifecycleConflict("MST context snapshot must be a single-link regular file")
+    actual_hash = "sha256:" + hashlib.sha256(content).hexdigest()
+    if actual_hash != expected_hash:
+        raise LifecycleConflict("MST context snapshot hash mismatch")
+    return _normalize_mst_context_json(
+        content.decode("utf-8"),
+        mst_session_id=session_id,
+        root_mst_id=root_id,
+    )
 
 
 def _artifact_path(
@@ -1197,6 +1328,7 @@ def start_native_attempt(
         scope=scope,
         capability_status=capability_status,
         external_adapter_available=None,
+        worktree_dir=worktree_dir,
     )
     if decision.get("route") != "native_candidate":
         raise LifecycleConflict(f"persisted route does not authorize native start: {decision.get('reason_code')}")
@@ -1212,6 +1344,7 @@ def start_native_attempt(
         "read_only": bool(read_only),
         "capability_status": capability,
         "route_fingerprint": decision.get("route_fingerprint"),
+        "launch_surface": decision.get("launch_surface", "direct"),
         "prompt_hash": prompt_evidence.get("hash") if prompt_evidence else None,
         "context_hashes": [item.get("hash") for item in context_evidence],
         "mst_session_id": identity["mst_session_id"],
@@ -1264,6 +1397,13 @@ def start_native_attempt(
             "attempt_id": str(attempt_id or f"{task_id}-native-{uuid.uuid4().hex[:12]}").strip(),
             "current_attempt": True,
             "execution_transport": "native",
+            "launch_surface": str(decision.get("launch_surface") or "direct"),
+            "requested_launch_surface": str(
+                decision.get("requested_launch_surface") or "direct"
+            ),
+            "launch_surface_status": str(
+                decision.get("launch_surface_status") or "disabled"
+            ),
             "external_control_surface": "host_bridge",
             "host": normalized_host,
             "provider": normalized_provider,
@@ -1836,7 +1976,36 @@ def request_external_fallback(
     idempotency_key: str,
     expected_attempt_id: str,
     attempt_id: str | None = None,
+    orca_client: Any | None = None,
 ) -> dict[str, Any]:
+    fallback_route: dict[str, Any] | None = None
+    settings = _resolved_delegation_settings(base_dir)
+    if settings.get("orca_enabled"):
+        with _task_lock(base_dir, task_id):
+            preview = _load_state(base_dir, task_id)
+            if not isinstance(preview, dict):
+                raise LifecycleConflict(f"delegation attempt not found for task {task_id}")
+            _validate_persisted_session_identity(preview)
+            _assert_attempt_cas(preview, expected_attempt_id, "fallback_route")
+            preview_host = str(preview.get("host") or "headless")
+            preview_provider = str(preview.get("provider") or "")
+            preview_scope = str(preview.get("scope") or "implementation")
+            preview_worktree = str(preview.get("worktree_dir") or "")
+        fallback_route = resolve_delegation_route(
+            base_dir=base_dir,
+            host=preview_host,
+            provider=preview_provider,
+            scope=preview_scope,
+            capability_status="unavailable",
+            external_adapter_available=None,
+            worktree_dir=preview_worktree,
+            orca_client=orca_client,
+        )
+        if fallback_route.get("route") != "external":
+            raise ExternalAdapterUnavailable(
+                "missing_cli: definitive native non-creation fallback is not externally routable"
+            )
+
     def mutate(state: dict[str, Any]) -> None:
         if (
             state.get("execution_transport") != "native"
@@ -1858,17 +2027,32 @@ def request_external_fallback(
             + hashlib.sha256(external_attempt_id.encode("utf-8")).hexdigest()[:16]
             + ".snapshot.md",
         )
+        context_snapshot_artifact, context_snapshot_bytes, context_snapshot_hash = (
+            _mst_context_binding(
+                base_dir=base_dir,
+                task_id=task_id,
+                attempt_id=external_attempt_id,
+                mst_session_id=str(state.get("mst_session_id") or ""),
+                root_mst_id=str(state.get("root_mst_id") or ""),
+                raw_context=os.environ.get("MST_CONTEXT_JSON", ""),
+            )
+        )
+        _atomic_write_private_bytes(context_snapshot_artifact, context_snapshot_bytes)
         prior_route_fingerprint = state.get("route_fingerprint")
-        fallback_decision = {
+        fallback_decision = dict(fallback_route) if isinstance(fallback_route, dict) else {
             "route": "external",
             "execution_transport": "external",
             "host": state.get("host"),
             "provider": state.get("provider"),
             "scope": state.get("scope"),
-            "reason_code": "external_fallback_after_definitive_not_created",
-            "route_cause": "definitive_not_created",
-            "source_route_fingerprint": prior_route_fingerprint,
         }
+        fallback_decision.update(
+            {
+                "reason_code": "external_fallback_after_definitive_not_created",
+                "route_cause": "definitive_not_created",
+                "source_route_fingerprint": prior_route_fingerprint,
+            }
+        )
         fallback_decision["route_fingerprint"] = _route_fingerprint(fallback_decision)
         _sync_attempt(state)
         for previous in state["attempts"]:
@@ -1880,6 +2064,15 @@ def request_external_fallback(
             {
                 "attempt_id": external_attempt_id,
                 "execution_transport": "external",
+                "launch_surface": str(
+                    fallback_decision.get("launch_surface") or "direct"
+                ),
+                "requested_launch_surface": str(
+                    fallback_decision.get("requested_launch_surface") or "direct"
+                ),
+                "launch_surface_status": str(
+                    fallback_decision.get("launch_surface_status") or "disabled"
+                ),
                 "external_control_surface": "provider_cli_adapter",
                 "route_reason": "external_fallback_after_definitive_not_created",
                 "route_decision": fallback_decision,
@@ -1898,14 +2091,36 @@ def request_external_fallback(
                 "started_at": fallback_now.isoformat(),
                 "last_heartbeat": fallback_now.isoformat(),
                 "external_claim_expires_at": _external_claim_expires_at(fallback_now),
+                "orca_cli_argv": list(
+                    (fallback_decision.get("orca_preflight") or {}).get("cli_argv") or []
+                ),
+                "orca_worktree_selector": (
+                    (fallback_decision.get("orca_preflight") or {}).get(
+                        "worktree_selector"
+                    )
+                ),
+                "orca_terminal_title": None,
+                "orca_terminal_handle": None,
+                "orca_launch_status": (
+                    "planned"
+                    if fallback_decision.get("launch_surface") == "orca"
+                    else "not_requested"
+                ),
+                "orca_launch_claim_owner": None,
+                "orca_launch_claimed_at": None,
+                "orca_create_invoked_at": None,
+                "orca_reconciliation_required": False,
+                "orca_reconciliation": None,
+                "orca_cleanup_status": None,
                 "prompt_snapshot_path": str(prompt_snapshot_artifact),
                 "prompt_snapshot_hash": None,
                 "prompt_snapshot_created_at": None,
+                "mst_context_snapshot_path": str(context_snapshot_artifact),
+                "mst_context_snapshot_hash": context_snapshot_hash,
                 "output_claim_baseline": None,
                 "io_exit_code": None,
             }
         )
-
     return _mutate_state(
         base_dir=base_dir,
         task_id=task_id,
@@ -2087,6 +2302,7 @@ def start_external_attempt(
     attempt_id: str | None = None,
     fallback_from: str | None = None,
     route_decision: dict[str, Any] | None = None,
+    mst_context_json: str | None = None,
 ) -> dict[str, Any]:
     task_id = _validate_task_id(task_id)
     key = str(idempotency_key or "").strip()
@@ -2098,6 +2314,7 @@ def start_external_attempt(
         root_mst_id=root_mst_id,
         parent_session_id=parent_session_id,
     )
+    resolved_attempt_id = str(attempt_id or f"{task_id}-external-{uuid.uuid4().hex[:12]}")
     running_artifact, trace_artifact, output_artifact = _lifecycle_artifact_paths(
         base_dir=base_dir,
         task_id=task_id,
@@ -2111,12 +2328,27 @@ def start_external_attempt(
         None,
         "prompt-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16] + ".snapshot.md",
     )
+    context_snapshot_artifact, context_snapshot_bytes, context_snapshot_hash = (
+        _mst_context_binding(
+            base_dir=base_dir,
+            task_id=task_id,
+            attempt_id=str(attempt_id or key),
+            mst_session_id=identity["mst_session_id"],
+            root_mst_id=identity["root_mst_id"],
+            raw_context=(
+                mst_context_json
+                if mst_context_json is not None
+                else os.environ.get("MST_CONTEXT_JSON", "")
+            ),
+        )
+    )
     _validate_external_control_plane_artifacts(
         base_dir=base_dir,
         task_id=task_id,
         worktree_dir=worktree_dir,
         artifacts={
             "prompt snapshot": prompt_snapshot_artifact,
+            "MST context snapshot": context_snapshot_artifact,
             "running log": running_artifact,
             "trace": trace_artifact,
             "output": output_artifact,
@@ -2145,8 +2377,10 @@ def start_external_attempt(
         "root_mst_id": identity["root_mst_id"],
         "parent_session_id": identity["parent_session_id"],
         "route_fingerprint": decision.get("route_fingerprint"),
+        "launch_surface": decision.get("launch_surface", "direct"),
         "prompt_hash": prompt_evidence.get("hash") if prompt_evidence else None,
         "prompt_snapshot_path": str(prompt_snapshot_artifact),
+        "mst_context_snapshot_hash": context_snapshot_hash,
         "running_log_path": str(running_artifact),
         "trace_path": str(trace_artifact),
         "output_path": str(output_artifact),
@@ -2179,6 +2413,7 @@ def start_external_attempt(
             trace_artifact,
             output_artifact,
         )
+        _atomic_write_private_bytes(context_snapshot_artifact, context_snapshot_bytes)
         now_dt = datetime.now(timezone.utc)
         now = now_dt.isoformat()
         state: dict[str, Any] = {
@@ -2187,9 +2422,16 @@ def start_external_attempt(
             "root_mst_id": identity["root_mst_id"],
             "parent_session_id": identity["parent_session_id"],
             "task_id": task_id,
-            "attempt_id": str(attempt_id or f"{task_id}-external-{uuid.uuid4().hex[:12]}"),
+            "attempt_id": resolved_attempt_id,
             "current_attempt": True,
             "execution_transport": "external",
+            "launch_surface": str(decision.get("launch_surface") or "direct"),
+            "requested_launch_surface": str(
+                decision.get("requested_launch_surface") or "direct"
+            ),
+            "launch_surface_status": str(
+                decision.get("launch_surface_status") or "disabled"
+            ),
             "external_control_surface": "provider_cli_adapter",
             "host": str(decision.get("host") or "headless"),
             "provider": normalized_provider,
@@ -2206,6 +2448,23 @@ def start_external_attempt(
             "exit_code": None,
             "completion_signal": None,
             "external_claim_expires_at": _external_claim_expires_at(now_dt),
+            "orca_cli_argv": list(
+                (decision.get("orca_preflight") or {}).get("cli_argv") or []
+            ),
+            "orca_worktree_selector": (
+                (decision.get("orca_preflight") or {}).get("worktree_selector")
+            ),
+            "orca_terminal_title": None,
+            "orca_terminal_handle": None,
+            "orca_launch_status": (
+                "planned" if decision.get("launch_surface") == "orca" else "not_requested"
+            ),
+            "orca_launch_claim_owner": None,
+            "orca_launch_claimed_at": None,
+            "orca_create_invoked_at": None,
+            "orca_reconciliation_required": False,
+            "orca_reconciliation": None,
+            "orca_cleanup_status": None,
             "failure_domain": None,
             "started_at": now,
             "last_heartbeat": now,
@@ -2219,6 +2478,8 @@ def start_external_attempt(
             "prompt_snapshot_path": str(prompt_snapshot_artifact),
             "prompt_snapshot_hash": None,
             "prompt_snapshot_created_at": None,
+            "mst_context_snapshot_path": str(context_snapshot_artifact),
+            "mst_context_snapshot_hash": context_snapshot_hash,
             "context_files_read": [prompt_evidence] if prompt_evidence else [],
             "running_log_path": str(running_artifact),
             "log_path": str(running_artifact),
@@ -3193,6 +3454,14 @@ def record_external_reap_unconfirmed(
                 "last_heartbeat": _now_iso(),
             }
         )
+        if state.get("launch_surface") == "orca":
+            state.update(
+                {
+                    "orca_reconciliation_required": True,
+                    "orca_cleanup_status": "ready_to_preserve",
+                    "orca_cleanup_ready_at": _now_iso(),
+                }
+            )
 
     return _mutate_state(
         base_dir=base_dir,
@@ -3743,6 +4012,37 @@ def _temporary_stage_bytes(handle: Any) -> bytes:
         raise LifecycleConflict(f"external anonymous output stage cannot be read: {exc}") from exc
 
 
+def _protected_external_output_patterns(provider_env: dict[str, str]) -> tuple[bytes, ...]:
+    """Return exact encodings that must never reach persisted provider output."""
+
+    context = str(provider_env.get("MST_CONTEXT_JSON") or "")
+    if not context:
+        return ()
+    candidates = {
+        context,
+        json.dumps(context, ensure_ascii=False)[1:-1],
+        json.dumps(context, ensure_ascii=True)[1:-1],
+    }
+    return tuple(
+        sorted(
+            (value.encode("utf-8") for value in candidates if value),
+            key=len,
+            reverse=True,
+        )
+    )
+
+
+def _redact_protected_external_output(
+    content: bytes | None,
+    protected_patterns: tuple[bytes, ...],
+) -> bytes:
+    redacted = bytes(content or b"")
+    replacement = b"[REDACTED_MST_CONTEXT_JSON]"
+    for pattern in protected_patterns:
+        redacted = redacted.replace(pattern, replacement)
+    return redacted
+
+
 def run_external_adapter(
     *,
     base_dir: Path | str,
@@ -3807,6 +4107,22 @@ def run_external_adapter(
         trace_path = Path(str(prepared.get("trace_path") or "")).resolve(strict=False)
         snapshot_path = Path(str(prepared.get("prompt_snapshot_path") or "")).resolve(strict=False)
         persisted_session_id = str(prepared.get("mst_session_id") or "").strip() or None
+        context_binding_required = bool(
+            prepared.get("mst_context_snapshot_path")
+            or prepared.get("mst_context_snapshot_hash")
+            or prepared.get("launch_surface") == "orca"
+            or prepared.get("requested_launch_surface") == "orca"
+        )
+
+    effective_env = dict(os.environ if env is None else env)
+    inherited_context = effective_env.get("MST_CONTEXT_JSON")
+    if context_binding_required or str(inherited_context or "").strip():
+        effective_env["MST_CONTEXT_JSON"] = load_persisted_mst_context(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            inherited_context=inherited_context,
+        )
 
     # Missing binaries remain a definitive pre-creation failure. Every failure
     # after the claim is terminal and consumes the authorization.
@@ -3816,6 +4132,7 @@ def run_external_adapter(
     gate_config_stage: Any = None
     stdout_stage: Any = None
     stderr_stage: Any = None
+    protected_output_patterns: tuple[bytes, ...] = ()
     gate_read_fd: int | None = None
     gate_write_fd: int | None = None
     claimed_output_fd: int | None = None
@@ -3963,7 +4280,11 @@ def run_external_adapter(
                 os.fsync(prompt_stage.fileno())
                 prompt_stage.seek(0)
             gate_config_stage = tempfile.TemporaryFile(mode="w+b")
-            provider_env = dict(os.environ if env is None else env)
+            provider_env = dict(effective_env)
+            protected_output_patterns = _protected_external_output_patterns(provider_env)
+            # Orca selects the outer launch surface only. The provider process
+            # must never inherit wrapper flags or credentials from that CLI.
+            provider_env.pop("ORCA_CLI_COMMAND", None)
             gate_config = json.dumps(
                 {"argv": command, "env": provider_env},
                 ensure_ascii=False,
@@ -4231,8 +4552,12 @@ def run_external_adapter(
                     break
             if now_monotonic >= next_heartbeat:
                 try:
-                    staged_stdout = _temporary_stage_bytes(stdout_stage)
-                    staged_stderr = _temporary_stage_bytes(stderr_stage)
+                    staged_stdout = _redact_protected_external_output(
+                        _temporary_stage_bytes(stdout_stage), protected_output_patterns
+                    )
+                    staged_stderr = _redact_protected_external_output(
+                        _temporary_stage_bytes(stderr_stage), protected_output_patterns
+                    )
                     _atomic_write_runtime_bytes(running_log, staged_stdout + staged_stderr)
                     monitor_updates = (
                         monitor_callback(current_state, running_log)
@@ -4252,8 +4577,12 @@ def run_external_adapter(
             time.sleep(EXTERNAL_CANCEL_POLL_SECONDS)
 
         if live_termination_unconfirmed and process.poll() is None:
-            stdout = _temporary_stage_bytes(stdout_stage)
-            stderr = _temporary_stage_bytes(stderr_stage)
+            stdout = _redact_protected_external_output(
+                _temporary_stage_bytes(stdout_stage), protected_output_patterns
+            )
+            stderr = _redact_protected_external_output(
+                _temporary_stage_bytes(stderr_stage), protected_output_patterns
+            )
             reap_evidence = {
                 "status": "termination_unconfirmed",
                 "identity_reason": "provider_process_remained_live_after_bounded_signals",
@@ -4283,8 +4612,12 @@ def run_external_adapter(
             )
 
         process.wait()
-        stdout = _temporary_stage_bytes(stdout_stage)
-        stderr = _temporary_stage_bytes(stderr_stage)
+        stdout = _redact_protected_external_output(
+            _temporary_stage_bytes(stdout_stage), protected_output_patterns
+        )
+        stderr = _redact_protected_external_output(
+            _temporary_stage_bytes(stderr_stage), protected_output_patterns
+        )
 
         cancelled = bool(observed_signals) or str((_load_state(base_dir, task_id) or {}).get("phase") or "") == "cancel_requested"
         group_alive_after_wait = _process_group_alive(provider_pgid)
@@ -4390,6 +4723,655 @@ def run_external_adapter(
                 signal.signal(signum, previous)
 
 
+def _orca_client_from_state(state: dict[str, Any], client: Any | None = None) -> Any:
+    if client is not None:
+        return client
+    command = state.get("orca_cli_argv")
+    if not isinstance(command, list) or not command or not all(
+        isinstance(item, str) and item for item in command
+    ):
+        raise LifecycleConflict("persisted Orca attempt is missing its selected CLI command")
+    try:
+        resolved = orca_delegation_mod.resolve_orca_cli()
+        if str(resolved[0]) != str(command[0]):
+            raise LifecycleConflict(
+                "selected Orca executable changed after attempt authorization"
+            )
+        return orca_delegation_mod.OrcaClient(command_argv=resolved)
+    except orca_delegation_mod.OrcaCommandError as exc:
+        raise LifecycleConflict(str(exc)) from exc
+
+
+def _record_orca_state_event(
+    *,
+    base_dir: Path | str,
+    state: dict[str, Any],
+    event: str,
+    idempotency_key: str,
+    operation_payload: dict[str, Any],
+) -> dict[str, Any]:
+    fingerprint = _operation_fingerprint(
+        event,
+        str(state.get("attempt_id") or ""),
+        operation_payload,
+    )
+    _record_event(
+        state,
+        event,
+        idempotency_key,
+        source_attempt_id=str(state.get("attempt_id") or ""),
+        fingerprint=fingerprint,
+    )
+    _sync_attempt(state)
+    _atomic_save(native_state_path(base_dir, str(state["task_id"])), state)
+    _append_history(base_dir, state, event)
+    return state
+
+
+def _orca_terminal_command(
+    *,
+    state: dict[str, Any],
+    mst_script: Path | str | None,
+) -> str:
+    session_id = str(state.get("mst_session_id") or "").strip()
+    if not session_id:
+        raise LifecycleConflict("Orca launch requires canonical MST_SESSION_ID")
+    script = Path(mst_script or _common._mst_script_path()).resolve(strict=False)
+    argv = [
+        "env",
+        f"MST_SESSION_ID={session_id}",
+        sys.executable,
+        str(script),
+        "dispatch",
+        "run-external",
+        "--task-id",
+        str(state.get("task_id") or ""),
+        "--expected-attempt-id",
+        str(state.get("attempt_id") or ""),
+        "--idempotency-key",
+        f"{state.get('task_id')}:{state.get('attempt_id')}:run:v2",
+    ]
+    return shlex.join(argv)
+
+
+def _fallback_orca_before_create(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    idempotency_key: str,
+    error: Exception,
+) -> dict[str, Any]:
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_precreate_fallback")
+        if state.get("orca_create_invoked_at"):
+            raise LifecycleConflict("Orca fallback is forbidden after terminal create invocation")
+        original = state.get("route_decision", {}).get("original_route_decision")
+        if not isinstance(original, dict):
+            raise LifecycleConflict("Orca route is missing its original fallback decision")
+        state.update(
+            {
+                "orca_launch_status": "preflight_failed",
+                "orca_reconciliation_required": False,
+                "launch_surface_status": "preflight_failed",
+                "orca_preflight_failure": {
+                    "reason_code": "orca_preflight_failed",
+                    "message": str(error),
+                    "observed_at": _now_iso(),
+                    "create_invoked": False,
+                },
+            }
+        )
+        fallback = json.loads(json.dumps(original, ensure_ascii=False))
+        fallback.update(
+            {
+                "requested_launch_surface": "orca",
+                "launch_surface": "direct",
+                "launch_surface_status": "preflight_failed",
+            }
+        )
+        fallback["route_fingerprint"] = _route_fingerprint(fallback)
+        if fallback.get("route") == "external":
+            state.update(
+                {
+                    "launch_surface": "direct",
+                    "route_decision": fallback,
+                    "route_fingerprint": fallback["route_fingerprint"],
+                    "route_reason": str(fallback.get("reason_code") or "external"),
+                    "phase": "planned",
+                    "status": "planned",
+                    "fallback_allowed": False,
+                }
+            )
+        else:
+            state.update(
+                {
+                    "phase": "failed",
+                    "status": "launch_fallback_required",
+                    "failure_domain": "orca_precreate_preflight",
+                    "fallback_allowed": True,
+                    "fallback_route_decision": fallback,
+                    "terminated_at": _now_iso(),
+                }
+            )
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_precreate_fallback",
+            idempotency_key=idempotency_key,
+            operation_payload={
+                "fallback_route": fallback.get("route"),
+                "reason": str(error),
+            },
+        )
+
+
+def reconcile_orca_terminal(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_terminal_reconcile")
+        if state.get("launch_surface") != "orca":
+            raise LifecycleConflict("Orca reconciliation requires an Orca launch surface")
+        selector = str(state.get("orca_worktree_selector") or "")
+        title = str(state.get("orca_terminal_title") or "")
+        initial_handle = str(state.get("orca_terminal_handle") or "")
+        if not selector.startswith("path:/") or not title:
+            raise LifecycleConflict("Orca reconciliation metadata is incomplete")
+        selected_client = _orca_client_from_state(state, client)
+
+    list_error: str | None = None
+    try:
+        terminals = selected_client.list_terminals(selector=selector)
+    except Exception as exc:
+        terminals = []
+        list_error = str(exc)
+    matches = [
+        item
+        for item in terminals
+        if orca_delegation_mod.terminal_title(item) == title
+        and orca_delegation_mod.terminal_handle(item)
+    ]
+    handle = (
+        orca_delegation_mod.terminal_handle(matches[0]) if len(matches) == 1 else None
+    )
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_terminal_reconcile")
+        if (
+            not handle
+            and not initial_handle
+            and state.get("orca_terminal_handle")
+            and state.get("orca_launch_status") == "created"
+        ):
+            # A concurrent creator persisted its authoritative response while
+            # this caller was listing. Never replace that handle with a stale
+            # zero-match observation from before the terminal became visible.
+            return state
+        now = _now_iso()
+        state["orca_reconciliation"] = {
+            "status": "reacquired" if handle else "unresolved",
+            "match_count": len(matches),
+            "worktree_selector": selector,
+            "terminal_title": title,
+            "error": list_error,
+            "observed_at": now,
+        }
+        if handle:
+            state.update(
+                {
+                    "orca_terminal_handle": handle,
+                    "orca_launch_status": "created",
+                    "orca_handle_acquired_at": now,
+                    "orca_reconciliation_required": False,
+                }
+            )
+            if (
+                str(state.get("phase") or "") == "reconciling"
+                and not state.get("external_claim_id")
+                and state.get("provider_reconciliation_required") is True
+            ):
+                state.update(
+                    {
+                        "phase": "planned",
+                        "status": "planned",
+                        "provider_reconciliation_required": False,
+                        "reconciliation_action": None,
+                    }
+                )
+        else:
+            state.update(
+                {
+                    "orca_terminal_handle": None,
+                    "orca_launch_status": "create_unknown",
+                    "orca_reconciliation_required": True,
+                    "fallback_allowed": False,
+                }
+            )
+            if not state.get("external_claim_id") and not lifecycle_is_terminal(state):
+                state.update(
+                    {
+                        "phase": "reconciling",
+                        "status": "orca_create_unknown",
+                        "provider_reconciliation_required": True,
+                        "reconciliation_action": {
+                            "kind": "orca_terminal_reconcile",
+                            "action_id": f"orca-terminal:{task_id}:{expected_attempt_id}",
+                            "lookup_key": f"{selector}|{title}",
+                            "status": "pending",
+                            "completion_accepted": False,
+                        },
+                    }
+                )
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_terminal_reconcile",
+            idempotency_key=f"{task_id}:{expected_attempt_id}:orca-reconcile:{now}",
+            operation_payload={"match_count": len(matches), "handle": handle},
+        )
+
+
+def launch_external_via_orca(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    idempotency_key: str,
+    client: Any | None = None,
+    mst_script: Path | str | None = None,
+) -> dict[str, Any]:
+    task_id = _validate_task_id(task_id)
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise LifecycleConflict("Orca launch requires idempotency_key")
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _validate_persisted_session_identity(state)
+        _assert_attempt_cas(state, expected_attempt_id, "orca_launch")
+        if state.get("execution_transport") != "external" or state.get("launch_surface") != "orca":
+            raise LifecycleConflict("Orca launch requires a persisted external Orca route")
+        if lifecycle_is_terminal(state):
+            return state
+        if (
+            state.get("orca_terminal_handle")
+            and state.get("orca_launch_status") == "created"
+        ):
+            return state
+        if state.get("orca_create_invoked_at"):
+            needs_reconcile = True
+        else:
+            needs_reconcile = False
+        selected_client = _orca_client_from_state(state, client)
+        worktree = Path(str(state.get("worktree_dir") or "")).resolve(strict=False)
+
+    if needs_reconcile:
+        return reconcile_orca_terminal(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            client=selected_client,
+        )
+
+    try:
+        preflight = selected_client.preflight(worktree)
+    except Exception as exc:
+        return _fallback_orca_before_create(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            idempotency_key=f"{key}:preflight-fallback",
+            error=exc,
+        )
+    selector = str(preflight.get("worktree_selector") or "")
+    exact_selector = f"path:{worktree}"
+    if selector != exact_selector:
+        return _fallback_orca_before_create(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            idempotency_key=f"{key}:selector-fallback",
+            error=LifecycleConflict("Orca preflight selector does not match the exact MST worktree"),
+        )
+
+    raced_create_invocation = False
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_launch_claim")
+        _assert_nonterminal_lifecycle(state, "claim Orca terminal launch")
+        if state.get("orca_create_invoked_at"):
+            raced_create_invocation = True
+        else:
+            title = f"MST/{task_id}/{expected_attempt_id}"
+            command = _orca_terminal_command(state=state, mst_script=mst_script)
+            now = _now_iso()
+            state.update(
+                {
+                    "orca_worktree_selector": exact_selector,
+                    "orca_terminal_title": title,
+                    "orca_launch_status": "create_invoked",
+                    "orca_launch_claim_owner": f"pid:{os.getpid()}",
+                    "orca_launch_claimed_at": now,
+                    # Persist before invoking the side effect. From this point on,
+                    # every uncertainty reconciles and never falls back/spawns.
+                    "orca_create_invoked_at": now,
+                    "fallback_allowed": False,
+                }
+            )
+            _record_orca_state_event(
+                base_dir=base_dir,
+                state=state,
+                event="orca_terminal_create_invoked",
+                idempotency_key=f"{key}:create-invoked",
+                operation_payload={"selector": exact_selector, "title": title},
+            )
+
+    if raced_create_invocation:
+        return reconcile_orca_terminal(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            client=selected_client,
+        )
+
+    try:
+        created = selected_client.create_terminal(
+            selector=exact_selector,
+            title=title,
+            command=command,
+        )
+        handle = orca_delegation_mod.terminal_handle(created) or str(
+            created.get("terminal_handle") or ""
+        )
+        if not handle:
+            raise orca_delegation_mod.OrcaCreateUncertain(
+                "Orca terminal create response omitted the handle"
+            )
+    except Exception:
+        return reconcile_orca_terminal(
+            base_dir=base_dir,
+            task_id=task_id,
+            expected_attempt_id=expected_attempt_id,
+            client=selected_client,
+        )
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_launch_created")
+        state.update(
+            {
+                "orca_terminal_handle": handle,
+                "orca_launch_status": "created",
+                "orca_handle_acquired_at": _now_iso(),
+                "orca_reconciliation_required": False,
+            }
+        )
+        if (
+            str(state.get("phase") or "") == "reconciling"
+            and not state.get("external_claim_id")
+            and state.get("provider_reconciliation_required") is True
+            and str(state.get("status") or "") == "orca_create_unknown"
+        ):
+            state.update(
+                {
+                    "phase": "planned",
+                    "status": "planned",
+                    "provider_reconciliation_required": False,
+                    "reconciliation_action": None,
+                }
+            )
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_terminal_created",
+            idempotency_key=f"{key}:created",
+            operation_payload={"handle": handle, "selector": exact_selector, "title": title},
+        )
+
+
+def finalize_orca_terminal(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_terminal_finalize")
+        if state.get("launch_surface") != "orca":
+            return state
+        selected_client = _orca_client_from_state(state, client)
+        successful = state.get("phase") == "done" and state.get("status") in {
+            "completed",
+            "fallback_completed",
+        }
+        if not successful:
+            state["orca_cleanup_status"] = "preserved"
+            state["orca_cleanup_observed_at"] = _now_iso()
+            return _record_orca_state_event(
+                base_dir=base_dir,
+                state=state,
+                event="orca_terminal_preserved",
+                idempotency_key=f"{task_id}:{expected_attempt_id}:orca-preserve",
+                operation_payload={"phase": state.get("phase"), "status": state.get("status")},
+            )
+        if (
+            state.get("orca_cleanup_status") != "ready_to_close"
+            or not state.get("orca_cleanup_ready_at")
+        ):
+            raise LifecycleConflict(
+                "Orca success cleanup requires durable out-of-tab controller evidence"
+            )
+        handle = str(state.get("orca_terminal_handle") or "")
+        selector = str(state.get("orca_worktree_selector") or "")
+        title = str(state.get("orca_terminal_title") or "")
+
+    close_error: str | None = None
+    if handle:
+        try:
+            selected_client.close_terminal(handle=handle)
+        except Exception as exc:
+            close_error = str(exc)
+            handle = ""
+    if not handle:
+        try:
+            matches = [
+                item
+                for item in selected_client.list_terminals(selector=selector)
+                if orca_delegation_mod.terminal_title(item) == title
+                and orca_delegation_mod.terminal_handle(item)
+            ]
+            if len(matches) == 1:
+                handle = str(orca_delegation_mod.terminal_handle(matches[0]) or "")
+                selected_client.close_terminal(handle=handle)
+                close_error = None
+            elif close_error is None:
+                close_error = f"terminal reacquisition matched {len(matches)} terminals"
+        except Exception as exc:
+            close_error = str(exc)
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_terminal_finalize")
+        state.update(
+            {
+                "orca_terminal_handle": handle or state.get("orca_terminal_handle"),
+                "orca_cleanup_status": "closed" if close_error is None and handle else "close_failed",
+                "orca_cleanup_error": close_error,
+                "orca_cleanup_observed_at": _now_iso(),
+            }
+        )
+        if state["orca_cleanup_status"] == "closed":
+            state["orca_launch_status"] = "closed"
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_terminal_closed" if state["orca_cleanup_status"] == "closed" else "orca_terminal_close_failed",
+            idempotency_key=f"{task_id}:{expected_attempt_id}:orca-close",
+            operation_payload={"handle": handle or None, "error": close_error},
+        )
+
+
+def mark_orca_cleanup_ready(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+) -> dict[str, Any]:
+    """Publish the final in-tab evidence before an outer controller closes the tab."""
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_cleanup_ready")
+        if state.get("launch_surface") != "orca":
+            return state
+        if not lifecycle_is_terminal(state):
+            raise LifecycleConflict("Orca cleanup cannot become ready before lifecycle finalization")
+        successful = state.get("phase") == "done" and state.get("status") in {
+            "completed",
+            "fallback_completed",
+        }
+        state["orca_cleanup_status"] = (
+            "ready_to_close" if successful else "ready_to_preserve"
+        )
+        state["orca_cleanup_ready_at"] = _now_iso()
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_terminal_cleanup_ready",
+            idempotency_key=f"{task_id}:{expected_attempt_id}:orca-cleanup-ready",
+            operation_payload={
+                "phase": state.get("phase"),
+                "status": state.get("status"),
+                "cleanup_status": state.get("orca_cleanup_status"),
+            },
+        )
+
+
+def record_orca_worker_failure(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    reason_code: str = "orca_worker_start_failed",
+) -> dict[str, Any]:
+    """Bound an in-terminal failure and hand preservation back to the controller."""
+
+    with _task_lock(base_dir, task_id):
+        state = _load_state(base_dir, task_id)
+        if not isinstance(state, dict):
+            raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+        _assert_attempt_cas(state, expected_attempt_id, "orca_worker_failure")
+        if state.get("launch_surface") != "orca" or lifecycle_is_terminal(state):
+            return state
+        now = _now_iso()
+        state.update(
+            {
+                "phase": "reconciling",
+                "status": "orca_worker_failed",
+                "failure_domain": str(reason_code or "orca_worker_start_failed"),
+                "provider_reconciliation_required": True,
+                "orca_reconciliation_required": True,
+                "orca_cleanup_status": "ready_to_preserve",
+                "orca_cleanup_ready_at": now,
+                "fallback_allowed": False,
+                "reconciliation_action": _external_reconciliation_action(
+                    state,
+                    next_operation="reconcile_orca_worker",
+                    reason_code=str(reason_code or "orca_worker_start_failed"),
+                ),
+                "last_heartbeat": now,
+            }
+        )
+        return _record_orca_state_event(
+            base_dir=base_dir,
+            state=state,
+            event="orca_worker_failure",
+            idempotency_key=f"{task_id}:{expected_attempt_id}:orca-worker-failure",
+            operation_payload={"reason_code": str(reason_code or "orca_worker_start_failed")},
+        )
+
+
+def wait_for_orca_cleanup_ready(
+    *,
+    base_dir: Path | str,
+    task_id: str,
+    expected_attempt_id: str,
+    poll_interval: float = 0.2,
+    stale_timeout: float = 300.0,
+) -> dict[str, Any]:
+    """Wait in the launch caller, which is outside the Orca-owned terminal."""
+
+    progress_signature: tuple[Any, ...] | None = None
+    progress_deadline = time.monotonic() + max(0.01, float(stale_timeout))
+    while True:
+        timed_out = False
+        with _task_lock(base_dir, task_id):
+            state = _load_state(base_dir, task_id)
+            if not isinstance(state, dict):
+                raise LifecycleConflict(f"external lifecycle state not found for task {task_id}")
+            _assert_attempt_cas(state, expected_attempt_id, "orca_cleanup_wait")
+            if state.get("launch_surface") != "orca":
+                return state
+            if state.get("orca_cleanup_status") in {
+                "ready_to_close",
+                "ready_to_preserve",
+                "closed",
+                "preserved",
+                "close_failed",
+            }:
+                return state
+            if state.get("phase") == "reconciling" or state.get(
+                "provider_reconciliation_required"
+            ) or state.get("orca_reconciliation_required"):
+                return state
+            current_signature = (
+                state.get("phase"),
+                state.get("status"),
+                state.get("last_heartbeat"),
+                state.get("orca_launch_status"),
+                state.get("external_claim_id"),
+            )
+            if current_signature != progress_signature:
+                progress_signature = current_signature
+                progress_deadline = time.monotonic() + max(0.01, float(stale_timeout))
+            timed_out = time.monotonic() >= progress_deadline
+        if timed_out:
+            return record_orca_worker_failure(
+                base_dir=base_dir,
+                task_id=task_id,
+                expected_attempt_id=expected_attempt_id,
+                reason_code="orca_worker_heartbeat_stale",
+            )
+        time.sleep(max(0.01, float(poll_interval)))
+
+
 def run_persisted_external_adapter(
     *,
     base_dir: Path | str,
@@ -4416,7 +5398,7 @@ def run_persisted_external_adapter(
         model = str(state.get("model")) if state.get("model") is not None else None
         scope = str(state.get("scope") or "implementation")
         read_only = bool(state.get("read_only"))
-    return run_external_adapter(
+    result = run_external_adapter(
         base_dir=base_dir,
         task_id=normalized_task_id,
         expected_attempt_id=expected_attempt_id,
@@ -4432,6 +5414,7 @@ def run_persisted_external_adapter(
         read_only=read_only,
         monitor_callback=monitor_callback,
     )
+    return result
 
 
 def _mark_bridge_result(
@@ -4501,6 +5484,7 @@ def execute_delegation_bridge(
                     scope=str(existing.get("scope") or scope),
                     capability_status=str(existing.get("capability_status") or "unknown"),
                     external_adapter_available=external_available,
+                    worktree_dir=existing.get("worktree_dir") or worktree_dir,
                 )
                 if _route_policy_signature(current_route) != _route_policy_signature(persisted_route):
                     existing = recover_native_attempt(
@@ -4527,20 +5511,28 @@ def execute_delegation_bridge(
                 return existing
             if not executable:
                 raise ExternalAdapterUnavailable("missing_cli: persisted external attempt has no provider CLI")
-            state = run_external_adapter(
-                base_dir=base_dir,
-                task_id=task_id,
-                expected_attempt_id=str(existing.get("attempt_id") or ""),
-                provider=provider,
-                prompt_file=existing.get("prompt_file") or prompt_file,
-                worktree_dir=worktree_dir,
-                output_path=existing.get("output_path") or output_path,
-                idempotency_key=f"{idempotency_key}:external-run",
-                binary=executable,
-                model=model,
-                scope=str(existing.get("scope") or scope),
-                read_only=bool(existing.get("read_only")),
-            )
+            if existing.get("launch_surface") == "orca":
+                state = launch_external_via_orca(
+                    base_dir=base_dir,
+                    task_id=task_id,
+                    expected_attempt_id=str(existing.get("attempt_id") or ""),
+                    idempotency_key=f"{idempotency_key}:orca-launch",
+                )
+            else:
+                state = run_external_adapter(
+                    base_dir=base_dir,
+                    task_id=task_id,
+                    expected_attempt_id=str(existing.get("attempt_id") or ""),
+                    provider=provider,
+                    prompt_file=existing.get("prompt_file") or prompt_file,
+                    worktree_dir=worktree_dir,
+                    output_path=existing.get("output_path") or output_path,
+                    idempotency_key=f"{idempotency_key}:external-run",
+                    binary=executable,
+                    model=model,
+                    scope=str(existing.get("scope") or scope),
+                    read_only=bool(existing.get("read_only")),
+                )
             return _mark_bridge_result(
                 base_dir=base_dir,
                 task_id=task_id,
@@ -4557,6 +5549,7 @@ def execute_delegation_bridge(
                 scope=scope,
                 capability_status="unknown",
                 external_adapter_available=external_available,
+                worktree_dir=worktree_dir,
             )
             capability = str(route["capability_status"])
             if route["route"] == "native_candidate" and route.get("handshake_required"):
@@ -4568,6 +5561,7 @@ def execute_delegation_bridge(
                     scope=scope,
                     capability_status=capability,
                     external_adapter_available=external_available,
+                    worktree_dir=worktree_dir,
                 )
             if route["route"] == "blocked":
                 raise ExternalAdapterUnavailable(
@@ -4588,20 +5582,28 @@ def execute_delegation_bridge(
                     model=model,
                     route_decision=route,
                 )
-                state = run_external_adapter(
-                    base_dir=base_dir,
-                    task_id=task_id,
-                    expected_attempt_id=str(state.get("attempt_id") or ""),
-                    provider=provider,
-                    prompt_file=prompt_file,
-                    worktree_dir=worktree_dir,
-                    output_path=output_path,
-                    idempotency_key=f"{idempotency_key}:external-run",
-                    binary=executable,
-                    model=model,
-                    scope=scope,
-                    read_only=read_only,
-                )
+                if state.get("launch_surface") == "orca":
+                    state = launch_external_via_orca(
+                        base_dir=base_dir,
+                        task_id=task_id,
+                        expected_attempt_id=str(state.get("attempt_id") or ""),
+                        idempotency_key=f"{idempotency_key}:orca-launch",
+                    )
+                else:
+                    state = run_external_adapter(
+                        base_dir=base_dir,
+                        task_id=task_id,
+                        expected_attempt_id=str(state.get("attempt_id") or ""),
+                        provider=provider,
+                        prompt_file=prompt_file,
+                        worktree_dir=worktree_dir,
+                        output_path=output_path,
+                        idempotency_key=f"{idempotency_key}:external-run",
+                        binary=executable,
+                        model=model,
+                        scope=scope,
+                        read_only=read_only,
+                    )
                 return _mark_bridge_result(
                     base_dir=base_dir,
                     task_id=task_id,
@@ -4729,20 +5731,28 @@ def execute_delegation_bridge(
                 expected_attempt_id=native_attempt_id,
                 idempotency_key=f"{idempotency_key}:fallback",
             )
-            state = run_external_adapter(
-                base_dir=base_dir,
-                task_id=task_id,
-                expected_attempt_id=str(state.get("attempt_id") or ""),
-                provider=provider,
-                prompt_file=prompt_file,
-                worktree_dir=worktree_dir,
-                output_path=output_path,
-                idempotency_key=f"{idempotency_key}:external-run",
-                binary=executable,
-                model=model,
-                scope=scope,
-                read_only=read_only,
-            )
+            if state.get("launch_surface") == "orca":
+                state = launch_external_via_orca(
+                    base_dir=base_dir,
+                    task_id=task_id,
+                    expected_attempt_id=str(state.get("attempt_id") or ""),
+                    idempotency_key=f"{idempotency_key}:orca-launch",
+                )
+            else:
+                state = run_external_adapter(
+                    base_dir=base_dir,
+                    task_id=task_id,
+                    expected_attempt_id=str(state.get("attempt_id") or ""),
+                    provider=provider,
+                    prompt_file=prompt_file,
+                    worktree_dir=worktree_dir,
+                    output_path=output_path,
+                    idempotency_key=f"{idempotency_key}:external-run",
+                    binary=executable,
+                    model=model,
+                    scope=scope,
+                    read_only=read_only,
+                )
             return _mark_bridge_result(
                 base_dir=base_dir,
                 task_id=task_id,
@@ -4857,6 +5867,8 @@ def plan_delegation_route(
     configured_scope: Any = "all",
     capability_status: str = "unknown",
     external_adapter_available: bool | None = None,
+    orca_enabled: bool = False,
+    orca_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a pure route decision without launching either transport."""
 
@@ -4919,9 +5931,7 @@ def plan_delegation_route(
                 "route_cause": route_cause,
             }
         )
-        return payload
-
-    if external_available:
+    elif external_available:
         payload.update(
             {
                 "route": "external",
@@ -4931,18 +5941,69 @@ def plan_delegation_route(
                 "handshake_required": False,
             }
         )
-        return payload
+    else:
+        payload.update(
+            {
+                "route": "blocked",
+                "execution_transport": None,
+                "reason_code": "missing_cli",
+                "route_cause": route_cause,
+                "handshake_required": False,
+                "failure_kind": "missing_cli",
+            }
+        )
 
+    original = json.loads(json.dumps(payload, ensure_ascii=False))
+    preflight = dict(orca_preflight) if isinstance(orca_preflight, dict) else {}
+    preflight_ready = bool(
+        orca_enabled
+        and external_available
+        and preflight.get("ok") is True
+        and str(preflight.get("runtime_scope") or "local").lower() == "local"
+        and str(preflight.get("worktree_selector") or "").startswith("path:/")
+    )
     payload.update(
         {
-            "route": "blocked",
-            "execution_transport": None,
-            "reason_code": "missing_cli",
-            "route_cause": route_cause,
-            "handshake_required": False,
-            "failure_kind": "missing_cli",
+            "requested_launch_surface": "orca" if orca_enabled else "direct",
+            "launch_surface": "orca" if preflight_ready else "direct",
+            "launch_surface_status": (
+                "ready"
+                if preflight_ready
+                else "disabled"
+                if not orca_enabled
+                else "preflight_failed"
+                if preflight
+                else "preflight_required"
+            ),
         }
     )
+    if orca_enabled:
+        payload["orca_preflight"] = {
+            key: preflight.get(key)
+            for key in (
+                "ok",
+                "runtime_scope",
+                "worktree_dir",
+                "worktree_selector",
+                "cli_argv",
+                "reason_code",
+                "message",
+            )
+            if preflight.get(key) is not None
+        }
+    if preflight_ready:
+        payload.update(
+            {
+                "route": "external",
+                "execution_transport": "external",
+                "reason_code": "orca_launch_surface_ready",
+                "route_cause": "orca_launch_surface",
+                "handshake_required": False,
+                "original_route_decision": original,
+                "original_route_fingerprint": _route_fingerprint(original),
+            }
+        )
+        payload.pop("failure_kind", None)
     return payload
 
 
@@ -4978,6 +6039,7 @@ def _resolved_delegation_settings(base_dir: Path | str | None = None) -> dict[st
         "transport_policy": NATIVE_FIRST_POLICY,
         "native_enabled": True,
         "configured_scope": "all",
+        "orca_enabled": False,
         "config_provenance": "builtin",
     }
     resolved_base = Path(base_dir).resolve(strict=False) if base_dir is not None else _common.BASE_DIR
@@ -4998,6 +6060,9 @@ def _resolved_delegation_settings(base_dir: Path | str | None = None) -> dict[st
         if not isinstance(delegation, dict):
             continue
 
+        orca = delegation.get("orca") if isinstance(delegation.get("orca"), dict) else {}
+        if isinstance(orca.get("enabled"), bool):
+            settings["orca_enabled"] = orca["enabled"]
         canonical_present = "transport_policy" in delegation or "native" in delegation
         if canonical_present:
             policy = delegation.get("transport_policy")
@@ -5039,6 +6104,34 @@ def _route_fingerprint(route: dict[str, Any]) -> str:
             "reason_code",
             "route_cause",
             "handshake_required",
+            "requested_launch_surface",
+            "launch_surface",
+            "launch_surface_status",
+            "original_route_fingerprint",
+        )
+    }
+    raw = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _legacy_route_fingerprint(route: dict[str, Any]) -> str:
+    """Fingerprint used before launch_surface became an orthogonal route axis."""
+
+    evidence = {
+        key: route.get(key)
+        for key in (
+            "host",
+            "provider",
+            "transport_policy",
+            "scope",
+            "configured_scope",
+            "native_enabled",
+            "capability_status",
+            "route",
+            "execution_transport",
+            "reason_code",
+            "route_cause",
+            "handshake_required",
         )
     }
     raw = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -5052,7 +6145,22 @@ def _validate_persisted_route(state: dict[str, Any]) -> dict[str, Any]:
     expected = str(state.get("route_fingerprint") or "")
     actual = _route_fingerprint(decision)
     decision_fingerprint = str(decision.get("route_fingerprint") or actual)
-    if not expected or expected != actual or decision_fingerprint != actual:
+    legacy_launch_fields_absent = not any(
+        key in decision
+        for key in (
+            "requested_launch_surface",
+            "launch_surface",
+            "launch_surface_status",
+            "original_route_fingerprint",
+        )
+    )
+    legacy = _legacy_route_fingerprint(decision)
+    legacy_valid = (
+        legacy_launch_fields_absent
+        and expected == legacy
+        and decision_fingerprint == legacy
+    )
+    if not expected or (not legacy_valid and (expected != actual or decision_fingerprint != actual)):
         raise LifecycleConflict("persisted delegation route fingerprint mismatch")
     route_transport = decision.get("execution_transport")
     if route_transport and route_transport != state.get("execution_transport"):
@@ -5061,9 +6169,21 @@ def _validate_persisted_route(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _route_policy_signature(route: dict[str, Any]) -> tuple[Any, ...]:
-    return tuple(
-        route.get(key)
-        for key in ("route", "transport_policy", "native_enabled", "configured_scope", "scope")
+    requested_launch_surface = route.get("requested_launch_surface")
+    launch_surface = route.get("launch_surface")
+    if requested_launch_surface is None and launch_surface is None:
+        # Attempts persisted before Orca existed are semantically equivalent
+        # to the default-off direct launch surface.
+        requested_launch_surface = "direct"
+        launch_surface = "direct"
+    return (
+        route.get("route"),
+        route.get("transport_policy"),
+        route.get("native_enabled"),
+        route.get("configured_scope"),
+        route.get("scope"),
+        requested_launch_surface,
+        launch_surface,
     )
 
 
@@ -5078,8 +6198,39 @@ def resolve_delegation_route(
     transport_policy: str | None = None,
     native_enabled: bool | None = None,
     configured_scope: Any = None,
+    worktree_dir: Path | str | None = None,
+    orca_client: Any | None = None,
 ) -> dict[str, Any]:
     settings = _resolved_delegation_settings(base_dir)
+    normalized_provider = _normalized_provider(provider)
+    resolved_external_available = (
+        bool(shutil.which(_external_binary(normalized_provider)))
+        if external_adapter_available is None
+        else bool(external_adapter_available)
+    )
+    orca_preflight: dict[str, Any] | None = None
+    if settings["orca_enabled"]:
+        if not resolved_external_available:
+            orca_preflight = {
+                "ok": False,
+                "reason_code": "provider_cli_missing",
+                "message": "the protected provider adapter is unavailable",
+            }
+        elif worktree_dir is None or not str(worktree_dir).strip():
+            orca_preflight = None
+        else:
+            try:
+                client = orca_client or orca_delegation_mod.OrcaClient()
+                orca_preflight = client.preflight(worktree_dir)
+            except (
+                orca_delegation_mod.OrcaCommandError,
+                orca_delegation_mod.OrcaPreflightError,
+            ) as exc:
+                orca_preflight = {
+                    "ok": False,
+                    "reason_code": "orca_preflight_failed",
+                    "message": str(exc),
+                }
     route = plan_delegation_route(
         host=host,
         provider=provider,
@@ -5088,7 +6239,9 @@ def resolve_delegation_route(
         native_enabled=settings["native_enabled"] if native_enabled is None else native_enabled,
         configured_scope=settings["configured_scope"] if configured_scope is None else configured_scope,
         capability_status=capability_status,
-        external_adapter_available=external_adapter_available,
+        external_adapter_available=resolved_external_available,
+        orca_enabled=settings["orca_enabled"],
+        orca_preflight=orca_preflight,
     )
     route["config_provenance"] = settings["config_provenance"]
     route["route_fingerprint"] = _route_fingerprint(route)
@@ -5142,6 +6295,7 @@ def cmd_delegation_route(args: argparse.Namespace) -> int:
         configured_scope=args.configured_scope,
         capability_status=args.capability_status,
         external_adapter_available=external_available,
+        worktree_dir=args.worktree_dir,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
     return 2 if payload["route"] == "blocked" else 0
@@ -5382,6 +6536,7 @@ def register(subparsers) -> None:
     route.add_argument("--provider", choices=["codex", "claude", "agy", "gemini"], required=True)
     route.add_argument("--transport-policy")
     route.add_argument("--scope", default="implementation")
+    route.add_argument("--worktree-dir")
     route.add_argument("--configured-scope")
     route.add_argument("--capability-status", choices=sorted(CAPABILITY_STATUSES), default="unknown")
     native_toggle = route.add_mutually_exclusive_group()

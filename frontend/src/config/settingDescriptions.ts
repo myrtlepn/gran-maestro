@@ -94,6 +94,7 @@ export const SETTING_DESCRIPTIONS: Record<string, string | SettingMeta> = {
     description: 'Native 위임을 허용할 작업 범위. 기존 native_codex_subagents.scope alias는 이 canonical 값으로 migration됩니다.',
     options: ['all', 'review-and-exploration-only', 'review-only', 'exploration-only', 'implementation-only', 'none'],
   },
+  'delegation.orca.enabled': '로컬 Orca 터미널에서 보호된 provider CLI runner를 실행합니다. MST worktree와 lifecycle은 그대로 유지되며 기본값은 꺼짐입니다.',
   'delegation.native_codex_subagents.enabled': 'Legacy read/migration alias입니다. 새 설정은 delegation.transport_policy와 delegation.native.enabled를 사용하며 canonical 값이 충돌 시 우선합니다.',
   'delegation.native_codex_subagents.scope': 'Legacy read/migration alias입니다. 새 설정은 delegation.native.scope를 사용하며 canonical 값이 충돌 시 우선합니다.',
   'delegation.codex_sandbox': 'Codex CLI sandbox 기본 정책',

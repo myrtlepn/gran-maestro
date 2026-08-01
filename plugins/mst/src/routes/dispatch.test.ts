@@ -85,6 +85,10 @@ Deno.test("GET /dispatch/stream emits snapshot events for active dispatch states
     provider: "claude",
     model: "claude-opus",
     execution_transport: "external",
+    launch_surface: "orca",
+    requested_launch_surface: "orca",
+    launch_surface_status: "ready",
+    orca_launch_status: "created",
     route_reason: "external_fallback_after_definitive_not_created",
     provider_task_id: null,
     completion_signal: null,
@@ -223,12 +227,14 @@ Deno.test("GET /dispatch/stream emits snapshot events for active dispatch states
     assertEquals(native?.provider_reconciliation_required, true);
     assertEquals(native?.reconciliation_required, true);
     assertEquals(native?.reconciliation_invariant_gap, false);
+    assertEquals(native?.launch_surface, "direct");
 
     const external = payload.items?.find((item) =>
       item.task_id === "task-external"
     );
     assertEquals(external?.attempt_id, "external-a2");
     assertEquals(external?.execution_transport, "external");
+    assertEquals(external?.requested_launch_surface, "orca");
     assertEquals(
       external?.route_reason,
       "external_fallback_after_definitive_not_created",
@@ -246,6 +252,9 @@ Deno.test("GET /dispatch/stream emits snapshot events for active dispatch states
     assertEquals(external?.provider_reconciliation_required, true);
     assertEquals(external?.reconciliation_required, true);
     assertEquals(external?.reconciliation_invariant_gap, false);
+    assertEquals(external?.launch_surface, "orca");
+    assertEquals(external?.launch_surface_status, "ready");
+    assertEquals(external?.orca_launch_status, "created");
 
     const history = await readSnapshot(
       await projectDispatchApi.request(

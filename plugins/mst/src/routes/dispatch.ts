@@ -34,6 +34,10 @@ type DispatchStateFile = {
   model?: unknown;
   last_heartbeat?: unknown;
   execution_transport?: unknown;
+  requested_launch_surface?: unknown;
+  launch_surface?: unknown;
+  launch_surface_status?: unknown;
+  orca_launch_status?: unknown;
   route_reason?: unknown;
   provider_task_id?: unknown;
   completion_signal?: unknown;
@@ -59,6 +63,10 @@ export type DispatchStreamItem = {
   provider: string;
   model: string;
   execution_transport: string;
+  requested_launch_surface: string;
+  launch_surface: string;
+  launch_surface_status: string;
+  orca_launch_status: string | null;
   route_reason: string;
   provider_task_id: string | null;
   completion_signal: string | null;
@@ -231,6 +239,14 @@ export async function collectDispatchSnapshot(
       model: asString(payload.model, ""),
       execution_transport: asString(payload.execution_transport, "external")
         .toLowerCase(),
+      requested_launch_surface: asString(
+        payload.requested_launch_surface,
+        payload.launch_surface === "orca" ? "orca" : "direct",
+      ).toLowerCase(),
+      launch_surface: asString(payload.launch_surface, "direct").toLowerCase(),
+      launch_surface_status: asString(payload.launch_surface_status, "disabled")
+        .toLowerCase(),
+      orca_launch_status: asNullableString(payload.orca_launch_status),
       route_reason: asString(payload.route_reason, ""),
       provider_task_id: asNullableString(payload.provider_task_id),
       completion_signal: asNullableString(payload.completion_signal),

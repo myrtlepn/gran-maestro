@@ -69,6 +69,13 @@ export function DispatchRunCard({ item }: { item: DispatchStreamItem }) {
           <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-medium text-violet-700 dark:border-violet-900/50 dark:bg-violet-900/30 dark:text-violet-200">
             {item.execution_transport}
           </span>
+          {item.requested_launch_surface === 'orca' && (
+            <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 font-medium text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-900/30 dark:text-cyan-200">
+              orca · {item.launch_surface === 'orca'
+                ? item.orca_launch_status || item.launch_surface_status
+                : `fallback · ${item.launch_surface_status}`}
+            </span>
+          )}
           {item.stale && (
             <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 font-medium text-red-700 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-200">
               stale

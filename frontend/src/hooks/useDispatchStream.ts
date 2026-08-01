@@ -12,6 +12,10 @@ export type DispatchStreamItem = {
   provider: string;
   model: string;
   execution_transport: string;
+  requested_launch_surface: string;
+  launch_surface: string;
+  launch_surface_status: string;
+  orca_launch_status: string | null;
   route_reason: string;
   provider_task_id: string | null;
   completion_signal: string | null;
@@ -102,6 +106,13 @@ function normalizeItem(value: unknown): DispatchStreamItem | null {
     provider: asString(row.provider, 'unknown'),
     model: asString(row.model, ''),
     execution_transport: asString(row.execution_transport, 'external').toLowerCase(),
+    requested_launch_surface: asString(
+      row.requested_launch_surface,
+      row.launch_surface === 'orca' ? 'orca' : 'direct',
+    ).toLowerCase(),
+    launch_surface: asString(row.launch_surface, 'direct').toLowerCase(),
+    launch_surface_status: asString(row.launch_surface_status, 'disabled').toLowerCase(),
+    orca_launch_status: asNullableString(row.orca_launch_status),
     route_reason: asString(row.route_reason, ''),
     provider_task_id: asNullableString(row.provider_task_id),
     completion_signal: asNullableString(row.completion_signal),

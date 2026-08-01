@@ -62,6 +62,8 @@ Native task가 생성되지 않았음이 확정된 경우에만 external fallbac
 
 기존 project-local `delegation.native_codex_subagents.enabled: false` opt-out은 migration/read alias로 보존됩니다. 새 설정의 canonical source는 `delegation.transport_policy`와 `delegation.native.{enabled,scope}`입니다. 자세한 설정과 migration 규칙은 [설정 관리](docs/configuration.md#delegation--agiledispatch)를 참고하세요.
 
+선택적으로 `delegation.orca.enabled: true`를 설정하면 Codex·Claude·AGY의 보호된 external runner를 exact MST worktree의 로컬 Orca background terminal에서 시작합니다. 기본값은 `false`이며, MST가 lifecycle·취소·결과 evidence를 계속 소유합니다. Terminal create 호출 전까지만 원래 route fallback이 가능하고 이후 불명확한 결과는 중복 실행 없이 reconcile합니다.
+
 ```
 # 1. plan으로 상세화 → request로 스펙 생성
 /mst:plan 로그인 화면 개선        # → PLN-001

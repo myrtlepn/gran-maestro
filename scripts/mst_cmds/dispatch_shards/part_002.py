@@ -665,7 +665,7 @@ def register(subparsers):
     authorize_external.add_argument("--read-only", action="store_true")
 
     validate_authorization = dispatch_sub.add_parser("validate-authorization")
-    validate_authorization.add_argument("--provider", choices=["codex", "claude"], required=True)
+    validate_authorization.add_argument("--provider", choices=["codex", "claude", "agy"], required=True)
     validate_authorization.add_argument("--prompt-file", required=True)
     validate_authorization.add_argument("--task-id", required=True)
     validate_authorization.add_argument("--worktree-dir", required=True)
@@ -695,6 +695,12 @@ def register(subparsers):
     run_external.add_argument("--idempotency-key", required=True)
     run_external.add_argument("--binary")
     run_external.add_argument("--timeout", type=int)
+
+    launch_external = dispatch_sub.add_parser("launch-external")
+    launch_external.add_argument("--task-id", required=True)
+    launch_external.add_argument("--expected-attempt-id", required=True)
+    launch_external.add_argument("--idempotency-key", required=True)
+    launch_external.add_argument("--timeout", type=int)
 
     heartbeat_external = dispatch_sub.add_parser("heartbeat-external")
     heartbeat_external.add_argument("--task-id", required=True)

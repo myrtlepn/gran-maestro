@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 
 from scripts.mst_cmds.native_delegation import (
+    _route_fingerprint,
     acknowledge_native_spawn,
     claim_native_spawn,
+    plan_delegation_route,
     request_external_fallback,
     start_external_attempt,
     start_native_attempt,
@@ -36,6 +38,7 @@ def _persist_external_authorization(
     running_log_path: Path,
     model: str | None,
     write_capable: bool = False,
+    route_decision: dict | None = None,
 ) -> dict:
     return start_external_attempt(
         base_dir=workspace / ".gran-maestro",
@@ -50,6 +53,7 @@ def _persist_external_authorization(
         running_log_path=running_log_path,
         model=model,
         mst_session_id=SESSION_ID,
+        route_decision=route_decision,
     )
 
 
@@ -893,6 +897,70 @@ def test_dispatch_build_agy_includes_required_fragments(tmp_path):
     assert "export MST_SESSION_ID" in command
     assert "MST_CONTEXT_JSON" in command
     assert "session resolve" not in command
+
+
+def test_agy_uses_protected_external_lifecycle_under_orca(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+    prompt_file = workspace / "prompt-agy-orca.md"
+    prompt_file.write_text("sensitive AGY prompt", encoding="utf-8")
+    log_file = workspace / "agy-orca.log"
+    route = plan_delegation_route(
+        host="headless",
+        provider="agy",
+        scope="analysis",
+        capability_status="unavailable",
+        external_adapter_available=True,
+        orca_enabled=True,
+        orca_preflight={
+            "ok": True,
+            "runtime_scope": "local",
+            "worktree_dir": str(workspace),
+            "worktree_selector": f"path:{workspace.resolve()}",
+            "cli_argv": ["/mock/orca"],
+        },
+    )
+    route["route_fingerprint"] = _route_fingerprint(route)
+    state = _persist_external_authorization(
+        workspace,
+        task_id="task-agy-orca",
+        provider="agy",
+        prompt_file=prompt_file,
+        worktree_dir=workspace,
+        running_log_path=log_file,
+        model="agy-test-model",
+        route_decision=route,
+    )
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "agy",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        "task-agy-orca",
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "agy-test-model",
+        "--expected-attempt-id",
+        str(state["attempt_id"]),
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+    assert "dispatch launch-external" in command
+    assert "dispatch run-external" not in command
+    assert "agy --print" not in command
+    assert "sensitive AGY prompt" not in command
+    assert str(prompt_file) not in command
+    assert str(log_file) not in command
+    assert ".snapshot.md" not in command
 
 
 def test_dispatch_build_legacy_gemini_alias_uses_agy(tmp_path):

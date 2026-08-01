@@ -35,7 +35,7 @@ _DELEGATE_MONITOR_KEY = "delegate_monitor"
 _DELEGATE_EVENT_TTL = timedelta(minutes=10)
 _DELEGATE_EVENT_COOLDOWN = timedelta(minutes=2)
 _DELEGATE_TAIL_BYTES = 2048
-_PERSISTED_EXTERNAL_AUTH_PROVIDERS = {"codex", "claude"}
+_PERSISTED_EXTERNAL_AUTH_PROVIDERS = {"codex", "claude", "agy"}
 _DELEGATE_ALLOWED_ACTIONS = ["observe", "wait", "mark_blocked", "terminate_gracefully"]
 _DELEGATE_FORBIDDEN_REASONS = [
     "stdin_write_disallowed",
@@ -147,6 +147,18 @@ _LIFECYCLE_ATTEMPT_FIELDS = (
     "attempt_sequence",
     "current_attempt",
     "security_evidence",
+    "execution_transport",
+    "launch_surface",
+    "requested_launch_surface",
+    "launch_surface_status",
+    "route_reason",
+    "route_fingerprint",
+    "orca_launch_status",
+    "orca_worktree_selector",
+    "orca_terminal_title",
+    "orca_terminal_handle",
+    "orca_reconciliation_required",
+    "orca_cleanup_status",
 )
 
 def _json_object_or_empty(raw: str) -> dict:
@@ -1140,6 +1152,14 @@ def _append_dispatch_history_event(session_id: str, payload: dict, event_type: s
         "created_new_session": False,
         "prompt_summary_used_as_source": False,
         "provider": payload.get("provider"),
+        "execution_transport": payload.get("execution_transport"),
+        "launch_surface": payload.get("launch_surface"),
+        "requested_launch_surface": payload.get("requested_launch_surface"),
+        "launch_surface_status": payload.get("launch_surface_status"),
+        "route_fingerprint": payload.get("route_fingerprint"),
+        "orca_launch_status": payload.get("orca_launch_status"),
+        "orca_terminal_handle": payload.get("orca_terminal_handle"),
+        "orca_cleanup_status": payload.get("orca_cleanup_status"),
         "provider_task_id": payload.get("provider_task_id") or os.environ.get("MST_PROVIDER_TASK_ID"),
         "pid": payload.get("pid"),
         "ppid": os.getppid(),
@@ -1333,6 +1353,22 @@ def _build_status_row(path: Path, stale_threshold: int, now: datetime) -> dict |
         "provider_exec_authorized_at": payload.get("provider_exec_authorized_at"),
         "provider_exec_released_at": payload.get("provider_exec_released_at"),
         "execution_transport": execution_transport,
+        "launch_surface": str(payload.get("launch_surface") or "direct"),
+        "requested_launch_surface": str(
+            payload.get("requested_launch_surface") or "direct"
+        ),
+        "launch_surface_status": str(
+            payload.get("launch_surface_status") or "disabled"
+        ),
+        "route_reason": payload.get("route_reason"),
+        "route_fingerprint": payload.get("route_fingerprint"),
+        "orca_launch_status": payload.get("orca_launch_status"),
+        "orca_terminal_handle": payload.get("orca_terminal_handle"),
+        "orca_terminal_title": payload.get("orca_terminal_title"),
+        "orca_reconciliation_required": bool(
+            payload.get("orca_reconciliation_required")
+        ),
+        "orca_cleanup_status": payload.get("orca_cleanup_status"),
         "completion_signal": payload.get("completion_signal"),
         "exit_code": payload.get("exit_code"),
         "skill": payload.get("skill", ""),
@@ -1847,7 +1883,7 @@ def validate_dispatch_external_authorization(
     expected = _safe_text(expected_attempt_id)
     if not expected:
         raise native_delegation_mod.LifecycleConflict(
-            "dispatch build requires --expected-attempt-id for Codex/Claude external execution"
+            "dispatch build requires --expected-attempt-id for protected external execution"
         )
 
     state = _load_dispatch_external_authorization(task_id)
@@ -1942,10 +1978,30 @@ def _emit_dispatch_authorization_failure(exc: Exception) -> int:
     return 2
 
 
+def _emit_dispatch_orca_worker_failure(args, exc: Exception, *, reason_code: str) -> int:
+    """Persist an outer-controller wakeup before the Orca worker exits."""
+
+    try:
+        native_delegation_mod.record_orca_worker_failure(
+            base_dir=_common.BASE_DIR,
+            task_id=str(args.task_id).strip(),
+            expected_attempt_id=args.expected_attempt_id,
+            reason_code=reason_code,
+        )
+    except (
+        TypeError,
+        ValueError,
+        native_delegation_mod.LifecycleConflict,
+    ):
+        pass
+    return _emit_dispatch_authorization_failure(exc)
+
+
 def cmd_dispatch_authorize_external(args):
     """Persist a central-planner external decision before dispatch build."""
 
     session_id = None
+    session_context_json = None
     if os.environ.get("MST_SESSION_ID", "").strip() or os.environ.get("MST_CONTEXT_JSON", "").strip():
         try:
             child_env = _dispatch_required_session_context()
@@ -1954,6 +2010,7 @@ def cmd_dispatch_authorize_external(args):
                 native_delegation_mod.LifecycleConflict(str(exc))
             )
         session_id = child_env["MST_SESSION_ID"]
+        session_context_json = child_env["MST_CONTEXT_JSON"]
         os.environ["MST_SESSION_ID"] = session_id
         os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
 
@@ -1987,6 +2044,7 @@ def cmd_dispatch_authorize_external(args):
             scope=args.scope,
             capability_status=args.capability_status,
             external_adapter_available=external_available,
+            worktree_dir=worktree_dir,
         )
         if route.get("route") != "external":
             raise native_delegation_mod.LifecycleConflict(
@@ -2010,6 +2068,7 @@ def cmd_dispatch_authorize_external(args):
             mst_session_id=session_id,
             attempt_id=args.attempt_id,
             route_decision=route,
+            mst_context_json=session_context_json,
         )
     except (native_delegation_mod.LifecycleConflict, native_delegation_mod.ExternalAdapterUnavailable) as exc:
         return _emit_dispatch_authorization_failure(exc)
@@ -2038,6 +2097,10 @@ def cmd_dispatch_validate_authorization(args):
                 "attempt_id": state.get("attempt_id"),
                 "provider": state.get("provider"),
                 "execution_transport": state.get("execution_transport"),
+                "launch_surface": state.get("launch_surface"),
+                "launch_surface_status": state.get("launch_surface_status"),
+                "orca_launch_status": state.get("orca_launch_status"),
+                "orca_worktree_selector": state.get("orca_worktree_selector"),
                 "route_fingerprint": state.get("route_fingerprint"),
             },
             ensure_ascii=False,
@@ -2067,14 +2130,53 @@ def cmd_dispatch_claim_external(args):
     return _dispatch_split_external_disabled("claim-external")
 
 
+def _dispatch_external_monitor_callback(current: dict, running_log: Path) -> dict:
+    try:
+        owner_pid = int(current.get("pid"))
+    except (TypeError, ValueError):
+        owner_pid = os.getpid()
+    result = evaluate_delegate_io_attention(
+        current,
+        {"combined": running_log},
+        process_identity={
+            "pid": owner_pid,
+            "pid_start_time": str(current.get("pid_start_time") or ""),
+            "pid_alive": _pid_is_alive(owner_pid),
+        },
+    )
+    monitored = result.get("state") if isinstance(result, dict) else None
+    if not isinstance(monitored, dict):
+        return {}
+    return {
+        field: monitored[field]
+        for field in ("delegate_monitor", "delegate_io_attention_events")
+        if field in monitored
+    }
+
+
 def cmd_dispatch_run_external(args):
     """Run a protected external attempt through the single Python supervisor."""
 
     try:
+        os.environ["MST_CONTEXT_JSON"] = (
+            native_delegation_mod.load_persisted_mst_context(
+                base_dir=_common.BASE_DIR,
+                task_id=str(args.task_id).strip(),
+                expected_attempt_id=args.expected_attempt_id,
+                inherited_context=os.environ.get("MST_CONTEXT_JSON"),
+            )
+        )
+    except native_delegation_mod.LifecycleConflict as exc:
+        return _emit_dispatch_orca_worker_failure(
+            args, exc, reason_code="orca_context_restore_failed"
+        )
+    try:
         child_env = _dispatch_required_session_context()
     except ValueError as exc:
-        return _emit_dispatch_authorization_failure(
-            native_delegation_mod.LifecycleConflict(str(exc))
+        return _emit_dispatch_orca_worker_failure(
+            args,
+            native_delegation_mod.LifecycleConflict(str(exc)),
+            reason_code="orca_context_validation_failed",
         )
     session_id = child_env["MST_SESSION_ID"]
     os.environ["MST_SESSION_ID"] = session_id
@@ -2086,34 +2188,13 @@ def cmd_dispatch_run_external(args):
             try:
                 timeout = max(0, int(raw_timeout))
             except ValueError:
-                return _emit_dispatch_authorization_failure(
+                return _emit_dispatch_orca_worker_failure(
+                    args,
                     native_delegation_mod.LifecycleConflict(
                         "MST_EXTERNAL_RUN_TIMEOUT must be an integer number of seconds"
-                    )
+                    ),
+                    reason_code="orca_worker_timeout_config_invalid",
                 )
-
-    def monitor_callback(current: dict, running_log: Path) -> dict:
-        try:
-            owner_pid = int(current.get("pid"))
-        except (TypeError, ValueError):
-            owner_pid = os.getpid()
-        result = evaluate_delegate_io_attention(
-            current,
-            {"combined": running_log},
-            process_identity={
-                "pid": owner_pid,
-                "pid_start_time": str(current.get("pid_start_time") or ""),
-                "pid_alive": _pid_is_alive(owner_pid),
-            },
-        )
-        monitored = result.get("state") if isinstance(result, dict) else None
-        if not isinstance(monitored, dict):
-            return {}
-        return {
-            field: monitored[field]
-            for field in ("delegate_monitor", "delegate_io_attention_events")
-            if field in monitored
-        }
 
     try:
         state = native_delegation_mod.run_persisted_external_adapter(
@@ -2123,7 +2204,7 @@ def cmd_dispatch_run_external(args):
             idempotency_key=args.idempotency_key,
             binary=args.binary,
             timeout=timeout,
-            monitor_callback=monitor_callback,
+            monitor_callback=_dispatch_external_monitor_callback,
         )
     except (
         TypeError,
@@ -2131,8 +2212,18 @@ def cmd_dispatch_run_external(args):
         native_delegation_mod.LifecycleConflict,
         native_delegation_mod.ExternalAdapterUnavailable,
     ) as exc:
-        return _emit_dispatch_authorization_failure(exc)
+        return _emit_dispatch_orca_worker_failure(
+            args, exc, reason_code="orca_external_adapter_failed"
+        )
     _append_dispatch_history_event(session_id, state, "dispatch.external_run")
+    if state.get("launch_surface") == "orca" and native_delegation_mod.lifecycle_is_terminal(
+        state
+    ):
+        state = native_delegation_mod.mark_orca_cleanup_ready(
+            base_dir=_common.BASE_DIR,
+            task_id=str(args.task_id).strip(),
+            expected_attempt_id=args.expected_attempt_id,
+        )
     print(json.dumps(state, ensure_ascii=False))
     if state.get("phase") == "done":
         return 0
@@ -2141,6 +2232,73 @@ def cmd_dispatch_run_external(args):
     except (TypeError, ValueError):
         provider_exit = 0
     return provider_exit if 0 < provider_exit <= 255 else 3
+
+
+def cmd_dispatch_launch_external(args):
+    """Create one background Orca terminal for the protected external runner."""
+
+    try:
+        child_env = _dispatch_required_session_context()
+    except ValueError as exc:
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(str(exc))
+        )
+    session_id = child_env["MST_SESSION_ID"]
+    os.environ["MST_SESSION_ID"] = session_id
+    os.environ["MST_CONTEXT_JSON"] = child_env["MST_CONTEXT_JSON"]
+    try:
+        state = native_delegation_mod.launch_external_via_orca(
+            base_dir=_common.BASE_DIR,
+            task_id=str(args.task_id).strip(),
+            expected_attempt_id=args.expected_attempt_id,
+            idempotency_key=args.idempotency_key,
+        )
+        if state.get("launch_surface") == "direct" and state.get("phase") == "planned":
+            state = native_delegation_mod.run_persisted_external_adapter(
+                base_dir=_common.BASE_DIR,
+                task_id=str(args.task_id).strip(),
+                expected_attempt_id=args.expected_attempt_id,
+                idempotency_key=f"{args.idempotency_key}:direct-fallback-run",
+                timeout=args.timeout,
+                monitor_callback=_dispatch_external_monitor_callback,
+            )
+        elif (
+            state.get("launch_surface") == "orca"
+            and state.get("orca_launch_status") == "created"
+        ):
+            state = native_delegation_mod.wait_for_orca_cleanup_ready(
+                base_dir=_common.BASE_DIR,
+                task_id=str(args.task_id).strip(),
+                expected_attempt_id=args.expected_attempt_id,
+            )
+            if state.get("orca_cleanup_status") in {
+                "ready_to_close",
+                "ready_to_preserve",
+            }:
+                state = native_delegation_mod.finalize_orca_terminal(
+                    base_dir=_common.BASE_DIR,
+                    task_id=str(args.task_id).strip(),
+                    expected_attempt_id=args.expected_attempt_id,
+                )
+    except (
+        TypeError,
+        ValueError,
+        native_delegation_mod.LifecycleConflict,
+        native_delegation_mod.ExternalAdapterUnavailable,
+    ) as exc:
+        return _emit_dispatch_authorization_failure(exc)
+
+    _append_dispatch_history_event(session_id, state, "dispatch.orca_launch")
+    print(json.dumps(state, ensure_ascii=False))
+    if state.get("phase") in {"planned", "running", "done"} and state.get(
+        "orca_launch_status"
+    ) in {"created", "closed"}:
+        return 0
+    if state.get("phase") == "done":
+        return 0
+    if state.get("status") == "launch_fallback_required":
+        return 4
+    return 3
 
 
 def cmd_dispatch_heartbeat_external(args):
@@ -2183,7 +2341,15 @@ def cmd_dispatch_build(args):
 
     authorization = None
     expected_attempt_id = _safe_text(getattr(args, "expected_attempt_id", None))
-    if provider in _PERSISTED_EXTERNAL_AUTH_PROVIDERS:
+    orca_enabled = bool(
+        native_delegation_mod._resolved_delegation_settings(_common.BASE_DIR).get(
+            "orca_enabled"
+        )
+    )
+    protected_provider = provider in _PERSISTED_EXTERNAL_AUTH_PROVIDERS and (
+        provider != "agy" or bool(expected_attempt_id) or orca_enabled
+    )
+    if protected_provider:
         if expected_attempt_id:
             try:
                 authorization = validate_dispatch_external_authorization(
@@ -2213,6 +2379,7 @@ def cmd_dispatch_build(args):
                 scope="implementation",
                 capability_status="unknown",
                 external_adapter_available=shutil.which(_provider_executable(provider)) is not None,
+                worktree_dir=worktree_dir,
             )
             if route.get("route") != "external":
                 return _emit_dispatch_authorization_failure(
@@ -2458,10 +2625,15 @@ def cmd_dispatch_build(args):
         # A single Python supervisor owns claim, exact prompt-byte delivery,
         # provider process-group reaping, atomic output publication, and
         # finalization.  The generated shell never reopens lifecycle paths.
+        launch_command = (
+            "launch-external"
+            if authorization.get("launch_surface") == "orca"
+            else "run-external"
+        )
         central_run_cmd = (
-            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch run-external '
+            f'MST_SESSION_ID="$MST_SESSION_ID" python3 {q(str(mst_script))} dispatch {launch_command} '
             f"--task-id {q(task_id)} --expected-attempt-id {q(expected_attempt_id)} "
-            f"--idempotency-key {q(task_id + ':' + expected_attempt_id + ':run:v2')}"
+            f"--idempotency-key {q(task_id + ':' + expected_attempt_id + ':' + launch_command + ':v2')}"
         )
         command = (
             f"{session_bootstrap_cmd}; "

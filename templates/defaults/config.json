@@ -222,6 +222,9 @@
       "enabled": true,
       "scope": "all"
     },
+    "orca": {
+      "enabled": false
+    },
     "codex_sandbox": "workspace-write",
     "monitor_interval_ms": 180000,
     "monitor_tail_lines": 50,

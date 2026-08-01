@@ -75,6 +75,7 @@ def test_codex_primary_defaults_do_not_require_claude_provider():
     assert defaults["delegation"]["default_provider"] == "codex"
     assert defaults["delegation"]["transport_policy"] == "same-host-native-first"
     assert defaults["delegation"]["native"] == {"enabled": True, "scope": "all"}
+    assert defaults["delegation"]["orca"] == {"enabled": False}
     assert "native_codex_subagents" not in defaults["delegation"]
 
     assignments = defaults["agent_assignments"]

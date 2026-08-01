@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import shutil
+import tempfile
 from pathlib import Path
 
 
@@ -186,42 +188,83 @@ def copy_path(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
-def reset_projection() -> None:
-    if PROJECTION_ROOT.exists() or PROJECTION_ROOT.is_symlink():
-        if PROJECTION_ROOT.is_symlink() or PROJECTION_ROOT.is_file():
-            PROJECTION_ROOT.unlink()
+def reset_projection(projection_root: Path) -> None:
+    if projection_root.exists() or projection_root.is_symlink():
+        if projection_root.is_symlink() or projection_root.is_file():
+            projection_root.unlink()
         else:
-            shutil.rmtree(PROJECTION_ROOT)
-    PROJECTION_ROOT.mkdir(parents=True)
+            shutil.rmtree(projection_root)
+    projection_root.mkdir(parents=True)
 
 
-def apply_codex_projection_rewrites() -> None:
+def apply_codex_projection_rewrites(projection_root: Path) -> None:
     for rel_path, rewrite in CODEX_SKILL_REWRITES.items():
-        path = PROJECTION_ROOT / rel_path
+        path = projection_root / rel_path
         text = path.read_text(encoding="utf-8")
         rewritten = rewrite(text, rel_path)
         path.write_text(rewritten, encoding="utf-8")
 
 
-def main() -> int:
-    reset_projection()
+def generate_projection(projection_root: Path) -> None:
+    reset_projection(projection_root)
 
     for rel in COPY_PATHS:
-        copy_path(REPO_ROOT / rel, PROJECTION_ROOT / rel)
+        copy_path(REPO_ROOT / rel, projection_root / rel)
 
-    extension_root = PROJECTION_ROOT / "extension"
+    extension_root = projection_root / "extension"
     extension_root.mkdir()
     for rel in EXTENSION_PATHS:
         source = REPO_ROOT / "extension" / rel
         if source.exists():
             copy_path(source, extension_root / rel)
 
-    hooks_root = PROJECTION_ROOT / "hooks"
+    hooks_root = projection_root / "hooks"
     hooks_root.mkdir()
     for rel in HOOK_PATHS:
         copy_path(REPO_ROOT / "hooks" / rel, hooks_root / rel)
 
-    apply_codex_projection_rewrites()
+    apply_codex_projection_rewrites(projection_root)
+
+
+def projection_drift(expected_root: Path, actual_root: Path) -> list[str]:
+    def files(root: Path) -> dict[str, bytes]:
+        if not root.is_dir():
+            return {}
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    expected = files(expected_root)
+    actual = files(actual_root)
+    paths = sorted(set(expected) | set(actual))
+    return [path for path in paths if expected.get(path) != actual.get(path)]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Sync the generated Codex plugin projection")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify projection drift without modifying plugins/mst",
+    )
+    args = parser.parse_args(argv)
+
+    if args.check:
+        with tempfile.TemporaryDirectory(prefix="mst-codex-projection-check-") as temp_dir:
+            expected_root = Path(temp_dir) / "mst"
+            generate_projection(expected_root)
+            drift = projection_drift(expected_root, PROJECTION_ROOT)
+        if drift:
+            print("Codex plugin projection drift detected:")
+            for path in drift:
+                print(f"- {path}")
+            return 1
+        print(f"Codex plugin projection check passed: {PROJECTION_ROOT}")
+        return 0
+
+    generate_projection(PROJECTION_ROOT)
 
     print(f"Synced Codex plugin projection: {PROJECTION_ROOT}")
     return 0

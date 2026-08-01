@@ -62,6 +62,8 @@ External fallback is allowed only when the host definitively reports that no nat
 
 An existing project-local `delegation.native_codex_subagents.enabled: false` opt-out remains supported as a migration/read alias. New configuration uses `delegation.transport_policy` and `delegation.native.{enabled,scope}` as the canonical source. See [Configuration Management](docs/configuration.en.md#delegation--agiledispatch) for settings and migration rules.
 
+Optionally set `delegation.orca.enabled: true` to start the protected Codex, Claude, and AGY external runners in a local Orca background terminal bound to the exact MST worktree. It defaults to `false`, and MST continues to own lifecycle, cancellation, and result evidence. The original route may be used only before terminal create is invoked; later uncertainty reconciles without duplicate execution.
+
 ```
 # 1. Expand multiple requests as plans
 /mst:plan Improve login screen
