@@ -7,7 +7,10 @@ calling its native agent tool after a ``native_candidate`` result.
 """
 
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import hashlib
 import hmac
 import json
@@ -185,11 +188,13 @@ def _task_lock(base_dir: Path | str, task_id: str):
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(_validate_task_id(task_id).encode("utf-8")).hexdigest()[:32]
     with (lock_dir / f"{lock_name}.lock").open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -199,11 +204,13 @@ def _bridge_lock(base_dir: Path | str, task_id: str):
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_name = hashlib.sha256(_validate_task_id(task_id).encode("utf-8")).hexdigest()[:32]
     with (lock_dir / f"{lock_name}.bridge.lock").open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -211,11 +218,13 @@ def _worktree_lease_lock(base_dir: Path | str):
     lock_dir = _base_path(base_dir) / "run" / ".locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / "worktree-leases.lock").open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _load_state(base_dir: Path | str, task_id: str) -> dict[str, Any] | None:
@@ -687,10 +696,12 @@ def _append_history(base_dir: Path | str, payload: dict[str, Any], event: str) -
         "provider_reap_evidence": payload.get("provider_reap_evidence"),
     }
     with path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         handle.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
         handle.flush()
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _file_evidence(path_value: Path | str | None) -> dict[str, Any] | None:
