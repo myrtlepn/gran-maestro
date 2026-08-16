@@ -114,25 +114,8 @@ def _host_context(host_value: str, event: str) -> dict[str, Any]:
     return host_cmd.build_host_context(host=host_value, event=event, payload={})
 
 
-def _codex_root_plan_can_ask(host_name: str) -> bool:
-    if host_name != "codex":
-        return False
-    raw_context = os.environ.get("MST_CONTEXT_JSON", "").strip()
-    if not raw_context:
-        return False
-    try:
-        context = json.loads(raw_context)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(context, dict):
-        return False
-    available_tools = context.get("available_tools")
-    return (
-        context.get("execution_mode") == "plan"
-        and context.get("agent_role") == "root"
-        and isinstance(available_tools, list)
-        and "request_user_input" in available_tools
-    )
+def _codex_root_plan_can_ask(host_name: str, native_capability: bool) -> bool:
+    return host_name == "codex" and native_capability
 
 
 def _codex_question_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -394,7 +377,7 @@ def cmd_question_prepare(args) -> int:
             print(_compact_json(result) if args.json else json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
-        resume_command = f"/mst:resume --answer {question_id}"
+        resume_command = f'/mst:resume --answer {question_id} --value "<answer>"'
         path = _write_pending_artifact(
             question_id=question_id,
             payload=payload,
@@ -407,7 +390,9 @@ def cmd_question_prepare(args) -> int:
             mst_session_id=mst_session_id,
         )
         codex_payload = (
-            _codex_question_payload(payload) if _codex_root_plan_can_ask(host_name) else None
+            _codex_question_payload(payload)
+            if _codex_root_plan_can_ask(host_name, bool(args.codex_native))
+            else None
         )
         if codex_payload is not None:
             result = {
@@ -528,6 +513,7 @@ def register(subparsers) -> None:
     prepare.add_argument("--resume-args", dest="resume_args", default="")
     prepare.add_argument("--payload-file", dest="payload_file", required=True)
     prepare.add_argument("--host", choices=["auto", "claude", "codex", "headless"], default="auto")
+    prepare.add_argument("--codex-native", type=_parse_bool_arg, default=False)
     prepare.add_argument("--auto", type=_parse_bool_arg, default=None)
     prepare.add_argument("--json", action="store_true")
 

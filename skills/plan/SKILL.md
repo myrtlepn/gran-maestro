@@ -166,7 +166,7 @@ Provider CLI를 직접 실행하는 허가된 external lane도 마지막 명령�
 
 - `/mst:plan` 호출 시 주제 성격과 무관하게 Step 0.1~4 전체 프로토콜을 실행 대상으로 잠근다.
 - 시작 전에 Write/Edit 허용 경로가 `PLN-*` 산출물 및 `CAP-*` 상태 갱신 경로인지 확인한다.
-- `AUTO_MODE=false`이면 최소 1회 Q&A 또는 `AskUserQuestion` 기반 분기 근거를 확보한다.
+- `AUTO_MODE=false`이면 핵심 결정의 근거를 대화 컨텍스트 또는 사용자 답변에서 확보한다. 중요한 미결 선택이 남을 때만 User Input Boundary로 질문한다.
 
 ### Exit
 
@@ -189,7 +189,7 @@ Provider CLI를 직접 실행하는 허가된 external lane도 마지막 명령�
 ## Anti-Rationalization Checklist
 
 - 합리화 패턴: "요구사항이 명확해 보이니 Cynefin 분류를 생략해도 된다." | 확인 증거: PM이 분류한 Cynefin 도메인과 적용 전략을 한 줄 통지로 출력한다.
-- 합리화 패턴: "질문 없이도 충분하니 Q&A를 건너뛰자." | 확인 증거: `AskUserQuestion` 실행 로그 또는 `auto-decisions.md`의 대응 결정 항목을 남긴다.
+- 합리화 패턴: "이미 정한 내용을 다시 물으면 더 안전하다." | 확인 증거: 대화에서 확정된 값은 plan.md에 `(대화에서 확인)`으로 반영하고, 실제 미결 선택만 User Input Boundary로 질문한다.
 - 합리화 패턴: "파일 저장 확인은 생략하고 다음 스킬로 넘어가자." | 확인 증거: `plan.md` 저장 경로와 실행 분기(`저장만/요청 실행`)를 명시한다.
 - 합리화 패턴: "WebSearch 결과를 표로 정리했으니 REF 저장은 생략해도 된다." | 확인 증거: WebSearch 실행 횟수와 동일한 횟수의 `Bash(mst.py reference add ...)` 호출 로그가 존재한다.
 - 합리화 패턴: "컨텍스트 한계에 도달했으니 체인을 건너뛰고 직접 codex로 끝내자." | 확인 증거: 체인 우회가 필요한 경우 반드시 `mst:codex --dispatch` 또는 `mst:claude --dispatch` 사용 로그가 `auto-decisions.md` 또는 `retrospective.md`에 남아있어야 한다.
@@ -370,10 +370,11 @@ DELEGATION BOUNDARY (MANDATORY)
 <!-- @include _shared/user-input-boundary.md -->
 ### User Input Boundary (MANDATORY)
 
-사용자 입력이 필요한 지점에서는 host별 질문 도구를 직접 판단하지 말고 `question prepare`를 먼저 호출한다. 이 규칙은 기존 `AskUserQuestion` 직접 호출 지시보다 우선한다.
+사용자 입력이 실제로 필요한 지점에서는 host별 질문 도구를 직접 호출하기 전에 `question prepare`를 사용한다. 이미 대화에서 결정된 내용을 재확인하기 위한 질문은 만들지 않는다.
 
-1. 질문 payload를 JSON 파일로 작성한다. 구조는 `templates/question-payload.schema.json`을 따른다.
-2. 아래 CLI를 호출한다.
+1. 질문 payload를 `templates/question-payload.schema.json`에 맞는 JSON 파일로 작성한다.
+2. 현재 호출이 **Codex root agent의 Plan mode**이고 이 호출에 `request_user_input` 도구가 실제로 노출되어 있을 때만 `CODEX_NATIVE=true`로 둔다. Default mode, subagent, headless, 또는 도구 부재에서는 반드시 `false`다. 추정으로 `true`를 설정하지 않는다.
+3. 아래 CLI를 호출한다. 기존 canonical `MST_SESSION_ID`와 `MST_CONTEXT_JSON`은 그대로 보존한다.
    ```bash
    python3 {PLUGIN_ROOT}/scripts/mst.py question prepare \
      --skill {CURRENT_SKILL} \
@@ -381,14 +382,15 @@ DELEGATION BOUNDARY (MANDATORY)
      --resume-skill {CURRENT_SKILL} \
      --resume-args "{RESUME_ARGS}" \
      --payload-file {QUESTION_PAYLOAD_JSON} \
+     --codex-native "${CODEX_NATIVE:-false}" \
      --json
    ```
-3. 반환값에 따라 분기한다.
+4. 반환값에 따라 분기한다.
    - `mode=claude_tool`: 반환된 `payload`로 `AskUserQuestion`을 호출한다.
-   - `mode=pending_artifact`: 반환된 `user_message`를 사용자에게 보여주고 종료한다. 이 상태는 정상적인 사용자 입력 대기이며 임의 중단이 아니다.
+   - `mode=codex_tool`: 반환된 `payload`로 `request_user_input`을 호출한다. 도구 응답을 `question answer`로 저장하고 `question consume`으로 저장된 continuation을 queue에 넣은 뒤 기존 resume 흐름을 계속한다.
+   - `mode=pending_artifact`: 반환된 `user_message`를 사용자에게 그대로 보여주고 종료한다. 이 상태는 정상적인 사용자 입력 대기다. 사용자는 안내된 `/mst:resume --answer Q-... --value "..."`로 답하고 재개한다.
    - `mode=auto_decision`: `AUTO_MODE=true` 경로로 질문 없이 계속하거나 blocker를 기록한다.
-4. Codex/headless host에서는 `AskUserQuestion`을 직접 호출하지 않는다. pending question은 `.gran-maestro/questions/Q-*.json`에 저장되고 `/mst:resume --answer Q-...`로 재개한다.
-5. workflow 중 임의 확인 질문이나 self-pause는 계속 금지한다. 정상 질문은 `question prepare`가 기록한 `awaiting_user_input` 상태와 payload hash가 일치할 때만 허용된다.
+5. Native payload 제약에 맞지 않는 질문은 내용을 자르지 않고 `pending_artifact`로 전환한다. workflow 중 임의 확인 질문이나 self-pause는 계속 금지한다.
 <!-- @end-include -->
 
 <!-- @include _shared/user-profile-read.md -->
@@ -634,10 +636,8 @@ Cynefin 자동 분류 보조 규칙: 트레이드오프 신호(대안 비교/장
 
 - `AUTO_MODE=false`:
   - PM이 요청을 분석하여 핵심 미결 항목(범위·우선순위·방향·접근법)을 파악한다.
-  - **요청이 단순·명확해 보이더라도 반드시 최소 1회 `AskUserQuestion`으로 대화를 시작한다.** (Fast-track 금지)
-    - 대부분 명확한 경우: PM이 현재 이해와 접근 방향 초안을 제시하고 "이 방향으로 진행할까요?" 형태의 확인 질문 포함
-    - 미결 항목이 있는 경우: 가장 중요한 미결 항목 1~2개에 대한 질문 제시
-  - `AskUserQuestion` 없이 Step 4로 직행하는 것은 **어떤 경우에도 허용하지 않는다.**
+  - 대화 컨텍스트에서 핵심 결정이 이미 명확하면 질문을 생략하고 plan.md에 `(대화에서 확인)` 또는 `(PM 추론)` 근거를 남긴다.
+  - 중요한 미결 선택이 있으면 가장 영향이 큰 1~3개만 User Input Boundary로 질문한다. 단순 확인을 위한 의례적 질문은 만들지 않는다.
 - `AUTO_MODE=true`: Step 2~3에서 `AskUserQuestion` 호출 금지. 우선순위가 가장 높은 미결 항목 1건을 먼저 처리한 뒤 Step 3 반복으로 이어간다. ideation/discussion 호출은 생략 대상이 아니라 결정 품질 확보 절차로 필요 시 즉시 수행한다.
 
 #### [AUTO_MODE 판단 패턴] (Step 2~3, Step 3.8 공통)

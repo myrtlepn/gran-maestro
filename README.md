@@ -54,6 +54,12 @@ codex plugin add mst@gran-maestro
 
 설치 후 두 런타임은 같은 MST skill source를 사용합니다. Claude Code는 hooks/agents까지 등록하고, Codex는 hookless skill surface와 queue-driven supervision으로 같은 plan → request → approve → review → accept 흐름을 제공합니다. 기본 설정은 Codex-primary이며, Claude provider는 Claude 계열 preset 또는 `claude-dev` 배정으로 opt-in합니다.
 
+### Codex 질문 동작과 공개 범위
+
+`/mst:plan`은 이미 대화에서 정해진 내용을 의례적으로 다시 묻지 않고, 중요한 미결 선택만 질문합니다. Codex root agent의 Plan mode에서 `request_user_input`이 실제로 제공되면 native 질문 UI를 사용합니다. Default mode, subagent, headless 실행 또는 native payload 제약에 맞지 않는 질문은 `.gran-maestro/questions/`에 저장하고 완전한 선택지를 텍스트로 보여준 뒤 `/mst:resume --answer Q-... --value "..."`로 이어갑니다.
+
+OpenAI가 공개한 범위는 [Codex CLI, SDK, App Server, Skills, Plugins 등 주요 구성요소](https://learn.chatgpt.com/docs/open-source)입니다. 같은 공식 문서에 따르면 Codex IDE extension과 Codex cloud는 오픈소스가 아닙니다. Gran Maestro는 이 공개 경계만 설명하며 native 질문 UI의 비공개 내부 구현까지 오픈소스라고 가정하지 않습니다.
+
 ### Same-host native-first 위임
 
 기본값인 `delegation.transport_policy: "same-host-native-first"`에서는 Codex host → Codex provider가 Codex collaboration agent를, Claude Code host → Claude provider가 Claude Task/Agent를 먼저 사용합니다. Cross-provider, headless, `external-only`, native 비활성/scope 제외, capability unavailable 조건에서는 기존 managed wrapper의 external lane으로 전환하며, 대상 CLI까지 없으면 실행을 꾸며내지 않고 `blocked`(`missing_cli`)로 종료합니다.
