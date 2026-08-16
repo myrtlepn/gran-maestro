@@ -56,6 +56,65 @@ def test_fresh_root_bootstrap_reserves_and_persists_the_same_id(tmp_path: Path) 
     assert (tmp_path / payload["session_metadata_path"]).is_file()
 
 
+def test_existing_request_bootstrap_reuses_exact_id_without_counter_allocation(
+    tmp_path: Path,
+) -> None:
+    request_dir = tmp_path / ".gran-maestro" / "requests" / "REQ-946"
+    request_dir.mkdir(parents=True)
+    request_path = request_dir / "request.json"
+    request_path.write_text(
+        json.dumps({"id": "REQ-946", "status": "spec_ready"}),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(MST_SCRIPT),
+            "session",
+            "bootstrap",
+            "--root-mst-id",
+            "REQ-946",
+            "--json",
+        ],
+        cwd=tmp_path,
+        env=_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["root_mst_id"] == "REQ-946"
+    assert payload["identity_source"] == "generated:root_mst_id"
+    assert not (tmp_path / ".gran-maestro" / "requests" / "counter.json").exists()
+    persisted = json.loads(request_path.read_text(encoding="utf-8"))
+    assert persisted["id"] == "REQ-946"
+    assert persisted["mst_session_id"] == payload["mst_session_id"]
+
+
+def test_shared_bootstrap_selects_existing_id_or_new_type_explicitly() -> None:
+    for root in (REPO_ROOT, REPO_ROOT / "plugins" / "mst"):
+        bootstrap = (root / "skills" / "_shared" / "session-bootstrap.md").read_text(
+            encoding="utf-8"
+        )
+        assert 'elif [ -n "${ROOT_ID:-}" ] && [ -z "${ROOT_TYPE:-}" ]; then' in bootstrap
+        assert '--root-mst-id "$ROOT_ID" --json' in bootstrap
+        assert 'elif [ -z "${ROOT_ID:-}" ] && [ -n "${ROOT_TYPE:-}" ]; then' in bootstrap
+        assert '--root-type "$ROOT_TYPE" --json' in bootstrap
+        assert "exactly one of ROOT_ID or ROOT_TYPE is required" in bootstrap
+
+        approve = (root / "skills" / "approve" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        assert "existing-only entry" in approve
+        assert approve.index('--root-mst-id "$ROOT_ID" --json') < approve.index(
+            '--root-type "$ROOT_TYPE" --json'
+        )
+
+
 def test_failed_fresh_root_bootstrap_can_retry_the_same_id(tmp_path: Path) -> None:
     from scripts.mst_cmds import session
 
