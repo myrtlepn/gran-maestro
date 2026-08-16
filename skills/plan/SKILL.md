@@ -44,6 +44,13 @@ Native child는 host가 전달한 canonical full `MST_SESSION_ID`와 선택적 `
 
 Accept/approve/cancel/feedback/priority/recover/review처럼 existing resource를 대상으로 하는 entry는 해당 root artifact의 existence, regular-file JSON object shape, exact ID, eligible non-terminal status를 read-only로 검증한 뒤에만 resolve/bootstrap합니다. Bootstrap으로 missing target을 생성해 preflight를 통과시키는 것은 금지합니다.
 
+Bootstrap 직전에 root source를 아래 두 변수 중 정확히 하나로 확정합니다.
+
+- 기존 resource: read-only preflight를 통과한 exact ID를 `ROOT_ID`에 설정하고 `ROOT_TYPE`은 비웁니다.
+- 신규 workflow: concrete namespace를 `ROOT_TYPE`에 설정하고 `ROOT_ID`는 비웁니다.
+
+둘 다 있거나 둘 다 없으면 mutation 없이 거부합니다. 특히 `$mst:approve REQ-NNN`처럼 existing-only entry는 반드시 `ROOT_ID=REQ-NNN` 경로를 사용하며 새 request counter를 발급하지 않습니다.
+
 #### 2. Resume preflight (READ-ONLY, ZERO MUTATION ON REJECTION)
 
 `request --resume REQ-NNN`은 resolve/bootstrap보다 먼저 다음을 모두 read-only로 확인합니다.
@@ -72,11 +79,19 @@ if [ -n "${MST_SESSION_ID:-}" ]; then
 elif [ -n "${MST_CONTEXT_JSON:-}" ]; then
   echo "context-only identity cannot replace a full MST_SESSION_ID" >&2
   exit 1
-else
+elif [ -n "${ROOT_ID:-}" ] && [ -z "${ROOT_TYPE:-}" ]; then
   SESSION_IDENTITY_JSON=$(
     python3 "{PLUGIN_ROOT}/scripts/mst.py" session bootstrap \
-      --root-type "{ROOT_TYPE}" --json
+      --root-mst-id "$ROOT_ID" --json
   ) || exit 1
+elif [ -z "${ROOT_ID:-}" ] && [ -n "${ROOT_TYPE:-}" ]; then
+  SESSION_IDENTITY_JSON=$(
+    python3 "{PLUGIN_ROOT}/scripts/mst.py" session bootstrap \
+      --root-type "$ROOT_TYPE" --json
+  ) || exit 1
+else
+  echo "exactly one of ROOT_ID or ROOT_TYPE is required" >&2
+  exit 1
 fi
 ```
 
@@ -592,7 +607,7 @@ Cynefin 자동 분류 보조 규칙: 트레이드오프 신호(대안 비교/장
 1. `{PROJECT_ROOT}/.gran-maestro/plans/PLN-*/plan.json` 목록 조회 → 각 `title`과 현재 요청 주제 비교 (LLM 의미 유사도) → 유사도 상위 3개 후보 식별 (없으면 silent skip)
 2. AUTO_MODE=false: AskUserQuestion으로 후보 목록(PLN-NNN/제목/생성일) 제시 + 재사용 여부 확인. 선택 시 해당 plan.md Read → 결정사항·제약·범위를 현재 세션 컨텍스트에 보관.
 3. AUTO_MODE=true: 유사도 높다고 판단되면 자동 참조 + auto-decisions.md 기록.
-4. 참조 대상으로 확정된 각 plan의 `plan.json`에서 `linked_intent` 확인 → 존재하면 `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`으로 intent 본문 Read하여 `referenced_intent`로 보관. 없거나 실패 시 graceful skip (워크플로우 차단 금지).
+4. 참조 대상으로 확정된 각 plan의 `plan.json`에서 `linked_intent` 확인 → 존재하면 `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`으로 intent 본문 Read하여 `referenced_intent`로 보관. 이는 과거 결정·선호를 바탕으로 모호한 부분을 추론하는 보조 기억일 뿐이며, 현재 plan의 사용자 답변과 충돌하면 폐기한다. 없거나 실패 시 graceful skip (워크플로우 차단 금지).
 
 ### Step 2: 초기 분석 & 첫 미결 항목 처리
 
@@ -1057,7 +1072,7 @@ findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/plans/PLN
 
 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다.
 - findings가 비어 있으면 Step 3.9로 진행한다.
-- findings가 있고 `current_round < max_rounds`이면 반영 대상 finding을 plan 초안의 AC, 제약, 리스크 레지스터, 제외 범위 중 적절한 위치에 보강한 뒤 `current_round += 1`로 재실행한다.
+- findings가 있고 `current_round < max_rounds`이면 반영 대상을 plan 초안의 AC, 제약, 리스크 레지스터, 제외 범위 중 적절한 위치에 보강한 뒤 `current_round += 1`로 재실행한다. 단, `## 사용자 최초 의도`는 finding으로 수정할 수 없고 `## 요청 (Refined)`는 사용자가 확인한 내용만 반영한다. 리뷰어 제안만으로 두 섹션을 확장하거나 재해석하지 않는다.
 - `current_round >= max_rounds`이면 남은 finding을 파일에 기록하고 Step 3.9로 진행한다.
 
 #### 3.8.5.4: AUTO_MODE 분기
@@ -1192,6 +1207,10 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
 ```
 
 1. 대화 내용 반영한 plan 초안 텍스트 제시 (**파일은 아직 작성하지 않음**)
+   - **`## 사용자 최초 의도` + `## 요청 (Refined)`를 반드시 포함한다 (MANDATORY)**:
+     - `사용자 최초 의도`: 최초 요청에서 사용자가 이루고자 한 결과와 이유를 의미 보존 방식으로 기록한다. 구현 방법, PM 추론, 리뷰 finding은 섞지 않는다.
+     - `요청 (Refined)`: Q&A에서 사용자가 명시적으로 답했거나 최종 plan 승인에 포함된 정제만 기록한다. PM 추론·auto-decisions·리뷰 finding은 별도 섹션에 두고 refined intent로 취급하지 않는다. 최초 의도를 대체하지 않고 명확하게 만든다.
+     - 이 두 섹션만 하위 request/approve/review/accept에 전달되는 canonical Intent Anchor다. 실행 계획, 기술 선택, PAC, 리스크, 리뷰 finding은 별도 실행·검증 정보이며 Intent Anchor가 아니다.
    - **`## 인수 기준 초안` 섹션을 반드시 포함한다 (MANDATORY)**: "이 plan이 완료됐다는 것은:" 프리픽스로 시작하는 불릿 리스트. 내용은 구현 방법이 아닌 **관찰 가능한 결과/동작** 중심으로 기술. 각 PAC 항목에 `[TIER-A]` 또는 `[TIER-B]` 위험도 태그를 반드시 포함 (미부여 시 기본값 `TIER-B`). 영향 예상 항목은 `[IMPACT]` 태그를 포함한 독립 불릿으로 추가 (기본 등급 `[SHOULD]`, PM 재량으로 `[MUST]` 가능). `[IMPACT]` 항목이 0개인 plan은 graceful skip.
      - 예시: `- [SHOULD] [IMPACT] [TIER-A] 기존 설정 화면의 입력 폼이 정상 렌더링되고 저장 기능이 동작한다`
    - **`## 범위 예산 (Appetite)` / `## 제외 범위 (No-go Scope)` 섹션을 반드시 포함한다** (빈 값 placeholder 허용)
@@ -1303,6 +1322,7 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
        --plan PLN-NNN --feature "..." --situation "..." --motivation "..." --goal "..."
      ```
    - 반환된 INTENT_ID를 `plan.json`의 `"linked_intent": "INTENT-NNN"` 필드에 기록.
+   - `linked_intent`는 이후 유사 작업에서 기존 결정을 떠올리는 추론 보조 기억이다. 현재 plan의 canonical Intent Anchor로 사용 금지하며, `## 사용자 최초 의도` 또는 `## 요청 (Refined)`와 충돌할 때 우선권을 갖지 않는다.
    - `## Intent (JTBD)` 섹션이 없거나 비어있으면 skip (비차단). 명령 실패 시 warn만 출력, 워크플로우 차단 금지.
 
    - `capture_context` 활성 시 **plan.md 저장 시점에 일괄 처리 (atomic)**:

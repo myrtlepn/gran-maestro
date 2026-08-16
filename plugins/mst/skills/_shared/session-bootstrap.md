@@ -12,6 +12,13 @@
 
 Accept/approve/cancel/feedback/priority/recover/review처럼 existing resource를 대상으로 하는 entry는 해당 root artifact의 existence, regular-file JSON object shape, exact ID, eligible non-terminal status를 read-only로 검증한 뒤에만 resolve/bootstrap합니다. Bootstrap으로 missing target을 생성해 preflight를 통과시키는 것은 금지합니다.
 
+Bootstrap 직전에 root source를 아래 두 변수 중 정확히 하나로 확정합니다.
+
+- 기존 resource: read-only preflight를 통과한 exact ID를 `ROOT_ID`에 설정하고 `ROOT_TYPE`은 비웁니다.
+- 신규 workflow: concrete namespace를 `ROOT_TYPE`에 설정하고 `ROOT_ID`는 비웁니다.
+
+둘 다 있거나 둘 다 없으면 mutation 없이 거부합니다. 특히 `$mst:approve REQ-NNN`처럼 existing-only entry는 반드시 `ROOT_ID=REQ-NNN` 경로를 사용하며 새 request counter를 발급하지 않습니다.
+
 #### 2. Resume preflight (READ-ONLY, ZERO MUTATION ON REJECTION)
 
 `request --resume REQ-NNN`은 resolve/bootstrap보다 먼저 다음을 모두 read-only로 확인합니다.
@@ -40,11 +47,19 @@ if [ -n "${MST_SESSION_ID:-}" ]; then
 elif [ -n "${MST_CONTEXT_JSON:-}" ]; then
   echo "context-only identity cannot replace a full MST_SESSION_ID" >&2
   exit 1
-else
+elif [ -n "${ROOT_ID:-}" ] && [ -z "${ROOT_TYPE:-}" ]; then
   SESSION_IDENTITY_JSON=$(
     python3 "{PLUGIN_ROOT}/scripts/mst.py" session bootstrap \
-      --root-type "{ROOT_TYPE}" --json
+      --root-mst-id "$ROOT_ID" --json
   ) || exit 1
+elif [ -z "${ROOT_ID:-}" ] && [ -n "${ROOT_TYPE:-}" ]; then
+  SESSION_IDENTITY_JSON=$(
+    python3 "{PLUGIN_ROOT}/scripts/mst.py" session bootstrap \
+      --root-type "$ROOT_TYPE" --json
+  ) || exit 1
+else
+  echo "exactly one of ROOT_ID or ROOT_TYPE is required" >&2
+  exit 1
 fi
 ```
 

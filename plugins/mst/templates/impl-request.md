@@ -5,6 +5,16 @@
 - Spec: {{SPEC_PATH}}
 - Plan: {{PLAN_PATH}}
 
+## Canonical Intent Anchor
+
+[INTENT_ANCHOR]
+- original_intent: {{PLAN_INTENT_ORIGINAL}}
+- refined_intent: {{PLAN_INTENT_REFINED}}
+- source: {{PLAN_PATH}}
+[/INTENT_ANCHOR]
+
+이 블록은 사용자가 최초로 원한 결과와 대화로 정제한 의도만 담습니다. 실행 계획·기술 선택·PAC는 구현과 검증을 위한 별도 계약이며, 이 블록 밖의 계획·기술 선택·리뷰 제안을 사용자 의도로 승격하지 않습니다.
+
 ## Plan JSON 메타 컨텍스트
 
 반드시 Read 하세요: 아래 경로의 `plan.json`을 Read하여 plan 메타(cynefin_domain, linked_objective, linked_intent, linked_captures)를 확인하세요. 미존재 시 이 섹션을 skip합니다.
@@ -41,7 +51,7 @@
 ## DOD-003 WORK_CONTRACT
 
 [WORK_CONTRACT]
-- read_requirements: 구현 전 위 context file과 spec `§0 Context Manifest` 파일을 직접 Read/inspection한다.
+- read_requirements: 구현 전 `[INTENT_ANCHOR]`, 위 context file, spec `§0 Context Manifest`를 직접 Read/inspection한다.
 - output_contract: 변경 파일 목록, 생성/수정한 테스트, completion report, `Read/inspection evidence`를 보고한다.
 - verification_contract: `verify_cmd`, `expected_signal`, 실행 결과를 보고한다.
 - failure_contract: `timeout`, `empty result`, `blocked`, `missing_context` 상태를 구조화해 남긴다.
@@ -75,8 +85,8 @@ linked objective/intent 또는 PAC 파일이 없는 legacy plan은 해당 산출
 1.1. plan 직접 읽기 (source_plan이 있는 경우만): `{{PLAN_PATH}}`가 `NO_SOURCE_PLAN`이 아니면 `cat {{PLAN_PATH}}` (또는 Read 도구), `NO_SOURCE_PLAN`이면 source_plan 없음으로 보고 이 단계를 skip
 1.2. source_plan이 있는 경우 `PLAN_JSON_META`, `PAC_LIST`, `OBJECTIVE_SECTION`에 주입된 원본 경로를 직접 Read/inspection하고, 존재하지 않는 linked objective/intent는 `NO_LINKED_OBJECTIVE`, `NO_OBJECTIVE_IDS`, `NO_PLAN_JSON`, `NO_PLAN_IDS`, `missing_context`, 또는 명시적 skip 사유를 기록하라
 1.5. §10 UI 설계(Stitch) 섹션에 "구현 코드" 경로가 있으면 해당 HTML 파일을 Read하여 디자인 시안을 파악하되, 기술 스택에 맞게 구현하세요 (HTML을 그대로 복사하지 말 것)
-2. §2 변경 범위의 파일 목록 파악
-3. §3 수락 조건을 기준으로 구현
+2. `[INTENT_ANCHOR]`의 최초 의도와 정제 의도를 훼손하지 않는 범위에서 §2 변경 범위를 파악
+3. §3 수락 조건을 구현하되, 구현 중 발견한 개선점이 Intent Anchor나 PAC에 연결되지 않으면 범위 밖 제안으로 남기고 구현 범위에 추가하지 않음
 4. [MANDATORY] §5 테스트 명령어를 실행하고 출력 전체를 응답에 포함하세요 (커밋은 PM이 처리)
 5. 완료 시 `completion report`에 변경 파일 목록, 생성/수정한 테스트, `verify_cmd`, `expected_signal`, 실행 결과, `missing_context` 또는 skip 사유를 남겨라
 
