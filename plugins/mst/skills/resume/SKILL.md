@@ -1,13 +1,24 @@
 ---
 name: resume
 description: "Gran Maestro workflow queue에서 다음 액션 하나를 pop하여 실행하는 단일 재진입 진입점. interactive resume skill 자체는 유지하되, headless queue drain runtime path는 repository-local `mst.py queue drain-headless` contract를 사용한다. queue가 비어 있으면 resolver fallback을 한 번 확인한 뒤 종료."
-user-invocable: false
-argument-hint: "[--wakeup-hint stop-recover]"
+user-invocable: true
+argument-hint: "[--answer Q-NNN --value \"답변\"] [--wakeup-hint stop-recover]"
 ---
 
 # maestro:resume
 
 **목적**: `.gran-maestro/pending.ndjson` queue에서 다음 action을 하나 pop하여 해당 스킬을 호출한다. interactive resume과 외부 wrapper(`scripts/mst-loop.sh`)는 같은 queue contract를 공유하지만, **headless runtime implementation path는 `python3 {PLUGIN_ROOT}/scripts/mst.py queue drain-headless --json`** 이다. 세션 교차/재진입/동시 세션에서는 queue를 1순위 SSoT로 사용하고, queue가 비어 있을 때만 resolver fallback(`workflow_state`, `wakeup-hint`)으로 다음 action을 큐에 복원한다. Claude print-mode로 `/mst:resume`를 직접 호출하던 방식은 historical 설명 문자열일 뿐 active runtime path가 아니다.
+
+## 질문 답변으로 재개
+
+`--answer Q-... --value "..."`가 있으면 일반 queue 처리 전에 저장된 질문에 답을 기록하고 소비한다.
+
+```bash
+python3 {PLUGIN_ROOT}/scripts/mst.py question answer {Q_ID} --answer "{ANSWER_VALUE}" --json
+python3 {PLUGIN_ROOT}/scripts/mst.py question consume {Q_ID} --json
+```
+
+두 명령이 성공하면 question artifact에 저장된 `resume_skill`/`resume_args`가 queue에 한 번 들어간다. 이후 아래의 기존 peek → pop → skill 호출 흐름을 그대로 수행한다. 호출 인자로 resume target을 새로 받거나 바꾸지 않는다. Codex `request_user_input`이 여러 답을 객체로 반환한 경우에는 그 JSON을 파일로 저장해 첫 명령의 `--answer-file`에 전달한 뒤 같은 consume 흐름을 사용한다.
 
 ## Gate
 

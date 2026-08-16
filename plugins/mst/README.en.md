@@ -54,6 +54,12 @@ codex plugin add mst@gran-maestro
 
 After installation, both runtimes use the same MST skill source. Claude Code registers hooks and agents as well; Codex exposes the hookless skill surface and uses queue-driven supervision for the same plan → request → approve → review → accept workflow. Defaults are Codex-primary; the Claude provider is opt-in through Claude presets or `claude-dev` assignment.
 
+### Codex questions and the open-source boundary
+
+`/mst:plan` does not ask a ceremonial confirmation when the conversation has already settled the decision; it asks only about material unresolved choices. When `request_user_input` is actually available to the Codex root agent in Plan mode, MST uses the native question UI. Default mode, subagents, headless runs, and payloads outside the native shape use a durable text fallback in `.gran-maestro/questions/`, followed by `/mst:resume --answer Q-... --value "..."`.
+
+OpenAI documents [Codex CLI, the SDK, App Server, Skills, Plugins, and other key components as open source](https://learn.chatgpt.com/docs/open-source). The same official page says that the Codex IDE extension and Codex cloud are not open source. Gran Maestro stays within that published boundary and does not infer that private native-question UI internals are open source.
+
 ### Same-host native-first delegation
 
 With the default `delegation.transport_policy: "same-host-native-first"`, Codex host → Codex provider uses Codex collaboration agents first, while Claude Code host → Claude provider uses Claude Task/Agent first. Cross-provider, headless, `external-only`, native-disabled/scope-excluded, and capability-unavailable routes use the existing managed-wrapper external lane. If its target CLI is also missing, the route fails closed as `blocked` (`missing_cli`) instead of pretending to execute.

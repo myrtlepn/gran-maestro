@@ -73,8 +73,9 @@ def _prepare(
     host: str,
     *,
     payload: dict | None = None,
-    env_extra: dict[str, str] | None = None,
+    codex_native: bool = False,
 ) -> dict:
+    native_args = ["--codex-native", "true"] if codex_native else []
     result = _run(
         project,
         "question",
@@ -91,8 +92,8 @@ def _prepare(
         "--resume AGI-001",
         "--payload-file",
         str(_payload_file(project, payload)),
+        *native_args,
         "--json",
-        env_extra=env_extra,
     )
     assert result.returncode == 0, result.stderr + result.stdout
     return json.loads(result.stdout)
@@ -120,20 +121,6 @@ def _multiple_questions() -> dict:
                 ],
             },
         ]
-    }
-
-
-def _codex_caller_context(*, execution_mode: str, agent_role: str) -> dict[str, str]:
-    return {
-        "MST_CONTEXT_JSON": json.dumps(
-            {
-                "mst_session_id": SID,
-                "execution_mode": execution_mode,
-                "agent_role": agent_role,
-                "available_tools": ["request_user_input"],
-            },
-            ensure_ascii=False,
-        )
     }
 
 
@@ -167,7 +154,7 @@ def test_root_plan_codex_capability_maps_native_request_user_input_payload(tmp_p
         project,
         "codex",
         payload=source,
-        env_extra=_codex_caller_context(execution_mode="plan", agent_role="root"),
+        codex_native=True,
     )
 
     assert prepared["mode"] == "codex_tool"
@@ -178,25 +165,24 @@ def test_root_plan_codex_capability_maps_native_request_user_input_payload(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("host", "execution_mode", "agent_role"),
+    ("host", "codex_native"),
     [
-        pytest.param("codex", "default", "root", id="default"),
-        pytest.param("codex", "plan", "subagent", id="subagent"),
-        pytest.param("headless", "plan", "root", id="headless"),
+        pytest.param("codex", False, id="default"),
+        pytest.param("codex", False, id="subagent"),
+        pytest.param("headless", True, id="headless"),
     ],
 )
 def test_non_root_plan_lanes_render_complete_nested_fallback(
     tmp_path: Path,
     host: str,
-    execution_mode: str,
-    agent_role: str,
+    codex_native: bool,
 ) -> None:
     project = _project(tmp_path)
     prepared = _prepare(
         project,
         host,
         payload=_multiple_questions(),
-        env_extra=_codex_caller_context(execution_mode=execution_mode, agent_role=agent_role),
+        codex_native=codex_native,
     )
 
     assert prepared["mode"] == "pending_artifact"
@@ -211,7 +197,9 @@ def test_non_root_plan_lanes_render_complete_nested_fallback(
     assert "커밋까지" not in first_block
     assert "커밋까지: 로컬 커밋을 남깁니다." in second_block
     assert "검증만: 테스트 결과만 보고합니다." in second_block
-    assert prepared["resume_command"] == f"/mst:resume --answer {prepared['question_id']}"
+    assert prepared["resume_command"] == (
+        f'/mst:resume --answer {prepared["question_id"]} --value "<answer>"'
+    )
     assert message.count(prepared["resume_command"]) == 1
 
 
