@@ -114,6 +114,88 @@ def _host_context(host_value: str, event: str) -> dict[str, Any]:
     return host_cmd.build_host_context(host=host_value, event=event, payload={})
 
 
+def _codex_root_plan_can_ask(host_name: str) -> bool:
+    if host_name != "codex":
+        return False
+    raw_context = os.environ.get("MST_CONTEXT_JSON", "").strip()
+    if not raw_context:
+        return False
+    try:
+        context = json.loads(raw_context)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(context, dict):
+        return False
+    available_tools = context.get("available_tools")
+    return (
+        context.get("execution_mode") == "plan"
+        and context.get("agent_role") == "root"
+        and isinstance(available_tools, list)
+        and "request_user_input" in available_tools
+    )
+
+
+def _codex_question_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    source_questions = payload.get("questions")
+    if source_questions is None:
+        source_questions = [payload]
+    if not isinstance(source_questions, list) or not 1 <= len(source_questions) <= 3:
+        return None
+
+    normalized_questions: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, source in enumerate(source_questions, start=1):
+        if not isinstance(source, dict):
+            return None
+        question = source.get("question") or source.get("prompt")
+        if not isinstance(question, str) or not question.strip():
+            return None
+
+        question_id = source.get("id", "question" if len(source_questions) == 1 else f"question_{index}")
+        header = source.get("header", "질문" if len(source_questions) == 1 else f"질문 {index}")
+        if (
+            not isinstance(question_id, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_]*", question_id)
+            or question_id in seen_ids
+            or not isinstance(header, str)
+            or not header.strip()
+            or len(header) > 12
+        ):
+            return None
+
+        source_options = source.get("options")
+        if not isinstance(source_options, list) or not 2 <= len(source_options) <= 3:
+            return None
+        options: list[dict[str, str]] = []
+        for option in source_options:
+            if isinstance(option, str):
+                label = option.strip()
+                description = ""
+            elif isinstance(option, dict):
+                label = option.get("label")
+                description = option.get("description", option.get("preview", ""))
+                if not isinstance(label, str) or not isinstance(description, str):
+                    return None
+                label = label.strip()
+                description = description.strip()
+            else:
+                return None
+            if not label or len(label.split()) > 5:
+                return None
+            options.append({"label": label, "description": description})
+
+        seen_ids.add(question_id)
+        normalized_questions.append(
+            {
+                "id": question_id,
+                "header": header.strip(),
+                "question": question.strip(),
+                "options": options,
+            }
+        )
+    return {"questions": normalized_questions}
+
+
 def _workflow_state_path() -> Path:
     return _common._workflow_state_file(_base_dir())
 
@@ -200,6 +282,17 @@ def _format_user_message(question_id: str, payload: dict[str, Any], resume_comma
                 text = str(question.get("question") or question.get("prompt") or "").strip()
                 if text:
                     lines.append(f"{index}. {text}")
+                nested_options = question.get("options")
+                if isinstance(nested_options, list):
+                    for option in nested_options:
+                        if isinstance(option, str):
+                            lines.append(f"   - {option}")
+                        elif isinstance(option, dict):
+                            label = str(option.get("label") or "").strip()
+                            description = str(
+                                option.get("description") or option.get("preview") or ""
+                            ).strip()
+                            lines.append(f"   - {label}" + (f": {description}" if description else ""))
     options = payload.get("options")
     if isinstance(options, list) and options:
         lines.append("")
@@ -313,6 +406,21 @@ def cmd_question_prepare(args) -> int:
             host_context=context,
             mst_session_id=mst_session_id,
         )
+        codex_payload = (
+            _codex_question_payload(payload) if _codex_root_plan_can_ask(host_name) else None
+        )
+        if codex_payload is not None:
+            result = {
+                "mode": "codex_tool",
+                "tool": "request_user_input",
+                "question_id": question_id,
+                "path": str(path),
+                "payload_hash": payload_hash,
+                "payload": codex_payload,
+            }
+            print(_compact_json(result) if args.json else json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
         result = {
             "mode": "pending_artifact",
             "question_id": question_id,
@@ -365,6 +473,23 @@ def cmd_question_consume(args) -> int:
         path, payload = _load_question(args.question_id)
         if payload.get("status") not in {"answered", "pending"}:
             raise ValueError(f"question is not consumable: {args.question_id}")
+        if payload.get("status") == "answered":
+            resume_skill = payload.get("resume_skill")
+            resume_args = payload.get("resume_args")
+            if not isinstance(resume_skill, str) or not resume_skill.strip():
+                raise ValueError(f"question has no stored resume skill: {args.question_id}")
+            if not isinstance(resume_args, str):
+                raise ValueError(f"question has invalid stored resume args: {args.question_id}")
+            _common.queue_enqueue(
+                {
+                    "skill": resume_skill,
+                    "args": resume_args,
+                    "source_skill": str(payload.get("skill") or ""),
+                    "source_id": args.question_id,
+                    "resource_id": args.question_id,
+                    "auto": False,
+                }
+            )
         payload["status"] = "consumed"
         payload["consumed_at"] = _now()
         _common.save_json(path, payload)
