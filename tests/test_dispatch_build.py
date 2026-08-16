@@ -26,6 +26,20 @@ MST_SCRIPT = REPO_ROOT / "scripts" / "mst.py"
 SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000"
 DIRECT_CLI_TOKENS = ("claude -p",)
 CLAUDE_PRINT_MODE_TOKEN = DIRECT_CLI_TOKENS[0]
+SESSION_ENV_KEYS = (
+    "MST_SESSION_ID",
+    "MST_CONTEXT_JSON",
+    "MST_HOOK_STDIN_RAW",
+    "MST_STATE_PPID",
+    "MST_SNAPSHOT_SESSION_ID",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dispatch_fixtures_from_parent_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep direct lifecycle helpers independent of the invoking MST session."""
+    for key in SESSION_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
 
 def _persist_external_authorization(
@@ -88,12 +102,16 @@ def _run_mst(
                 write_capable=write_capable,
             )
             command_args.extend(["--expected-attempt-id", str(state["attempt_id"])])
+    merged_env = os.environ.copy() if env is None else dict(env)
+    for key in SESSION_ENV_KEYS:
+        if env is None or key not in env:
+            merged_env.pop(key, None)
     return subprocess.run(
         [sys.executable, str(MST_SCRIPT), *command_args],
         cwd=workspace,
         capture_output=True,
         text=True,
-        env=env,
+        env=merged_env,
         check=False,
     )
 
@@ -1467,3 +1485,61 @@ def test_dispatch_build_gemini_execution_records_failure_evidence_and_fallback(
     assert f"PROVIDER_EVIDENCE_ID:{task_id}:agy-failure" in running_log
     assert f"failure_kind={failure_kind}" in running_log
     assert "fallback=codex_fallback_required" in running_log
+
+
+def test_dispatch_build_uses_authorization_bound_full_session_id_when_env_empty(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / ".gran-maestro").mkdir(parents=True, exist_ok=True)
+
+    prompt_file = workspace / "prompt.md"
+    prompt_file.write_text("hello codex", encoding="utf-8")
+    log_file = workspace / "codex.log"
+    task_id = "task-codex-bound"
+
+    # 1. external authorization에 full structured ID 바인딩하여 저장
+    # (SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000")
+    state = _persist_external_authorization(
+        workspace,
+        task_id=task_id,
+        provider="codex",
+        prompt_file=prompt_file,
+        worktree_dir=workspace,
+        running_log_path=log_file,
+        model="gpt-test-codex",
+    )
+
+    # 2. 호출 shell env는 비우고 (env["MST_SESSION_ID"] = ""), dispatch build 호출
+    env = os.environ.copy()
+    env["MST_SESSION_ID"] = ""
+    env.pop("MST_CONTEXT_JSON", None)
+
+    proc = _run_mst(
+        workspace,
+        "dispatch",
+        "build",
+        "--provider",
+        "codex",
+        "--prompt-file",
+        str(prompt_file),
+        "--task-id",
+        task_id,
+        "--worktree-dir",
+        str(workspace),
+        "--log-file",
+        str(log_file),
+        "--model",
+        "gpt-test-codex",
+        "--expected-attempt-id",
+        str(state["attempt_id"]),
+        authorize_external=False,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    command = proc.stdout.strip()
+
+    # 3. wrapper 내에 bound된 full session ID가 포함되어야 함
+    assert f'export MST_SESSION_ID="${{MST_SESSION_ID:-{SESSION_ID}}}"' in command or f'MST_SESSION_ID="${{MST_SESSION_ID:-{SESSION_ID}}}"' in command
+
+    # 4. DBG-NNN/REQ-NNN root ID나 task_id 등은 fallback으로 사용되지 않아야 함
+    assert "task-codex-bound" not in command.split("dispatch run-external")[0]

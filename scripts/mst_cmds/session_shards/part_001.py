@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import copy
+import errno
 import glob
 import hashlib
 import json
@@ -15,6 +16,7 @@ import tarfile
 import tempfile
 import time
 import unicodedata
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,6 +49,7 @@ ALLOWED_ROOT_MST_NAMESPACES = frozenset(
 _ROOT_MST_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*)-\d+$")
 _STARTED_AT_COMPACT_RE = re.compile(r"^\d{8}T\d{9}Z$")
 _RANDOM_SEGMENT_RE = re.compile(r"^[a-z0-9]+$")
+_MAX_PATH_COMPONENT_BYTES = 255
 class MstSessionIdValidationError(ValueError):
     def __init__(self, reason: str):
         super().__init__(f"invalid structured mst_session_id: {reason}")
@@ -62,6 +65,28 @@ class StructuredMstSessionId:
     random: str
 def _structured_failure(reason: str) -> MstSessionIdValidationError:
     return MstSessionIdValidationError(reason)
+def _validate_path_component_bytes(value: str, *, field: str) -> str:
+    if len(value.encode("utf-8")) > _MAX_PATH_COMPONENT_BYTES:
+        raise _structured_failure(f"{field} exceeds {_MAX_PATH_COMPONENT_BYTES} UTF-8 bytes")
+    return value
+def _strict_json_object_pairs(pairs: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+def _reject_nonfinite_json_constant(value: str) -> object:
+    raise ValueError(f"non-finite JSON number is not allowed: {value}")
+def strict_json_loads(raw: str, *, source: str = "JSON") -> object:
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=_strict_json_object_pairs,
+            parse_constant=_reject_nonfinite_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"{source} is not strict JSON: {exc}") from exc
 def format_mst_session_started_at(started_at: datetime) -> str:
     if started_at.tzinfo is None:
         raise _structured_failure("started_at must be timezone-aware UTC")
@@ -107,8 +132,10 @@ def parse_mst_session_started_at_metadata(value: str) -> datetime:
         raise _structured_failure("started_at metadata precision must be milliseconds")
     return parsed_utc
 def validate_root_mst_id(root_mst_id: str) -> str:
-    root = str(root_mst_id).strip()
-    if root != str(root_mst_id):
+    if not isinstance(root_mst_id, str):
+        raise _structured_failure("root_mst_id must be a string")
+    root = root_mst_id.strip()
+    if root != root_mst_id:
         raise _structured_failure("root_mst_id must not require normalization")
     match = _ROOT_MST_ID_RE.fullmatch(root)
     if not match:
@@ -118,14 +145,19 @@ def validate_root_mst_id(root_mst_id: str) -> str:
         raise _structured_failure(f"root namespace is not allowed: {namespace}")
     if not _common.is_path_safe_mst_session_id(root):
         raise _structured_failure("root_mst_id must be path-safe")
-    return root
+    return _validate_path_component_bytes(root, field="root_mst_id")
 def _validate_random_segment(value: str) -> str:
-    random_segment = str(value)
+    if not isinstance(value, str):
+        raise _structured_failure("random segment must be a string")
+    random_segment = value
     if len(random_segment) < MST_SESSION_ID_RANDOM_MIN_LENGTH:
         raise _structured_failure("random segment is too short")
     if not _RANDOM_SEGMENT_RE.fullmatch(random_segment):
         raise _structured_failure("random segment contains characters outside [a-z0-9]")
-    return random_segment
+    return _validate_path_component_bytes(random_segment, field="random segment")
+def _validate_generated_session_component_capacity(root_mst_id: str, random_segment: str) -> None:
+    placeholder = f"MST-{root_mst_id}-00000000T000000000Z-{random_segment}"
+    _validate_path_component_bytes(placeholder, field="mst_session_id")
 def _new_random_segment(length: int = MST_SESSION_ID_RANDOM_DEFAULT_LENGTH) -> str:
     if length < MST_SESSION_ID_RANDOM_MIN_LENGTH:
         raise ValueError(f"random length must be >= {MST_SESSION_ID_RANDOM_MIN_LENGTH}")
@@ -140,6 +172,7 @@ def parse_mst_session_id(value: str) -> StructuredMstSessionId:
         raise _structured_failure("value must be path-safe and must not contain traversal")
     if not session_id.startswith(MST_SESSION_ID_PREFIX):
         raise _structured_failure("missing MST- prefix")
+    _validate_path_component_bytes(session_id, field="mst_session_id")
 
     body = session_id[len(MST_SESSION_ID_PREFIX):]
     try:
@@ -190,6 +223,7 @@ def generate_mst_session_id(
         started_at = now.replace(microsecond=(now.microsecond // 1000) * 1000)
     started_at_compact = format_mst_session_started_at(started_at)
     random_value = _validate_random_segment(random_segment) if random_segment is not None else _new_random_segment()
+    _validate_generated_session_component_capacity(root, random_value)
     session_id = f"{MST_SESSION_ID_PREFIX}{root}-{started_at_compact}-{random_value}"
     validate_mst_session_id(session_id, expected_root_mst_id=root, expected_started_at=started_at)
     return session_id
@@ -274,15 +308,295 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tmp_path.unlink()
         except FileNotFoundError:
             pass
-def _cleanup_empty_dirs(path: Path, stop: Path) -> None:
-    stop = stop.resolve(strict=False)
-    current = path.resolve(strict=False)
-    while current != stop and stop in current.parents:
+def _absolute_lexical_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+def _secure_relative_parts(base_dir: Path, target: Path) -> tuple[Path, Path, tuple[str, ...]]:
+    base = _absolute_lexical_path(base_dir)
+    target_path = _absolute_lexical_path(target)
+    try:
+        relative = target_path.relative_to(base)
+    except ValueError as exc:
+        raise RootSessionCreateError(f"session persistence path escapes canonical base: {target_path}") from exc
+    parts = relative.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise RootSessionCreateError(f"invalid canonical session persistence path: {target_path}")
+    for part in parts:
+        _validate_path_component_bytes(part, field="persistence path component")
+    return base, target_path, parts
+def _directory_open_flags() -> int:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return flags
+def _assert_real_directory(path: Path, *, label: str) -> os.stat_result:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    if stat.S_ISLNK(info.st_mode):
+        raise RootSessionCreateError(f"{label} must not be a symlink: {path}")
+    if not stat.S_ISDIR(info.st_mode):
+        raise RootSessionCreateError(f"{label} must be a directory: {path}")
+    return info
+def _open_existing_directory_path(path: Path, *, label: str) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        return os.open(path, flags)
+    except OSError as exc:
+        raise RootSessionCreateError(f"cannot open existing {label}: {path}: {exc}") from exc
+def _open_canonical_base(
+    base: Path,
+    *,
+    create: bool,
+    created_dirs: list[Path],
+) -> int:
+    if base == Path(base.anchor):
+        raise RootSessionCreateError("canonical session base cannot be the filesystem root")
+    parent_fd = _open_existing_directory_path(base.parent, label="canonical base parent")
+    try:
         try:
-            current.rmdir()
+            return os.open(base.name, _directory_open_flags(), dir_fd=parent_fd)
+        except FileNotFoundError:
+            if not create:
+                raise
+            try:
+                os.mkdir(base.name, 0o700, dir_fd=parent_fd)
+                created_dirs.append(base)
+            except FileExistsError:
+                pass
+            try:
+                return os.open(base.name, _directory_open_flags(), dir_fd=parent_fd)
+            except OSError as exc:
+                raise RootSessionCreateError(
+                    f"cannot open canonical base without following symlinks: {base}: {exc}"
+                ) from exc
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                raise RootSessionCreateError(f"canonical base must be a real directory: {base}") from exc
+            raise
+    finally:
+        os.close(parent_fd)
+def _open_secure_parent_directory(
+    base_dir: Path,
+    target: Path,
+    *,
+    create: bool,
+    created_dirs: list[Path] | None = None,
+) -> tuple[int, Path, str]:
+    base, target_path, parts = _secure_relative_parts(base_dir, target)
+    created = created_dirs if created_dirs is not None else []
+    try:
+        current_fd = _open_canonical_base(base, create=create, created_dirs=created)
+    except FileNotFoundError:
+        raise
+    current_path = base
+    try:
+        for component in parts[:-1]:
+            child_path = current_path / component
+            try:
+                child_fd = os.open(component, _directory_open_flags(), dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, 0o700, dir_fd=current_fd)
+                    created.append(child_path)
+                except FileExistsError:
+                    pass
+                try:
+                    child_fd = os.open(component, _directory_open_flags(), dir_fd=current_fd)
+                except OSError as exc:
+                    raise RootSessionCreateError(
+                        f"cannot open session persistence component without following symlinks: {child_path}: {exc}"
+                    ) from exc
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise RootSessionCreateError(
+                        f"session persistence component must be a real directory: {child_path}"
+                    ) from exc
+                raise
+            os.close(current_fd)
+            current_fd = child_fd
+            current_path = child_path
+        return current_fd, current_path, parts[-1]
+    except Exception:
+        os.close(current_fd)
+        raise
+def _secure_parent_matches_path(base_dir: Path, parent_path: Path, parent_fd: int) -> bool:
+    try:
+        fresh_fd, _fresh_path, _probe_name = _open_secure_parent_directory(
+            base_dir,
+            parent_path / ".mst-parent-probe",
+            create=False,
+        )
+        opened_info = os.fstat(parent_fd)
+        fresh_info = os.fstat(fresh_fd)
+    except (FileNotFoundError, OSError, RootSessionCreateError):
+        return False
+    try:
+        return (fresh_info.st_dev, fresh_info.st_ino) == (opened_info.st_dev, opened_info.st_ino)
+    finally:
+        os.close(fresh_fd)
+def _read_relative_file(parent_fd: int, filename: str) -> tuple[bool, bytes | None]:
+    try:
+        info = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False, None
+    if stat.S_ISLNK(info.st_mode):
+        raise RootSessionCreateError(f"session persistence target must not be a symlink: {filename}")
+    if not stat.S_ISREG(info.st_mode):
+        raise RootSessionCreateError(f"session persistence target must be a regular file: {filename}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(filename, flags, dir_fd=parent_fd)
+    try:
+        opened_info = os.fstat(fd)
+        if not stat.S_ISREG(opened_info.st_mode):
+            raise RootSessionCreateError(f"session persistence target must be a regular file: {filename}")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return True, b"".join(chunks)
+    finally:
+        os.close(fd)
+def _strict_json_object_from_bytes(raw: bytes, *, source: str) -> dict:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RootSessionCreateError(f"{source} is not UTF-8 JSON") from exc
+    try:
+        payload = strict_json_loads(text, source=source)
+    except ValueError as exc:
+        raise RootSessionCreateError(str(exc)) from exc
+    if not isinstance(payload, dict):
+        raise RootSessionCreateError(f"{source} is not a JSON object")
+    return payload
+def _secure_read_json_object(
+    base_dir: Path,
+    path: Path,
+) -> tuple[bool, dict | None, bytes | None]:
+    try:
+        parent_fd, parent_path, filename = _open_secure_parent_directory(
+            base_dir,
+            path,
+            create=False,
+        )
+    except FileNotFoundError:
+        return False, None, None
+    try:
+        if not _secure_parent_matches_path(base_dir, parent_path, parent_fd):
+            raise RootSessionCreateError(f"session persistence parent escaped canonical base: {parent_path}")
+        exists, raw = _read_relative_file(parent_fd, filename)
+        if not exists or raw is None:
+            return False, None, None
+        return True, _strict_json_object_from_bytes(raw, source=str(path)), raw
+    finally:
+        os.close(parent_fd)
+def _write_relative_bytes(parent_fd: int, filename: str, raw: bytes) -> None:
+    tmp_name = f".{filename}.tmp.{os.getpid()}.{secrets.token_hex(8)}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    tmp_fd = os.open(tmp_name, flags, 0o600, dir_fd=parent_fd)
+    try:
+        view = memoryview(raw)
+        while view:
+            written = os.write(tmp_fd, view)
+            view = view[written:]
+        os.fsync(tmp_fd)
+    finally:
+        os.close(tmp_fd)
+    try:
+        os.replace(tmp_name, filename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        os.fsync(parent_fd)
+    finally:
+        try:
+            os.unlink(tmp_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+def _restore_relative_file(parent_fd: int, filename: str, original_bytes: bytes | None) -> None:
+    if original_bytes is None:
+        try:
+            os.unlink(filename, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+        os.fsync(parent_fd)
+        return
+    _write_relative_bytes(parent_fd, filename, original_bytes)
+@dataclass
+class _SecureJsonCommit:
+    path: Path
+    parent_fd: int
+    filename: str
+    written_bytes: bytes
+    original_bytes: bytes | None
+def _rollback_secure_json_commit(commit: _SecureJsonCommit) -> None:
+    try:
+        exists, current_bytes = _read_relative_file(commit.parent_fd, commit.filename)
+        if exists and current_bytes == commit.written_bytes:
+            _restore_relative_file(commit.parent_fd, commit.filename, commit.original_bytes)
+    except Exception:
+        return
+def _close_secure_json_commits(commits: list[_SecureJsonCommit]) -> None:
+    for commit in commits:
+        try:
+            os.close(commit.parent_fd)
+        except Exception:
+            pass
+def _secure_atomic_write_json(
+    base_dir: Path,
+    path: Path,
+    payload: dict,
+    *,
+    created_dirs: list[Path],
+) -> _SecureJsonCommit:
+    try:
+        raw = (json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise RootSessionCreateError(f"session metadata is not strict JSON: {exc}") from exc
+    parent_fd, parent_path, filename = _open_secure_parent_directory(
+        base_dir,
+        path,
+        create=True,
+        created_dirs=created_dirs,
+    )
+    original_bytes: bytes | None = None
+    try:
+        _exists, original_bytes = _read_relative_file(parent_fd, filename)
+        if not _secure_parent_matches_path(base_dir, parent_path, parent_fd):
+            raise RootSessionCreateError(f"session persistence parent escaped canonical base: {parent_path}")
+        _write_relative_bytes(parent_fd, filename, raw)
+        if not _secure_parent_matches_path(base_dir, parent_path, parent_fd):
+            _restore_relative_file(parent_fd, filename, original_bytes)
+            raise RootSessionCreateError(f"session persistence parent changed during commit: {parent_path}")
+        return _SecureJsonCommit(
+            path=path,
+            parent_fd=parent_fd,
+            filename=filename,
+            written_bytes=raw,
+            original_bytes=original_bytes,
+        )
+    except Exception:
+        try:
+            exists, current_bytes = _read_relative_file(parent_fd, filename)
+            if exists and current_bytes == raw:
+                _restore_relative_file(parent_fd, filename, original_bytes)
+        except Exception:
+            pass
+        os.close(parent_fd)
+        raise
+def _cleanup_owned_directories(created_dirs: list[Path]) -> None:
+    for path in reversed(created_dirs):
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            continue
+        try:
+            os.rmdir(path)
         except OSError:
-            return
-        current = current.parent
+            pass
 def _metadata_mismatch(source: str, field: str) -> MstSessionIdValidationError:
     return _structured_failure(f"{source} {field} metadata mismatch")
 def _validate_metadata_payload(
@@ -290,21 +604,30 @@ def _validate_metadata_payload(
     payload: dict,
     *,
     source: str,
+    expected_root_artifact_path: str | None = None,
+    validate_root_id: bool = False,
 ) -> None:
-    raw_session_id = payload.get("mst_session_id")
-    if isinstance(raw_session_id, str) and raw_session_id.strip() and raw_session_id.strip() != parsed.mst_session_id:
-        raise _metadata_mismatch(source, "mst_session_id")
-    raw_root = payload.get("root_mst_id")
-    if isinstance(raw_root, str) and raw_root.strip() and validate_root_mst_id(raw_root.strip()) != parsed.root_mst_id:
-        raise _metadata_mismatch(source, "root_mst_id")
-    raw_started_at = payload.get("started_at")
-    if isinstance(raw_started_at, str) and raw_started_at.strip():
-        compact = format_mst_session_started_at(parse_mst_session_started_at_metadata(raw_started_at))
-        if compact != parsed.started_at_compact:
-            raise _metadata_mismatch(source, "started_at")
-    raw_random = payload.get("random")
-    if isinstance(raw_random, str) and raw_random.strip() and _validate_random_segment(raw_random.strip()) != parsed.random:
-        raise _metadata_mismatch(source, "random")
+    expected_strings = {
+        "mst_session_id": parsed.mst_session_id,
+        "root_mst_id": parsed.root_mst_id,
+        "started_at": format_mst_session_started_at_iso(parsed.started_at),
+        "started_at_compact": parsed.started_at_compact,
+        "random": parsed.random,
+    }
+    if validate_root_id:
+        expected_strings["id"] = parsed.root_mst_id
+    if expected_root_artifact_path is not None:
+        expected_strings["root_artifact_path"] = expected_root_artifact_path
+    for field, expected in expected_strings.items():
+        if field not in payload:
+            continue
+        actual = payload[field]
+        if not isinstance(actual, str) or not actual or actual != expected:
+            raise _metadata_mismatch(source, field)
+    if "schema_version" in payload and (
+        type(payload["schema_version"]) is not int or payload["schema_version"] != 1
+    ):
+        raise _metadata_mismatch(source, "schema_version")
 def validate_mst_session_metadata_consistency(
     base_dir: Path,
     mst_session_id: str,
@@ -316,17 +639,30 @@ def validate_mst_session_metadata_consistency(
     parsed = validate_mst_session_id(mst_session_id)
     root_path = root_artifact_metadata_path(base_dir, parsed.root_mst_id)
     session_path = session_metadata_path(base_dir, parsed.mst_session_id)
+    root_relative = str(root_path.relative_to(base_dir))
 
-    root_payload = load_json_object(root_path)
-    session_payload = load_json_object(session_path)
-    if require_root_metadata and root_payload is None:
+    root_exists, root_payload, _root_bytes = _secure_read_json_object(base_dir, root_path)
+    session_exists, session_payload, _session_bytes = _secure_read_json_object(base_dir, session_path)
+    if require_root_metadata and not root_exists:
         raise _structured_failure(f"missing root metadata: {root_path}")
-    if require_session_metadata and session_payload is None:
+    if require_session_metadata and not session_exists:
         raise _structured_failure(f"missing session metadata: {session_path}")
     if validate_root_metadata and isinstance(root_payload, dict):
-        _validate_metadata_payload(parsed, root_payload, source="root")
+        _validate_metadata_payload(
+            parsed,
+            root_payload,
+            source="root",
+            expected_root_artifact_path=root_relative if "root_artifact_path" in root_payload else None,
+            validate_root_id=True,
+        )
     if isinstance(session_payload, dict):
-        _validate_metadata_payload(parsed, session_payload, source="session")
+        _validate_metadata_payload(
+            parsed,
+            session_payload,
+            source="session",
+            expected_root_artifact_path=root_relative,
+            validate_root_id=True,
+        )
     return parsed
 def _session_metadata_payload(base: Path, root_path: Path, parsed: StructuredMstSessionId) -> dict:
     return {
@@ -334,6 +670,121 @@ def _session_metadata_payload(base: Path, root_path: Path, parsed: StructuredMst
         "root_artifact_path": str(root_path.relative_to(base)),
         "schema_version": 1,
     }
+
+
+def _session_bootstrap_lock_path(base_dir: Path, root_mst_id: str) -> Path:
+    """Return a workspace-external lock path for one canonical root identity.
+
+    Invalid identity attempts must leave the workspace byte-for-byte unchanged, so
+    the serialization file cannot live below ``.gran-maestro``.  The resolved
+    workspace path and validated root form a stable, collision-resistant key.
+    """
+    root = validate_root_mst_id(root_mst_id)
+    base = _absolute_lexical_path(Path(base_dir))
+    lock_key = hashlib.sha256(f"{base}\0{root}".encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / "gran-maestro-session-bootstrap-locks" / f"{lock_key}.lock"
+
+
+def _root_type_bootstrap_lock_path(base_dir: Path, type_key: str) -> Path:
+    if type_key not in _common.TYPE_DIRS:
+        raise RootSessionCreateError(f"unknown root counter type: {type_key}")
+    base = _absolute_lexical_path(Path(base_dir))
+    lock_key = hashlib.sha256(f"{base}\0counter:{type_key}".encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / "gran-maestro-session-bootstrap-locks" / f"{lock_key}.lock"
+
+
+def _open_session_bootstrap_lock(lock_path: Path):
+    try:
+        os.mkdir(lock_path.parent, 0o700)
+    except FileExistsError:
+        pass
+    _assert_real_directory(lock_path.parent, label="session bootstrap lock parent")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise RootSessionCreateError(f"cannot open session bootstrap lock safely: {lock_path}: {exc}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise RootSessionCreateError(f"session bootstrap lock must be a regular file: {lock_path}")
+        return os.fdopen(fd, "r+", encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def open_root_type_bootstrap_lock(base_dir: Path, type_key: str):
+    return _open_session_bootstrap_lock(_root_type_bootstrap_lock_path(base_dir, type_key))
+
+
+def next_root_number(scan_root: Path, type_key: str, counter_payload: dict) -> int:
+    _subdir, prefix = _common.TYPE_DIRS[type_key]
+    last_id = counter_payload.get("last_id", 0)
+    if type(last_id) is not int or last_id < 0:
+        raise RootSessionCreateError("counter last_id must be a non-negative integer")
+
+    disk_max = 0
+    for path in Path(scan_root).glob(f"{prefix}-*"):
+        if type_key != "intent" and not path.is_dir():
+            continue
+        if type_key == "intent" and not (path.is_dir() or path.is_file()):
+            continue
+        match = re.fullmatch(rf"{re.escape(prefix)}-(\d+)", path.name)
+        if match:
+            disk_max = max(disk_max, int(match.group(1)))
+    return max(last_id, disk_max) + 1
+
+
+def reserve_root_session_artifacts(
+    base_dir: Path,
+    type_key: str,
+    *,
+    started_at: datetime | None = None,
+    random_segment: str | None = None,
+    failure_stage: str | None = None,
+) -> dict:
+    """Reserve one root ID and bootstrap its session as one operation."""
+    if type_key not in _common.TYPE_DIRS:
+        raise RootSessionCreateError(f"unknown root counter type: {type_key}")
+
+    base = Path(base_dir)
+    subdir, prefix = _common.TYPE_DIRS[type_key]
+    counter_path = base / subdir / "counter.json"
+    with open_root_type_bootstrap_lock(base, type_key) as lock_handle:
+        _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=30.0, poll_interval=0.01)
+        counter_commit: _SecureJsonCommit | None = None
+        created_dirs: list[Path] = []
+        try:
+            _counter_exists, counter_payload, _counter_bytes = _secure_read_json_object(base, counter_path)
+            next_id = next_root_number(base / subdir, type_key, counter_payload or {})
+            root_mst_id = validate_root_mst_id(f"{prefix}-{next_id:03d}")
+            counter_commit = _secure_atomic_write_json(
+                base,
+                counter_path,
+                {"last_id": next_id},
+                created_dirs=created_dirs,
+            )
+            try:
+                outcome = ensure_root_session_artifacts(
+                    base,
+                    root_mst_id,
+                    started_at=started_at,
+                    random_segment=random_segment,
+                    failure_stage=failure_stage,
+                )
+            except Exception:
+                _rollback_secure_json_commit(counter_commit)
+                _cleanup_owned_directories(created_dirs)
+                raise
+            outcome["counter_type"] = type_key
+            outcome["counter_reserved_id"] = root_mst_id
+            return outcome
+        finally:
+            if counter_commit is not None:
+                _close_secure_json_commits([counter_commit])
+            else:
+                _cleanup_owned_directories(created_dirs)
+            _common._unlock(lock_handle)
 
 
 def create_root_session_artifacts(
@@ -356,21 +807,34 @@ def create_root_session_artifacts(
 
     if commit_order not in {"root-first", "session-first"}:
         raise ValueError("commit_order must be root-first or session-first")
-    if root_path.exists():
+    root_exists, _existing_root, _root_bytes = _secure_read_json_object(base, root_path)
+    session_exists, _existing_session, _session_bytes = _secure_read_json_object(base, session_path)
+    if root_exists:
         raise RootSessionCreateError(f"root artifact already exists: {root_path}")
-    if session_path.exists():
+    if session_exists:
         raise RootSessionCreateError(f"session metadata already exists: {session_path}")
 
     root_data = dict(root_payload or {})
+    if root_payload is not None:
+        _validate_metadata_payload(
+            parsed,
+            root_data,
+            source="root payload",
+            expected_root_artifact_path=(
+                str(root_path.relative_to(base)) if "root_artifact_path" in root_data else None
+            ),
+            validate_root_id=True,
+        )
     root_data.setdefault("id", root)
     root_data.update(metadata)
     session_data = _session_metadata_payload(base, root_path, parsed)
 
-    created_paths: list[Path] = []
+    commits: list[_SecureJsonCommit] = []
+    created_dirs: list[Path] = []
 
     def _commit(path: Path, payload: dict, stage_name: str) -> None:
-        _atomic_write_json(path, payload)
-        created_paths.append(path)
+        commit = _secure_atomic_write_json(base, path, payload, created_dirs=created_dirs)
+        commits.append(commit)
         if failure_stage == stage_name:
             raise RootSessionCreateError(f"injected failure: {stage_name}")
 
@@ -388,16 +852,14 @@ def create_root_session_artifacts(
             require_session_metadata=True,
         )
     except Exception as exc:
-        for path in reversed(created_paths):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        _cleanup_empty_dirs(root_path.parent, base)
-        _cleanup_empty_dirs(session_path.parent, base)
+        for commit in reversed(commits):
+            _rollback_secure_json_commit(commit)
+        _close_secure_json_commits(commits)
+        _cleanup_owned_directories(created_dirs)
         if isinstance(exc, RootSessionCreateError):
             raise
         raise RootSessionCreateError(str(exc)) from exc
+    _close_secure_json_commits(commits)
 
     return {
         "mst_session_id": parsed.mst_session_id,
@@ -415,85 +877,143 @@ def ensure_root_session_artifacts(
     root_payload: dict | None = None,
     started_at: datetime | None = None,
     random_segment: str | None = None,
+    mst_session_id: str | None = None,
+    commit_order: str = "root-first",
+    failure_stage: str | None = None,
 ) -> dict:
     root = validate_root_mst_id(root_mst_id)
     base = Path(base_dir)
-    root_path = root_artifact_metadata_path(base, root)
-    root_data = load_json_object(root_path)
-    if root_data is None:
-        created = create_root_session_artifacts(
-            base,
-            root,
-            root_payload=root_payload,
-            started_at=started_at,
-            random_segment=random_segment,
-        )
-        created["created_new_session"] = True
-        created["root_artifact_created"] = True
-        return created
+    if commit_order not in {"root-first", "session-first"}:
+        raise ValueError("commit_order must be root-first or session-first")
 
-    existing_session_id = root_data.get("mst_session_id")
-    if isinstance(existing_session_id, str) and existing_session_id.strip():
-        parsed = validate_mst_session_id(existing_session_id.strip(), expected_root_mst_id=root)
-        session_path = session_metadata_path(base, parsed.mst_session_id)
-        if not session_path.exists():
-            _atomic_write_json(session_path, _session_metadata_payload(base, root_path, parsed))
-        validate_mst_session_metadata_consistency(
-            base,
-            parsed.mst_session_id,
-            require_root_metadata=True,
-            require_session_metadata=True,
+    requested: StructuredMstSessionId | None = None
+    if mst_session_id:
+        requested = validate_mst_session_id(
+            mst_session_id,
+            expected_root_mst_id=root,
+            expected_started_at=started_at,
         )
-        return {
-            "mst_session_id": parsed.mst_session_id,
-            "root_mst_id": parsed.root_mst_id,
-            "root_artifact_path": root_path,
-            "session_metadata_path": session_path,
-            "created_new_session": False,
-            "root_artifact_created": False,
-            **mst_session_metadata(parsed),
-        }
-
-    mst_session_id = generate_mst_session_id(root, started_at=started_at, random_segment=random_segment)
-    parsed = validate_mst_session_id(mst_session_id, expected_root_mst_id=root, expected_started_at=started_at)
-    metadata = mst_session_metadata(parsed)
-    session_path = session_metadata_path(base, parsed.mst_session_id)
-    if session_path.exists():
-        raise RootSessionCreateError(f"session metadata already exists: {session_path}")
-
-    original_root_data = dict(root_data)
-    updated_root_data = dict(root_data)
-    updated_root_data.setdefault("id", root)
-    updated_root_data.update(metadata)
-    try:
-        _atomic_write_json(root_path, updated_root_data)
-        _atomic_write_json(session_path, _session_metadata_payload(base, root_path, parsed))
-        validate_mst_session_metadata_consistency(
-            base,
-            parsed.mst_session_id,
-            require_root_metadata=True,
-            require_session_metadata=True,
+        if random_segment is not None and requested.random != _validate_random_segment(random_segment):
+            raise _structured_failure("mst_session_id random metadata mismatch")
+    else:
+        preflight_random = (
+            _validate_random_segment(random_segment)
+            if random_segment is not None
+            else "a" * MST_SESSION_ID_RANDOM_DEFAULT_LENGTH
         )
-    except Exception as exc:
-        _atomic_write_json(root_path, original_root_data)
+        _validate_generated_session_component_capacity(root, preflight_random)
+
+    lock_path = _session_bootstrap_lock_path(base, root)
+    with _open_session_bootstrap_lock(lock_path) as lock_handle:
+        _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=30.0, poll_interval=0.01)
         try:
-            session_path.unlink()
-        except FileNotFoundError:
-            pass
-        _cleanup_empty_dirs(session_path.parent, base)
-        if isinstance(exc, RootSessionCreateError):
-            raise
-        raise RootSessionCreateError(str(exc)) from exc
+            root_path = root_artifact_metadata_path(base, root)
+            root_existed, root_data, _root_original_bytes = _secure_read_json_object(base, root_path)
 
-    return {
-        "mst_session_id": parsed.mst_session_id,
-        "root_mst_id": parsed.root_mst_id,
-        "root_artifact_path": root_path,
-        "session_metadata_path": session_path,
-        "created_new_session": True,
-        "root_artifact_created": False,
-        **metadata,
-    }
+            existing_session_id = root_data.get("mst_session_id") if isinstance(root_data, dict) else None
+            existing_bound_session = isinstance(existing_session_id, str) and bool(existing_session_id.strip())
+            if existing_bound_session:
+                parsed = validate_mst_session_id(existing_session_id.strip(), expected_root_mst_id=root)
+                if requested is not None and parsed.mst_session_id != requested.mst_session_id:
+                    raise RootSessionCreateError(
+                        f"root artifact canonical session mismatch: {parsed.mst_session_id} vs {requested.mst_session_id}"
+                    )
+            elif requested is not None:
+                parsed = requested
+            else:
+                generated = generate_mst_session_id(root, started_at=started_at, random_segment=random_segment)
+                parsed = validate_mst_session_id(
+                    generated,
+                    expected_root_mst_id=root,
+                    expected_started_at=started_at,
+                )
+
+            metadata = mst_session_metadata(parsed)
+            session_path = session_metadata_path(base, parsed.mst_session_id)
+            root_relative = str(root_path.relative_to(base))
+            session_existed, session_data, _session_original_bytes = _secure_read_json_object(base, session_path)
+            if isinstance(root_data, dict):
+                _validate_metadata_payload(
+                    parsed,
+                    root_data,
+                    source="root",
+                    expected_root_artifact_path=root_relative if "root_artifact_path" in root_data else None,
+                    validate_root_id=True,
+                )
+            if isinstance(session_data, dict):
+                _validate_metadata_payload(
+                    parsed,
+                    session_data,
+                    source="session",
+                    expected_root_artifact_path=root_relative,
+                    validate_root_id=True,
+                )
+            if isinstance(root_payload, dict):
+                _validate_metadata_payload(
+                    parsed,
+                    root_payload,
+                    source="root payload",
+                    expected_root_artifact_path=root_relative if "root_artifact_path" in root_payload else None,
+                    validate_root_id=True,
+                )
+
+            desired_root = dict(root_data or {})
+            if root_payload:
+                desired_root.update(root_payload)
+            desired_root.setdefault("id", root)
+            desired_root.update(metadata)
+            desired_session = _session_metadata_payload(base, root_path, parsed)
+            root_changed = root_data != desired_root
+            session_changed = session_data != desired_session
+            commits: list[_SecureJsonCommit] = []
+            created_dirs: list[Path] = []
+
+            def _commit_if_changed(path: Path, payload: dict, changed: bool, stage_name: str) -> None:
+                if not changed:
+                    return
+                commit = _secure_atomic_write_json(base, path, payload, created_dirs=created_dirs)
+                commits.append(commit)
+                if failure_stage == stage_name:
+                    raise RootSessionCreateError(f"injected failure: {stage_name}")
+
+            try:
+                if commit_order == "root-first":
+                    _commit_if_changed(root_path, desired_root, root_changed, "after_root_artifact_commit")
+                    _commit_if_changed(session_path, desired_session, session_changed, "after_session_metadata_commit")
+                else:
+                    _commit_if_changed(session_path, desired_session, session_changed, "after_session_metadata_commit")
+                    _commit_if_changed(root_path, desired_root, root_changed, "after_root_artifact_commit")
+                validate_mst_session_metadata_consistency(
+                    base,
+                    parsed.mst_session_id,
+                    require_root_metadata=True,
+                    require_session_metadata=True,
+                )
+            except Exception as exc:
+                for commit in reversed(commits):
+                    _rollback_secure_json_commit(commit)
+                _close_secure_json_commits(commits)
+                _cleanup_owned_directories(created_dirs)
+                if isinstance(exc, RootSessionCreateError):
+                    raise
+                raise RootSessionCreateError(str(exc)) from exc
+            _close_secure_json_commits(commits)
+
+            mutation_performed = root_changed or session_changed
+            return {
+                "mst_session_id": parsed.mst_session_id,
+                "root_mst_id": parsed.root_mst_id,
+                "root_artifact_path": root_path,
+                "session_metadata_path": session_path,
+                "created_new_session": bool(mutation_performed and not existing_bound_session),
+                "root_artifact_created": bool(root_changed and not root_existed),
+                "session_metadata_created": bool(session_changed and not session_existed),
+                "mutation_performed": mutation_performed,
+                "reused_existing_session": not mutation_performed,
+                **metadata,
+            }
+        finally:
+            _common._unlock(lock_handle)
 SESSION_WORKTREE_OUTCOME_KEY = "session_worktree_outcome"
 SESSION_WORKTREE_ACTIVE_STATES = {"active", "reused"}
 def _session_worktree_created_at_now() -> str:
@@ -725,7 +1245,9 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
     path_entry = next((entry for entry in entries if entry.get("worktree") == str(worktree_path)), None)
     branch_entry = next((entry for entry in entries if entry.get("branch") == session_branch_ref), None)
 
-    if existing_payload and _session_metadata_matches_contract(
+    is_base_metadata_only = existing_payload and not existing_payload.get("session_branch") and not existing_payload.get("session_worktree_path")
+
+    if existing_payload and not is_base_metadata_only and _session_metadata_matches_contract(
         existing_payload,
         mst_session_id=parsed.mst_session_id,
         session_branch=session_branch,
@@ -780,7 +1302,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             ),
         )
 
-    if existing_payload:
+    if existing_payload and not is_base_metadata_only:
         return _write_session_worktree_payload(
             session_path,
             _session_worktree_payload(
@@ -822,6 +1344,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="active",
                 outcome="reused_existing",
+                existing_payload=existing_payload,
                 original_checkout_path=original_checkout_path,
                 parent_project_root=parent_project_root,
                 original_checkout_common_dir=original_checkout_common_dir,
@@ -841,6 +1364,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             created_at=created_at,
             state="blocked",
             outcome="blocked_mst_temp_original_base",
+            existing_payload=existing_payload,
             diagnostic={
                 "blocked_base_branch": snapshot.get("blocked_base_branch"),
             },
@@ -862,6 +1386,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             created_at=created_at,
             state="blocked",
             outcome="blocked_unborn_branch",
+            existing_payload=existing_payload,
             diagnostic={
                 "git_error": snapshot.get("git_error"),
                 "blocked_base_branch": snapshot.get("blocked_base_branch"),
@@ -886,6 +1411,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_detached_head",
+                existing_payload=existing_payload,
                 diagnostic={"worktree_creation": "skipped_detached_head"},
                 original_checkout_path=original_checkout_path,
                 parent_project_root=parent_project_root,
@@ -908,6 +1434,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_worktree_conflict",
+                existing_payload=existing_payload,
                 diagnostic={
                     "existing_path_entry": path_entry,
                     "existing_branch_entry": branch_entry,
@@ -933,6 +1460,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_path_collision",
+                existing_payload=existing_payload,
                 diagnostic={"existing_path": str(worktree_path)},
                 original_checkout_path=original_checkout_path,
                 parent_project_root=parent_project_root,
@@ -955,6 +1483,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_branch_collision",
+                existing_payload=existing_payload,
                 diagnostic={"existing_branch": session_branch},
                 original_checkout_path=original_checkout_path,
                 parent_project_root=parent_project_root,
@@ -984,6 +1513,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
                 created_at=created_at,
                 state="blocked",
                 outcome="blocked_git_worktree_add_failed",
+                existing_payload=existing_payload,
                 diagnostic={
                     "stderr": result.stderr.strip(),
                     "stdout": result.stdout.strip(),
@@ -1008,6 +1538,7 @@ def ensure_session_worktree_contract(project_root: Path, mst_session_id: str) ->
             created_at=created_at,
             state="active",
             outcome="created",
+            existing_payload=existing_payload,
             original_checkout_path=original_checkout_path,
             parent_project_root=parent_project_root,
             original_checkout_common_dir=original_checkout_common_dir,
@@ -2836,7 +3367,7 @@ def write_session_history_event(base_dir: Path, mst_session_id: str, payload: di
     parsed = validate_mst_session_metadata_consistency(
         base_dir,
         mst_session_id,
-        validate_root_metadata=False,
+        validate_root_metadata=True,
     )
     path = session_history_path(base_dir, parsed.mst_session_id)
     if _should_skip_stale_invocation_history_append(base_dir, parsed.mst_session_id, payload):

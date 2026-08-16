@@ -96,6 +96,7 @@ def test_claude_source_keeps_claude_style_agile_plan_delegation() -> None:
         'Skill(skill: "mst:agile-plan", args: "--resume {AGI_ID} '
         '--return-to agile/1 {AUTO_FLAG_IF_TRUE}")'
     ) in source
+    assert "MST_PARENT_BINDING" not in source
 
 
 def test_codex_projection_uses_codex_native_agile_plan_invocation() -> None:
@@ -110,6 +111,7 @@ def test_codex_projection_uses_codex_native_agile_plan_invocation() -> None:
         "$mst:agile-plan --resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}"
     ) in projected
     assert 'Skill(skill: "mst:agile-plan"' not in projected
+    assert "MST_PARENT_BINDING" not in projected
 
 
 def test_codex_projection_declares_agile_plan_command_identity() -> None:
@@ -143,6 +145,7 @@ def test_codex_projection_rewriter_reproduces_agile_plan_invocation_contract() -
         "$mst:agile-plan --resume {AGI_ID} --return-to agile/1 {AUTO_FLAG_IF_TRUE}"
     ) in rewritten
     assert 'Skill(skill: "mst:agile-plan"' not in rewritten
+    assert "MST_PARENT_BINDING" not in rewritten
 
 
 def test_codex_projection_rewriter_reproduces_agile_plan_identity_guard() -> None:
@@ -268,3 +271,59 @@ def test_codex_plugin_default_prompts_use_model_visible_skill_names() -> None:
     assert prompts
     assert all(prompt.startswith("$mst:") for prompt in prompts)
     assert all(not prompt.startswith("/mst:") for prompt in prompts)
+
+
+def test_session_bootstrap_conditional_inheritance_parity() -> None:
+    bootstrap_skills = {
+        "debug",
+        "discussion",
+        "explore",
+        "ideation",
+        "plan-doc",
+        "plan",
+        "request",
+    }
+
+    for name in PROVIDER_DISPATCH_SKILLS:
+        if name not in bootstrap_skills:
+            continue
+
+        for read_func, label in [(read_source_skill, "source"), (read_projected_skill, "projected")]:
+            content = read_func(name)
+
+            # 1. Check for inclusion markers
+            include_marker = "<!-- @include _shared/session-bootstrap.md -->"
+            end_marker = "<!-- @end-include -->"
+
+            idx = content.find(include_marker)
+            assert idx != -1, f"{label} skill {name} is missing include"
+
+            end_idx = content.find(end_marker, idx)
+            assert end_idx != -1, f"{label} skill {name} is missing end-include"
+
+            # 2. Extract content outside the session-bootstrap include block
+            post_include_content = content[:idx] + content[end_idx + len(end_marker):]
+
+            # 3. Assert no unconditional session bootstrap instructions/command blocks exist in the rest of the file
+            forbidden_patterns = [
+                r"session bootstrap --root-mst-id",
+                r"session bootstrap` 커맨드를 실행하여 세션을 초기화",
+            ]
+            for pattern in forbidden_patterns:
+                match = re.search(pattern, post_include_content)
+                assert not match, (
+                    f"Unconditional session bootstrap instruction found in {label} skill {name} post-include: "
+                    f"{match.group(0) if match else ''}"
+                )
+
+            include_body = content[idx : end_idx + len(end_marker)]
+            required_tokens = (
+                "session resolve --json",
+                "session bootstrap",
+                "CANONICAL_MST_SESSION_ID",
+                "CANONICAL_MST_CONTEXT_JSON",
+                "모든 별도",
+                "한 `export`에 의존하면 안 됩니다",
+            )
+            for token in required_tokens:
+                assert token in include_body, f"{label} skill {name} is missing {token!r}"

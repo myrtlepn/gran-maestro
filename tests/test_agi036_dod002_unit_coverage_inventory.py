@@ -19,7 +19,10 @@ DOD002_UNIT_COVERAGE = {
         "path": "tests/test_dod002_entrypoint_generation_matrix.py",
         "tests": [
             "test_root_entrypoint_generation_allowed_with_explicit_root_context",
-            "test_child_entrypoint_generation_forbidden_without_parent_env",
+            # REQ-946 permits structured context inheritance at the tested
+            # dispatch boundary; the representative test was renamed with
+            # that canonical contract.
+            "test_child_entrypoint_generation_allowed_with_structured_parent_context",
             "test_missing_context_mutation_generation_forbidden_without_legacy_fallback",
         ],
         "tokens": ["ENTRYPOINT_GENERATION_MATRIX", "UUID_V4_RE"],

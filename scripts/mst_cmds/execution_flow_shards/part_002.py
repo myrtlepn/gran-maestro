@@ -839,6 +839,7 @@ def resolve_canonical_mst_session_identity(
     allow_generate: bool = False,
     root_mst_id: str | None = None,
     started_at: datetime | None = None,
+    generated_mst_session_id: str | None = None,
 ) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     env = env if env is not None else os.environ
@@ -957,8 +958,8 @@ def resolve_canonical_mst_session_identity(
             code="invalid_mst_session_id",
         )
 
-    if allow_generate and invocation_class == "normal_entry" and root_mst_id:
-        generated = session_cmds.generate_mst_session_id(root_mst_id, started_at=started_at)
+    if (allow_generate or generated_mst_session_id) and invocation_class == "normal_entry" and root_mst_id:
+        generated = generated_mst_session_id if generated_mst_session_id else session_cmds.generate_mst_session_id(root_mst_id, started_at=started_at)
         parsed = session_cmds.validate_mst_session_id(generated)
         observed_sources["generated:root_mst_id"] = {
             "present": True,

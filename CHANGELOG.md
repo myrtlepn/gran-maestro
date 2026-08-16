@@ -8,6 +8,21 @@
 
 ---
 
+## [0.65.1] — 2026-08-16
+
+### 개선
+
+- **MST 명시적 호출 경계 일관화**: 모든 사용자 호출형 MST 스킬은 `$mst:*`, `/mst:*` 또는 MST/Maestro를 사용해 달라는 명시적 요청으로만 새 워크플로우에 진입합니다. 승인된 내부 스킬 연쇄는 같은 canonical session을 안전하게 이어받습니다.
+- **Codex 설치 검증 강화**: 임시 로컬 설치 smoke가 핵심 스킬·런타임·adapter·agent 파일의 실제 내용을 비교하고, 동일 버전 캐시 충돌도 감지합니다.
+
+### 버그 수정
+
+- **새 Codex 세션 bootstrap 복구**: hook이 없는 명시적 MST 진입에서도 canonical `MST_SESSION_ID`를 한 번만 발급·보존하며, malformed context·경로 이탈·손상된 metadata는 파일 변경 없이 차단합니다.
+- **일반 세션 무상태 보장**: 명시적으로 MST를 사용하지 않은 SessionStart·PreToolUse·Stop 경로가 `.gran-maestro` 디렉터리나 legacy bridge를 만들지 않도록 수정했습니다.
+- **Codex 0.147 CLI 호환성 복구**: review 및 network 실행에서 지원하지 않거나 충돌하는 옵션을 제거해 실제 parser가 명령을 정상 수락하도록 했습니다.
+
+---
+
 ## [0.65.0] — 2026-08-16
 
 ### 새 기능

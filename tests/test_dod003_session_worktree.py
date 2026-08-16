@@ -345,7 +345,7 @@ def test_env_stdin_conflict_no_mutation_does_not_create_session_worktree_or_sess
         env={"MST_SESSION_ID": MST_SESSION_ID},
     )
 
-    assert result.returncode == 0
+    assert result.returncode != 0
     assert "mst_session_id mismatch" in result.stderr
     assert _head_branch(repo_root) == before_branch
     assert _head_sha(repo_root) == before_sha

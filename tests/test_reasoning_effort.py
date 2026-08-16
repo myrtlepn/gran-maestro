@@ -162,3 +162,28 @@ def test_inherit_omits_external_effort_flag(tmp_path: Path) -> None:
         )
         assert "--effort" not in command
         assert not any(item.startswith("model_reasoning_effort=") for item in command)
+
+
+def test_codex_external_permission_flags_match_current_cli_contract(tmp_path: Path) -> None:
+    writable, _transport = _external_command(
+        provider="codex",
+        executable="codex",
+        prompt="prompt",
+        worktree_dir=tmp_path,
+        model="test-model",
+        read_only=False,
+    )
+    read_only, _transport = _external_command(
+        provider="codex",
+        executable="codex",
+        prompt="prompt",
+        worktree_dir=tmp_path,
+        model="test-model",
+        read_only=True,
+    )
+
+    assert "--approve-for-me" in writable
+    assert "--sandbox" not in writable
+    assert "--full-auto" not in writable
+    assert read_only[1:4] == ["exec", "--sandbox", "read-only"]
+    assert "--approve-for-me" not in read_only

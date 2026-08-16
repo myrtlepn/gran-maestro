@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from tests.fixtures.hook_harness import run_hook as run_stop_hook_harness
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SESSION_START_HOOK = REPO_ROOT / "hooks" / "mst-session-init.sh"
@@ -63,6 +65,19 @@ def _hashes(workspace: Path) -> dict[str, str]:
         for path in sorted(base.rglob("*"))
         if path.is_file()
     }
+
+
+def _tree_entries(workspace: Path) -> set[tuple[str, str]]:
+    """Snapshot files and directories so empty MST directory mutations are visible."""
+    base = workspace / ".gran-maestro"
+    if not base.exists():
+        return set()
+    entries: set[tuple[str, str]] = set()
+    entries.add(("dir", "."))
+    for path in sorted(base.rglob("*")):
+        kind = "symlink" if path.is_symlink() else "dir" if path.is_dir() else "file"
+        entries.add((kind, str(path.relative_to(base))))
+    return entries
 
 
 def _run_hook(
@@ -267,6 +282,75 @@ def test_missing_parent_hooks_produce_no_uuid_default_or_ppid_identity_mutation(
         assert not (workspace / ".gran-maestro" / "tmp" / f"mst-state-{LEGACY_PPID}.json").exists()
 
 
+def test_ordinary_no_sid_invocations_leave_workspace_tree_unchanged() -> None:
+    hook_payloads = (
+        (
+            SESSION_START_HOOK,
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": CLAUDE_SESSION_ID,
+                "transcript_path": f"/tmp/{TRANSCRIPT_SESSION_ID}.jsonl",
+            },
+        ),
+        (
+            USER_PROMPT_HOOK,
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": CLAUDE_SESSION_ID,
+                "prompt": "ordinary non-MST request",
+            },
+        ),
+        (
+            PRE_TOOL_USE_HOOK,
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": CLAUDE_SESSION_ID,
+                "tool_name": "Skill",
+                "tool_input": {"skill_name": "ordinary:skill", "args": ""},
+            },
+        ),
+        (
+            STOP_HOOK,
+            {
+                "hook_event_name": "Stop",
+                "session_id": CLAUDE_SESSION_ID,
+            },
+        ),
+    )
+
+    for hook_path, payload in hook_payloads:
+        for existing_mst_tree in (False, True):
+            with _workspace() as raw_workspace:
+                workspace = Path(raw_workspace)
+                for name in ("scripts", "templates"):
+                    (workspace / name).symlink_to(REPO_ROOT / name, target_is_directory=True)
+                if existing_mst_tree:
+                    sentinel = workspace / ".gran-maestro" / "sentinel"
+                    (sentinel / "empty").mkdir(parents=True)
+                    (sentinel / "content.txt").write_text("unchanged\n", encoding="utf-8")
+                runtime_dir = workspace / "hook-runtime"
+                runtime_dir.mkdir()
+                before_tree = _tree_entries(workspace)
+                before_hashes = _hashes(workspace)
+
+                result = _run_hook(
+                    workspace,
+                    hook_path,
+                    payload,
+                    env={
+                        "HOOK_JUDGE_TIMEOUT_RUNTIME_DIR": str(runtime_dir),
+                        "MST_STOP_HOOK_CLEANUP_DISABLE": "1",
+                    },
+                )
+
+                assert result.returncode == 0, f"{hook_path.name}: {result.stderr}"
+                assert _tree_entries(workspace) == before_tree, hook_path.name
+                assert _hashes(workspace) == before_hashes, hook_path.name
+                assert list(runtime_dir.iterdir()) == [], hook_path.name
+                if not existing_mst_tree:
+                    assert not (workspace / ".gran-maestro").exists(), hook_path.name
+
+
 def test_hook_env_stdin_mismatch_fails_closed_without_identity_mutation() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
@@ -291,12 +375,42 @@ def test_hook_env_stdin_mismatch_fails_closed_without_identity_mutation() -> Non
         assert STALE_SESSION_ID not in "\n".join(_identity_paths(workspace))
 
 
+def test_shared_hook_harness_preserves_explicit_env_for_mismatch_guard() -> None:
+    with _workspace() as raw_workspace:
+        workspace = Path(raw_workspace)
+        _init_workspace(workspace)
+        before_hashes = _hashes(workspace)
+        mismatch_payload = {
+            "hook_event_name": "Stop",
+            "mst_session_id": STALE_SESSION_ID,
+            "session_id": CLAUDE_SESSION_ID,
+        }
+
+        result = run_stop_hook_harness(
+            workspace,
+            mismatch_payload,
+            env={
+                "MST_SESSION_ID": PARENT_SESSION_ID,
+                "MST_STOP_HOOK_CLEANUP_DISABLE": "1",
+            },
+        )
+
+        combined = f"{result.stdout}\n{result.stderr}"
+        assert result.returncode != 0
+        assert _hashes(workspace) == before_hashes
+        assert "mismatch" in combined
+        assert PARENT_SESSION_ID not in "\n".join(_identity_paths(workspace))
+        assert STALE_SESSION_ID not in "\n".join(_identity_paths(workspace))
+
+
 def main() -> int:
     tests = [
         test_session_start_pretool_stop_and_user_prompt_keep_parent_structured_session,
         test_claude_session_transcript_ppid_and_owner_metadata_are_diagnostic_only,
         test_missing_parent_hooks_produce_no_uuid_default_or_ppid_identity_mutation,
+        test_ordinary_no_sid_invocations_leave_workspace_tree_unchanged,
         test_hook_env_stdin_mismatch_fails_closed_without_identity_mutation,
+        test_shared_hook_harness_preserves_explicit_env_for_mismatch_guard,
     ]
     for test in tests:
         test()

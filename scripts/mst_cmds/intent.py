@@ -25,6 +25,20 @@ from scripts.mst_cmds._common import (
 )
 
 def _next_intent_id():
+    mst_session_id = os.environ.get("MST_SESSION_ID", "").strip()
+    if mst_session_id:
+        from scripts.mst_cmds import session as session_mod
+
+        parsed = session_mod.validate_mst_session_id(mst_session_id)
+        if parsed.root_mst_id.startswith("INTENT-"):
+            session_mod.validate_mst_session_metadata_consistency(
+                _common.BASE_DIR,
+                mst_session_id,
+                require_root_metadata=True,
+                require_session_metadata=True,
+            )
+            return parsed.root_mst_id
+
     cmd = [
         sys.executable,
         str(_common._mst_script_path()),

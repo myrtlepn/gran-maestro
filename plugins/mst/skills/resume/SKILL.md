@@ -100,11 +100,13 @@ python3 {PLUGIN_ROOT}/scripts/mst.py queue pop --json
 
 ### Step 3/5: Skill 호출
 
-`action.skill` 필드에 해당하는 Skill 도구를 호출한다. **args는 원본 그대로 전달한다** (재조합/수정 금지).
+`action.skill` 필드가 허용된 exact `mst:{name}`인지 확인한 뒤 해당 Skill 도구를 호출한다. Queue의 업무 args bytes는 재조합하거나 수정하지 않고, parent가 소유한 reserved binding만 별도 suffix로 추가한다.
 
 ```
 Skill(skill: "{action.skill}", args: "{action.args}")
 ```
+
+Dynamic `child_skill={action.skill}`은 queue의 allowlisted exact skill identity, trusted host-native metadata, 현재 호출 대상과 모두 같아야 한다. 불일치·duplicate·replay면 queue complete/fail이나 child delegation을 수행하지 않고 zero mutation으로 거부한다.
 
 예시:
 - `action.skill == "mst:request"` → `Skill(skill: "mst:request", args: "--plan PLN-437 -a")`

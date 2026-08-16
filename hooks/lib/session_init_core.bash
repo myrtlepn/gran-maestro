@@ -540,7 +540,10 @@ EOF_STATE
 
 write_session_bridge() {
   local session_id tmp_path
-  session_id="$(stdin_session_id)"
+  # The bridge carries the legacy Claude host UUID only as owner metadata.
+  # mst-session-init invokes this writer only after canonical MST identity has
+  # resolved, so a legacy-only SessionStart can never create the bridge.
+  session_id="${MST_LEGACY_SESSION_ID:-}"
 
   if [ -z "$session_id" ]; then
     return 0

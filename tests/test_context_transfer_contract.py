@@ -15,7 +15,6 @@ SPRINT_DISPATCH_TEMPLATE = REPO_ROOT / "templates" / "sprint-dispatch-prompt.md"
 
 PROVIDER_SKILL_PATHS = [
     "skills/codex/SKILL.md",
-    "skills/gemini/SKILL.md",
     "skills/claude/SKILL.md",
 ]
 
@@ -275,16 +274,21 @@ def test_approve_skill_requires_no_source_plan_but_allows_previous_feedback_n_a(
     assert "첫 실행 시 \"N/A\"" in previous_feedback_line
 
 
-def test_approve_claude_dispatch_documents_prompt_worktree_and_wrapper_binding() -> None:
+def test_approve_claude_dispatch_documents_prompt_worktree_and_native_call() -> None:
     text = _read(APPROVE_SKILL)
+    native_invocation = (
+        'Skill(skill: "mst:claude", args: "--prompt-file {prompt_file} --dir {worktree_path} '
+        '--trace {REQ-ID}/{TASK-NUM}/phase2-impl")'
+    )
     claude_section = _section_lines(
         text,
-        'Skill(skill: "mst:claude", args: "--prompt-file {prompt_file} --dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase2-impl")',
+        native_invocation,
         window=14,
     )
 
     assert '--prompt-file {prompt_file} --dir {worktree_path} --trace {REQ-ID}/{TASK-NUM}/phase2-impl' in claude_section
-    assert '--trace {REQ-ID}/{TASK-NUM}/phase2-impl")' in claude_section
+    assert native_invocation in claude_section
+    assert "MST_PARENT_BINDING" not in text
     assert "python3 {PLUGIN_ROOT}/scripts/mst.py run" in claude_section
     assert "--task-id {REQ-ID}-T{TASK-NUM}" in claude_section
     assert "--log-dir {task_dir}" in claude_section
@@ -326,7 +330,7 @@ def test_dispatch_contract_preserves_provider_neutral_lifecycle_evidence() -> No
             "python3 {PLUGIN_ROOT}/scripts/mst.py run",
             "--task-id \"{AGI_ID}-S{NN}\"",
             "--provider codex",
-            "--provider gemini",
+            "--provider agy",
             '--provider "$PROVIDER"',
             "--log-dir \"{PROJECT_ROOT}/.gran-maestro/agile/{AGI_ID}/sprints/S{NN}/\"",
             "sprint dispatch lifecycle tuple",

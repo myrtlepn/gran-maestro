@@ -62,6 +62,14 @@ def test_session_a_snapshot_integrity_after_b_hook(tmp_path):
 def _run_mst(workspace: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
     merged_env["MST_FLOW_DISABLE_ATEXIT"] = "1"
+    for key in (
+        "MST_SESSION_ID",
+        "MST_CONTEXT_JSON",
+        "MST_HOOK_STDIN_RAW",
+        "MST_STATE_PPID",
+        "MST_SNAPSHOT_SESSION_ID",
+    ):
+        merged_env.pop(key, None)
     if env:
         merged_env.update(env)
     return subprocess.run(
@@ -130,11 +138,16 @@ def test_shell_wrapper_repeated_resolve_keeps_same_exported_sid(tmp_path: Path) 
         'printf "%s\\n%s\\n" "$first" "$MST_SESSION_ID"'
     )
 
+    test_env = os.environ.copy()
+    for key in ("MST_SESSION_ID", "MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW", "MST_STATE_PPID", "MST_SNAPSHOT_SESSION_ID"):
+        test_env.pop(key, None)
+
     result = subprocess.run(
         ["bash", "-c", script],
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        env=test_env,
         check=False,
         timeout=30,
     )

@@ -13,13 +13,23 @@ SESSION_ID = "MST-REQ-000-20260519T000000000Z-test0000"
 
 
 def _run_mst(workspace: Path, *args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    merged_env = os.environ.copy() if env is None else dict(env)
+    for key in (
+        "MST_SESSION_ID",
+        "MST_CONTEXT_JSON",
+        "MST_HOOK_STDIN_RAW",
+        "MST_STATE_PPID",
+        "MST_SNAPSHOT_SESSION_ID",
+    ):
+        if env is None or key not in env:
+            merged_env.pop(key, None)
     return subprocess.run(
         [sys.executable, str(MST_SCRIPT), *args],
         cwd=workspace,
         capture_output=True,
         text=True,
         check=False,
-        env=env,
+        env=merged_env,
     )
 
 
@@ -63,6 +73,17 @@ def _dispatch_and_execute(
     )
     assert built.returncode == 0, built.stderr
 
+    exec_env = os.environ.copy() if env is None else dict(env)
+    for key in (
+        "MST_SESSION_ID",
+        "MST_CONTEXT_JSON",
+        "MST_HOOK_STDIN_RAW",
+        "MST_STATE_PPID",
+        "MST_SNAPSHOT_SESSION_ID",
+    ):
+        if env is None or key not in env:
+            exec_env.pop(key, None)
+
     command = built.stdout.strip()
     executed = subprocess.run(
         ["bash", "-c", command],
@@ -70,7 +91,7 @@ def _dispatch_and_execute(
         capture_output=True,
         text=True,
         check=False,
-        env=env,
+        env=exec_env,
     )
     assert executed.returncode == 0, executed.stderr
 

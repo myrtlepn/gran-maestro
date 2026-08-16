@@ -690,6 +690,28 @@ def _next_agile_id() -> str:
     next_id = last_id + 1
     save_json(counter_path, {"last_id": next_id})
     return f"AGI-{next_id:03d}"
+
+
+def _fresh_bootstrap_agile_identity() -> tuple[str, str] | None:
+    mst_session_id = os.environ.get("MST_SESSION_ID", "").strip()
+    if not mst_session_id:
+        return None
+    parsed = session_mod.validate_mst_session_id(mst_session_id)
+    if not parsed.root_mst_id.startswith("AGI-"):
+        return None
+    session_mod.validate_mst_session_metadata_consistency(
+        _common.BASE_DIR,
+        mst_session_id,
+        require_root_metadata=True,
+        require_session_metadata=True,
+    )
+    root_path = session_mod.root_artifact_metadata_path(_common.BASE_DIR, parsed.root_mst_id)
+    root_payload = load_json(root_path) or {}
+    if root_payload.get("status") or root_payload.get("agi_id"):
+        raise ValueError(f"{parsed.root_mst_id} already exists")
+    return parsed.root_mst_id, parsed.mst_session_id
+
+
 def _verify_agile_init_session(agi_id: str, mst_session_id: str) -> dict:
     payload, _ = _load_agile_session(agi_id)
     actual_mst_session_id = str(payload.get("mst_session_id") or "").strip()
@@ -710,13 +732,14 @@ def cmd_agile_init(args):
         return 1
 
     try:
-        agi_id = _next_agile_id()
-    except RuntimeError as exc:
+        bootstrap_identity = _fresh_bootstrap_agile_identity()
+        agi_id = bootstrap_identity[0] if bootstrap_identity else _next_agile_id()
+    except (RuntimeError, ValueError) as exc:
         print(f"Error: failed to allocate AGI id ({exc})", file=sys.stderr)
         return 1
 
     session_dir = _agi_session_dir(agi_id)
-    if session_dir.exists():
+    if session_dir.exists() and bootstrap_identity is None:
         print(f"Error: {agi_id} already exists", file=sys.stderr)
         return 1
 
@@ -741,11 +764,19 @@ def cmd_agile_init(args):
         "updated_at": now,
     }
     try:
-        created = session_mod.create_root_session_artifacts(
-            _common.BASE_DIR,
-            agi_id,
-            root_payload=payload,
-        )
+        if bootstrap_identity:
+            created = session_mod.ensure_root_session_artifacts(
+                _common.BASE_DIR,
+                agi_id,
+                root_payload=payload,
+                mst_session_id=bootstrap_identity[1],
+            )
+        else:
+            created = session_mod.create_root_session_artifacts(
+                _common.BASE_DIR,
+                agi_id,
+                root_payload=payload,
+            )
         mst_session_id = str(created["mst_session_id"])
         session_mod.write_session_history_event(
             _common.BASE_DIR,

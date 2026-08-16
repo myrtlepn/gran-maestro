@@ -163,13 +163,19 @@ def _run_stop_hook(
     session_id: str = SID,
     head: str,
 ):
+    # These contract scenarios exercise the full Python judge and ledger path.
+    # Use the runtime's 5s judge budget so host load cannot turn a behavior
+    # assertion into the wrapper's intentional 500ms fail-open fallback.
     return dod011._run_stop_hook(
         workspace,
         policy_home,
         payload,
         session_id=session_id,
         context=_context(head, session_id=session_id),
-        extra_env={"MST_STOP_HOOK_CLEANUP_DISABLE": "1"},
+        extra_env={
+            "MST_STOP_HOOK_CLEANUP_DISABLE": "1",
+            "MST_HOOK_JUDGE_TIMEOUT_MS": "5000",
+        },
     )
 
 
@@ -467,21 +473,44 @@ def test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
         "normalized_error": "pytest:file-not-found",
     }
     different_action = {**same_failure, "command": "python3 -m pytest -q tests/other_missing.py", "normalized_action": "bash:python3 -m pytest -q tests/other_missing.py"}
-    attempts = [
+    sid_attempts = [
         (SID, same_failure, "pytest:file-not-found"),
         (SID, same_failure, "pytest:file-not-found"),
         (SID, different_action, "pytest:file-not-found"),
-        (OTHER_SID, same_failure, "pytest:file-not-found"),
         (SID, same_failure, "pytest:assertion-failed"),
     ]
 
     with dod011._workspace() as raw:
         workspace = Path(raw)
         policy_home = workspace / "policy"
-        head = _seed_auto_workspace(workspace, policy_home, session_id=SID, next_action=same_failure)
-        _seed_auto_workspace(workspace, policy_home, session_id=OTHER_SID, next_action=same_failure)
+        # A root metadata pair names one exact active session. Exercise the
+        # other-session key while that pair is authoritative, then activate
+        # SID; keeping two same-root sessions "active" at once is invalid
+        # under REQ-946 strict persistence corroboration.
+        other_head = _seed_auto_workspace(
+            workspace, policy_home, session_id=OTHER_SID, next_action=same_failure
+        )
+        _seed_auto_stop_hook_state(workspace, session_id=OTHER_SID, next_action=same_failure)
+        other_result = _run_stop_hook(
+            workspace,
+            policy_home,
+            {
+                "hook_event_name": "Stop",
+                "mst_session_id": OTHER_SID,
+                "last_assistant_message": "Recoverable failure in another canonical session.",
+                "queued_action": same_failure,
+                "failure": {"normalized_error": same_failure["normalized_error"]},
+            },
+            session_id=OTHER_SID,
+            head=other_head,
+        )
+        assert other_result.returncode == 0, other_result.stderr
 
-        for index, (session_id, action, normalized_error) in enumerate(attempts, 1):
+        heads = {
+            SID: _seed_auto_workspace(workspace, policy_home, session_id=SID, next_action=same_failure),
+        }
+
+        for index, (session_id, action, normalized_error) in enumerate(sid_attempts, 1):
             _seed_auto_stop_hook_state(workspace, session_id=session_id, next_action=action)
             result = _run_stop_hook(
                 workspace,
@@ -494,9 +523,14 @@ def test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
                     "failure": {"normalized_error": normalized_error},
                 },
                 session_id=session_id,
-                head=head,
+                head=heads[session_id],
             )
             assert result.returncode == 0, result.stderr
+            # REQ-946 strict parent-pair corroboration requires the next hook
+            # context to carry the latest persisted history head per session.
+            heads[session_id] = (
+                workspace / ".gran-maestro" / "sessions" / session_id / "history.head"
+            ).read_text(encoding="utf-8").strip()
 
         progress_event = {
             "schema_version": 1,
@@ -512,6 +546,9 @@ def test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
         from scripts.mst_cmds import hook as hook_cmds
 
         hook_cmds.append_history_event(workspace, policy_home, SID, progress_event)
+        heads[SID] = (
+            workspace / ".gran-maestro" / "sessions" / SID / "history.head"
+        ).read_text(encoding="utf-8").strip()
         _seed_auto_stop_hook_state(workspace, session_id=SID, next_action=same_failure)
         result = _run_stop_hook(
             workspace,
@@ -524,11 +561,22 @@ def test_retry_circuit_key_is_session_action_error_scoped_and_resets_on_progress
                 "failure": {"normalized_error": same_failure["normalized_error"]},
             },
             session_id=SID,
-            head=head,
+            head=heads[SID],
         )
         assert result.returncode == 0, result.stderr
 
-        circuit_events = _find_events(workspace, lambda event: isinstance(event.get("circuit_breaker"), dict))
+        circuit_events = [
+            *_find_events(
+                workspace,
+                lambda event: isinstance(event.get("circuit_breaker"), dict),
+                session_id=SID,
+            ),
+            *_find_events(
+                workspace,
+                lambda event: isinstance(event.get("circuit_breaker"), dict),
+                session_id=OTHER_SID,
+            ),
+        ]
         assert circuit_events, f"missing circuit breaker events: {_event_types(workspace)}"
         counters: dict[str, list[int]] = {}
         for event in circuit_events:

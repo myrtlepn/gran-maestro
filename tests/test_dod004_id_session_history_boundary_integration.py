@@ -210,11 +210,15 @@ def _assert_session_identity_contract(workspace: Path, policy_home: Path, mst_se
     assert env_only.returncode == 0, "session stage: env-only canonical ID should approve: " + env_only.stdout + env_only.stderr
     assert json.loads(env_only.stdout)["mst_session_id"] == mst_session_id
 
-    stdin_only = _run_required_session_context(workspace, policy_home, payload=_identity_payload(mst_session_id))
-    assert stdin_only.returncode != 0, "session stage: stdin-only canonical ID without inherited env should be non-success"
-    stdin_payload = json.loads(stdin_only.stdout)
-    assert stdin_payload["status"] == "error"
-    assert "missing MST_SESSION_ID" in stdin_payload["message"]
+    context_only = _run_required_session_context(workspace, policy_home, payload=_identity_payload(mst_session_id))
+    assert context_only.returncode == 0, (
+        "session stage: valid structured context-only authority should preserve the canonical ID: "
+        + context_only.stdout
+        + context_only.stderr
+    )
+    context_payload = json.loads(context_only.stdout)
+    assert context_payload["mst_session_id"] == mst_session_id
+    assert context_payload["context"]["mst_session_id"] == mst_session_id
 
     legacy_only = _run_required_session_context(
         workspace,

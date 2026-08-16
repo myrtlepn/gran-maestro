@@ -19,6 +19,16 @@ claim_judge_timeout_emit() {
   return 1
 }
 
+emit_approve_json_without_marker() {
+  local reason="${1:-approved}"
+  python3 - "$reason" <<'PY'
+import json
+import sys
+reason = sys.argv[1] if len(sys.argv) > 1 else "approved"
+print(json.dumps({"decision": "approve", "reason": reason.strip() or "approved"}, ensure_ascii=False))
+PY
+}
+
 emit_approve_json() {
   local reason="${1:-approved}" details_anchor="${2:-}"
   DECISION_EMIT_WRITTEN="false"
@@ -72,14 +82,14 @@ esac
 case "$script_dir" in
   *'${CLAUDE_PLUGIN_ROOT}'*)
     printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
-    emit_approve_json "unexpected hook execution path; stop hook fail-open without mutation"
+    emit_approve_json_without_marker "unexpected hook execution path; stop hook fail-open without mutation"
     exit 0
     ;;
 esac
 
 if [ ! -f "$script_dir/lib/bootstrap.bash" ] || [ ! -f "$script_dir/lib/logging.bash" ]; then
   printf '[mst-hook] warning: unexpected execution path. Possible ${CLAUDE_PLUGIN_ROOT} mis-substitution. Exiting fail-open.\n' >&2
-  emit_approve_json "missing hook bootstrap files; stop hook fail-open without mutation"
+  emit_approve_json_without_marker "missing hook bootstrap files; stop hook fail-open without mutation"
   exit 0
 fi
 
@@ -97,7 +107,6 @@ DEBUG_LOG_FILE="${MST_TMP}/mst-hook-debug-${PPID}.log"
 BOUNDARY_LOG_FILE="${PROJECT_ROOT}/.gran-maestro/logs/boundary-guard.log"
 HOOK_NAME="$(basename "${BASH_SOURCE[0]}")"
 MST_HOOK_LOG_PREFIX="mst-stop-hook"
-mkdir -p "$MST_TMP"
 
 STDIN_RAW="$(cat || true)"
 MST_CANONICAL_SESSION_ID=""
@@ -111,10 +120,11 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
-  emit_approve_json "missing canonical MST_SESSION_ID; stop hook fail-open without mutation"
+  emit_approve_json_without_marker "missing canonical MST_SESSION_ID; stop hook fail-open without mutation"
   exit 0
 fi
 export MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"
+mkdir -p "$MST_TMP"
 MST_LEDGER_HOOK_EVENT="Stop"
 if [ -f "${script_dir}/lib/ledger.bash" ]; then
   # shellcheck source=/dev/null

@@ -3937,7 +3937,10 @@ def _external_command(
     worktree = str(Path(worktree_dir).resolve(strict=False))
     command = [executable]
     if provider == "codex":
-        command.extend(["exec", "--sandbox", "read-only"] if read_only else ["exec", "--full-auto"])
+        if read_only:
+            command.extend(["exec", "--sandbox", "read-only"])
+        else:
+            command.extend(["exec", "--approve-for-me"])
         if model:
             command.extend(["-m", str(model)])
         if reasoning_effort:

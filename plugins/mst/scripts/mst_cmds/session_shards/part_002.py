@@ -1,4 +1,9 @@
-def _validate_context_identity(payload: dict, session_id: str) -> None:
+def _validate_context_identity(
+    payload: dict,
+    session_id: str,
+    *,
+    reject_legacy_identity: bool = True,
+) -> None:
     parsed = validate_mst_session_id(session_id)
     has_legacy_identity = any(
         isinstance(payload.get(key), str) and payload.get(key, "").strip()
@@ -10,7 +15,7 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
             isinstance(core.get(key), str) and core.get(key, "").strip()
             for key in ("session_id", "sessionId", "owner_session_id")
         )
-    if has_legacy_identity:
+    if has_legacy_identity and reject_legacy_identity:
         _common.raise_validation_failure(
             target="dispatch_envelope",
             field="legacy_identity",
@@ -18,7 +23,9 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
             code="legacy_identity_not_canonical_source",
         )
 
-    if "schema_version" in payload and payload.get("schema_version") != 1:
+    if "schema_version" in payload and (
+        type(payload.get("schema_version")) is not int or payload.get("schema_version") != 1
+    ):
         _common.raise_validation_failure(
             target="dispatch_envelope",
             field="schema_version",
@@ -55,7 +62,7 @@ def _validate_context_identity(payload: dict, session_id: str) -> None:
 
     if isinstance(core, dict):
         core_schema_version = core.get("schema_version")
-        if core_schema_version != 1:
+        if type(core_schema_version) is not int or core_schema_version != 1:
             _common.raise_validation_failure(
                 target="dispatch_envelope",
                 field="core_rehydration.schema_version",
@@ -102,16 +109,90 @@ def _normalize_context_identity_from_core(payload: dict) -> dict:
         if isinstance(core_root_mst_id, str) and core_root_mst_id.strip():
             normalized["root_mst_id"] = core_root_mst_id.strip()
     return normalized
+def _validate_present_context_string(payload: dict, key: str, *, field: str) -> None:
+    if key not in payload:
+        return
+    value = payload[key]
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError(f"MST_CONTEXT_JSON {field} must be a non-empty canonical string")
+def _validate_raw_context_shape(payload: dict) -> None:
+    if "schema_version" in payload and (
+        type(payload["schema_version"]) is not int or payload["schema_version"] != 1
+    ):
+        raise ValueError("MST_CONTEXT_JSON schema_version must be integer 1")
+    _validate_present_context_string(payload, "mst_session_id", field="mst_session_id")
+    _validate_present_context_string(payload, "root_mst_id", field="root_mst_id")
+
+    core = payload.get("core_rehydration")
+    if "core_rehydration" in payload and not isinstance(core, dict):
+        raise ValueError("MST_CONTEXT_JSON core_rehydration must be an object")
+    if not isinstance(core, dict):
+        return
+    if "schema_version" in core and (
+        type(core["schema_version"]) is not int or core["schema_version"] != 1
+    ):
+        raise ValueError("MST_CONTEXT_JSON core_rehydration.schema_version must be integer 1")
+    _validate_present_context_string(core, "mst_session_id", field="core_rehydration.mst_session_id")
+    _validate_present_context_string(core, "root_mst_id", field="core_rehydration.root_mst_id")
+
+    next_execution = core.get("next_execution")
+    if "next_execution" in core and not isinstance(next_execution, dict):
+        raise ValueError("MST_CONTEXT_JSON core_rehydration.next_execution must be an object")
+    if isinstance(next_execution, dict):
+        next_env = next_execution.get("env")
+        if "env" in next_execution and not isinstance(next_env, dict):
+            raise ValueError("MST_CONTEXT_JSON core_rehydration.next_execution.env must be an object")
+        if isinstance(next_env, dict):
+            _validate_present_context_string(
+                next_env,
+                "MST_SESSION_ID",
+                field="core_rehydration.next_execution.env.MST_SESSION_ID",
+            )
+        next_context = next_execution.get("context")
+        if "context" in next_execution and not isinstance(next_context, dict):
+            raise ValueError("MST_CONTEXT_JSON core_rehydration.next_execution.context must be an object")
+        if isinstance(next_context, dict):
+            _validate_present_context_string(
+                next_context,
+                "mst_session_id",
+                field="core_rehydration.next_execution.context.mst_session_id",
+            )
+            _validate_present_context_string(
+                next_context,
+                "root_mst_id",
+                field="core_rehydration.next_execution.context.root_mst_id",
+            )
+
+    handoff = core.get("execution_handoff")
+    if "execution_handoff" in core and not isinstance(handoff, dict):
+        raise ValueError("MST_CONTEXT_JSON core_rehydration.execution_handoff must be an object")
+    if isinstance(handoff, dict):
+        _validate_present_context_string(
+            handoff,
+            "mst_session_id",
+            field="core_rehydration.execution_handoff.mst_session_id",
+        )
+        _validate_present_context_string(
+            handoff,
+            "root_mst_id",
+            field="core_rehydration.execution_handoff.root_mst_id",
+        )
 def _normalized_child_context_payload(raw_context: str, session_id: str) -> dict:
     context_payload: dict = {}
     if raw_context:
         try:
-            parsed = json.loads(raw_context)
-        except json.JSONDecodeError as exc:
+            parsed = strict_json_loads(raw_context, source="MST_CONTEXT_JSON")
+        except ValueError as exc:
             raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+        _validate_raw_context_shape(parsed)
         parsed = _normalize_context_identity_from_core(parsed)
+        parsed_id = validate_mst_session_id(session_id)
+        if not parsed.get("mst_session_id"):
+            parsed["mst_session_id"] = session_id
+        if not parsed.get("root_mst_id"):
+            parsed["root_mst_id"] = parsed_id.root_mst_id
         _validate_context_identity(parsed, session_id)
         context_payload = dict(parsed)
 
@@ -142,19 +223,84 @@ def _normalized_child_context_payload(raw_context: str, session_id: str) -> dict
                 context["mst_session_id"] = session_id
 
     return context_payload
-def _session_id_from_stdin_or_env_payload() -> str | None:
-    for env_name in ("MST_CONTEXT_JSON", "MST_HOOK_STDIN_RAW"):
-        raw = os.environ.get(env_name, "")
-        if raw:
-            value = _session_id_from_payload(raw)
-            if value:
-                return value
+def _context_session_identity_from_env() -> dict | None:
+    raw = os.environ.get("MST_CONTEXT_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        payload = strict_json_loads(raw, source="MST_CONTEXT_JSON")
+    except ValueError as exc:
+        raise ValueError(f"MST_CONTEXT_JSON must be a JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("MST_CONTEXT_JSON must be a JSON object")
+    _validate_raw_context_shape(payload)
+
+    candidates = _context_payload_session_candidates(payload)
+    if not candidates:
+        legacy_fields = ("session_id", "sessionId", "owner_session_id")
+        core = payload.get("core_rehydration")
+        has_legacy_identity = any(
+            isinstance(payload.get(field), str) and payload.get(field, "").strip()
+            for field in legacy_fields
+        ) or (
+            isinstance(core, dict)
+            and any(isinstance(core.get(field), str) and core.get(field, "").strip() for field in legacy_fields)
+        )
+        if has_legacy_identity:
+            raise ValueError("missing MST_SESSION_ID: MST_CONTEXT_JSON contains only legacy identity")
+        raise ValueError("invalid MST_CONTEXT_JSON: missing canonical mst_session_id")
+
+    session_id = _validate_session_id(candidates[0])
+    if any(_validate_session_id(candidate) != session_id for candidate in candidates[1:]):
+        raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
+
+    parsed = validate_mst_session_id(session_id)
+    normalized = _normalize_context_identity_from_core(payload)
+    normalized.setdefault("schema_version", 1)
+    normalized.setdefault("mst_session_id", parsed.mst_session_id)
+    normalized.setdefault("root_mst_id", parsed.root_mst_id)
+    _validate_context_identity(normalized, session_id, reject_legacy_identity=False)
+    return {
+        "mst_session_id": session_id,
+        "source": "context:MST_CONTEXT_JSON",
+    }
+
+
+def _payload_has_identity_claim(raw: str) -> bool:
+    if not raw.strip():
+        return False
+    try:
+        payload = strict_json_loads(raw, source="hook/stdin payload")
+    except (TypeError, ValueError):
+        return True
+    if not isinstance(payload, dict):
+        return False
+    if _context_payload_session_candidates(payload):
+        return True
+    legacy_fields = ("session_id", "sessionId", "owner_session_id")
+    if any(isinstance(payload.get(field), str) and payload.get(field, "").strip() for field in legacy_fields):
+        return True
+    core = payload.get("core_rehydration")
+    return isinstance(core, dict) and any(
+        isinstance(core.get(field), str) and core.get(field, "").strip() for field in legacy_fields
+    )
+
+
+def _has_noncanonical_hook_or_stdin_identity_claim() -> bool:
+    if _payload_has_identity_claim(os.environ.get("MST_HOOK_STDIN_RAW", "")):
+        return True
     try:
         if sys.stdin is None or sys.stdin.isatty():
-            return None
-        return _session_id_from_payload(sys.stdin.read())
+            return False
+        return _payload_has_identity_claim(sys.stdin.read())
     except Exception:
-        return None
+        return False
+
+
+def _session_id_from_stdin_or_env_payload() -> str | None:
+    """Compatibility helper: only MST_CONTEXT_JSON is canonical authority."""
+    identity = _context_session_identity_from_env()
+    return str(identity["mst_session_id"]) if identity else None
 def _validate_session_id(value: str) -> str:
     return validate_mst_session_id(value).mst_session_id
 def resolve_session_id_identity(
@@ -164,7 +310,8 @@ def resolve_session_id_identity(
     started_at: datetime | None = None,
 ) -> dict:
     env_value = canonical_session_id_from_env()
-    payload_value = _session_id_from_stdin_or_env_payload()
+    context_identity = _context_session_identity_from_env()
+    payload_value = str(context_identity["mst_session_id"]) if context_identity else None
     if env_value and payload_value and env_value != payload_value:
         raise ValueError("MST_SESSION_ID and structured mst_session_id mismatch")
 
@@ -178,9 +325,12 @@ def resolve_session_id_identity(
     if payload_value:
         return {
             "mst_session_id": _validate_session_id(payload_value),
-            "source": "payload:mst_session_id",
+            "source": str(context_identity["source"]),
             "legacy_diagnostics": _common.legacy_session_diagnostics(),
         }
+
+    if _has_noncanonical_hook_or_stdin_identity_claim():
+        raise ValueError("missing MST_SESSION_ID: hook/stdin identity is not canonical authority")
 
     if not allow_generate:
         raise ValueError("missing MST_SESSION_ID")
@@ -213,18 +363,19 @@ def child_env_with_session_id() -> dict[str, str]:
     return child_env
 def child_env_with_required_session_context() -> dict[str, str]:
     env_value = canonical_session_id_from_env()
-    if not env_value:
+    payload_identity = _context_session_identity_from_env()
+    payload_value = str(payload_identity["mst_session_id"]) if payload_identity else None
+    if not env_value and not payload_value:
         raise ValueError("missing MST_SESSION_ID")
 
-    payload_value = _session_id_from_stdin_or_env_payload()
-    if payload_value and env_value != payload_value:
+    if env_value and payload_value and env_value != payload_value:
         _common.raise_validation_failure(
             target="dispatch_envelope",
             field="mst_session_id",
             reason="MST_SESSION_ID and structured mst_session_id mismatch",
         )
 
-    session_id = _validate_session_id(env_value)
+    session_id = _validate_session_id(env_value or payload_value)
     child_env = os.environ.copy()
     child_env["MST_SESSION_ID"] = session_id
 
@@ -243,10 +394,11 @@ def cmd_session_resolve(args):
             started_at=started_at,
         )
     except ValueError as exc:
-        if args.json and _common.is_session_identity_non_success_error(exc):
+        if args.json:
             return _common.emit_session_identity_non_success(
                 "session resolve",
                 error=exc,
+                code=_session_identity_error_code(exc),
                 invocation_class="external_invocation",
             )
         print(f"Error: {exc}", file=sys.stderr)
@@ -256,7 +408,7 @@ def cmd_session_resolve(args):
         from scripts.mst_cmds import execution_flow
 
         diagnostic = execution_flow.resolve_canonical_mst_session_identity(
-            {"mst_session_id": session_id} if identity.get("source") == "payload:mst_session_id" else {},
+            {"mst_session_id": session_id} if identity.get("source") == "context:MST_CONTEXT_JSON" else {},
             {"MST_SESSION_ID": session_id} if identity.get("source") == "env:MST_SESSION_ID" else {},
             invocation_class="external_invocation",
         )
@@ -268,12 +420,14 @@ def cmd_session_resolve(args):
                 allow_generate=True,
                 root_mst_id=args.root_mst_id,
                 started_at=started_at,
+                generated_mst_session_id=session_id,
             )
         print(
             json.dumps(
                 {
                     "mst_session_id": session_id,
                     "session_id": session_id,
+                    "root_mst_id": validate_mst_session_id(session_id).root_mst_id,
                     "source": identity.get("source"),
                     "legacy_diagnostics": identity.get("legacy_diagnostics", {}),
                     "valid": diagnostic.get("valid", True),
@@ -289,13 +443,100 @@ def cmd_session_resolve(args):
     else:
         print(session_id)
     return 0
+def _session_identity_error_code(exc: Exception) -> str:
+    explicit_code = getattr(exc, "code", None)
+    if isinstance(explicit_code, str) and explicit_code:
+        return explicit_code
+    text = str(exc)
+    if "mismatch" in text or "conflict" in text:
+        return "mst_session_id_mismatch"
+    if "legacy identity" in text:
+        return "legacy_identity_not_canonical_source"
+    if "missing MST_SESSION_ID" in text or "missing root_mst_id" in text:
+        if _common.legacy_session_diagnostics():
+            return "legacy_identity_not_canonical_source"
+        return "missing_canonical_mst_session_id"
+    return "invalid_canonical_mst_session_id"
+
+
+def cmd_session_bootstrap(args):
+    try:
+        bootstrap_base = Path(_common.BASE_DIR) if _common.BASE_DIR is not None else _common.cwd_base_dir()
+        started_at = _parse_started_at_arg(args.started_at) if args.started_at else None
+        root_type = getattr(args, "root_type", None)
+        try:
+            identity = resolve_session_id_identity(
+                allow_generate=False,
+                started_at=started_at,
+            )
+        except ValueError as exc:
+            if str(exc) != "missing MST_SESSION_ID":
+                raise
+            identity = None
+
+        if identity is None:
+            if not args.root_mst_id and not root_type:
+                raise ValueError("missing root_mst_id or root_type for structured mst_session_id generation")
+            if root_type:
+                outcome = reserve_root_session_artifacts(
+                    bootstrap_base,
+                    root_type,
+                    started_at=started_at,
+                )
+                root_mst_id = str(outcome["root_mst_id"])
+                identity_source = "generated:reserved_root_type"
+            else:
+                root_mst_id = validate_root_mst_id(args.root_mst_id)
+                outcome = ensure_root_session_artifacts(
+                    bootstrap_base,
+                    root_mst_id,
+                    started_at=started_at,
+                )
+                identity_source = "generated:root_mst_id"
+        else:
+            mst_session_id = identity["mst_session_id"]
+            parsed_id = validate_mst_session_id(mst_session_id)
+            if args.root_mst_id and parsed_id.root_mst_id != validate_root_mst_id(args.root_mst_id):
+                raise ValueError(
+                    f"mismatch: root_mst_id is {args.root_mst_id} but inherited session belongs to {parsed_id.root_mst_id}"
+                )
+            root_mst_id = parsed_id.root_mst_id
+            outcome = ensure_root_session_artifacts(
+                bootstrap_base,
+                root_mst_id,
+                started_at=started_at,
+                mst_session_id=mst_session_id,
+            )
+            identity_source = str(identity.get("source") or "canonical")
+        outcome["identity_source"] = identity_source
+    except Exception as exc:
+        if args.json:
+            return _common.emit_session_identity_non_success(
+                "session bootstrap",
+                error=exc,
+                code=_session_identity_error_code(exc),
+            )
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        serializable_outcome = {}
+        for k, v in outcome.items():
+            if isinstance(v, Path):
+                serializable_outcome[k] = str(v)
+            else:
+                serializable_outcome[k] = v
+        print(json.dumps(serializable_outcome, ensure_ascii=False))
+    else:
+        print(outcome["mst_session_id"])
+    return 0
 def _parse_json_object_argument(raw_value: str | None, *, argument: str) -> dict:
     text = str(raw_value or "").strip()
     if not text:
         return {}
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
+        payload = strict_json_loads(text, source=argument)
+    except ValueError as exc:
         raise ValueError(f"{argument} must be a JSON object: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{argument} must be a JSON object")
@@ -589,6 +830,20 @@ def register(subparsers):
     sess_resolve.add_argument("--json", action="store_true")
     sess_resolve.add_argument("--root-mst-id", help="explicit root MST artifact id for new structured session issuance")
     sess_resolve.add_argument("--started-at", help="UTC start time for deterministic structured session issuance")
+
+    sess_bootstrap = sess_sub.add_parser("bootstrap")
+    sess_bootstrap.add_argument("--json", action="store_true")
+    sess_bootstrap_identity = sess_bootstrap.add_mutually_exclusive_group()
+    sess_bootstrap_identity.add_argument(
+        "--root-mst-id",
+        help="explicit root MST artifact id for new structured session issuance",
+    )
+    sess_bootstrap_identity.add_argument(
+        "--root-type",
+        choices=sorted(_common.TYPE_DIRS),
+        help="reserve the next root id and bootstrap its structured session",
+    )
+    sess_bootstrap.add_argument("--started-at", help="UTC start time for deterministic structured session issuance")
 
     sess_split = sess_sub.add_parser("split-prompts", help="combined-prompts.txt를 개별 프롬프트 파일로 분리")
     sess_split.add_argument("--dir", dest="prompts_dir", required=False, help="prompts 디렉토리 경로")

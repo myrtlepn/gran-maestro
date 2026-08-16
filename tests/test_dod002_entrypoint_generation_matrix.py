@@ -132,7 +132,7 @@ def test_root_entrypoint_generation_allowed_with_explicit_root_context() -> None
         assert UUID_V4_RE.search(payload["mst_session_id"]) is None
 
 
-def test_child_entrypoint_generation_forbidden_without_parent_env() -> None:
+def test_child_entrypoint_generation_allowed_with_structured_parent_context() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
@@ -156,12 +156,18 @@ def test_child_entrypoint_generation_forbidden_without_parent_env() -> None:
         )
 
         combined = f"{result.stdout}\n{result.stderr}"
-        assert result.returncode != 0
-        payload = _read_non_success_payload(result)
-        assert payload["code"] == "missing_canonical_mst_session_id"
-        assert "REQ-805-child" not in combined
-        assert not UUID_V4_RE.search(combined)
-        assert _files(workspace) == before
+        assert result.returncode == 0, combined
+        payload = json.loads(result.stdout.strip())
+        assert payload["status"] == "running"
+        assert payload["mst_session_id"] == STRUCTURED_PARENT
+        assert payload["created_new_session"] is False
+
+        after_files = _files(workspace)
+        new_files = after_files - before
+        for f in new_files:
+            name = Path(f).name
+            assert not name.startswith("session")
+            assert not name.startswith("root")
 
 
 def test_missing_context_mutation_generation_forbidden_without_legacy_fallback() -> None:
@@ -207,7 +213,7 @@ def main() -> int:
     tests = [
         test_entrypoint_generation_matrix_has_required_allowed_and_forbidden_rows,
         test_root_entrypoint_generation_allowed_with_explicit_root_context,
-        test_child_entrypoint_generation_forbidden_without_parent_env,
+        test_child_entrypoint_generation_allowed_with_structured_parent_context,
         test_missing_context_mutation_generation_forbidden_without_legacy_fallback,
     ]
     for test in tests:

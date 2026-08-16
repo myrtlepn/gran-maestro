@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,8 +123,45 @@ import {
   stableEvidenceRelativePath as hookAdapterEvidencePath,
   validationEvidenceRelativePath as hookAdapterValidationEvidencePath,
 } from '../scripts/lib/codex-hook-adapter-parity.mjs';
+import {
+  compareRepresentativePluginFiles,
+  representativePluginFiles,
+} from '../scripts/lib/codex-plugin-install-integrity.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+test('Codex install integrity detects representative same-version stale bytes', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'req946-install-integrity.'));
+  const sourceRoot = join(tempRoot, 'source');
+  const installedRoot = join(tempRoot, 'installed');
+
+  try {
+    for (const [index, relativePath] of representativePluginFiles.entries()) {
+      const sourcePath = join(sourceRoot, relativePath);
+      const installedPath = join(installedRoot, relativePath);
+      const bytes = `representative-${index}\n`;
+      mkdirSync(dirname(sourcePath), { recursive: true });
+      mkdirSync(dirname(installedPath), { recursive: true });
+      writeFileSync(sourcePath, bytes, 'utf8');
+      writeFileSync(installedPath, bytes, 'utf8');
+    }
+
+    const matchingComparison = compareRepresentativePluginFiles(sourceRoot, installedRoot);
+    assert.equal(matchingComparison.matches, true);
+    assert.equal(matchingComparison.files.every((entry) => entry.hashes_match), true);
+    assert.equal(matchingComparison.files.every((entry) => entry.bytes_match), true);
+
+    const staleRelativePath = representativePluginFiles[0];
+    writeFileSync(join(installedRoot, staleRelativePath), 'same-version-stale-cache\n', 'utf8');
+    const staleComparison = compareRepresentativePluginFiles(sourceRoot, installedRoot);
+    assert.equal(staleComparison.matches, false);
+    assert.deepEqual(staleComparison.mismatches, [staleRelativePath]);
+    assert.equal(staleComparison.files[0].hashes_match, false);
+    assert.equal(staleComparison.files[0].bytes_match, false);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
 const req890ValidationSummary = {
   ...defaultCodexHookAdapterValidationSummary,
   parity_generator: {
@@ -3076,6 +3113,7 @@ test('request and approve implementation brief contract keeps DOD-003 path-first
   assert.match(approveSkill, /NO_SOURCE_PLAN/);
   assert.doesNotMatch(approveSkill, /\{\{PLAN_PATH\}\}.*"N\/A"/);
   assert.match(approveSkill, /Skill\(skill: "mst:claude", args: "--prompt-file \{prompt_file\} --dir \{worktree_path\} --trace \{REQ-ID\}\/\{TASK-NUM\}\/phase2-impl"\)/);
+  assert.doesNotMatch(approveSkill, /MST_PARENT_BINDING/);
   assert.match(approveSkill, /python3 \{PLUGIN_ROOT\}\/scripts\/mst\.py run/);
   assert.match(approveSkill, /--log-dir \{task_dir\}/);
 

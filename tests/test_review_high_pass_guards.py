@@ -5,7 +5,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_SKILL = ROOT / "skills" / "review" / "SKILL.md"
 APPROVE_SKILL = ROOT / "skills" / "approve" / "SKILL.md"
+PM_CONDUCTOR = ROOT / "agents" / "pm-conductor.md"
 DEFAULT_CONFIG = ROOT / "templates" / "defaults" / "config.json"
+CODEX_ADAPTER = ROOT / "src" / "core" / "cli-adapter.ts"
+PROJECTED_PM_CONDUCTOR = ROOT / "plugins" / "mst" / "agents" / "pm-conductor.md"
+PROJECTED_CODEX_ADAPTER = ROOT / "plugins" / "mst" / "src" / "core" / "cli-adapter.ts"
 
 
 def test_review_minor_only_high_pass_guard_documented():
@@ -26,9 +30,31 @@ def test_review_executable_dispatch_is_worktree_bound():
     assert 'REVIEW_ROLE="review-RV-NNN"' in content
     assert "dispatch validate-worktree --worktree-dir \"$REVIEW_WORKTREE\" --json" in content
     assert "--require-worktree --worktree-dir \"$REVIEW_WORKTREE\"" in content
-    assert 'codex exec --full-auto -m "$MODEL" -C "$REVIEW_WORKTREE"' in content
+    assert 'codex exec --approve-for-me -m "$MODEL" -C "$REVIEW_WORKTREE"' in content
     assert 'cd {PROJECT_ROOT} && gemini' not in content
-    assert "codex exec --full-auto -m \"$MODEL\" -C {PROJECT_ROOT}" not in content
+    assert "codex exec --approve-for-me -m \"$MODEL\" -C {PROJECT_ROOT}" not in content
+
+
+def test_pm_codex_review_fallback_uses_current_writable_contract():
+    content = PM_CONDUCTOR.read_text(encoding="utf-8")
+
+    assert '`codex exec --approve-for-me "{prompt}"`' in content
+    assert "codex --full-auto" not in content
+
+
+def test_codex_public_consumers_match_current_cli_permission_contract():
+    adapter = CODEX_ADAPTER.read_text(encoding="utf-8")
+    pm_conductor = PM_CONDUCTOR.read_text(encoding="utf-8")
+
+    assert "runProcessWithTimeout('codex', args" in adapter
+    assert "['--sandbox', 'read-only']" in adapter
+    assert "--approve-for-me" in adapter
+    assert "new Deno.Command(executable" in adapter
+    assert "--full-auto" not in adapter
+    assert 'codex exec --approve-for-me "{prompt}"' in pm_conductor
+    assert "--full-auto" not in pm_conductor
+    assert PROJECTED_CODEX_ADAPTER.read_text(encoding="utf-8") == adapter
+    assert PROJECTED_PM_CONDUCTOR.read_text(encoding="utf-8") == pm_conductor
 
 
 def test_pm_direct_fix_requires_worktree_preflight_and_evidence():

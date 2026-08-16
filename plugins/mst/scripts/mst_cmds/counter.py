@@ -28,29 +28,22 @@ from scripts.mst_cmds._common import (
 )
 
 def cmd_counter_next(args):
+    from scripts.mst_cmds import session as session_mod
+
     counter_path = get_counter_path(args.type, args.dir)
     subdir, prefix = TYPE_DIRS.get(args.type, ("requests", "REQ"))
     scan_root = Path(args.dir) if args.dir else _common.BASE_DIR / subdir
-    disk_max = 0
-    for path in scan_root.glob(f"{prefix}-*"):
-        if args.type != "intent" and not path.is_dir():
-            continue
-        if args.type == "intent" and not (path.is_dir() or path.is_file()):
-            continue
+    lock_base = Path(args.dir) if args.dir else _common.BASE_DIR
+    with session_mod.open_root_type_bootstrap_lock(lock_base, args.type) as lock_handle:
+        _common._lock_exclusive_with_timeout(lock_handle, timeout_sec=30.0, poll_interval=0.01)
         try:
-            n = int(path.name.split("-")[1])
-        except (IndexError, ValueError):
-            continue
-        if n > disk_max:
-            disk_max = n
-
-    scan_root.mkdir(parents=True, exist_ok=True)
-    data = load_json(counter_path) or {}
-    last_id = max(data.get("last_id", 0), disk_max)
-    next_id = last_id + 1
-    save_json(counter_path, {"last_id": next_id})
-    print(f"{prefix}-{next_id:03d}")
-    return 0
+            next_id = session_mod.next_root_number(scan_root, args.type, load_json(counter_path) or {})
+            scan_root.mkdir(parents=True, exist_ok=True)
+            save_json(counter_path, {"last_id": next_id})
+            print(f"{prefix}-{next_id:03d}")
+            return 0
+        finally:
+            _common._unlock(lock_handle)
 
 def cmd_counter_peek(args):
     counter_path = get_counter_path(args.type, args.dir)

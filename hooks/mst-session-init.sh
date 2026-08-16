@@ -72,17 +72,10 @@ if mst_resolve_canonical_mst_session_id "$MST_HOOK_LOG_PREFIX" "require-env-for-
 else
   MST_SESSION_RESOLUTION_STATUS=$?
 fi
+if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
+  exit 1
+fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
-  mkdir -p "$MST_TMP"
-  if ! write_session_bridge; then
-    echo "[mst-session-init] warning: failed to write legacy session bridge file." >&2
-  fi
-  if [ -n "${MST_LEGACY_SESSION_ID:-}" ] && [ "$MST_LEGACY_OWNER_METADATA_PRESENT" = "0" ] && [ -z "${MST_LEGACY_OWNER_SESSION_ID:-}" ] && [ -z "${MST_LEGACY_OWNER_PPID:-}" ]; then
-    STATE_FILE="${MST_TMP}/mst-state-${PPID}.json"
-    if ! write_initial_state; then
-      echo "[mst-session-init] warning: failed to initialize legacy state file." >&2
-    fi
-  fi
   exit 0
 fi
 MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"

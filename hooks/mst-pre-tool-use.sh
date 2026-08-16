@@ -66,8 +66,6 @@ if [ "$MST_SESSION_RESOLUTION_STATUS" -eq 1 ]; then
   exit 1
 fi
 if [ "$MST_SESSION_RESOLUTION_STATUS" -ne 0 ]; then
-  mkdir -p "$MST_TMP" 2>/dev/null || true
-  mst_warn_legacy_session_id_mismatch_once "$PROJECT_ROOT" "$MST_TMP" "$STDIN_RAW" "$MST_HOOK_LOG_PREFIX" "$PPID" ""
   exit 0
 fi
 MST_SESSION_ID="$MST_CANONICAL_SESSION_ID"

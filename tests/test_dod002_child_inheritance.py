@@ -181,22 +181,23 @@ def test_workflow_child_env_and_context_inherit_parent_structured_id() -> None:
         assert context["keep"] == "value"
 
 
-def test_child_context_payload_without_parent_env_fails_closed() -> None:
+def test_child_context_payload_without_parent_env_inherits_canonical_identity() -> None:
     with _workspace() as raw_workspace:
         workspace = Path(raw_workspace)
         _init_workspace(workspace)
-        before = _files(workspace)
-
         result = _register_child(
             workspace,
             "dod002-payload-only",
             {"MST_CONTEXT_JSON": json.dumps({"mst_session_id": STRUCTURED_PARENT})},
         )
 
-        assert result.returncode != 0
-        assert _files(workspace) == before
-        payload = _read_non_success_payload(result)
-        assert payload["code"] == "missing_canonical_mst_session_id"
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["mst_session_id"] == STRUCTURED_PARENT
+        run_payload = json.loads(
+            (workspace / ".gran-maestro" / "run" / "dod002-payload-only.json").read_text(encoding="utf-8")
+        )
+        assert run_payload["mst_session_id"] == STRUCTURED_PARENT
 
 
 def test_child_missing_parent_does_not_generate_from_child_or_legacy_ids() -> None:
@@ -254,7 +255,7 @@ def main() -> int:
     tests = [
         test_dispatch_child_env_and_context_inherit_parent_structured_id,
         test_workflow_child_env_and_context_inherit_parent_structured_id,
-        test_child_context_payload_without_parent_env_fails_closed,
+        test_child_context_payload_without_parent_env_inherits_canonical_identity,
         test_child_missing_parent_does_not_generate_from_child_or_legacy_ids,
         test_child_env_payload_mismatch_fails_without_replacement_generation,
     ]

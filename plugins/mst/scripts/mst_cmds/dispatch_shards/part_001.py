@@ -913,7 +913,11 @@ def _skill_dispatch_session_id(prompt_file: Path, log_file: Path, worktree_dir: 
         if len(parts) >= 2 and parts[0] in {"ideation", "discussion", "debug"}:
             candidate = str(parts[1]).strip()
             if _common.is_path_safe_mst_session_id(candidate):
-                return candidate
+                try:
+                    session_mod.validate_mst_session_id(candidate)
+                    return candidate
+                except ValueError:
+                    continue
     return ""
 def _dispatch_session_bootstrap_cmd(fallback_session_id: str = "") -> str:
     normalize_context_py = """
@@ -2491,9 +2495,12 @@ def cmd_dispatch_build(args):
 
     mst_script = _common._mst_script_path().resolve()
     q = shlex.quote
-    session_bootstrap_cmd = _dispatch_session_bootstrap_cmd(
-        _skill_dispatch_session_id(prompt_file, log_file, worktree_dir)
-    )
+    fallback_sid = ""
+    if authorization is not None:
+        fallback_sid = _safe_text(authorization.get("mst_session_id"))
+    if not fallback_sid:
+        fallback_sid = _skill_dispatch_session_id(prompt_file, log_file, worktree_dir)
+    session_bootstrap_cmd = _dispatch_session_bootstrap_cmd(fallback_sid)
 
     protected_external = authorization is not None and provider in _PERSISTED_EXTERNAL_AUTH_PROVIDERS
     trace_path = None
@@ -2544,7 +2551,7 @@ def cmd_dispatch_build(args):
     )
     resolved_effort = execution.get("reasoning_effort")
     if provider == "codex":
-        permission_args = "--sandbox read-only" if authorization_read_only else "--full-auto"
+        permission_args = "--sandbox read-only" if authorization_read_only else "--approve-for-me"
         codex_effort_config = f'model_reasoning_effort="{resolved_effort}"'
         effort_args = (
             f"-c {q(codex_effort_config)} "

@@ -262,6 +262,7 @@ DISPATCH = {
     ("session", "flow"): session.cmd_session_flow,
     ("session", "merge-scope"): session.cmd_session_merge_scope,
     ("session", "resolve"): session.cmd_session_resolve,
+    ("session", "bootstrap"): session.cmd_session_bootstrap,
     ("session", "split-prompts"): session.cmd_session_split_prompts,
     ("priority", None): priority.cmd_priority,
     ("task", "set-commit"): task.cmd_task_set_commit,

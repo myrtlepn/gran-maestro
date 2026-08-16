@@ -3,6 +3,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  compareRepresentativePluginFiles,
+  representativePluginFiles,
+} from './lib/codex-plugin-install-integrity.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -11,6 +15,12 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const marketplaceName = 'gran-maestro';
 const pluginName = manifest.name;
 const pluginSelector = `${pluginName}@${marketplaceName}`;
+const projectedPluginCandidate = join(repoRoot, 'plugins', pluginName);
+const projectedPluginRoot = existsSync(
+  join(projectedPluginCandidate, '.codex-plugin', 'plugin.json'),
+)
+  ? projectedPluginCandidate
+  : repoRoot;
 const tempRoot = mkdtempSync(join(tmpdir(), 'mst-codex-home.'));
 const runtimeProjectRoot = join(tempRoot, 'runtime-project');
 mkdirSync(join(runtimeProjectRoot, '.gran-maestro'), { recursive: true });
@@ -225,6 +235,49 @@ const installedMstLegacyGeminiPreflightPassed =
   installedMstLegacyGeminiPreflightPayload?.model === 'legacy-installed-custom-model' &&
   installedMstLegacyGeminiPreflightPayload?.deprecated_alias === 'gemini';
 
+const installedContentComparison = compareRepresentativePluginFiles(
+  projectedPluginRoot,
+  installedRoot,
+);
+const sameVersionCollisionRelativePath = 'src/core/cli-adapter.ts';
+const sameVersionCollisionInstalledPath = join(
+  installedRoot,
+  sameVersionCollisionRelativePath,
+);
+let sameVersionCollisionCommand = null;
+let sameVersionStaleComparison = null;
+let sameVersionCollisionComparison = null;
+let sameVersionStaleCacheDetected = false;
+let sameVersionCollisionRepaired = false;
+
+if (installedContentComparison.matches && existsSync(sameVersionCollisionInstalledPath)) {
+  writeFileSync(
+    sameVersionCollisionInstalledPath,
+    '// intentional same-version stale-cache probe\n',
+    'utf8',
+  );
+  sameVersionStaleComparison = compareRepresentativePluginFiles(
+    projectedPluginRoot,
+    installedRoot,
+  );
+  sameVersionStaleCacheDetected =
+    !sameVersionStaleComparison.matches &&
+    sameVersionStaleComparison.mismatches.includes(
+      sameVersionCollisionRelativePath,
+    );
+  if (sameVersionStaleCacheDetected) {
+    sameVersionCollisionCommand = runCodex(['plugin', 'add', pluginSelector]);
+  }
+  sameVersionCollisionComparison = compareRepresentativePluginFiles(
+    projectedPluginRoot,
+    installedRoot,
+  );
+  sameVersionCollisionRepaired =
+    sameVersionCollisionCommand !== null &&
+    commandPassed(sameVersionCollisionCommand) &&
+    sameVersionCollisionComparison.matches;
+}
+
 const evidence = {
   artifact_id: 'codex-plugin-local-install-smoke',
   status: commands.every(commandPassed) &&
@@ -239,6 +292,11 @@ const evidence = {
     existsSync(installedHookHelperShardsPath) &&
     manifestMatchesSource &&
     skillsMatchSource &&
+    installedContentComparison.matches &&
+    sameVersionStaleCacheDetected &&
+    sameVersionCollisionCommand !== null &&
+    commandPassed(sameVersionCollisionCommand) &&
+    sameVersionCollisionRepaired &&
     !installedManifestHasHooks &&
     presentBlockedClaudeSurfacePaths.length === 0 &&
     !codexConfigTrustedClaudeHooks &&
@@ -255,6 +313,7 @@ const evidence = {
   mutates_user_codex_home: false,
   marketplace_name: marketplaceName,
   plugin_selector: pluginSelector,
+  projected_plugin_root: projectedPluginRoot,
   installed_root: installedRoot,
   installed_manifest_path: installedManifestPath,
   installed_skills_path: installedSkillsPath,
@@ -316,6 +375,17 @@ const evidence = {
   source_skill_count: sourceSkillNames.length,
   installed_skill_count: installedSkillNames.length,
   installed_skills_match_source: skillsMatchSource,
+  representative_plugin_files: representativePluginFiles,
+  installed_content_comparison: installedContentComparison,
+  same_version_collision: {
+    relative_path: sameVersionCollisionRelativePath,
+    installed_path: sameVersionCollisionInstalledPath,
+    stale_comparison_before_reinstall: sameVersionStaleComparison,
+    reinstall_command: sameVersionCollisionCommand,
+    post_reinstall_comparison: sameVersionCollisionComparison,
+    stale_cache_detected: sameVersionStaleCacheDetected,
+    repaired: sameVersionCollisionRepaired,
+  },
   missing_installed_skills: sourceSkillNames.filter((name) => !installedSkillNames.includes(name)),
   extra_installed_skills: installedSkillNames.filter((name) => !sourceSkillNames.includes(name)),
   blocked_claude_surface_paths: blockedClaudeSurfacePaths,

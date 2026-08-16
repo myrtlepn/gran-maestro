@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import stat
@@ -5,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,19 +25,28 @@ def _bridge_path(workspace: Path, ppid: int) -> Path:
     return _workspace_tmp_path(workspace) / f"claude-session-{ppid}.id"
 
 
-def _state_path(workspace: Path, ppid: int) -> Path:
-    return _workspace_tmp_path(workspace) / f"mst-state-{ppid}.json"
+def _state_path(workspace: Path, session_id: str) -> Path:
+    return _workspace_tmp_path(workspace) / f"mst-state-{session_id}.json"
 
 
-def _hook_env(workspace: Path) -> dict[str, str]:
-    return {
+def _hook_env(workspace: Path, mst_session_id: str | None = None) -> dict[str, str]:
+    env = {
         **os.environ,
         "HOME": str(workspace),
         "CLAUDE_CONFIG_DIR": str(workspace / ".claude"),
     }
+    env.pop("MST_SESSION_ID", None)
+    if mst_session_id is not None:
+        env["MST_SESSION_ID"] = mst_session_id
+    return env
 
 
-def _run_hook(workspace: Path, stdin_payload: str) -> subprocess.CompletedProcess:
+def _run_hook(
+    workspace: Path,
+    stdin_payload: str,
+    *,
+    mst_session_id: str | None = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
         cwd=workspace,
@@ -42,11 +54,11 @@ def _run_hook(workspace: Path, stdin_payload: str) -> subprocess.CompletedProces
         capture_output=True,
         text=True,
         check=False,
-        env=_hook_env(workspace),
+        env=_hook_env(workspace, mst_session_id),
     )
 
 
-def test_write_bridge_on_valid_uuid(tmp_path):
+def test_legacy_uuid_is_diagnostic_only_and_does_not_write_bridge(tmp_path):
     owner_ppid = os.getpid()
     stdin_payload = json.dumps(
         {"session_id": VALID_SESSION_ID, "transcript_path": "/tmp/x.jsonl"}
@@ -55,10 +67,85 @@ def test_write_bridge_on_valid_uuid(tmp_path):
     result = _run_hook(tmp_path, stdin_payload)
 
     assert result.returncode == 0, result.stderr
+    assert not _bridge_path(tmp_path, owner_ppid).exists()
+    assert not (tmp_path / ".gran-maestro").exists()
+
+
+def test_explicit_canonical_entry_preserves_owner_bridge(tmp_path):
+    from scripts.mst_cmds import _common
+    from scripts.mst_cmds.state import _resolve_owner_session_id
+
+    owner_ppid = os.getpid()
+    stdin_payload = json.dumps(
+        {"session_id": VALID_SESSION_ID, "transcript_path": "/tmp/x.jsonl"}
+    )
+
+    result = _run_hook(
+        tmp_path,
+        stdin_payload,
+        mst_session_id=VALID_MST_SESSION_ID,
+    )
+
+    assert result.returncode == 0, result.stderr
     bridge_path = _bridge_path(tmp_path, owner_ppid)
-    assert bridge_path.exists()
     assert bridge_path.read_text(encoding="utf-8").strip() == VALID_SESSION_ID
     assert stat.S_IMODE(bridge_path.stat().st_mode) == 0o644
+    previous_base_dir = _common.BASE_DIR
+    try:
+        _common.set_base_dir(tmp_path / ".gran-maestro")
+        assert _resolve_owner_session_id(owner_ppid) == VALID_SESSION_ID
+    finally:
+        _common.set_base_dir(previous_base_dir)
+
+
+def test_explicit_canonical_bridge_remains_available_to_state_and_agile_consumers(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from scripts._skill_state import _base_snapshot
+    from scripts.mst_cmds import _common
+    from scripts.mst_cmds.agile import cmd_agile_init
+
+    owner_ppid = os.getpid()
+    stdin_payload = json.dumps(
+        {"session_id": VALID_SESSION_ID, "transcript_path": "/tmp/x.jsonl"}
+    )
+    result = _run_hook(
+        tmp_path,
+        stdin_payload,
+        mst_session_id=VALID_MST_SESSION_ID,
+    )
+    assert result.returncode == 0, result.stderr
+
+    for key in (
+        "MST_CONTEXT_B64",
+        "MST_CONTEXT_JSON",
+        "MST_HOOK_STDIN_RAW",
+        "MST_SESSION_ID",
+        "MST_SNAPSHOT_SESSION_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MST_STATE_PPID", str(owner_ppid))
+
+    previous_base_dir = _common.BASE_DIR
+    try:
+        _common.set_base_dir(tmp_path / ".gran-maestro")
+        snapshot = _base_snapshot(VALID_MST_SESSION_ID)
+        assert snapshot["owner_ppid"] == owner_ppid
+        assert snapshot["owner_session_id"] == VALID_SESSION_ID
+
+        assert cmd_agile_init(SimpleNamespace(steering_every=3, json=False)) == 0
+        capsys.readouterr()
+        agile_session = json.loads(
+            (tmp_path / ".gran-maestro" / "agile" / "AGI-001" / "session.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert agile_session["owner_ppid"] == owner_ppid
+        assert agile_session["owner_session_id"] == VALID_SESSION_ID
+    finally:
+        _common.set_base_dir(previous_base_dir)
 
 
 @pytest.mark.parametrize(
@@ -88,7 +175,7 @@ def test_skip_on_empty_or_non_json_stdin(tmp_path, stdin_payload):
     assert not _bridge_path(tmp_path, owner_ppid).exists()
 
 
-def test_roundtrip_with_resolve_owner_session_id(tmp_path):
+def test_legacy_uuid_does_not_become_owner_session_id(tmp_path):
     from scripts.mst_cmds import _common
     from scripts.mst_cmds.state import _resolve_owner_session_id
 
@@ -100,15 +187,16 @@ def test_roundtrip_with_resolve_owner_session_id(tmp_path):
     result = _run_hook(tmp_path, stdin_payload)
 
     assert result.returncode == 0, result.stderr
+    assert not _bridge_path(tmp_path, owner_ppid).exists()
     previous_base_dir = _common.BASE_DIR
     try:
         _common.set_base_dir(tmp_path / ".gran-maestro")
-        assert _resolve_owner_session_id(owner_ppid) == VALID_SESSION_ID
+        assert _resolve_owner_session_id(owner_ppid) is None
     finally:
         _common.set_base_dir(previous_base_dir)
 
 
-def test_write_initial_state_preserved(tmp_path):
+def test_legacy_uuid_does_not_write_initial_state(tmp_path):
     owner_ppid = os.getpid()
     stdin_payload = json.dumps(
         {"session_id": VALID_SESSION_ID, "transcript_path": "/tmp/x.jsonl"}
@@ -117,8 +205,23 @@ def test_write_initial_state_preserved(tmp_path):
     result = _run_hook(tmp_path, stdin_payload)
 
     assert result.returncode == 0, result.stderr
-    state_path = _state_path(tmp_path, owner_ppid)
-    assert state_path.exists()
+    assert not _state_path(tmp_path, str(owner_ppid)).exists()
+    assert not (tmp_path / ".gran-maestro").exists()
+
+
+def test_explicit_canonical_entry_initializes_canonical_state(tmp_path):
+    stdin_payload = json.dumps(
+        {"session_id": VALID_SESSION_ID, "transcript_path": "/tmp/x.jsonl"}
+    )
+
+    result = _run_hook(
+        tmp_path,
+        stdin_payload,
+        mst_session_id=VALID_MST_SESSION_ID,
+    )
+
+    assert result.returncode == 0, result.stderr
+    state_path = _state_path(tmp_path, VALID_MST_SESSION_ID)
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert payload["workflow_active"] is False
     assert payload["current_skill"] == ""

@@ -195,7 +195,7 @@ def test_legacy_only_session_resolve_is_no_mutation_structured_non_success() -> 
         assert not (policy_home / "ledger-heads").exists()
 
 
-def test_canonical_env_wins_over_conflicting_legacy_session_values() -> None:
+def test_canonical_env_with_legacy_only_context_fails_closed_without_mutation() -> None:
     with _workspace() as raw:
         workspace = Path(raw)
         (workspace / ".gran-maestro").mkdir()
@@ -206,15 +206,15 @@ def test_canonical_env_wins_over_conflicting_legacy_session_values() -> None:
 
         result = _run(workspace, "session", "resolve", "--json", env=env)
 
-        assert result.returncode == 0, result.stderr
+        # REQ-946 strict transport rejects an accompanying legacy-only
+        # MST_CONTEXT_JSON even when the environment carries a canonical SID.
+        assert result.returncode != 0
         assert _snapshot(workspace / ".gran-maestro", policy_home) == before
         payload = _read_json_from_stdout(result.stdout)
-        assert payload["mst_session_id"] == SID
-        assert payload.get("session_id") in (SID, None)
-        assert payload["source"] == "env:MST_SESSION_ID"
+        _assert_pac5_non_success_payload(payload, code="legacy_identity_not_canonical_source")
         assert payload.get("legacy_diagnostics", {}).get("hook_session_id") == LEGACY_UUID
         assert payload.get("legacy_diagnostics", {}).get("hook_transcript_stem") == TRANSCRIPT_UUID
-        assert LEGACY_UUID not in {payload.get("mst_session_id"), payload.get("session_id")}
+        assert payload.get("canonical_mst_session_id") is None
         assert not (workspace / ".gran-maestro" / "sessions" / LEGACY_UUID).exists()
         assert not (workspace / ".gran-maestro" / "sessions" / TRANSCRIPT_UUID).exists()
 
@@ -222,7 +222,7 @@ def test_canonical_env_wins_over_conflicting_legacy_session_values() -> None:
 def main() -> int:
     for test in (
         test_legacy_only_session_resolve_is_no_mutation_structured_non_success,
-        test_canonical_env_wins_over_conflicting_legacy_session_values,
+        test_canonical_env_with_legacy_only_context_fails_closed_without_mutation,
     ):
         test()
         print(f"PASS {test.__name__}")

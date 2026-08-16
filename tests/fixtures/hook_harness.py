@@ -21,7 +21,18 @@ def run_hook(
     if not HOOK.is_file():
         raise FileNotFoundError(f"hook not found: {HOOK}")
 
-    hook_env = {**os.environ, **dict(env or {})}
+    hook_env = os.environ.copy()
+    for key in (
+        "MST_SESSION_ID",
+        "MST_CONTEXT_JSON",
+        "MST_HOOK_STDIN_RAW",
+        "MST_STATE_PPID",
+        "MST_SNAPSHOT_SESSION_ID",
+    ):
+        hook_env.pop(key, None)
+    if env:
+        hook_env.update(env)
+
     payload = dict(payload)
     mst_session_id = payload.get("mst_session_id")
     if not isinstance(mst_session_id, str) or not mst_session_id.strip():
@@ -29,8 +40,9 @@ def run_hook(
         if isinstance(candidate, str) and candidate.startswith("MST-"):
             mst_session_id = candidate
             payload["mst_session_id"] = candidate
-    if isinstance(mst_session_id, str) and mst_session_id.strip():
-        hook_env.setdefault("MST_SESSION_ID", mst_session_id.strip())
+    explicit_session_env = env is not None and "MST_SESSION_ID" in env
+    if isinstance(mst_session_id, str) and mst_session_id.strip() and not explicit_session_env:
+        hook_env["MST_SESSION_ID"] = mst_session_id.strip()
 
     return subprocess.run(
         ["bash", str(HOOK)],

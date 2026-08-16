@@ -276,7 +276,7 @@ Phase 1 runs in two modes:
    - 각 에이전트에 대해 `templates/review-request.md`로 독립 리뷰 프롬프트 생성 (PERSPECTIVE는 에이전트 타입에 따라 자동 주입)
    - codex 에이전트 dispatch 시:
      - `config.code_review.use_native_review=true`이고 `codex review --help`가 성공하면 `codex review --base {worktree.base_branch} "{PERSPECTIVE}\n\n{FOCUS_HINTS}\n\n{native_review_prompt}"` 형태로 실행한다 (`native_review_prompt`가 비어 있으면 해당 블록 생략).
-     - `codex review`가 미지원/실패하면 기존 `codex --full-auto "{prompt}"` 방식으로 fallback한다.
+     - `codex review`가 미지원/실패하면 `codex exec --approve-for-me "{prompt}"` 방식으로 fallback한다.
    - `config.code_review.parallel: true`이면 기존 패스(2.5, 2.7, 2.8)와 동시 실행 (`run_in_background: true`)
    - trace label: `phase3-review-explore-{agent}` (예: `phase3-review-explore-codex`, `phase3-review-explore-agy`)
    - 결과를 Review Report "추가 독립 리뷰어 의견" 섹션에 통합

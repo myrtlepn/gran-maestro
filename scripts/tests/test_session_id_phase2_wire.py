@@ -105,21 +105,18 @@ def mismatch_events(root: Path, session_id: str = SID_A) -> list[dict]:
     ]
 
 
-def test_stop_hook_mismatch_stderr_warning(tmp_path: Path) -> None:
+def test_stop_hook_legacy_payload_is_diagnostic_only_without_canonical_parent(tmp_path: Path) -> None:
     write_snapshot(tmp_path, snapshot_sid=SID_B)
     write_request(tmp_path, durable_sid=SID_C)
 
     result = run_hook(STOP_HOOK, tmp_path, hook_payload())
 
     assert result.returncode == 0
-    assert "[session-id mismatch]" in result.stderr
-    assert f"stdin={SID_A}" in result.stderr
-    assert f"snapshot={SID_B}" in result.stderr
-    assert f"durable={SID_C}" in result.stderr
-    assert "hook=mst-stop-hook" in result.stderr
+    assert "legacy session_id ignored without canonical MST_SESSION_ID/mst_session_id" in result.stderr
+    assert "[session-id mismatch]" not in result.stderr
 
 
-def test_mismatch_event_appended_to_flow_detail(tmp_path: Path) -> None:
+def test_stop_hook_legacy_payload_does_not_append_canonical_mismatch_event(tmp_path: Path) -> None:
     write_snapshot(tmp_path, snapshot_sid=SID_B)
     write_request(tmp_path, durable_sid=SID_C)
 
@@ -127,15 +124,10 @@ def test_mismatch_event_appended_to_flow_detail(tmp_path: Path) -> None:
     events = mismatch_events(tmp_path)
 
     assert result.returncode == 0
-    assert len(events) == 1
-    assert events[0]["session_id"] == SID_A
-    assert events[0]["data"]["stdin_sid"] == SID_A
-    assert events[0]["data"]["snapshot_sid"] == SID_B
-    assert events[0]["data"]["durable_sid"] == SID_C
-    assert events[0]["data"]["hook"] == "mst-stop-hook"
+    assert events == []
 
 
-def test_match_no_warning_no_regression(tmp_path: Path) -> None:
+def test_matching_legacy_artifacts_still_do_not_authorize_stop_hook(tmp_path: Path) -> None:
     write_snapshot(tmp_path, snapshot_sid=SID_A)
     write_request(tmp_path, durable_sid=SID_A)
 
@@ -146,7 +138,7 @@ def test_match_no_warning_no_regression(tmp_path: Path) -> None:
     assert mismatch_events(tmp_path) == []
     payload = json.loads(result.stdout)
     assert payload["decision"] == "approve"
-    assert payload["reason"] == "completion snapshot_present=true"
+    assert payload["reason"] == "missing canonical MST_SESSION_ID; stop hook fail-open without mutation"
 
 
 def test_missing_durable_owner_session_id_silent_skip(tmp_path: Path) -> None:
@@ -160,7 +152,7 @@ def test_missing_durable_owner_session_id_silent_skip(tmp_path: Path) -> None:
     assert mismatch_events(tmp_path) == []
 
 
-def test_pre_tool_use_mismatch_warning(tmp_path: Path) -> None:
+def test_pre_tool_use_legacy_payload_is_diagnostic_only_without_canonical_parent(tmp_path: Path) -> None:
     write_snapshot(tmp_path, snapshot_sid=SID_B)
     write_request(tmp_path, durable_sid=SID_C)
 
@@ -170,16 +162,14 @@ def test_pre_tool_use_mismatch_warning(tmp_path: Path) -> None:
     events = mismatch_events(tmp_path)
 
     assert result.returncode == 0
-    assert "[session-id mismatch]" in result.stderr
-    assert "hook=mst-pre-tool-use" in result.stderr
-    assert len(events) == 1
-    assert events[0]["data"]["stdin_sid"] == SID_A
-    assert events[0]["data"]["snapshot_sid"] == SID_B
-    assert events[0]["data"]["durable_sid"] == SID_C
-    assert events[0]["data"]["hook"] == "mst-pre-tool-use"
+    # REQ-946 explicit-only contract: hook payload session_id is legacy
+    # diagnostic input, not authority that may select or mutate a session.
+    assert "legacy session_id ignored without canonical MST_SESSION_ID/mst_session_id" in result.stderr
+    assert "[session-id mismatch]" not in result.stderr
+    assert events == []
 
 
-def test_pre_tool_use_mismatch_warning_dedup_by_ppid_and_session(tmp_path: Path) -> None:
+def test_pre_tool_use_legacy_diagnostic_repeats_without_creating_dedup_state(tmp_path: Path) -> None:
     write_snapshot(tmp_path, snapshot_sid=SID_B)
     write_request(tmp_path, durable_sid=SID_C)
 
@@ -190,6 +180,9 @@ def test_pre_tool_use_mismatch_warning_dedup_by_ppid_and_session(tmp_path: Path)
 
     assert first.returncode == 0
     assert second.returncode == 0
-    assert first.stderr.count("[session-id mismatch]") == 1
-    assert "[session-id mismatch]" not in second.stderr
-    assert len(mismatch_events(tmp_path)) == 1
+    # A no-authority ordinary hook cannot persist a dedup marker: both calls
+    # stay diagnostic-only and leave canonical flow history untouched.
+    diagnostic = "legacy session_id ignored without canonical MST_SESSION_ID/mst_session_id"
+    assert first.stderr.count(diagnostic) == 1
+    assert second.stderr.count(diagnostic) == 1
+    assert mismatch_events(tmp_path) == []

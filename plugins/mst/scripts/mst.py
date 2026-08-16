@@ -69,6 +69,7 @@ BASE_DIR_OPTIONAL_COMMANDS = {
     ("hooks", "sync"),
     ("on", "cleanup"),
     ("session", "resolve"),
+    ("session", "bootstrap"),
     ("host", "context"),
     ("skill", "build"),
     ("skill", "scaffold"),
