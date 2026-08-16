@@ -19,6 +19,7 @@ from scripts.mst_cmds import _common
 from scripts.mst_cmds import cleanup as cleanup_mod
 from scripts.mst_cmds import host as host_mod
 from scripts.mst_cmds import resolve_model as resolve_model_mod
+from scripts.mst_cmds import reasoning_effort as reasoning_effort_mod
 from scripts.mst_cmds import session as session_mod
 from scripts.mst_cmds import native_delegation as native_delegation_mod
 from scripts.mst_cmds._common import (
@@ -120,6 +121,8 @@ _LIFECYCLE_ATTEMPT_FIELDS = (
     "skill",
     "label",
     "model",
+    "reasoning_effort",
+    "reasoning_effort_source",
     "phase",
     "status",
     "started_at",
@@ -1240,6 +1243,22 @@ def _resolve_provider_model(
     return None
 
 
+def _resolve_provider_execution(
+    provider: str,
+    explicit_model: str | None,
+    explicit_reasoning_effort: str | None = None,
+    *,
+    selector: str = "default",
+    requested_provider: str | None = None,
+) -> dict:
+    return reasoning_effort_mod.resolve_execution(
+        requested_provider or provider,
+        selector,
+        explicit_model=explicit_model,
+        explicit_reasoning_effort=explicit_reasoning_effort,
+    )
+
+
 def _normalize_dispatch_provider(provider: str) -> tuple[str, str | None]:
     normalized = str(provider or "").strip().lower()
     if normalized == "gemini":
@@ -1875,6 +1894,7 @@ def validate_dispatch_external_authorization(
     worktree_dir: Path | str,
     prompt_file: Path | str,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     running_log_path: Path | str | None = None,
 ) -> dict:
     """Bind dispatch build/execution to one current persisted external attempt."""
@@ -1927,6 +1947,12 @@ def validate_dispatch_external_authorization(
     requested_model = str(model) if model is not None else None
     if (str(persisted_model) if persisted_model is not None else None) != requested_model:
         raise native_delegation_mod.LifecycleConflict("dispatch authorization model mismatch")
+    persisted_effort = state.get("reasoning_effort")
+    requested_effort = str(reasoning_effort) if reasoning_effort is not None else None
+    if (str(persisted_effort) if persisted_effort is not None else None) != requested_effort:
+        raise native_delegation_mod.LifecycleConflict(
+            "dispatch authorization reasoning effort mismatch"
+        )
 
     requested_worktree = Path(worktree_dir).resolve(strict=False)
     persisted_worktree = Path(_safe_text(state.get("worktree_dir"))).resolve(strict=False)
@@ -2016,7 +2042,19 @@ def cmd_dispatch_authorize_external(args):
 
     requested_provider = str(args.provider).strip().lower()
     provider, _legacy_provider = _normalize_dispatch_provider(requested_provider)
-    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=_legacy_provider)
+    try:
+        execution = _resolve_provider_execution(
+            provider,
+            args.model,
+            args.reasoning_effort,
+            selector=args.selector,
+            requested_provider=_legacy_provider,
+        )
+    except reasoning_effort_mod.ReasoningEffortError as exc:
+        return _emit_dispatch_authorization_failure(
+            native_delegation_mod.LifecycleConflict(str(exc))
+        )
+    resolved_model = execution.get("model")
     if not isinstance(resolved_model, str) or not resolved_model:
         return _emit_dispatch_authorization_failure(
             native_delegation_mod.LifecycleConflict(
@@ -2065,6 +2103,8 @@ def cmd_dispatch_authorize_external(args):
             trace_path=args.trace_path,
             output_path=args.output_path,
             model=resolved_model,
+            reasoning_effort=execution.get("reasoning_effort"),
+            reasoning_effort_source=execution.get("reasoning_effort_source"),
             mst_session_id=session_id,
             attempt_id=args.attempt_id,
             route_decision=route,
@@ -2086,6 +2126,7 @@ def cmd_dispatch_validate_authorization(args):
             worktree_dir=args.worktree_dir,
             prompt_file=args.prompt_file,
             model=args.model,
+            reasoning_effort=args.reasoning_effort,
         )
     except native_delegation_mod.LifecycleConflict as exc:
         return _emit_dispatch_authorization_failure(exc)
@@ -2102,6 +2143,9 @@ def cmd_dispatch_validate_authorization(args):
                 "orca_launch_status": state.get("orca_launch_status"),
                 "orca_worktree_selector": state.get("orca_worktree_selector"),
                 "route_fingerprint": state.get("route_fingerprint"),
+                "model": state.get("model"),
+                "reasoning_effort": state.get("reasoning_effort"),
+                "reasoning_effort_source": state.get("reasoning_effort_source"),
             },
             ensure_ascii=False,
         )
@@ -2313,7 +2357,18 @@ def cmd_dispatch_build(args):
     requested_provider = str(args.provider).strip().lower()
     provider, legacy_provider = _normalize_dispatch_provider(requested_provider)
 
-    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=legacy_provider)
+    try:
+        execution = _resolve_provider_execution(
+            provider,
+            args.model,
+            args.reasoning_effort,
+            selector=args.selector,
+            requested_provider=legacy_provider,
+        )
+    except reasoning_effort_mod.ReasoningEffortError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    resolved_model = execution.get("model")
     if not isinstance(resolved_model, str) or not resolved_model:
         print(f"Error: failed to resolve model for provider '{provider}'", file=sys.stderr)
         return 1
@@ -2359,6 +2414,7 @@ def cmd_dispatch_build(args):
                     worktree_dir=worktree_dir,
                     prompt_file=prompt_file,
                     model=resolved_model,
+                    reasoning_effort=execution.get("reasoning_effort"),
                     running_log_path=log_file,
                 )
             except native_delegation_mod.LifecycleConflict as exc:
@@ -2418,6 +2474,8 @@ def cmd_dispatch_build(args):
                     prompt_file=prompt_file,
                     running_log_path=log_file,
                     model=resolved_model,
+                    reasoning_effort=execution.get("reasoning_effort"),
+                    reasoning_effort_source=execution.get("reasoning_effort_source"),
                     mst_session_id=session_id,
                     route_decision=route,
                 )
@@ -2484,26 +2542,35 @@ def cmd_dispatch_build(args):
     authorization_read_only = bool(
         isinstance(authorization, dict) and authorization.get("read_only")
     )
+    resolved_effort = execution.get("reasoning_effort")
     if provider == "codex":
         permission_args = "--sandbox read-only" if authorization_read_only else "--full-auto"
+        codex_effort_config = f'model_reasoning_effort="{resolved_effort}"'
+        effort_args = (
+            f"-c {q(codex_effort_config)} "
+            if resolved_effort
+            else ""
+        )
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" codex exec {permission_args} -m {q(resolved_model)} '
-            f"-C {q(str(worktree_dir))} -"
+            f"{effort_args}-C {q(str(worktree_dir))} -"
         )
         prompt_redirect = f"< {q(str(prompt_snapshot_path if protected_external else prompt_file))}"
     elif provider == "claude":
         # Contract literals retained for security/inventory checks:
         # --permission-mode plan / --permission-mode acceptEdits
         permission_mode = "plan" if authorization_read_only else "acceptEdits"
+        effort_args = f"--effort {q(str(resolved_effort))} " if resolved_effort else ""
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" claude -p '  # MST_EXTERNAL_FALLBACK_ONLY
-            f"--model {q(resolved_model)} --permission-mode {permission_mode} --add-dir {q(str(worktree_dir))}"
+            f"--model {q(resolved_model)} {effort_args}--permission-mode {permission_mode} --add-dir {q(str(worktree_dir))}"
         )
         prompt_redirect = f"< {q(str(prompt_snapshot_path if protected_external else prompt_file))}"
     else:
+        effort_args = f"--effort {q(str(resolved_effort))} " if resolved_effort else ""
         cli_cmd = (
             f'MST_SESSION_ID="$MST_SESSION_ID" agy --print \"$(cat {q(str(prompt_file))})\" '
-            f"--dangerously-skip-permissions --add-dir {q(str(worktree_dir))}"
+            f"{effort_args}--dangerously-skip-permissions --add-dir {q(str(worktree_dir))}"
         )
         prompt_redirect = "< /dev/null"
         legacy_note = ""
@@ -2696,7 +2763,18 @@ def cmd_dispatch_preflight(args):
         print(f"Error: required binary '{executable}' not found in PATH", file=sys.stderr)
         return 1
 
-    resolved_model = _resolve_provider_model(provider, args.model, requested_provider=legacy_provider)
+    try:
+        execution = _resolve_provider_execution(
+            provider,
+            args.model,
+            args.reasoning_effort,
+            selector=args.selector,
+            requested_provider=legacy_provider,
+        )
+    except reasoning_effort_mod.ReasoningEffortError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    resolved_model = execution.get("model")
     if not isinstance(resolved_model, str) or not resolved_model:
         print(f"Error: failed to resolve model for provider '{provider}'", file=sys.stderr)
         return 1
@@ -2709,7 +2787,14 @@ def cmd_dispatch_preflight(args):
             file=sys.stderr,
         )
 
-    payload = {"provider": provider, "binary": executable, "model": resolved_model, "stdin": stdin_kind}
+    payload = {
+        "provider": provider,
+        "binary": executable,
+        "model": resolved_model,
+        "reasoning_effort": execution.get("reasoning_effort"),
+        "reasoning_effort_source": execution.get("reasoning_effort_source"),
+        "stdin": stdin_kind,
+    }
     if legacy_provider:
         payload["deprecated_alias"] = legacy_provider
     print(json.dumps(payload, ensure_ascii=False))

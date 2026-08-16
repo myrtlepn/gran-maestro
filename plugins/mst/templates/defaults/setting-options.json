@@ -1,4 +1,6 @@
 {
+  "models.providers.*.default_reasoning_effort": ["inherit", "low", "medium", "high", "xhigh", "max", "ultra"],
+  "**.reasoning_effort": ["default", "inherit", "low", "medium", "high", "xhigh", "max", "ultra"],
   "discussion.agents.codex.tier": ["premium", "economy"],
   "discussion.agents.agy.tier": ["premium", "economy"],
   "discussion.agents.claude.tier": ["premium", "economy"],

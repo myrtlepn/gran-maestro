@@ -35,6 +35,7 @@ from scripts.mst_cmds import task
 from scripts.mst_cmds import explore
 from scripts.mst_cmds import wait_files
 from scripts.mst_cmds import resolve_model
+from scripts.mst_cmds import reasoning_effort
 from scripts.mst_cmds import stitch
 from scripts.mst_cmds import notify
 from scripts.mst_cmds import extension
@@ -100,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     explore.register(sub)
     wait_files.register(sub)
     resolve_model.register(sub)
+    reasoning_effort.register(sub)
     stitch.register(sub)
     notify.register(sub)
     extension.register(sub)
@@ -268,6 +270,8 @@ DISPATCH = {
     ("stitch", "sleep"): stitch.cmd_stitch_sleep,
     ("wait-files", None): wait_files.cmd_wait_files,
     ("resolve-model", None): resolve_model.cmd_resolve_model,
+    ("resolve-execution", None): reasoning_effort.cmd_resolve_execution,
+    ("reasoning-capabilities", None): reasoning_effort.cmd_reasoning_capabilities,
     ("extension", "ensure-copy"): extension.cmd_extension_ensure_copy,
     ("config", "resolve"): config.cmd_config_resolve,
     ("config", "get"): config.cmd_config_get,

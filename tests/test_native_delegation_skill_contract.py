@@ -58,6 +58,9 @@ def test_shared_route_contract_is_executable_and_fail_closed() -> None:
     )
 
     required_tokens = (
+        "mst.py resolve-execution",
+        "reasoning_effort",
+        "reasoning_effort_source",
         "mst.py host context --json",
         "mst.py delegation route",
         "route=native_candidate",
@@ -88,6 +91,7 @@ def test_shared_route_contract_is_executable_and_fail_closed() -> None:
     assert "claim exact replay는 bearer token/파일을 다시 발급하지 않는다" in shared
     assert '--claim-token-file "{claim_token_file}"' in shared
     assert "atomic replace" in shared
+    assert "Orca는 이미 `route=external`" in shared
 
 
 def test_every_provider_dispatch_skill_uses_canonical_include_before_execution() -> None:

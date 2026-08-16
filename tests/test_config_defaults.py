@@ -110,6 +110,34 @@ def test_native_delegation_setting_options_are_canonical():
     assert options["delegation.transport_policy"] == ["same-host-native-first", "external-only"]
     assert "all" in options["delegation.native.scope"]
     assert not any("native_codex_subagents" in key for key in options)
+    assert options["models.providers.*.default_reasoning_effort"][0] == "inherit"
+    assert options["**.reasoning_effort"][:2] == ["default", "inherit"]
+
+
+def test_all_default_provider_calls_declare_reasoning_effort():
+    defaults = _load_defaults()
+
+    for provider, provider_config in defaults["models"]["providers"].items():
+        assert provider_config["default_reasoning_effort"] == "inherit", provider
+
+    def visit(value, path=()):
+        if isinstance(value, dict):
+            if (
+                isinstance(value.get("tier"), str)
+                and (
+                    isinstance(value.get("count"), int)
+                    or isinstance(value.get("provider"), str)
+                    or isinstance(value.get("agent"), str)
+                )
+            ):
+                assert "reasoning_effort" in value, ".".join(path)
+            for key, child in value.items():
+                visit(child, (*path, str(key)))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, (*path, str(index)))
+
+    visit(defaults)
 
 
 def test_codex_primary_presets_use_canonical_native_first_policy():

@@ -90,10 +90,18 @@ def _stub_binary(tmp_path: Path, provider: str, marker: Path) -> Path:
     return binary
 
 
-def test_fake_native_bridge_success_records_exact_lifecycle_calls(tmp_path: Path) -> None:
+def test_fake_native_bridge_success_records_exact_lifecycle_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workspace, base, prompt = _workspace(tmp_path)
     output = tmp_path / "native-output.md"
     bridge = FakeBridge()
+    monkeypatch.setattr(
+        native_delegation_mod.reasoning_effort_mod,
+        "_codex_model_catalog",
+        lambda: {"gpt-5.6-sol": {"efforts": ["ultra"], "default": "low"}},
+    )
 
     state = execute_delegation_bridge(
         base_dir=base,
@@ -108,6 +116,9 @@ def test_fake_native_bridge_success_records_exact_lifecycle_calls(tmp_path: Path
         output_path=output,
         idempotency_key="wave-1",
         external_binary=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="ultra",
+        reasoning_effort_source="explicit",
     )
 
     assert bridge.calls == [
@@ -121,6 +132,9 @@ def test_fake_native_bridge_success_records_exact_lifecycle_calls(tmp_path: Path
     assert state["execution_transport"] == "native"
     assert state["completion_signal"] == "completed"
     assert state["exit_code"] is None
+    assert state["model"] == "gpt-5.6-sol"
+    assert state["reasoning_effort"] == "ultra"
+    assert state["reasoning_effort_source"] == "explicit"
     assert output.read_text(encoding="utf-8") == "native result"
     request = bridge.spawn_requests[0]
     assert request["attempt_id"]
@@ -128,6 +142,8 @@ def test_fake_native_bridge_success_records_exact_lifecycle_calls(tmp_path: Path
     assert request["read_only"] is True
     assert request["worktree_dir"] == str(workspace.resolve())
     assert request["idempotency_key"].endswith(":host-spawn")
+    assert request["model"] == "gpt-5.6-sol"
+    assert request["reasoning_effort"] == "ultra"
 
 
 def test_status_terminal_bridge_issues_no_resumed_host_authority(tmp_path: Path) -> None:

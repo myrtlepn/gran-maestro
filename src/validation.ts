@@ -16,6 +16,28 @@ export interface ValidationResult {
 
 export type SettingOptions = Record<string, string[]>;
 
+function optionPatternMatches(pattern: string, path: string): boolean {
+  const expression = pattern
+    .split(".")
+    .map((segment) => {
+      if (segment === "**") return ".+";
+      if (segment === "*") return "[^.]+";
+      return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    })
+    .join("\\.");
+  return new RegExp(`^${expression}$`).test(path);
+}
+
+function allowedValuesForPath(options: SettingOptions, path: string): string[] | undefined {
+  if (options[path]) return options[path];
+  for (const [pattern, values] of Object.entries(options)) {
+    if (pattern.includes("*") && optionPatternMatches(pattern, path)) {
+      return values;
+    }
+  }
+  return undefined;
+}
+
 function joinPath(...segments: string[]): string {
   return segments
     .map((segment, index) => {
@@ -83,7 +105,7 @@ export function validateConfigValues(
   const warnings: ValidationWarning[] = [];
 
   for (const [path, value] of Object.entries(flattened)) {
-    const allowed = options[path];
+    const allowed = allowedValuesForPath(options, path);
     if (!allowed) {
       continue;
     }

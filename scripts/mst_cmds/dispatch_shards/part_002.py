@@ -642,6 +642,8 @@ def register(subparsers):
     build.add_argument("--worktree-dir", required=True)
     build.add_argument("--log-file", required=True)
     build.add_argument("--model")
+    build.add_argument("--selector", default="default")
+    build.add_argument("--reasoning-effort")
     build.add_argument("--require-worktree", action="store_true")
     build.add_argument("--expected-attempt-id")
 
@@ -656,6 +658,8 @@ def register(subparsers):
     authorize_external.add_argument("--attempt-id")
     authorize_external.add_argument("--idempotency-key", required=True)
     authorize_external.add_argument("--model")
+    authorize_external.add_argument("--selector", default="default")
+    authorize_external.add_argument("--reasoning-effort")
     authorize_external.add_argument("--scope", default="implementation")
     authorize_external.add_argument(
         "--capability-status",
@@ -671,6 +675,7 @@ def register(subparsers):
     validate_authorization.add_argument("--worktree-dir", required=True)
     validate_authorization.add_argument("--expected-attempt-id", required=True)
     validate_authorization.add_argument("--model", required=True)
+    validate_authorization.add_argument("--reasoning-effort")
 
     claim_external = dispatch_sub.add_parser("claim-external")
     claim_external.add_argument("--provider", choices=["codex", "claude"], required=True)
@@ -731,6 +736,8 @@ def register(subparsers):
     preflight = dispatch_sub.add_parser("preflight")
     preflight.add_argument("--provider", choices=["codex", "agy", "gemini", "claude"], required=True)
     preflight.add_argument("--model")
+    preflight.add_argument("--selector", default="default")
+    preflight.add_argument("--reasoning-effort")
 
     register_cmd = dispatch_sub.add_parser("register")
     register_cmd.add_argument("--task-id", required=True)

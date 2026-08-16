@@ -141,7 +141,7 @@ Compatibility: existing `gemini`, `gemini-dev`, and `gemini-reviewer` config key
 | `delegation.transport_policy` | `"same-host-native-first"` | `same-host-native-first` or `external-only`, which skips native routing |
 | `delegation.native.enabled` | `true` | whether same-host native candidates are allowed |
 | `delegation.native.scope` | `"all"` | native scope (`all`, `review-and-exploration-only`, `review-only`, `exploration-only`, `implementation-only`, `none`) |
-| `delegation.orca.enabled` | `false` | launch the protected provider CLI runner in a local Orca background terminal bound to the exact MST worktree |
+| `delegation.orca.enabled` | `false` | launch an already-external provider CLI runner in a local Orca background terminal bound to the exact MST worktree |
 | `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
 ### Route selection and CLI requirements
@@ -154,7 +154,7 @@ Compatibility: existing `gemini`, `gemini-dev`, and `gemini-reviewer` config key
 
 For a same-host route with `capability_status=unknown`, the planner requires a native capability handshake instead of immediately selecting external. Same-provider external-wrapper fallback is allowed only when native spawn is confirmed as `definitive_not_created`. After spawn acknowledgement or a provider task ID, attach failure, timeout, an unknown result, or unconfirmed cancellation keeps the attempt in `reconciling` and blocks both a new native spawn and duplicate external execution. A native task failure is terminal and is not a transport-fallback reason.
 
-When `delegation.orca.enabled=true`, Codex, Claude, and AGY all launch the existing protected external runner through the Orca launch surface. Orca is neither a provider nor the lifecycle owner, and MST does not use Orca Run/Task/Dispatch APIs. Only the absolute MST-created worktree is preflighted and selected as `path:<absolute-worktree>`; V1 supports ready local runtimes only. A definitive failure before terminal create recomputes the original route. Once create is invoked, lost responses or unknown handles never fall back: recovery reconciles by exact worktree and deterministic `MST/<task>/<attempt>` title. On success, the in-terminal runner persists output, history, and cleanup-ready evidence before the out-of-terminal launch controller closes the tab. Failed, cancelled, and unknown attempts, in-terminal pre-run failures, and ambiguous provider reap states release the controller wait and preserve their terminals for diagnostics. Wrapper arguments from `ORCA_CLI_COMMAND` are redacted from normal responses, timeouts, and structured errors and are not forwarded into the provider environment. The structured MST context binding overrides inherited environment state at the provider-spawn boundary for every entrypoint, including canonical fallback and the public compatibility CLI; raw and JSON-escaped exact values are then redacted before provider output or runtime logs are persisted. Terminal output is diagnostic, while MST output hashes and lifecycle state remain authoritative.
+When `delegation.orca.enabled=true`, only Codex, Claude, and AGY calls already resolved to `external` launch the existing protected runner through Orca. Orca never changes a native candidate into an external route and does not change model/effort bindings or provider capabilities. Orca is neither a provider nor the lifecycle owner, and MST does not use Orca Run/Task/Dispatch APIs. Only the absolute MST-created worktree is preflighted and selected as `path:<absolute-worktree>`; V1 supports ready local runtimes only. A definitive failure before terminal create falls back to direct external execution. Once create is invoked, lost responses or unknown handles never fall back: recovery reconciles by exact worktree and deterministic `MST/<task>/<attempt>` title. On success, the in-terminal runner persists output, history, and cleanup-ready evidence before the out-of-terminal launch controller closes the tab. Failed, cancelled, and unknown attempts, in-terminal pre-run failures, and ambiguous provider reap states release the controller wait and preserve their terminals for diagnostics. Wrapper arguments from `ORCA_CLI_COMMAND` are redacted from normal responses, timeouts, and structured errors and are not forwarded into the provider environment. The structured MST context binding overrides inherited environment state at the provider-spawn boundary for every entrypoint, including canonical fallback and the public compatibility CLI; raw and JSON-escaped exact values are then redacted before provider output or runtime logs are persisted. Terminal output is diagnostic, while MST output hashes and lifecycle state remain authoritative.
 
 The route planner returns only a JSON decision; it does not execute either transport.
 
@@ -297,12 +297,15 @@ Defines model tiers (premium/economy) per provider.
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium model |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy model |
 | `models.providers.codex.default_tier` | `"premium"` | Codex default tier |
+| `models.providers.codex.default_reasoning_effort` | `"inherit"` | Codex default reasoning effort |
 | `models.providers.agy.premium` | `"agy-default"` | AGY premium model |
 | `models.providers.agy.economy` | `"agy-default"` | AGY economy model |
 | `models.providers.agy.default_tier` | `"premium"` | AGY default tier |
+| `models.providers.agy.default_reasoning_effort` | `"inherit"` | AGY default reasoning effort |
 | `models.providers.claude.premium` | `"opus"` | Claude premium model |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy model |
 | `models.providers.claude.default_tier` | `"economy"` | Claude default tier |
+| `models.providers.claude.default_reasoning_effort` | `"inherit"` | Claude default reasoning effort |
 
 ### models.roles
 
@@ -323,6 +326,8 @@ When a role specifies a `tier`, the actual model name is resolved from the provi
 Example: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.3-codex"`
 
 If `tier` is omitted, the provider's `default_tier` is used.
+
+Each agent or role object accepts `reasoning_effort` with `default | inherit | low | medium | high | xhigh | max | ultra`. `default` uses the provider's `default_reasoning_effort`; `inherit` leaves the native host or CLI default unchanged. A concrete per-call value overrides the provider default, and unsupported provider/model combinations fail before launch. The same resolved binding is used for native, direct external, and Orca external execution.
 
 > **Terminology note: model tier vs preset tier**
 >

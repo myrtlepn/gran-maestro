@@ -237,9 +237,21 @@ def test_default_config_has_adversarial_review_schema():
     assert review["perspectives"]["integration"]["enabled"] is True
     assert review["perspectives"]["persona"]["enabled"] is False
     assert review["perspectives"]["nfr"]["enabled"] is False
-    assert review["agents"]["codex"] == {"count": 1, "tier": "premium"}
-    assert review["agents"]["gemini"] == {"count": 0, "tier": "premium"}
-    assert review["agents"]["claude"] == {"count": 0, "tier": "economy"}
+    assert review["agents"]["codex"] == {
+        "count": 1,
+        "tier": "premium",
+        "reasoning_effort": "default",
+    }
+    assert review["agents"]["agy"] == {
+        "count": 0,
+        "tier": "premium",
+        "reasoning_effort": "default",
+    }
+    assert review["agents"]["claude"] == {
+        "count": 0,
+        "tier": "economy",
+        "reasoning_effort": "default",
+    }
     assert review["max_rounds"] == 3
     assert review["auto_apply_severity_threshold"] == "critical"
     assert review["clarification_blocking_severities"] == ["critical", "major"]

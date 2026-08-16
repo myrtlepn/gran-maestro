@@ -27,6 +27,16 @@ const AGENT_PROVIDERS = ['codex', 'agy', 'claude'] as const;
 
 type AgentProvider = typeof AGENT_PROVIDERS[number];
 type AgentTier = 'premium' | 'economy';
+type ReasoningEffort = 'default' | 'inherit' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+
+type ReasoningCapabilities = {
+  schema_version: number;
+  providers: Partial<Record<AgentProvider, {
+    available: boolean;
+    efforts?: string[];
+    models?: Record<string, { efforts?: string[]; default?: string }>;
+  }>>;
+};
 
 type WorkflowNodeKind = 'agent-matrix' | 'role-summary' | 'info';
 
@@ -52,6 +62,7 @@ type WorkflowAgentRow = {
   provider: AgentProvider;
   count: number;
   tier: AgentTier;
+  reasoningEffort: string;
   editable: boolean;
   mixedTier?: boolean;
 };
@@ -62,6 +73,8 @@ type WorkflowRoleDetailRow = {
   agent: string;
   tier: string;
   tierPath: string[];
+  reasoningEffort: string;
+  reasoningEffortPath: string[];
   agentPath: string[];
 };
 
@@ -78,6 +91,7 @@ type WorkflowModelProviderRow = {
   premium: string;
   economy: string;
   defaultTier: string;
+  defaultReasoningEffort: string;
 };
 
 type WorkflowModelRoleAssignmentRow = {
@@ -86,6 +100,8 @@ type WorkflowModelRoleAssignmentRow = {
   tier: string;
   tierPath: string[];
   providerPath: string[];
+  reasoningEffort: string;
+  reasoningEffortPath: string[];
 };
 
 const MODEL_ROLE_DISPLAY_ORDER = ['pm_conductor', 'architect', 'developer', 'reviewer', 'developer_claude'] as const;
@@ -186,6 +202,14 @@ const WORKFLOW_PHASES: WorkflowPhase[] = [
         agentsPath: ['discussion', 'agents'],
       },
       {
+        id: 'd3',
+        label: 'd3',
+        description: 'D3 계획 검증 에이전트 구성',
+        kind: 'agent-matrix',
+        enabledPath: ['d3', 'enabled'],
+        agentsPath: ['d3', 'agents'],
+      },
+      {
         id: 'phase1_exploration',
         label: 'phase1_exploration',
         description: '탐색 역할별 agent/tier 배정',
@@ -271,6 +295,22 @@ const WORKFLOW_PHASES: WorkflowPhase[] = [
         description: '리뷰 역할별 agent/tier 배정',
         kind: 'role-summary',
         rolesPath: ['review', 'roles'],
+      },
+      {
+        id: 'agile.adversarial_review',
+        label: 'agile.adversarial_review',
+        description: 'Agile 적대적 리뷰 에이전트 구성',
+        kind: 'agent-matrix',
+        enabledPath: ['agile', 'adversarial_review', 'enabled'],
+        agentsPath: ['agile', 'adversarial_review', 'agents'],
+      },
+      {
+        id: 'agile.retrospective',
+        label: 'agile.retrospective',
+        description: 'Agile 회고 에이전트 구성',
+        kind: 'agent-matrix',
+        enabledPath: ['agile', 'retrospective', 'enabled'],
+        agentsPath: ['agile', 'retrospective', 'agents'],
       },
       {
         id: 'code_review',
@@ -675,11 +715,43 @@ function resolveDefaultTier(config: any, provider: AgentProvider): AgentTier {
   return isTier(defaultTier) ? defaultTier : 'premium';
 }
 
-function normalizeAgentEntry(entry: any, defaultTier: AgentTier): { count: number; tier: AgentTier } {
+function resolveProviderModel(config: any, provider: string, tier: string): string {
+  const model = getNestedValueWithArrays(config, ['models', 'providers', provider, tier]);
+  return typeof model === 'string' ? model : '';
+}
+
+function supportedReasoningEfforts(
+  capabilities: ReasoningCapabilities | null,
+  provider: string,
+  model: string,
+): string[] {
+  const capability = capabilities?.providers?.[provider as AgentProvider];
+  if (!capability?.available) return [];
+  if (provider === 'codex') {
+    return capability.models?.[model]?.efforts ?? [];
+  }
+  return capability.efforts ?? [];
+}
+
+function reasoningOptions(
+  capabilities: ReasoningCapabilities | null,
+  provider: string,
+  model: string,
+  includeDefault = true,
+): string[] {
+  return [
+    ...(includeDefault ? ['default'] : []),
+    'inherit',
+    ...supportedReasoningEfforts(capabilities, provider, model),
+  ];
+}
+
+function normalizeAgentEntry(entry: any, defaultTier: AgentTier): { count: number; tier: AgentTier; reasoningEffort: string } {
   if (typeof entry === 'number') {
     return {
       count: Number.isFinite(entry) ? Math.max(0, Math.trunc(entry)) : 0,
       tier: defaultTier,
+      reasoningEffort: 'default',
     };
   }
 
@@ -689,10 +761,11 @@ function normalizeAgentEntry(entry: any, defaultTier: AgentTier): { count: numbe
     return {
       count: Number.isFinite(rawCount) ? Math.max(0, Math.trunc(rawCount)) : 0,
       tier: rawTier,
+      reasoningEffort: typeof entry.reasoning_effort === 'string' ? entry.reasoning_effort : 'default',
     };
   }
 
-  return { count: 0, tier: defaultTier };
+  return { count: 0, tier: defaultTier, reasoningEffort: 'default' };
 }
 
 function buildRowsFromAgentsPath(config: any, path: string[]): WorkflowAgentRow[] {
@@ -704,6 +777,7 @@ function buildRowsFromAgentsPath(config: any, path: string[]): WorkflowAgentRow[
       provider,
       count: normalized.count,
       tier: normalized.tier,
+      reasoningEffort: normalized.reasoningEffort,
       editable: true,
     };
   });
@@ -717,6 +791,7 @@ function buildRowsFromRolePath(config: any, path: string[]): WorkflowAgentRow[] 
       provider,
       count: 0,
       tier: fallbackTier,
+      reasoningEffort: 'default',
       editable: false,
       mixedTier: false,
     };
@@ -745,6 +820,12 @@ function buildRowsFromRolePath(config: any, path: string[]): WorkflowAgentRow[] 
         row.mixedTier = true;
       }
     }
+    const effort = typeof roleValue.reasoning_effort === 'string' ? roleValue.reasoning_effort : 'default';
+    if (row.count === 1) {
+      row.reasoningEffort = effort;
+    } else if (row.reasoningEffort !== effort) {
+      row.reasoningEffort = 'mixed';
+    }
   }
 
   return rows;
@@ -766,6 +847,8 @@ function buildRoleDetailsFromRolePath(config: any, path: string[]): WorkflowRole
         tier: '-',
         tierPath: [...path, name, 'tier'],
         agentPath: [...path, name, 'agent'],
+        reasoningEffort: 'default',
+        reasoningEffortPath: [...path, name, 'reasoning_effort'],
       };
     }
 
@@ -776,6 +859,8 @@ function buildRoleDetailsFromRolePath(config: any, path: string[]): WorkflowRole
       tier: typeof roleValue.tier === 'string' ? roleValue.tier : '-',
       tierPath: [...path, name, 'tier'],
       agentPath: [...path, name, 'agent'],
+      reasoningEffort: typeof roleValue.reasoning_effort === 'string' ? roleValue.reasoning_effort : 'default',
+      reasoningEffortPath: [...path, name, 'reasoning_effort'],
     };
   });
 }
@@ -789,6 +874,9 @@ function buildModelProviderRows(config: any): WorkflowModelProviderRow[] {
       premium: typeof providerConfig.premium === 'string' ? providerConfig.premium : '-',
       economy: typeof providerConfig.economy === 'string' ? providerConfig.economy : '-',
       defaultTier: typeof providerConfig.default_tier === 'string' ? providerConfig.default_tier : '-',
+      defaultReasoningEffort: typeof providerConfig.default_reasoning_effort === 'string'
+        ? providerConfig.default_reasoning_effort
+        : 'inherit',
     };
   });
 }
@@ -818,6 +906,8 @@ function buildModelRoleAssignmentRows(config: any): WorkflowModelRoleAssignmentR
           tier: typeof slot.tier === 'string' ? slot.tier : '-',
           tierPath: ['models', 'roles', roleName, index.toString(), 'tier'],
           providerPath: ['models', 'roles', roleName, index.toString(), 'provider'],
+          reasoningEffort: typeof slot.reasoning_effort === 'string' ? slot.reasoning_effort : 'default',
+          reasoningEffortPath: ['models', 'roles', roleName, index.toString(), 'reasoning_effort'],
         });
       });
       continue;
@@ -830,6 +920,8 @@ function buildModelRoleAssignmentRows(config: any): WorkflowModelRoleAssignmentR
       tier: typeof slot.tier === 'string' ? slot.tier : '-',
       tierPath: ['models', 'roles', roleName, 'tier'],
       providerPath: ['models', 'roles', roleName, 'provider'],
+      reasoningEffort: typeof slot.reasoning_effort === 'string' ? slot.reasoning_effort : 'default',
+      reasoningEffortPath: ['models', 'roles', roleName, 'reasoning_effort'],
     });
   }
 
@@ -952,6 +1044,7 @@ export function SettingsView() {
   const [openSections, setOpenSections] = useState<string[]>(['workflow']);
   const [activeTab, setActiveTab] = useState<'workflow' | 'behavior' | 'advanced'>('workflow');
   const [selectedNodeId, setSelectedNodeId] = useState<string>('ideation');
+  const [reasoningCapabilities, setReasoningCapabilities] = useState<ReasoningCapabilities | null>(null);
 
   useEffect(() => {
     if (!projectId) {
@@ -972,11 +1065,18 @@ export function SettingsView() {
   async function fetchConfig() {
     setLoading(true);
     try {
-      const data = await apiFetch<{ merged: any; overrides: any; defaults: any }>('/api/config', projectId);
+      const [data, capabilities] = await Promise.all([
+        apiFetch<{ merged: any; overrides: any; defaults: any }>('/api/config', projectId),
+        apiFetch<ReasoningCapabilities>('/api/config/reasoning-capabilities', projectId).catch((err) => {
+          console.warn('Reasoning capability probe unavailable:', err);
+          return null;
+        }),
+      ]);
       setMerged(data.merged ?? null);
       setOriginalConfig(JSON.parse(JSON.stringify(data.merged ?? null)));
       setOverrides(data.overrides ?? null);
       setDefaults(data.defaults ?? null);
+      setReasoningCapabilities(capabilities);
       setIsDirty(false);
     } catch (err) {
       console.error('Failed to fetch config:', err);
@@ -1093,11 +1193,46 @@ export function SettingsView() {
     setIsDirty(true);
   }
 
+  function getReasoningOptionsForPath(fullPath: string[]): string[] | undefined {
+    const field = fullPath[fullPath.length - 1];
+    if (field === 'default_reasoning_effort' && fullPath[0] === 'models' && fullPath[1] === 'providers') {
+      const provider = fullPath[2];
+      const premium = supportedReasoningEfforts(
+        reasoningCapabilities,
+        provider,
+        resolveProviderModel(merged, provider, 'premium'),
+      );
+      const economy = supportedReasoningEfforts(
+        reasoningCapabilities,
+        provider,
+        resolveProviderModel(merged, provider, 'economy'),
+      );
+      const supportedByBoth = premium.filter((effort) => economy.includes(effort));
+      return ['inherit', ...supportedByBoth];
+    }
+    if (field !== 'reasoning_effort') return undefined;
+
+    const parentPath = fullPath.slice(0, -1);
+    const parent = getNestedValueWithArrays(merged, parentPath);
+    const agentsIndex = fullPath.lastIndexOf('agents');
+    const provider = isObject(parent) && typeof parent.provider === 'string'
+      ? parent.provider
+      : isObject(parent) && typeof parent.agent === 'string'
+        ? parent.agent
+        : agentsIndex >= 0
+          ? fullPath[agentsIndex + 1]
+          : '';
+    if (!AGENT_PROVIDERS.includes(provider as AgentProvider)) return ['default', 'inherit'];
+    const tier = isObject(parent) && isTier(parent.tier) ? parent.tier : resolveDefaultTier(merged, provider as AgentProvider);
+    const model = resolveProviderModel(merged, provider, tier);
+    return reasoningOptions(reasoningCapabilities, provider, model);
+  }
+
   function handleWorkflowAgentChange(
     node: WorkflowNode,
     provider: AgentProvider,
-    field: 'count' | 'tier',
-    value: number | AgentTier
+    field: 'count' | 'tier' | 'reasoning_effort',
+    value: number | AgentTier | ReasoningEffort
   ) {
     const agentsPath = node.agentsPath;
     if (node.kind !== 'agent-matrix' || !agentsPath) {
@@ -1113,6 +1248,7 @@ export function SettingsView() {
       const nextEntry = {
         count: field === 'count' ? Math.max(0, Math.trunc(Number(value) || 0)) : normalized.count,
         tier: field === 'tier' && isTier(value) ? value : normalized.tier,
+        reasoning_effort: field === 'reasoning_effort' ? String(value) : normalized.reasoningEffort,
       };
 
       const nextSection = {
@@ -1144,9 +1280,12 @@ export function SettingsView() {
     const indent = depth * 16;
     const fullPath = [...path, key];
     const fullPathKey = fullPath.join('.');
-    const descEntry = SETTING_DESCRIPTIONS[fullPath.join('.')];
+    const descEntry = SETTING_DESCRIPTIONS[fullPath.join('.')]
+      ?? (key === 'reasoning_effort'
+        ? '이 MST 호출의 추론 난이도. default는 provider 기본값, inherit은 host/CLI 기본값을 사용합니다.'
+        : undefined);
     const description = getDescription(descEntry);
-    const options = getOptions(descEntry);
+    const options = getReasoningOptionsForPath(fullPath) ?? getOptions(descEntry);
 
     if (fullPathKey === 'review.cross_validation' && isObject(value)) {
       const crossValidationValue = value as Record<string, unknown>;
@@ -1244,6 +1383,7 @@ export function SettingsView() {
                       <th className="text-left px-3 py-2 text-xs font-semibold">Agent</th>
                       <th className="text-left px-3 py-2 text-xs font-semibold">Count</th>
                       <th className="text-left px-3 py-2 text-xs font-semibold">Tier</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold">Effort</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1281,6 +1421,27 @@ export function SettingsView() {
                                 <SelectItem value="economy" className="font-mono">economy</SelectItem>
                               </SelectContent>
                             </Select>
+                          </td>
+                          <td className="px-3 py-2">
+                            {(() => {
+                              const model = resolveProviderModel(merged, provider, normalized.tier);
+                              const options = reasoningOptions(reasoningCapabilities, provider, model);
+                              return (
+                                <Select
+                                  value={options.includes(normalized.reasoningEffort) ? normalized.reasoningEffort : undefined}
+                                  onValueChange={(effort) => handleFieldChange([...fullPath, provider, 'reasoning_effort'], effort)}
+                                >
+                                  <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                    <SelectValue placeholder={`${normalized.reasoningEffort} (unsupported)`} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {options.map((effort) => (
+                                      <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );
@@ -1687,6 +1848,7 @@ export function SettingsView() {
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Premium</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Economy</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Default Tier</th>
+                                    <th className="text-left px-3 py-2 text-xs font-semibold">Default Effort</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1727,6 +1889,23 @@ export function SettingsView() {
                                           </SelectContent>
                                         </Select>
                                       </td>
+                                      <td className="px-3 py-2">
+                                        <Select
+                                          value={getReasoningOptionsForPath(['models', 'providers', row.provider, 'default_reasoning_effort'])?.includes(row.defaultReasoningEffort) ? row.defaultReasoningEffort : undefined}
+                                          onValueChange={(value) =>
+                                            handleFieldChange(['models', 'providers', row.provider, 'default_reasoning_effort'], value)
+                                          }
+                                        >
+                                          <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                            <SelectValue placeholder={`${row.defaultReasoningEffort} (unsupported)`} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {getReasoningOptionsForPath(['models', 'providers', row.provider, 'default_reasoning_effort'])?.map((effort) => (
+                                              <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1751,6 +1930,7 @@ export function SettingsView() {
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Role</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Provider</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Tier</th>
+                                    <th className="text-left px-3 py-2 text-xs font-semibold">Effort</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1787,6 +1967,27 @@ export function SettingsView() {
                                             <SelectItem value="economy" className="font-mono">economy</SelectItem>
                                           </SelectContent>
                                         </Select>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        {(() => {
+                                          const model = resolveProviderModel(merged, row.provider, row.tier);
+                                          const options = reasoningOptions(reasoningCapabilities, row.provider, model);
+                                          return (
+                                            <Select
+                                              value={options.includes(row.reasoningEffort) ? row.reasoningEffort : undefined}
+                                              onValueChange={(value) => handleFieldChange(row.reasoningEffortPath, value)}
+                                            >
+                                              <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                                <SelectValue placeholder={`${row.reasoningEffort} (unsupported)`} />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                {options.map((effort) => (
+                                                  <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                                ))}
+                                              </SelectContent>
+                                            </Select>
+                                          );
+                                        })()}
                                       </td>
                                     </tr>
                                   ))}
@@ -1840,6 +2041,7 @@ export function SettingsView() {
                                 <th className="text-left px-3 py-2 text-xs font-semibold">Agent</th>
                                 <th className="text-left px-3 py-2 text-xs font-semibold">Count</th>
                                 <th className="text-left px-3 py-2 text-xs font-semibold">Tier</th>
+                                <th className="text-left px-3 py-2 text-xs font-semibold">Effort</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1898,6 +2100,29 @@ export function SettingsView() {
                                       </div>
                                     )}
                                   </td>
+                                  <td className="px-3 py-2">
+                                    {row.editable ? (() => {
+                                      const model = resolveProviderModel(merged, row.provider, row.tier);
+                                      const options = reasoningOptions(reasoningCapabilities, row.provider, model);
+                                      return (
+                                        <Select
+                                          value={options.includes(row.reasoningEffort) ? row.reasoningEffort : undefined}
+                                          onValueChange={(value) => handleWorkflowAgentChange(selectedNode, row.provider, 'reasoning_effort', value as ReasoningEffort)}
+                                        >
+                                          <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                            <SelectValue placeholder={`${row.reasoningEffort} (unsupported)`} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {options.map((effort) => (
+                                              <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      );
+                                    })() : (
+                                      <Input value={row.reasoningEffort} readOnly className="h-8 w-32 font-mono text-xs" />
+                                    )}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1913,6 +2138,7 @@ export function SettingsView() {
                                   <th className="text-left px-3 py-2 text-xs font-semibold">Enabled</th>
                                   <th className="text-left px-3 py-2 text-xs font-semibold">Agent</th>
                                   <th className="text-left px-3 py-2 text-xs font-semibold">Tier</th>
+                                  <th className="text-left px-3 py-2 text-xs font-semibold">Effort</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1972,6 +2198,27 @@ export function SettingsView() {
                                           <SelectItem value="economy" className="font-mono">economy</SelectItem>
                                         </SelectContent>
                                       </Select>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {(() => {
+                                        const model = resolveProviderModel(merged, row.agent, row.tier);
+                                        const options = reasoningOptions(reasoningCapabilities, row.agent, model);
+                                        return (
+                                          <Select
+                                            value={options.includes(row.reasoningEffort) ? row.reasoningEffort : undefined}
+                                            onValueChange={(value) => handleFieldChange(row.reasoningEffortPath, value)}
+                                          >
+                                            <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                              <SelectValue placeholder={`${row.reasoningEffort} (unsupported)`} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {options.map((effort) => (
+                                                <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        );
+                                      })()}
                                     </td>
                                   </tr>
                                 ))}

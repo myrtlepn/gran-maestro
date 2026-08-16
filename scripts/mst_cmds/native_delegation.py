@@ -34,6 +34,7 @@ from typing import Any, Callable
 
 from scripts.mst_cmds import _common
 from scripts.mst_cmds import orca_delegation as orca_delegation_mod
+from scripts.mst_cmds import reasoning_effort as reasoning_effort_mod
 
 
 NATIVE_PROVIDERS = {"codex", "claude"}
@@ -653,6 +654,9 @@ def _append_history(base_dir: Path | str, payload: dict[str, Any], event: str) -
         "orca_cleanup_status": payload.get("orca_cleanup_status"),
         "host": payload.get("host"),
         "provider": payload.get("provider"),
+        "model": payload.get("model"),
+        "reasoning_effort": payload.get("reasoning_effort"),
+        "reasoning_effort_source": payload.get("reasoning_effort_source"),
         "provider_task_id": payload.get("provider_task_id"),
         "spawn_claim_status": payload.get("spawn_claim_status"),
         "spawn_claim_owner": payload.get("spawn_claim_owner"),
@@ -1296,6 +1300,8 @@ def start_native_attempt(
     trace_path: Path | str | None = None,
     output_path: Path | str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
+    reasoning_effort_source: str | None = None,
     mst_session_id: str | None = None,
     root_mst_id: str | None = None,
     parent_session_id: str | None = None,
@@ -1354,6 +1360,8 @@ def start_native_attempt(
         "trace_path": str(trace_artifact),
         "output_path": str(output_artifact),
         "model": str(model) if model is not None else None,
+        "reasoning_effort": str(reasoning_effort) if reasoning_effort is not None else None,
+        "reasoning_effort_source": str(reasoning_effort_source) if reasoning_effort_source is not None else None,
         "parent_heartbeat": parent_heartbeat,
     }
     start_fingerprint = _operation_fingerprint("start", "", start_payload)
@@ -1436,6 +1444,8 @@ def start_native_attempt(
             "scope": str(scope or "implementation"),
             "read_only": bool(read_only),
             "model": str(model) if model is not None else None,
+            "reasoning_effort": str(reasoning_effort) if reasoning_effort is not None else None,
+            "reasoning_effort_source": str(reasoning_effort_source) if reasoning_effort_source is not None else None,
             "prompt_file": prompt_evidence["path"] if prompt_evidence else None,
             "prompt_hash": prompt_evidence["hash"] if prompt_evidence else None,
             "context_files_read": context_evidence,
@@ -2296,6 +2306,8 @@ def start_external_attempt(
     trace_path: Path | str | None = None,
     output_path: Path | str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
+    reasoning_effort_source: str | None = None,
     mst_session_id: str | None = None,
     root_mst_id: str | None = None,
     parent_session_id: str | None = None,
@@ -2373,6 +2385,8 @@ def start_external_attempt(
         "scope": scope,
         "read_only": bool(read_only),
         "model": str(model) if model is not None else None,
+        "reasoning_effort": str(reasoning_effort) if reasoning_effort is not None else None,
+        "reasoning_effort_source": str(reasoning_effort_source) if reasoning_effort_source is not None else None,
         "mst_session_id": identity["mst_session_id"],
         "root_mst_id": identity["root_mst_id"],
         "parent_session_id": identity["parent_session_id"],
@@ -2473,6 +2487,8 @@ def start_external_attempt(
             "scope": str(scope),
             "read_only": bool(read_only),
             "model": str(model) if model is not None else None,
+            "reasoning_effort": str(reasoning_effort) if reasoning_effort is not None else None,
+            "reasoning_effort_source": str(reasoning_effort_source) if reasoning_effort_source is not None else None,
             "prompt_file": prompt_evidence["path"] if prompt_evidence else None,
             "prompt_hash": prompt_evidence["hash"] if prompt_evidence else None,
             "prompt_snapshot_path": str(prompt_snapshot_artifact),
@@ -2556,6 +2572,7 @@ def _validate_external_attempt_bindings(
     running_log_path: Path | str,
     trace_path: Path | str,
     output_path: Path | str,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     _assert_attempt_cas(state, expected_attempt_id, "external_claim")
     if state.get("current_attempt") is not True:
@@ -2598,6 +2615,14 @@ def _validate_external_attempt_bindings(
     incoming_model = str(model) if model is not None else None
     if incoming_model != persisted_model:
         raise LifecycleConflict("external model does not match persisted binding")
+    persisted_effort = (
+        str(state.get("reasoning_effort"))
+        if state.get("reasoning_effort") is not None
+        else None
+    )
+    incoming_effort = str(reasoning_effort) if reasoning_effort is not None else None
+    if incoming_effort != persisted_effort:
+        raise LifecycleConflict("external reasoning effort does not match persisted binding")
     if str(scope) != str(state.get("scope")):
         raise LifecycleConflict("external scope does not match persisted binding")
     if bool(read_only) != bool(state.get("read_only")):
@@ -2644,6 +2669,8 @@ def _validate_external_attempt_bindings(
         "prompt_bytes": prompt_bytes,
         "prompt_snapshot_path": prompt_snapshot,
         "model": persisted_model,
+        "reasoning_effort": persisted_effort,
+        "reasoning_effort_source": state.get("reasoning_effort_source"),
         "scope": str(state.get("scope")),
         "read_only": bool(state.get("read_only")),
         "running_log_path": running,
@@ -2672,6 +2699,7 @@ def claim_external_attempt(
     started_by_pid: int | None,
     idempotency_key: str,
     mst_session_id: str | None,
+    reasoning_effort: str | None = None,
     _private_resources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Atomically consume one persisted external authorization.
@@ -2727,6 +2755,7 @@ def claim_external_attempt(
                 prompt_snapshot_path or state.get("prompt_snapshot_path") or ""
             ),
             model=model,
+            reasoning_effort=reasoning_effort,
             scope=scope,
             read_only=read_only,
             running_log_path=running_log_path,
@@ -2812,6 +2841,7 @@ def claim_external_attempt(
             "prompt_hash": bindings["prompt_hash"],
             "prompt_snapshot_hash": snapshot_evidence["hash"],
             "model": bindings["model"],
+            "reasoning_effort": bindings["reasoning_effort"],
             "scope": bindings["scope"],
             "read_only": bindings["read_only"],
             "running_log_path": str(bindings["running_log_path"]),
@@ -3902,6 +3932,7 @@ def _external_command(
     worktree_dir: Path | str,
     model: str | None,
     read_only: bool,
+    reasoning_effort: str | None = None,
 ) -> tuple[list[str], str]:
     worktree = str(Path(worktree_dir).resolve(strict=False))
     command = [executable]
@@ -3909,16 +3940,22 @@ def _external_command(
         command.extend(["exec", "--sandbox", "read-only"] if read_only else ["exec", "--full-auto"])
         if model:
             command.extend(["-m", str(model)])
+        if reasoning_effort:
+            command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
         command.extend(["-C", worktree, "-"])
         return command, "stdin"
     if provider == "claude":
         command.append("-p")
         if model:
             command.extend(["--model", str(model)])
+        if reasoning_effort:
+            command.extend(["--effort", str(reasoning_effort)])
         command.extend(["--permission-mode", "plan" if read_only else "acceptEdits", "--add-dir", worktree])
         return command, "stdin"
     if provider == "agy":
         command.extend(["--print", prompt])
+        if reasoning_effort:
+            command.extend(["--effort", str(reasoning_effort)])
         if not read_only:
             command.append("--dangerously-skip-permissions")
         command.extend(["--add-dir", worktree])
@@ -3956,6 +3993,7 @@ def _external_command_metadata(
     prompt_hash: str | None,
     prompt_transport: str,
     read_only: bool,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     model_value = str(model or "")
     worktree_value = str(Path(worktree_dir).resolve(strict=False))
@@ -3965,6 +4003,7 @@ def _external_command_metadata(
         "prompt_transport": prompt_transport,
         "prompt_hash": prompt_hash,
         "model_hash": "sha256:" + hashlib.sha256(model_value.encode("utf-8")).hexdigest(),
+        "reasoning_effort": reasoning_effort,
         "worktree_hash": "sha256:" + hashlib.sha256(worktree_value.encode("utf-8")).hexdigest(),
         "permission_profile": "read-only" if read_only else "workspace-write",
     }
@@ -4055,6 +4094,7 @@ def run_external_adapter(
     idempotency_key: str,
     binary: Path | str | None = None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     timeout: int | None = None,
     env: dict[str, str] | None = None,
     scope: str = "implementation",
@@ -4099,6 +4139,14 @@ def run_external_adapter(
         requested_model = str(model) if model is not None else None
         if requested_model != persisted_model:
             raise LifecycleConflict("external model does not match persisted model binding")
+        persisted_effort = (
+            str(prepared.get("reasoning_effort"))
+            if prepared.get("reasoning_effort") is not None
+            else None
+        )
+        requested_effort = str(reasoning_effort) if reasoning_effort is not None else None
+        if requested_effort != persisted_effort:
+            raise LifecycleConflict("external reasoning effort does not match persisted binding")
         if str(scope) != str(prepared.get("scope")):
             raise LifecycleConflict("external scope does not match persisted scope binding")
         if bool(read_only) != bool(prepared.get("read_only")):
@@ -4164,6 +4212,7 @@ def run_external_adapter(
             prompt_file=prompt_path,
             prompt_snapshot_path=snapshot_path,
             model=persisted_model,
+            reasoning_effort=persisted_effort,
             scope=scope,
             read_only=read_only,
             running_log_path=running_log,
@@ -4206,12 +4255,14 @@ def run_external_adapter(
             prompt=prompt_text,
             worktree_dir=resolved_worktree,
             model=persisted_model,
+            reasoning_effort=persisted_effort,
             read_only=read_only,
         )
         command_metadata = _external_command_metadata(
             provider=normalized_provider,
             executable=executable,
             model=persisted_model,
+            reasoning_effort=persisted_effort,
             worktree_dir=resolved_worktree,
             prompt_hash=prompt_execution_hash,
             prompt_transport="stdin_claimed_fd" if prompt_transport == "stdin" else prompt_transport,
@@ -4224,6 +4275,7 @@ def run_external_adapter(
             "prompt_hash": prompt_execution_hash,
             "prompt_source": "claim_memory",
             "model": persisted_model,
+            "reasoning_effort": persisted_effort,
             "worktree_dir": str(resolved_worktree),
             "output_path": str(resolved_output),
             "timeout": timeout,
@@ -5396,6 +5448,11 @@ def run_persisted_external_adapter(
         worktree_dir = str(state.get("worktree_dir") or "")
         output_path = str(state.get("output_path") or "")
         model = str(state.get("model")) if state.get("model") is not None else None
+        reasoning_effort = (
+            str(state.get("reasoning_effort"))
+            if state.get("reasoning_effort") is not None
+            else None
+        )
         scope = str(state.get("scope") or "implementation")
         read_only = bool(state.get("read_only"))
     result = run_external_adapter(
@@ -5409,6 +5466,7 @@ def run_persisted_external_adapter(
         idempotency_key=idempotency_key,
         binary=binary,
         model=model,
+        reasoning_effort=reasoning_effort,
         timeout=timeout,
         scope=scope,
         read_only=read_only,
@@ -5456,6 +5514,8 @@ def execute_delegation_bridge(
     idempotency_key: str,
     external_binary: Path | str | None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
+    reasoning_effort_source: str | None = None,
 ) -> dict[str, Any]:
     """Small host-bridge coordinator used by skills and deterministic tests."""
 
@@ -5529,7 +5589,12 @@ def execute_delegation_bridge(
                     output_path=existing.get("output_path") or output_path,
                     idempotency_key=f"{idempotency_key}:external-run",
                     binary=executable,
-                    model=model,
+                    model=(str(existing.get("model")) if existing.get("model") is not None else None),
+                    reasoning_effort=(
+                        str(existing.get("reasoning_effort"))
+                        if existing.get("reasoning_effort") is not None
+                        else None
+                    ),
                     scope=str(existing.get("scope") or scope),
                     read_only=bool(existing.get("read_only")),
                 )
@@ -5542,6 +5607,20 @@ def execute_delegation_bridge(
 
         state = existing if isinstance(existing, dict) else None
         if state is None:
+            if reasoning_effort_source is None:
+                resolved_execution = reasoning_effort_mod.resolve_execution(
+                    provider,
+                    explicit_model=model,
+                    explicit_reasoning_effort=reasoning_effort,
+                    base_dir=base_dir,
+                )
+                model = resolved_execution.get("model")
+                reasoning_effort = resolved_execution.get("reasoning_effort")
+                reasoning_effort_source = str(
+                    resolved_execution.get("reasoning_effort_source") or "default"
+                )
+            else:
+                reasoning_effort_mod.validate_reasoning_effort(provider, model, reasoning_effort)
             route = resolve_delegation_route(
                 base_dir=base_dir,
                 host=host,
@@ -5580,6 +5659,8 @@ def execute_delegation_bridge(
                     prompt_file=prompt_file,
                     output_path=output_path,
                     model=model,
+                    reasoning_effort=reasoning_effort,
+                    reasoning_effort_source=reasoning_effort_source,
                     route_decision=route,
                 )
                 if state.get("launch_surface") == "orca":
@@ -5601,6 +5682,7 @@ def execute_delegation_bridge(
                         idempotency_key=f"{idempotency_key}:external-run",
                         binary=executable,
                         model=model,
+                        reasoning_effort=reasoning_effort,
                         scope=scope,
                         read_only=read_only,
                     )
@@ -5626,6 +5708,8 @@ def execute_delegation_bridge(
                 prompt_file=prompt_file,
                 output_path=output_path,
                 model=model,
+                reasoning_effort=reasoning_effort,
+                reasoning_effort_source=reasoning_effort_source,
             )
             native_attempt_id = str(state["attempt_id"])
             if state.get("phase") == "reconciling":
@@ -5668,6 +5752,8 @@ def execute_delegation_bridge(
                         "read_only": read_only,
                         "worktree_dir": str(Path(worktree_dir).resolve(strict=False)),
                         "prompt_file": str(prompt_file),
+                        "model": model,
+                        "reasoning_effort": reasoning_effort,
                         "idempotency_key": f"{idempotency_key}:host-spawn",
                     }
                 )
@@ -5749,7 +5835,12 @@ def execute_delegation_bridge(
                     output_path=output_path,
                     idempotency_key=f"{idempotency_key}:external-run",
                     binary=executable,
-                    model=model,
+                    model=(str(state.get("model")) if state.get("model") is not None else None),
+                    reasoning_effort=(
+                        str(state.get("reasoning_effort"))
+                        if state.get("reasoning_effort") is not None
+                        else None
+                    ),
                     scope=scope,
                     read_only=read_only,
                 )
@@ -5954,9 +6045,11 @@ def plan_delegation_route(
         )
 
     original = json.loads(json.dumps(payload, ensure_ascii=False))
+    orca_applicable = payload.get("route") == "external"
     preflight = dict(orca_preflight) if isinstance(orca_preflight, dict) else {}
     preflight_ready = bool(
         orca_enabled
+        and orca_applicable
         and external_available
         and preflight.get("ok") is True
         and str(preflight.get("runtime_scope") or "local").lower() == "local"
@@ -5964,20 +6057,22 @@ def plan_delegation_route(
     )
     payload.update(
         {
-            "requested_launch_surface": "orca" if orca_enabled else "direct",
+            "requested_launch_surface": "orca" if orca_enabled and orca_applicable else "direct",
             "launch_surface": "orca" if preflight_ready else "direct",
             "launch_surface_status": (
                 "ready"
                 if preflight_ready
                 else "disabled"
                 if not orca_enabled
+                else "not_applicable"
+                if not orca_applicable
                 else "preflight_failed"
                 if preflight
                 else "preflight_required"
             ),
         }
     )
-    if orca_enabled:
+    if orca_enabled and orca_applicable:
         payload["orca_preflight"] = {
             key: preflight.get(key)
             for key in (
@@ -5992,18 +6087,8 @@ def plan_delegation_route(
             if preflight.get(key) is not None
         }
     if preflight_ready:
-        payload.update(
-            {
-                "route": "external",
-                "execution_transport": "external",
-                "reason_code": "orca_launch_surface_ready",
-                "route_cause": "orca_launch_surface",
-                "handshake_required": False,
-                "original_route_decision": original,
-                "original_route_fingerprint": _route_fingerprint(original),
-            }
-        )
-        payload.pop("failure_kind", None)
+        payload["original_route_decision"] = original
+        payload["original_route_fingerprint"] = _route_fingerprint(original)
     return payload
 
 
@@ -6208,8 +6293,19 @@ def resolve_delegation_route(
         if external_adapter_available is None
         else bool(external_adapter_available)
     )
+    base_route = plan_delegation_route(
+        host=host,
+        provider=provider,
+        transport_policy=transport_policy or settings["transport_policy"],
+        scope=scope,
+        native_enabled=settings["native_enabled"] if native_enabled is None else native_enabled,
+        configured_scope=settings["configured_scope"] if configured_scope is None else configured_scope,
+        capability_status=capability_status,
+        external_adapter_available=resolved_external_available,
+        orca_enabled=False,
+    )
     orca_preflight: dict[str, Any] | None = None
-    if settings["orca_enabled"]:
+    if settings["orca_enabled"] and base_route.get("route") == "external":
         if not resolved_external_available:
             orca_preflight = {
                 "ok": False,
@@ -6257,7 +6353,11 @@ def _cli_base_dir() -> Path:
 def _emit_cli_action(action, *, terminal_success_required: bool = False) -> int:
     try:
         payload = action()
-    except (LifecycleConflict, ExternalAdapterUnavailable) as exc:
+    except (
+        LifecycleConflict,
+        ExternalAdapterUnavailable,
+        reasoning_effort_mod.ReasoningEffortError,
+    ) as exc:
         print(
             json.dumps(
                 {
@@ -6324,8 +6424,14 @@ def cmd_delegation_capability(args: argparse.Namespace) -> int:
 
 
 def cmd_delegation_start(args: argparse.Namespace) -> int:
-    return _emit_cli_action(
-        lambda: start_native_attempt(
+    def action() -> dict[str, Any]:
+        execution = reasoning_effort_mod.resolve_execution(
+            args.provider,
+            args.selector,
+            explicit_model=args.model,
+            explicit_reasoning_effort=args.reasoning_effort,
+        )
+        return start_native_attempt(
             base_dir=_cli_base_dir(),
             task_id=args.task_id,
             attempt_id=args.attempt_id,
@@ -6342,12 +6448,17 @@ def cmd_delegation_start(args: argparse.Namespace) -> int:
             running_log_path=args.running_log_path,
             trace_path=args.trace_path,
             output_path=args.output_path,
-            model=args.model,
+            model=execution.get("model"),
+            reasoning_effort=execution.get("reasoning_effort"),
+            reasoning_effort_source=execution.get("reasoning_effort_source"),
             mst_session_id=args.mst_session_id,
             root_mst_id=args.root_mst_id,
             parent_session_id=args.parent_session_id,
             parent_heartbeat=args.parent_heartbeat,
         )
+
+    return _emit_cli_action(
+        action
     )
 
 
@@ -6519,6 +6630,7 @@ def cmd_delegation_external_run(args: argparse.Namespace) -> int:
             idempotency_key=args.idempotency_key,
             binary=args.binary,
             model=args.model,
+            reasoning_effort=args.reasoning_effort,
             timeout=args.timeout,
             scope=args.scope,
             read_only=args.read_only,
@@ -6575,6 +6687,8 @@ def register(subparsers) -> None:
     start.add_argument("--trace-path")
     start.add_argument("--output-path")
     start.add_argument("--model")
+    start.add_argument("--selector", default="default")
+    start.add_argument("--reasoning-effort")
     start.add_argument("--mst-session-id")
     start.add_argument("--root-mst-id")
     start.add_argument("--parent-session-id")
@@ -6659,6 +6773,7 @@ def register(subparsers) -> None:
     external_run.add_argument("--idempotency-key", required=True)
     external_run.add_argument("--binary")
     external_run.add_argument("--model")
+    external_run.add_argument("--reasoning-effort")
     external_run.add_argument("--timeout", type=int)
     external_run.add_argument("--scope", default="implementation")
     external_run.add_argument("--read-only", action="store_true")

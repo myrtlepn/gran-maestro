@@ -144,15 +144,18 @@
       "agents": {
         "codex": {
           "count": 1,
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         "agy": {
           "count": 0,
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         "claude": {
           "count": 0,
-          "tier": "economy"
+          "tier": "economy",
+          "reasoning_effort": "default"
         }
       },
       "max_rounds": 3,
@@ -170,15 +173,18 @@
       "agents": {
         "codex": {
           "count": 1,
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         "agy": {
           "count": 1,
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         "claude": {
           "count": 0,
-          "tier": "economy"
+          "tier": "economy",
+          "reasoning_effort": "default"
         }
       }
     }
@@ -286,15 +292,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     }
   },
@@ -302,15 +311,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     }
   },
@@ -318,15 +330,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     },
     "response_char_limit": 2000,
@@ -338,15 +353,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     },
     "opinion_char_limit": 2000,
@@ -361,15 +379,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     }
   },
@@ -378,51 +399,61 @@
       "codex": {
         "premium": "gpt-5.4",
         "economy": "gpt-5.3-codex-spark",
-        "default_tier": "premium"
+        "default_tier": "premium",
+        "default_reasoning_effort": "inherit"
       },
       "agy": {
         "premium": "agy-default",
         "economy": "agy-default",
-        "default_tier": "premium"
+        "default_tier": "premium",
+        "default_reasoning_effort": "inherit"
       },
       "claude": {
         "premium": "opus",
         "economy": "sonnet",
-        "default_tier": "economy"
+        "default_tier": "economy",
+        "default_reasoning_effort": "inherit"
       }
     },
     "roles": {
       "pm_conductor": {
         "provider": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "architect": {
         "provider": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "developer": [
         {
           "provider": "codex",
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         {
           "provider": "agy",
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         }
       ],
       "developer_claude": {
         "provider": "claude",
         "tier": "premium",
+        "reasoning_effort": "default",
         "enabled": false
       },
       "reviewer": [
         {
           "provider": "codex",
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         },
         {
           "provider": "agy",
-          "tier": "premium"
+          "tier": "premium",
+          "reasoning_effort": "default"
         }
       ]
     }
@@ -442,7 +473,8 @@
     "max_verification_rounds": 3,
     "agent": {
       "provider": "codex",
-      "tier": "premium"
+      "tier": "premium",
+      "reasoning_effort": "default"
     }
   },
   "reference": {
@@ -541,22 +573,26 @@
       "architect": {
         "enabled": true,
         "agent": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "devils_advocate": {
         "enabled": true,
         "agent": "agy",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "completeness": {
         "enabled": true,
         "agent": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "ux_reviewer": {
         "enabled": true,
         "agent": "agy",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       }
     }
   },
@@ -599,34 +635,41 @@
     "roles": {
       "code_reviewer": {
         "agent": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "arch_reviewer": {
         "agent": "agy",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "ui_reviewer": {
         "agent": "agy",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "browser_tester": {
         "agent": "codex",
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       },
       "intent_fidelity": {
         "agent": "codex",
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "impact_reviewer": {
         "enabled": true,
         "agent": "codex",
         "tier": "premium",
+        "reasoning_effort": "default",
         "enhanced_analysis": true
       },
       "adversarial_reviewer": {
         "enabled": false,
         "agent": "codex",
         "tier": "premium",
+        "reasoning_effort": "default",
         "trigger": "auto",
         "auto_conditions": {
           "min_changed_files": 3,
@@ -693,15 +736,18 @@
     "agents": {
       "codex": {
         "count": 2,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "agy": {
         "count": 0,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "claude": {
         "count": 0,
-        "tier": "economy"
+        "tier": "economy",
+        "reasoning_effort": "default"
       }
     },
     "cynefin_skip": [
@@ -748,12 +794,14 @@
       "symbol_tracing": {
         "agent": "codex",
         "enabled": true,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       },
       "broad_scan": {
         "agent": "agy",
         "enabled": true,
-        "tier": "premium"
+        "tier": "premium",
+        "reasoning_effort": "default"
       }
     }
   },

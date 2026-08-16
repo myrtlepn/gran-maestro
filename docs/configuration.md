@@ -186,7 +186,7 @@ Host와 provider를 분리하고 중앙 route planner가 `native_candidate`, `ex
 | `delegation.transport_policy` | `"same-host-native-first"` | `same-host-native-first` 또는 native를 건너뛰는 `external-only` |
 | `delegation.native.enabled` | `true` | same-host native candidate 허용 여부 |
 | `delegation.native.scope` | `"all"` | native 허용 scope (`all`, `review-and-exploration-only`, `review-only`, `exploration-only`, `implementation-only`, `none`) |
-| `delegation.orca.enabled` | `false` | 보호된 provider CLI runner를 exact MST worktree의 로컬 Orca background terminal에서 시작할지 여부 |
+| `delegation.orca.enabled` | `false` | 이미 external로 결정된 provider CLI runner를 exact MST worktree의 로컬 Orca background terminal에서 시작할지 여부 |
 | `agile.dispatch.provider` | `"codex"` | Sprint dispatch provider (`codex` / `agy` / `claude`) |
 
 ### Route 선택과 CLI 요구사항
@@ -199,7 +199,7 @@ Host와 provider를 분리하고 중앙 route planner가 `native_candidate`, `ex
 
 `capability_status=unknown`인 same-host route는 곧바로 external로 내리지 않고 native capability handshake를 요구합니다. Native spawn이 `definitive_not_created`로 확정된 경우에만 같은 provider의 external wrapper fallback을 허용합니다. Spawn 승인 또는 provider task ID 이후 attach 실패·timeout·결과 불명·취소 미확인은 `reconciling`으로 남기고 새 native spawn과 external 중복 실행을 모두 차단합니다. Native task 자체의 실패도 terminal failure이며 transport fallback 사유가 아닙니다.
 
-`delegation.orca.enabled=true`이면 Codex, Claude, AGY 모두 기존 보호된 external runner를 Orca launch surface로 시작합니다. Orca는 provider나 lifecycle owner가 아니며 Run/Task/Dispatch API도 사용하지 않습니다. MST가 만든 absolute worktree만 `path:<absolute-worktree>`로 preflight/선택하고, V1은 ready 상태인 local runtime만 지원합니다. Preflight가 terminal create 호출 전에 확정적으로 실패하면 원래 route를 다시 사용하지만, create 호출 이후 응답 유실이나 handle 불명은 fallback하지 않고 exact worktree와 `MST/<task>/<attempt>` title로 reconcile합니다. 성공 attempt는 terminal 내부 runner가 output·history와 cleanup-ready evidence를 먼저 저장한 뒤, terminal 밖의 launch controller가 tab을 닫습니다. 실패·취소·unknown terminal과 terminal 내부 worker의 실행 전 실패·provider 회수 불명은 controller 대기를 끝내고 진단을 위해 보존합니다. `ORCA_CLI_COMMAND`의 wrapper 인자는 정상 응답뿐 아니라 timeout·structured error에도 redaction하고 provider 환경에도 전달하지 않습니다. 구조화된 MST context binding은 canonical fallback과 공개 호환 CLI를 포함한 모든 진입점의 provider-spawn 경계에서 inherited 환경보다 우선해 적용하며, provider output과 runtime log를 저장하기 전에 raw/JSON-escaped exact context 값을 redaction합니다. Terminal 출력은 진단용이며 MST output hash와 lifecycle state가 완료의 기준입니다.
+`delegation.orca.enabled=true`이면 이미 `external`로 결정된 Codex, Claude, AGY 보호 runner만 Orca launch surface로 시작합니다. Orca는 native candidate를 external로 바꾸지 않으며 model/effort binding과 provider 기능 범위도 바꾸지 않습니다. Orca는 provider나 lifecycle owner가 아니며 Run/Task/Dispatch API도 사용하지 않습니다. MST가 만든 absolute worktree만 `path:<absolute-worktree>`로 preflight/선택하고, V1은 ready 상태인 local runtime만 지원합니다. Preflight가 terminal create 호출 전에 확정적으로 실패하면 direct external로 실행하지만, create 호출 이후 응답 유실이나 handle 불명은 fallback하지 않고 exact worktree와 `MST/<task>/<attempt>` title로 reconcile합니다. 성공 attempt는 terminal 내부 runner가 output·history와 cleanup-ready evidence를 먼저 저장한 뒤, terminal 밖의 launch controller가 tab을 닫습니다. 실패·취소·unknown terminal과 terminal 내부 worker의 실행 전 실패·provider 회수 불명은 controller 대기를 끝내고 진단을 위해 보존합니다. `ORCA_CLI_COMMAND`의 wrapper 인자는 정상 응답뿐 아니라 timeout·structured error에도 redaction하고 provider 환경에도 전달하지 않습니다. 구조화된 MST context binding은 canonical fallback과 공개 호환 CLI를 포함한 모든 진입점의 provider-spawn 경계에서 inherited 환경보다 우선해 적용하며, provider output과 runtime log를 저장하기 전에 raw/JSON-escaped exact context 값을 redaction합니다. Terminal 출력은 진단용이며 MST output hash와 lifecycle state가 완료의 기준입니다.
 
 Route planner는 transport를 실행하지 않고 JSON 결정만 반환합니다.
 
@@ -342,12 +342,15 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium 모델 |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy 모델 |
 | `models.providers.codex.default_tier` | `"premium"` | Codex 기본 티어 |
+| `models.providers.codex.default_reasoning_effort` | `"inherit"` | Codex 기본 추론 난이도 |
 | `models.providers.agy.premium` | `"agy-default"` | AGY premium 모델 |
 | `models.providers.agy.economy` | `"agy-default"` | AGY economy 모델 |
 | `models.providers.agy.default_tier` | `"premium"` | AGY 기본 티어 |
+| `models.providers.agy.default_reasoning_effort` | `"inherit"` | AGY 기본 추론 난이도 |
 | `models.providers.claude.premium` | `"opus"` | Claude premium 모델 |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy 모델 |
 | `models.providers.claude.default_tier` | `"economy"` | Claude 기본 티어 |
+| `models.providers.claude.default_reasoning_effort` | `"inherit"` | Claude 기본 추론 난이도 |
 
 ### models.roles
 
@@ -368,6 +371,8 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 예: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.3-codex"`
 
 `tier`를 생략하면 해당 프로바이더의 `default_tier`가 적용됩니다.
+
+각 agent/role 객체의 `reasoning_effort`는 `default | inherit | low | medium | high | xhigh | max | ultra`를 사용합니다. `default`는 provider의 `default_reasoning_effort`를 따르고, `inherit`은 native host 또는 CLI 기본값을 사용합니다. concrete 값은 호출별 값이 provider 기본값보다 우선하며, 현재 provider/model이 지원하지 않는 값은 실행 전에 차단됩니다. 동일한 resolved 값이 native, direct external, Orca external에 적용됩니다.
 
 > **용어 주의: model tier vs preset tier**
 >

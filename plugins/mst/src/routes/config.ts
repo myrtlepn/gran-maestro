@@ -1,10 +1,49 @@
 import { Hono } from "https://deno.land/x/hono@v4.3.11/mod.ts";
+import { dirname, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { readJsonFile, writeJsonFile, diffFromBase, deepMerge } from "../utils.ts";
 import { DEFAULTS_PATH, PLUGIN_ROOT, resolveBaseDir, registry } from "../config.ts";
 import type { ConfigResponse, GranMaestroConfig } from "../types.ts";
 import { loadSettingOptions, validateConfigValues } from "../validation.ts";
 
 const projectConfigApi = new Hono();
+
+projectConfigApi.get("/config/reasoning-capabilities", async (c) => {
+  const baseDir = resolveBaseDir(c.req.param("projectId"));
+  if (!baseDir) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  try {
+    const child = new Deno.Command("python3", {
+      args: [join(PLUGIN_ROOT, "scripts", "mst.py"), "reasoning-capabilities"],
+      cwd: dirname(baseDir),
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    const timeoutId = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The child may have exited between scheduling and cancellation.
+      }
+    }, 15_000);
+    const output = await child.output();
+    clearTimeout(timeoutId);
+    if (!output.success) {
+      const detail = new TextDecoder().decode(output.stderr).trim();
+      return c.json({ error: detail || "Reasoning capability probe failed" }, 503);
+    }
+    const payload = JSON.parse(new TextDecoder().decode(output.stdout));
+    return c.json(payload);
+  } catch (err) {
+    return c.json(
+      {
+        error: err instanceof Error ? err.message : "Reasoning capability probe failed",
+      },
+      503,
+    );
+  }
+});
 
 projectConfigApi.get("/config", async (c) => {
   const baseDir = resolveBaseDir(c.req.param("projectId"));

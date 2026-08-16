@@ -80,7 +80,7 @@ class FakeOrcaClient:
 
 def _route(*, provider: str = "codex", ready: bool = True) -> dict:
     route = plan_delegation_route(
-        host="codex",
+        host="headless",
         provider=provider,
         scope="analysis",
         native_enabled=True,
@@ -156,18 +156,43 @@ def test_orca_ready_routes_all_supported_providers_to_exact_worktree(provider: s
     assert route["execution_transport"] == "external"
     assert route["launch_surface"] == "orca"
     assert route["requested_launch_surface"] == "orca"
-    assert route["original_route_decision"]["route"] in {"native_candidate", "external"}
+    assert route["original_route_decision"]["route"] == "external"
     assert _route_fingerprint(route) != route["original_route_fingerprint"]
 
 
 def test_orca_preflight_failure_falls_back_before_create() -> None:
     route = _route(ready=False)
 
-    assert route["route"] == "native_candidate"
-    assert route["execution_transport"] == "native"
+    assert route["route"] == "external"
+    assert route["execution_transport"] == "external"
     assert route["launch_surface"] == "direct"
     assert route["requested_launch_surface"] == "orca"
     assert route["launch_surface_status"] == "preflight_failed"
+
+
+def test_orca_never_changes_an_available_native_route() -> None:
+    route = plan_delegation_route(
+        host="codex",
+        provider="codex",
+        scope="analysis",
+        native_enabled=True,
+        configured_scope="all",
+        capability_status="available",
+        external_adapter_available=True,
+        orca_enabled=True,
+        orca_preflight={
+            "ok": True,
+            "runtime_scope": "local",
+            "worktree_selector": "path:/tmp/worktree",
+        },
+    )
+
+    assert route["route"] == "native_candidate"
+    assert route["execution_transport"] == "native"
+    assert route["launch_surface"] == "direct"
+    assert route["requested_launch_surface"] == "direct"
+    assert route["launch_surface_status"] == "not_applicable"
+    assert "orca_preflight" not in route
 
 
 def test_native_definitive_non_creation_fallback_uses_orca(
