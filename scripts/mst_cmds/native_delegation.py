@@ -3937,7 +3937,14 @@ def _external_command(
     worktree = str(Path(worktree_dir).resolve(strict=False))
     command = [executable]
     if provider == "codex":
-        command.extend(["exec", "--sandbox", "read-only"] if read_only else ["exec", "--full-auto"])
+        # `--full-auto` was removed from recent Codex CLI releases. Use the
+        # stable sandbox spelling for both lanes so an external invocation
+        # reaches the prompt instead of failing during argument parsing.
+        command.extend(
+            ["exec", "--sandbox", "read-only"]
+            if read_only
+            else ["exec", "--sandbox", "workspace-write"]
+        )
         if model:
             command.extend(["-m", str(model)])
         if reasoning_effort:

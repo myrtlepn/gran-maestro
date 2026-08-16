@@ -716,9 +716,9 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 # route=external + codex-dev인 경우에만 (OMX_AUTOPILOT=true 시 \$autopilot 프리픽스 삽입)
 Bash(
   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex");
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" < /dev/null',   # OMX_AUTOPILOT=true
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --sandbox workspace-write -m "$MODEL" -C {worktree_path} "\$autopilot $(cat {prompt_file})" < /dev/null',   # OMX_AUTOPILOT=true
   # 또는:
-  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --full-auto -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" < /dev/null',              # OMX_AUTOPILOT=false
+  command: 'python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ-ID}-T{TASK-NUM} --provider codex --model "$MODEL" --log-dir {task_dir} --trace {REQ-ID}/{TASK-NUM}/phase2-impl --require-worktree --worktree-dir {worktree_path} -- codex exec --sandbox workspace-write -m "$MODEL" -C {worktree_path} "$(cat {prompt_file})" < /dev/null',              # OMX_AUTOPILOT=false
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}
 )

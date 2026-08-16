@@ -685,7 +685,7 @@ Step 2.2.3은 `Bash(python3 {PLUGIN_ROOT}/scripts/mst.py config get agile.dispat
        --trace {AGI_ID}/S{NN}/dispatch \
        --require-worktree \
        --worktree-dir "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" \
-       -- codex exec --full-auto -m "$MODEL" -C "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" "$(cat sprint-prompt.md)"
+       -- codex exec --sandbox workspace-write -m "$MODEL" -C "{PROJECT_ROOT}/.gran-maestro/worktrees/{AGI_ID}/sprint-{CURRENT_SPRINT}/" "$(cat sprint-prompt.md)"
      ```
    - `PROVIDER=agy`, external lane call:
      ```bash

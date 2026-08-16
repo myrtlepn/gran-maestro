@@ -191,16 +191,16 @@ DELEGATION BOUNDARY (MANDATORY)
 5. 공통 routing protocol로 host와 route를 결정한다. `native_candidate`면 Codex collaboration spawn/attach/wait/result 경로를 실행하고 native lifecycle evidence를 기록한다.
 6. `route=external`인 경우에만 기본 모델과 Codex sandbox 플래그를 resolve한다:
    ```bash
-   SANDBOX_ARGS="--full-auto"
+   SANDBOX_ARGS="--sandbox workspace-write"
    if [ "${NETWORK_MODE:-false}" = "true" ]; then
-     SANDBOX_ARGS="-s danger-full-access -a on-request"
+     SANDBOX_ARGS="--sandbox danger-full-access"
    fi
    ```
 7. **External lane only** — `route=external`인 경우에만 Codex CLI adapter 실행:
    ```bash
    MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex")
-   SANDBOX_ARGS="--full-auto"
-   [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="-s danger-full-access -a on-request"
+   SANDBOX_ARGS="--sandbox workspace-write"
+   [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="--sandbox danger-full-access"
 
    # 인라인 프롬프트
    python3 {PLUGIN_ROOT}/scripts/mst.py run \
@@ -252,7 +252,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py run \
   --trace REQ-001/01/phase2-impl \
   --require-worktree \
   --worktree-dir {worktree} \
-  -- codex exec --full-auto -m gpt-5.3-codex -C {worktree} "$(cat {prompt_file})"
+  -- codex exec --sandbox workspace-write -m gpt-5.3-codex -C {worktree} "$(cat {prompt_file})"
 ```
 
 wrapper는 자동으로 다음을 처리합니다.
@@ -274,7 +274,7 @@ wrapper는 자동으로 다음을 처리합니다.
 - `--ephemeral`: 상태를 보존하지 않는 일회성 실행
 - `--output {file}`: 결과를 파일로 저장 (독립 호출용)
 - `--trace {REQ/TASK/label}`: 워크플로우 trace 문서 자동 생성 (stdout 반환 안 함)
-- `--network`: Codex sandbox를 `-s danger-full-access -a on-request`로 전환 (미지정 시 `--full-auto`)
+- `--network`: Codex sandbox를 `--sandbox danger-full-access`로 전환 (미지정 시 `--sandbox workspace-write`)
 
 > `--trace`와 `--output`이 동시에 지정되면 `--trace`가 우선합니다.
 > `--prompt-file`과 인라인 프롬프트가 동시에 지정되면 `--prompt-file`이 우선합니다.
@@ -291,7 +291,7 @@ wrapper는 자동으로 다음을 처리합니다.
 
 - 같은 Codex host의 native lane에는 Codex CLI가 필요하지 않다. `route=external`인 경우에만 `codex --version` preflight가 필요하며 미설치 시 route의 `blocked/missing_cli` 결과를 그대로 보고한다.
 - `--network`는 명시적으로 위험 권한을 허용하므로 네트워크가 반드시 필요한 작업에서만 사용
-- `--full-auto` 모드는 기본 sandbox(workspace-write) 기준 파일 수정 권한이 있으므로 주의
+- `--sandbox workspace-write` 모드는 파일 수정 권한이 있으므로 주의
 - `--trace` 모드에서는 전체 결과가 파일에만 저장되고 부모 컨텍스트에 반환 안 됨
 - "타임아웃" → `/mst:settings timeouts.cli_large_task_ms` 확인
 - "trace 디렉토리 생성 실패" → `requests/{REQ-ID}/tasks/{TASK-NUM}/` 경로 확인

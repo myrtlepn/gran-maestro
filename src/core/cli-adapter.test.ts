@@ -95,12 +95,11 @@ runSerialTest("CodexAdapter.execute uses danger sandbox flags when sandboxMode i
   }
 
   const command = getSpawnedShellCommand(calls);
-  assert(command.includes("-s danger-full-access"));
-  assert(command.includes("-a on-request"));
+  assert(command.includes("codex exec --sandbox danger-full-access"));
   assert(!command.includes("--full-auto"));
 });
 
-runSerialTest("CodexAdapter.execute keeps --full-auto when sandboxMode is not provided", async () => {
+runSerialTest("CodexAdapter.execute uses workspace-write sandbox by default", async () => {
   const calls: CommandCall[] = [];
   const restore = installCommandMock(calls);
   const adapter = new CodexAdapter();
@@ -115,7 +114,8 @@ runSerialTest("CodexAdapter.execute keeps --full-auto when sandboxMode is not pr
   }
 
   const command = getSpawnedShellCommand(calls);
-  assert(command.includes("--full-auto"));
+  assert(command.includes("codex exec --sandbox workspace-write"));
+  assert(!command.includes("--full-auto"));
 });
 
 function assert(condition: unknown, message?: string): asserts condition {

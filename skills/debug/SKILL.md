@@ -367,7 +367,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py config get prompt_builder.enabled prompt_bu
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex debug 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{investigatorKey}-prompt.md)\" > {absolute_path}/finding-{investigatorKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/finding-{investigatorKey}.md; exit $EC"
+    command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex debug 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{investigatorKey}-prompt.md)\" > {absolute_path}/finding-{investigatorKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/finding-{investigatorKey}.md; exit $EC"
   )
   ```
 - `provider: "agy"`:

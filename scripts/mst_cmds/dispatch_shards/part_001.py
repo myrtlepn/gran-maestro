@@ -2544,7 +2544,13 @@ def cmd_dispatch_build(args):
     )
     resolved_effort = execution.get("reasoning_effort")
     if provider == "codex":
-        permission_args = "--sandbox read-only" if authorization_read_only else "--full-auto"
+        # `--full-auto` was removed from recent Codex CLI releases. Keep the
+        # permission policy explicit using the supported sandbox flag.
+        permission_args = (
+            "--sandbox read-only"
+            if authorization_read_only
+            else "--sandbox workspace-write"
+        )
         codex_effort_config = f'model_reasoning_effort="{resolved_effort}"'
         effort_args = (
             f"-c {q(codex_effort_config)} "

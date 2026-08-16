@@ -398,7 +398,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{participant.key}-prompt.md)\" > {absolute_path}/opinion-{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/opinion-{participant.key}.md; exit $EC"
+    command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/{participant.key}-prompt.md)\" > {absolute_path}/opinion-{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/opinion-{participant.key}.md; exit $EC"
   )
   ```
 - `provider: "agy"`:
@@ -427,7 +427,7 @@ Critic에도 별도 route/lifecycle을 적용한다. 아래 Bash는 `route=exter
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/critique-{criticKey}.md; exit $EC"
+    command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex ideation 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/critique-{criticKey}.md; exit $EC"
   )
   ```
 - `provider: "agy"`:

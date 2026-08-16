@@ -128,20 +128,21 @@ export async function runWithTimeout(
  * Codex CLI adapter.
  *
  * The exact CLI flags are subject to verification against the real binary
- * (`codex --help`). The current implementation uses the best-known invocation.
+ * (`codex --help`). Keep sandbox policy explicit because recent Codex CLI
+ * versions no longer accept the legacy `--full-auto` flag.
  */
 export class CodexAdapter implements CLIAdapter {
   name = 'codex';
 
   async execute(prompt: string, opts: CLIOptions): Promise<CLIResult> {
-    // Verified: `codex --full-auto` is the non-interactive default mode.
-    // For network-required tasks, sandbox can be widened via explicit mode.
+    // `workspace-write` is the normal non-interactive policy. For
+    // network-required tasks, sandbox can be widened via explicit mode.
     // -C flag / cwd may differ -- using cwd via process spawn.
     const escapedPrompt = prompt.replace(/"/g, '\\"');
     const useDangerSandbox = opts.sandboxMode === 'danger-full-access';
     let cmd = useDangerSandbox
-      ? `codex -s danger-full-access -a on-request "${escapedPrompt}"`
-      : `codex --full-auto "${escapedPrompt}"`;
+      ? `codex exec --sandbox danger-full-access "${escapedPrompt}"`
+      : `codex exec --sandbox workspace-write "${escapedPrompt}"`;
     if (opts.model) {
       cmd += ` --model ${opts.model}`;
     }

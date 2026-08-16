@@ -370,7 +370,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
      ```
      Bash(
        run_in_background: true,
-       command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/00/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/{participant.key}.md; exit $EC"
+       command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/00/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/{participant.key}.md; exit $EC"
      )
      ```
    - `provider: "agy"`:
@@ -396,7 +396,7 @@ TIMEOUT이면 완료된 파일들만으로 진행합니다.
      ```
      Bash(
        run_in_background: true,
-       command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/00/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/critique-{criticKey}.md; exit $EC"
+       command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/00/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/00/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/00/critique-{criticKey}.md; exit $EC"
      )
      ```
    - `provider: "agy"`:
@@ -535,7 +535,7 @@ participant 발송 (`participants` 동적 순회):
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/NN/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/{participant.key}.md; exit $EC"
+    command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/{participant.key}-prompt.md)\" > {absolute_path}/rounds/NN/{participant.key}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/{participant.key}.md; exit $EC"
   )
   ```
 - `provider: "agy"`:
@@ -562,7 +562,7 @@ critic 동시 발송 (`critics` 동적 순회):
   ```
   Bash(
     run_in_background: true,
-    command: "codex exec --full-auto -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/NN/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/critique-{criticKey}.md; exit $EC"
+    command: "codex exec --sandbox workspace-write -m $(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex discussion 2>/dev/null || echo \"gpt-5.3-codex\") -C $(pwd) \"$(cat {absolute_path}/rounds/NN/prompts/critique-{criticKey}-prompt.md)\" > {absolute_path}/rounds/NN/critique-{criticKey}.md < /dev/null 2>&1; EC=$?; echo \"EXIT_CODE:$EC\" >> {absolute_path}/rounds/NN/critique-{criticKey}.md; exit $EC"
   )
   ```
 - `provider: "agy"`:
