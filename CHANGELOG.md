@@ -8,6 +8,21 @@
 
 ---
 
+## [0.65.0] — 2026-08-16
+
+### 새 기능
+
+- **MST 호출별 추론 난이도 설정**: Codex·AGY·Claude provider 기본값과 각 agent/role 호출에 `default`, `inherit` 또는 provider/model이 지원하는 구체적인 추론 난이도를 지정할 수 있습니다.
+- **모델 capability 기반 Settings UI**: 일반 워크플로우 설정과 고급 설정에서 추론 난이도를 편집하며, 현재 선택한 모델이 실제 지원하는 값만 표시합니다.
+
+### 개선
+
+- **실행 transport 간 동일한 binding 보장**: model과 reasoning effort를 native, direct external, Orca external 실행 전체에서 하나의 lifecycle binding으로 보존합니다.
+- **지원하지 않는 조합의 사전 차단**: provider 실행 전에 capability를 검증해 지원하지 않는 추론 난이도가 다른 transport나 기본값으로 조용히 우회되지 않도록 했습니다.
+- **Orca 책임 경계 명확화**: Orca는 이미 external로 판정된 호출의 launch surface만 변경하며 native route나 provider/model 기능 범위를 변경하지 않습니다.
+
+---
+
 ## [0.64.0] — 2026-07-13
 
 ### 새 기능
