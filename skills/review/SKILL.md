@@ -501,20 +501,20 @@ python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir "
    - 조회된 INTENT가 존재하면 `feature/situation/motivation/goal`을 리뷰어 프롬프트에 의도 위반 체크 컨텍스트로 주입. 결과 없으면 skip (비차단).
 4-b. **Intent Trace 컨텍스트 수집 (intent_fidelity 전용)**:
    - 현재 태스크 `spec.md`의 `## 3.2 Intent Trace` 섹션을 `{INTENT_TRACE_SECTION}`으로 보관.
-   - `source_plan` 존재 시: `plan.md`의 `## 요청 (Refined)` + `## Intent (JTBD)`를 `{PLAN_INTENT_CONTEXT}`로 보관.
+   - `source_plan` 존재 시: `plan.md`의 `## 사용자 최초 의도` + `## 요청 (Refined)`를 `{PLAN_INTENT_CONTEXT}`로 보관. `## Intent (JTBD)`와 과거 linked intent는 추론 보조로만 분리한다.
    - `Intent Trace`의 `근거 출처`에 포함된 `docs/` 경로를 Read하여 `{INTENT_DOCS_CONTEXT}`로 보관 (없으면 skip).
    - 섹션 미존재 시: `intent_fidelity_skip_reason = "Intent Fidelity 리뷰 skip (Intent Trace 없음)"` 설정 후 auto-skip.
 4-b-1. **PO 의도 검증 컨텍스트 수집 (po_intent_validation 전용, MANDATORY)**:
    - `po_intent_validation`은 accept 단계가 소비하는 별도 산출물이며, 기존 `intent_fidelity` 산출물이나 blocking 판정을 대체하지 않는다.
    - `request.json.source_plan`이 없으면 `po_intent_validation.verdict="SKIP"`, `reason="NO_SOURCE_PLAN"`으로 기록할 준비를 하고 원본 비교를 임의 PASS 처리하지 않는다.
-   - `source_plan`이 있으면 아래 원본 의도 소스를 모두 수집해 `{PO_INTENT_SOURCE_CONTEXT}`로 보관한다.
-     - 원본 문서: `request.json.original_request` 및 spec `## 3.2 Intent Trace`의 `근거 출처`에 포함된 직접 문서 경로(존재하는 경우 Read).
-     - plan: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`의 `## 요청 (Refined)`, `## Intent (JTBD)`, `## 결정 사항`, `## 범위`, `## 제약사항`.
-     - PAC: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`의 `id`, `grade`, `tags`, `text`.
-     - spec Intent Trace: 현재 태스크 `spec.md`의 `## 3.2 Intent Trace` 원문.
+   - `source_plan`이 있으면 아래 컨텍스트를 역할별로 분리해 수집한다.
+     - canonical Intent Anchor: plan.md의 `## 사용자 최초 의도`를 `original_intent`, `## 요청 (Refined)`를 `refined_intent`로 보관한다. legacy plan에 최초 의도 섹션이 없으면 request의 최초 사용자 요청을 fallback으로 쓰고 사유를 남긴다.
+     - 실행 검증 기준: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.ids.json`의 PAC와 spec `## 3.2 Intent Trace`. 이는 Intent Anchor를 실현했는지 검증하는 기준이지 새로운 사용자 의도 소스가 아니다.
+     - 추론 보조: `linked_intent`, docs, `## Intent (JTBD)`, 구현 계획과 리뷰 finding. Anchor와 충돌하거나 범위를 넓히는 근거로 사용하지 않는다.
    - spec `## 3.2 Intent Trace`가 없으면 `po_intent_validation.verdict="SKIP"`, `reason="NO_INTENT_TRACE"`으로 기록할 준비를 한다.
    - 변경 내용 비교 소스는 `changed_files`와 `git diff <base>..HEAD` 또는 동등한 현재 iteration diff를 `{PO_INTENT_CHANGE_CONTEXT}`로 보관한다. 변경 파일과 diff를 모두 확보할 수 없으면 `reason="NO_CHANGED_FILES_OR_DIFF"`으로 SKIP한다.
-   - PASS 조건은 엄격하다. 원본 의도 소스(`original_documents`, `plan`, `plan_ac`, `spec_intent_trace`)와 실제 변경 소스(`changed_files` 또는 `diff`)를 모두 비교하지 않은 경우 `PASS`를 기록할 수 없다.
+   - PASS 조건은 엄격하다. `original_intent`와 `refined_intent`를 실제 변경 소스(`changed_files` 또는 `diff`)와 비교하고, PAC/spec trace는 별도 실행 증거로 확인해야 한다. 실행 계획·기술 선택·리뷰 finding 자체를 의도 기준으로 비교하지 않는다.
+   - `request.json.follow_up_recommendations`가 있으면 현재 review의 `follow_up_recommendations` 초기값으로 이어받는다. 이 항목은 현재 PASS/FAIL 또는 수정 태스크 생성에 사용하지 않고 최종 accept 결과까지 전달한다.
 4-c. **Reference 컨텍스트 수집 (MANDATORY)**:
    - Step 2 입력에서 외부 의존성 키워드를 감지하고 `Reference Lookup Protocol`을 실행한다.
    - 결과를 `reference_context_block`으로 보관해 Pass B 모든 리뷰어 프롬프트에 공통 주입한다.
@@ -732,15 +732,15 @@ python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir "
 
 #### "테스트 없음" 분기 (MANDATORY)
 
-- `full-backend-test-report.md`에 `status: NO_TESTS_DETECTED` 기록 후 반드시 사용자 확인 요청 (AUTO_MODE=true여도 AskUserQuestion 생략 불가).
-- 허용 → `full_backend_test_gate_result = pass_with_warning` → Step 4 진행.
-- 비허용 → `full_backend_test_gate_result = fail` → Step 6(c)/(d) 경로.
+- `full-backend-test-report.md`에 `status: NO_TESTS_DETECTED`와 탐지 근거를 기록한다. review 중간에는 사용자에게 질문하지 않는다.
+- Intent Anchor 또는 MUST PAC/AC가 자동 테스트를 요구하면 `PAC_GAP` 또는 `PAC_CLARIFICATION`으로 분류해 필요한 테스트 종류·허용 범위·검증 신호를 담은 구체적 수정 지시를 만들고 `full_backend_test_gate_result = fail` → Step 6(c)/(d) 경로로 진행한다.
+- 현재 계약이 자동 테스트를 요구하지 않으면 테스트 프레임워크 도입을 현재 범위에 추가하지 않고 `full_backend_test_gate_result = pass_with_warning`으로 Step 4를 진행한다. 필요하면 테스트 도입을 `FOLLOW_UP_RECOMMENDATION`으로만 남긴다.
 
 #### 실행/실패 분석 프로토콜 (MANDATORY)
 
 1. `cd "$REVIEW_WORKTREE"` 후 `npm test` 실행. 로그 저장: `{.../reviews/{RV-NNN}/full-backend-test.log}`.
 2. 실패 테스트 1개 이상이면 각 항목을 `explore` 기반 원인 분석.
-3. `intent`/`plan`/`spec` 3중 문맥과 비교해 의도성 판정:
+3. plan의 original/refined Intent Anchor와 MUST PAC/Spec AC에 비교해 의도성 판정한다. `/mst:intent` 기록은 판정 근거를 찾기 위한 보조 자료일 뿐 현재 계약을 덮어쓰지 않는다.
    - `INTENTIONAL`: 의도적 동작 변경과 일치 → 테스트 기대값/fixture/assertion 수정 태스크 자동 디스패치.
    - `UNINTENTIONAL`: 회귀/부수효과 → 소스 코드 + 테스트 보강 태스크 자동 디스패치.
    - `UNCERTAIN`: 증거 불충분 → `UNINTENTIONAL`로 처리.
@@ -750,7 +750,7 @@ python3 {PLUGIN_ROOT}/scripts/mst.py dispatch validate-worktree --worktree-dir "
 
 - 루프: 테스트 실행 → 실패 시 explore 분석 + 의도 판정 → 분기별 태스크 디스패치 → 보강 완료 후 재테스트.
 - 10회 이내 100% PASS: `full_backend_test_gate_result = pass` → Step 4 허용.
-- 10회 초과 FAIL: `limit_reached`로 기록 + 사용자 에스컬레이션. 11회째 자동 시도 금지.
+- 10회 초과 FAIL: `limit_reached`와 마지막 수정 지시·반복 실패 근거를 기록하고 11회째 자동 시도 없이 terminal checkpoint로 종료한다. `-a`는 질문 없이 후속 선택지를 보고하고, 일반 모드는 종료 상태를 저장한 뒤에만 한 번 확인한다.
 
 #### 결과 리포트 + `evidence-ledger.md` 연계 (MANDATORY)
 
@@ -834,33 +834,35 @@ adversarial-reviewer (bg): 공격 표면 기반 적대적 리뷰       ─┘
   - machine-readable: `reviews/RV-NNN/po-intent-validation.json`
   - human-readable 요약: `reviews/RV-NNN/po-intent-validation.md`
   - `review.json.po_intent_validation`에도 동일 객체를 mirror하여 accept가 최신 completed review artifact에서 안정적으로 파싱할 수 있게 한다.
-- `po_intent_validation`은 PO 포지션의 의도 검증 계약이다. 기존 `review-intent-fidelity.md`, `tasks[].self_check.intent_fidelity_result`, blocking 모드 intent_fidelity 결과 반영 규칙은 유지하며 이 산출물로 대체하거나 완화하지 않는다.
-- 생성 시 반드시 `{PO_INTENT_SOURCE_CONTEXT}`와 `{PO_INTENT_CHANGE_CONTEXT}`를 함께 비교한다. PM 요약만 근거로 삼거나 원본 의도 소스 또는 변경 소스 중 한쪽만 확인한 경우 `PASS` 금지.
+- `po_intent_validation`은 PO 포지션의 의도 검증 계약이다. plan의 `original_intent`와 `refined_intent`만 canonical Intent Anchor로 사용하고 PAC/Spec AC는 별도 실행 검증 기준으로 유지한다.
+- 생성 시 반드시 canonical Intent Anchor와 `{PO_INTENT_CHANGE_CONTEXT}`를 함께 비교한다. PM 요약, 과거 intent, 실행 계획, 리뷰 제안만 근거로 삼거나 Anchor/변경 소스 중 한쪽만 확인한 경우 `PASS` 금지.
+- PM 요약만 근거로 PASS 처리하지 않는다. plan의 두 Intent Anchor 원문과 실제 변경을 직접 비교한다.
 - 최소 JSON 스키마:
   ```json
   {
     "verdict": "PASS | FAIL | SKIP",
     "reason": "NO_SOURCE_PLAN | NO_INTENT_TRACE | NO_CHANGED_FILES_OR_DIFF | SOURCE_READ_FAILED | CHANGE_READ_FAILED | NOT_APPLICABLE | null",
     "compared_sources": [
-      { "source_type": "original_documents | plan | plan_ac | spec_intent_trace", "ref": "absolute-or-repo-relative-path-or-request.json field", "summary": "비교한 의도 근거 요약" }
+      { "source_type": "original_documents | plan | plan_ac | spec_intent_trace", "ref": "absolute-or-repo-relative-path-or-request.json field", "summary": "original_documents=original_intent, plan=refined_intent, plan_ac/spec_intent_trace=별도 실행 증거" }
     ],
     "compared_changes": [
       { "change_type": "changed_file | diff", "ref": "file path or diff hunk ref", "summary": "의도와 대조한 실제 변경 요약" }
     ],
     "rationale": "원본 의도와 실제 변경이 일치/불일치/비교불가인 이유",
     "missing_or_mismatched_intent": [
-      { "source_ref": "PAC-3 | AC-001 | plan.md section | original_request", "expected_intent": "...", "observed_change": "...", "severity": "MUST | SHOULD | INFO" }
+      { "source_ref": "original_intent | refined_intent | PAC-3 | AC-001", "expected_intent": "...", "observed_change": "...", "severity": "MUST | SHOULD | INFO", "intent_relation": "ANCHOR_VIOLATION | PAC_GAP | PAC_CLARIFICATION | CHANGE_REGRESSION | FOLLOW_UP_RECOMMENDATION | CONTRACT_CONFLICT" }
     ]
   }
   ```
 - 허용 verdict는 `PASS`, `FAIL`, `SKIP` 세 가지뿐이다.
 - `PASS` 필수 조건:
-  - `compared_sources`에 `original_documents`, `plan`, `plan_ac`, `spec_intent_trace`가 각각 1건 이상 포함된다.
+  - `compared_sources`의 `original_documents`는 plan의 `original_intent`, `plan`은 `refined_intent`를 가리켜야 한다. `plan_ac`와 `spec_intent_trace`는 별도 실행 증거로 각각 1건 이상 포함한다.
   - `compared_changes`에 실제 변경 파일 또는 diff 근거가 1건 이상 포함된다.
   - `missing_or_mismatched_intent`가 비어 있거나, 남은 항목이 blocking 불일치가 아님을 `rationale`에 명시한다.
 - `FAIL` 조건:
-  - 원본 의도 소스와 실제 변경을 비교한 결과, MUST PAC/Spec AC/Intent Trace 의도가 누락되었거나 실제 변경과 충돌한다.
+  - canonical Intent Anchor와 실제 변경을 비교한 결과 `ANCHOR_VIOLATION`이 있거나, MUST PAC/Spec AC가 누락됐거나, 이번 변경이 `CHANGE_REGRESSION`을 만들었다.
   - 비교는 완료됐지만 `missing_or_mismatched_intent`에 blocking 불일치가 남아 있다.
+- `FOLLOW_UP_RECOMMENDATION`은 FAIL 사유가 아니다. 의도·범위·PAC의 선택적 변경 제안으로 기록하고 현재 수정 범위에 포함하지 않는다. `CONTRACT_CONFLICT`만 현재 계약으로 완료 판정할 수 없는 사유다.
 - `SKIP` 조건:
   - `source_plan` 없음: `reason="NO_SOURCE_PLAN"`.
   - spec `## 3.2 Intent Trace` 없음: `reason="NO_INTENT_TRACE"`.
@@ -876,9 +878,9 @@ background 에이전트는 `run_in_background: true` 옵션으로 dispatch합니
 | 역할 키 | 검토 관점 | config 키 |
 |---------|-----------|-----------|
 | `code_reviewer` | 누락 로직, 버그, 엣지케이스, 테스트 누락 + 테스트 패턴 준수 검증(spec 주입 원칙 기준, 미준수 시 [MAJOR]) | `review.roles.code_reviewer.agent` |
-| `arch_reviewer` | spec 의도 vs 구현 방향, 통합 일관성 + Scope Audit(`SCOPE_CREEP`/`OMISSION`, plan.md 상위 목표 대비 적합성, 불필요 파일 변경 여부. 미발견 시 `"확인 완료 — 해당 없음"` 명시) | `review.roles.arch_reviewer.agent` |
+| `arch_reviewer` | canonical Intent Anchor와 구현 방향의 일치, 통합 일관성 + Scope Audit(`SCOPE_CREEP`/`OMISSION`). 실행 계획 자체를 의도로 간주하지 않고, finding마다 intent_relation과 anchor/PAC 근거를 명시 | `review.roles.arch_reviewer.agent` |
 | `ui_reviewer` | Stitch 시안 vs 실제 UI, UX 흐름 일관성 | `review.roles.ui_reviewer.agent` |
-| `intent_fidelity` | plan 요청+docs 대비 구현 일치. spec §3.2 Intent Trace 항목을 구현 증거와 대조. Missing/Partial/Verified 분류. blocking 모드에서 MUST Partial/Missing은 pass/fail 반영, SHOULD는 warning | `review.roles.intent_fidelity.agent` |
+| `intent_fidelity` | plan의 `original_intent`+`refined_intent` 대비 구현 일치. 과거 intent/docs는 추론 보조로만 사용. spec §3.2 Intent Trace를 구현 증거와 대조해 Missing/Partial/Verified 분류 | `review.roles.intent_fidelity.agent` |
 | `impact_reviewer` | `git diff --name-only` 기준 변경 파일 → 역추적(enhanced_analysis=true시 2단계, false시 1단계) → 기능 깨짐 판단. [impact-check] AC Given/When/Then 전담 판정. 영향 rubric: 공개 API/라우트=CRITICAL, 공유 컴포넌트/유틸=MAJOR, 내부 모듈=MINOR | `review.roles.impact_reviewer.agent` |
 | `adversarial_reviewer` | 보안/데이터 무결성/동시성/롤백 안전/null·timeout/버전 스큐/관측성 등 attack surface 관점. finding에 `attack_surface`+`confidence(0~1)` 필수 | `review.roles.adversarial_reviewer.agent` |
 
@@ -1135,28 +1137,52 @@ Pass B에서 `[MUST] [impact-check]` AC FAIL 1건이라도 있으면 `review.jso
 6. SHOULD warning 로깅 (`should_warning_log == true`): `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/warnings.log`에 JSONL(`timestamp`, `req_id`, `rv_id`, `ac_id`, `module`, `result`, `reason`).
 7. 동일 `module`에서 SHOULD warning 누적 횟수가 `should_escalation_threshold` 이상이면 review-report에 `"MUST escalation review required"` 플래그 추가 (즉시 blocking 아님).
 
+#### 수정 방향 판정과 구체화 (Step 6 분기 전, MANDATORY)
+
+모든 AC gap과 Pass B finding을 severity보다 먼저 다음 중 하나로 분류한다.
+
+- `ANCHOR_VIOLATION`: 구현이 `original_intent` 또는 `refined_intent`를 훼손·누락함.
+- `PAC_GAP`: 기존 MUST PAC/Spec AC가 충족되지 않음.
+- `PAC_CLARIFICATION`: PAC의 의미는 유지되지만 검증 방법·증거·spec 매핑을 더 구체화해야 함. plan PAC 문구는 바꾸지 않고 LLM이 검증 상세만 보완함.
+- `CHANGE_REGRESSION`: 이번 변경으로 기존에 정상인 동작이 깨짐.
+- `FOLLOW_UP_RECOMMENDATION`: 더 나은 하드닝·리팩터링·확장 또는 의도·범위·PAC의 추가/완화/삭제를 제안하지만 현재 Anchor 달성에 필요하지 않음.
+- `CONTRACT_CONFLICT`: original/refined Intent Anchor와 MUST PAC가 충돌해 현재 계약 그대로는 정직한 완료 판정이 불가능함.
+
+`ANCHOR_VIOLATION`, `PAC_GAP`, `PAC_CLARIFICATION`, `CHANGE_REGRESSION`은 루프를 멈추는 사유가 아니라 **수정 방향**이다. 같은 근본 원인과 같은 책임 태스크의 finding을 합쳐 아래 필드를 갖는 구체적 수정 지시로 만든다.
+
+- 위반한 `original_intent`/`refined_intent` 문장 또는 PAC/AC ID
+- 관찰된 불일치와 파일·diff·테스트 근거
+- 수정 후 반드시 관찰돼야 할 결과
+- 허용된 수정 범위와 건드리지 말아야 할 범위
+- 재검증 명령과 expected signal
+
+가능하면 기존 책임 태스크의 `feedback-RN.md`로 전달해 같은 태스크를 재실행한다. 동일 근본 원인의 reviewer finding마다 새 태스크나 새 AC를 만들지 않는다. 기존 태스크로 교정할 수 없고 Anchor/PAC 달성에 꼭 필요한 독립 책임일 때만 correction task 1개를 생성한다.
+
+`FOLLOW_UP_RECOMMENDATION`은 review report의 후속 추천에만 기록하고 수정 지시·자동 태스크·blocking count에서 제외한다. `CONTRACT_CONFLICT`는 가능한 in-scope 작업과 검증을 마친 뒤 terminal 결과로 기록한다. `-a`에서는 질문 없이 충돌·선택지·권장 후속 작업을 반환하고, 일반 모드는 플로우 종료 후 한 번만 사용자 결정을 요청한다.
+
+`CONTRACT_CONFLICT`가 1건 이상이면 `review.json.status="gap_found"`, `review_summary.status="contract_conflict"`, `contract_conflicts[]`를 기록하고 correction task를 만들지 않은 채 approve에 반환한다. 이 반환이 현재 review 플로우의 terminal checkpoint이며 review 내부에서는 질문하지 않는다.
+
 #### (a) 갭 없음 + 코드리뷰 이슈 없음 (+ blocking 모드면 intent_fidelity 통과)
 
 - `review.json.status = "passed"`, `request.json.review_summary = { "iteration": N, "status": "passed" }` 업데이트.
+- `FOLLOW_UP_RECOMMENDATION`만 남아 있으면 PASS를 유지하고 `review_summary.result="completed_with_recommendations"`와 추천 목록을 기록한다.
 - Phase 3 PASS 반환. approve가 Phase 5(mst:accept)를 호출 — review는 mst:accept를 직접 호출하지 않는다.
 
 #### (b) 갭 없음 + 코드리뷰 이슈만 있음 (AC는 통과, 설계/품질 이슈)
 
-코드리뷰 이슈를 등급별로 분류한 뒤 자동 처리 분기를 수행합니다.
+`FOLLOW_UP_RECOMMENDATION`을 제외하고 구체적 수정 지시로 정규화된 in-scope 이슈만 등급별 자동 처리 분기에 넣습니다. severity는 수정 우선순위를 정할 뿐 scope authority가 아닙니다.
 
 ##### (b) enabled 가드
 
 `config.review.severity_auto_fix.enabled` 확인:
-- `false`: 기존 (b) 동작으로 fallback
-  - **`--auto` 모드**: 이슈를 report에만 기록하고 Phase 5 자동 진행. `review.json.status = "passed"`.
-  - **일반 모드**: `AskUserQuestion` → `[이슈 무시하고 수락]`(Phase 5) 또는 `[이슈를 태스크로 추가]`((c)와 동일 경로).
+- `false`: severity별 최적화만 생략한다. Intent Anchor/PAC에 연결된 in-scope 이슈는 모드와 무관하게 위 구체적 수정 지시로 정규화해 (c) 경로로 교정하고, `FOLLOW_UP_RECOMMENDATION`만 report에 남긴 채 PASS 가능하다. review 중간에는 질문하지 않는다.
 - `true`: 아래 등급별 분기 진행.
 
 ##### (b) 사전 처리: 이슈 파싱 및 등급 분류
 
-1. **리뷰어 태깅 파싱**: `review-report.md`에서 `[CRITICAL]`/`[MAJOR]`/`[MINOR]` 접두사 파싱. 태깅 없는 이슈는 MAJOR로 기본 분류. adversarial finding은 Step 5 confidence 매핑 완료 항목만 포함 (DROP 제외).
+1. **리뷰어 태깅 파싱**: `review-report.md`에서 `intent_relation`을 먼저 파싱하고 `FOLLOW_UP_RECOMMENDATION`을 후속 추천으로 분리한다. 남은 항목의 `[CRITICAL]`/`[MAJOR]`/`[MINOR]` 접두사를 파싱한다. 태깅 없는 in-scope 이슈는 MAJOR로 기본 분류. adversarial finding은 Step 5 confidence 매핑 완료 항목만 포함 (DROP 제외).
 
-2. **PM 재조정 (보안 오버라이드)**: `config.review.severity_auto_fix.security_override_keywords` 배열 키워드가 이슈 텍스트에 포함되면 무조건 CRITICAL 승격 (대소문자 무시).
+2. **PM 재조정 (보안 오버라이드)**: in-scope 이슈에 `config.review.severity_auto_fix.security_override_keywords` 배열 키워드가 포함되면 CRITICAL로 승격한다. 보안 키워드도 `FOLLOW_UP_RECOMMENDATION`을 현재 scope 안으로 승격시키지는 않는다.
 
 3. **Severity 역행 감지 (iteration 2+ MANDATORY)**:
    - 직전 회차 `review.json`에서 `previous_severity_counts`를 현재 회차에 기록.
@@ -1172,8 +1198,9 @@ Pass B에서 `[MUST] [impact-check]` AC FAIL 1건이라도 있으면 `review.jso
 
 ##### (b-1) CRITICAL 또는 MAJOR가 1건 이상 존재
 
-- **`--auto` 모드**: CRITICAL/MAJOR → `(c)` 경로. MINOR → `review_issues_summary.skipped` 기록 후 스킵. `gap_source: "code_review_issues"`.
-- **일반 모드**: `AskUserQuestion` → `[CRITICAL/MAJOR N건 태스크로 추가]`((c) 경로, MINOR는 b-2/b-3 규칙 적용) 또는 `[전체 이슈 무시하고 수락]`(Phase 5).
+- `ANCHOR_VIOLATION | PAC_GAP | PAC_CLARIFICATION | CHANGE_REGRESSION`: auto/일반 모드 모두 사용자 질문 없이 구체적 수정 지시를 생성하고 `(c)` 경로로 이어간다.
+- `FOLLOW_UP_RECOMMENDATION`: severity와 무관하게 현재 루프에서 제외하고 최종 결과에 기록한다.
+- `CONTRACT_CONFLICT`: 안전한 in-scope 검증을 마친 후 terminal 결과로 넘긴다. 중간 질문 금지.
 
 ##### (b-2) MINOR만 존재 + 개수 <= threshold (스킵+리포트)
 
@@ -1190,26 +1217,26 @@ Pass B에서 `[MUST] [impact-check]` AC FAIL 1건이라도 있으면 `review.jso
 
 ##### (b) `--auto` 모드 동작 요약
 
-| 등급 | 동작 |
+| 관계 | 동작 |
 |------|------|
-| CRITICAL | 자동 태스크 생성 + 재외주 (c 경로) |
-| MAJOR | 자동 태스크 생성 + 재외주 (c 경로) |
-| MINOR | `minor_skip_threshold` + `auto_accept_guard` 검사. 가드 차단 시 (c) 경로. CRITICAL/MAJOR+MINOR 혼재 시 MINOR 스킵. |
+| ANCHOR_VIOLATION / PAC_GAP / PAC_CLARIFICATION / CHANGE_REGRESSION | 구체적 수정 지시 생성 + 기존 책임 태스크 재실행. 필요할 때만 correction task 생성 |
+| FOLLOW_UP_RECOMMENDATION | 현재 결과의 후속 추천으로만 기록 |
+| CONTRACT_CONFLICT | 안전한 작업을 마친 뒤 terminal 결과로 기록. `-a`는 질문 없이 종료, 일반 모드는 종료 후 1회 확인 |
 
 #### (c) 갭 있음 + iteration ≤ max_iterations
 
-1. 갭별 새 태스크 spec.md 자동 작성: `tasks/NN+1/spec.md` (기존 최대 번호 +1).
-   - `request.json.tasks` 항목: `{ "id": "NN", "title": "<갭 설명>", "status": "pending", "agent": null, "spec": "tasks/NN/spec.md", "generated_by": "review" }`.
-   - impact_reviewer 이슈 태스크라면 description에 `함께 수정 필요 파일` + 수정 방향 포함.
-2. `request.json.tasks` 배열 업데이트.
-3. `request.json.review_summary = { "iteration": N, "status": "gap_fixing" }` 업데이트.
-4. `review.json` 업데이트: `{ "status": "gap_found", "gaps_found": M, "tasks_created": [...], "gap_source": "ac_gap | code_review_issues | intent_fidelity" }`.
-5. approve 스킬에 갭 목록 + 새 태스크 ID 반환 → approve가 Phase 2 재실행 제어. — 텍스트만 출력하고 멈추지 않는다.
+1. in-scope 갭을 근본 원인·Intent/PAC ref·책임 태스크 기준으로 dedupe한다.
+2. 기존 책임 태스크가 있으면 해당 `tasks/NN/feedback-RN.md`에 위의 구체적 수정 지시를 저장하고 태스크를 재실행 대상으로 표시한다. 기존 spec AC와 Intent Anchor는 수정하지 않는다.
+3. 기존 책임 태스크가 없을 때만 최소 correction task의 spec.md를 작성한다. `request.json.tasks`에는 `{ "id": "NN", "title": "<교정할 결과>", "status": "pending", "agent": null, "spec": "tasks/NN/spec.md", "generated_by": "review", "correction_for": ["original_intent | refined_intent | PAC-N | AC-NNN"] }`를 기록한다. reviewer finding 수만큼 태스크를 만들지 않는다.
+4. `FOLLOW_UP_RECOMMENDATION`과 `CONTRACT_CONFLICT`는 correction task로 생성하지 않는다.
+5. `request.json.review_summary = { "iteration": N, "status": "gap_fixing" }` 업데이트.
+6. `review.json`에 아래 필드를 분리 기록한다: `correction_instructions[]`(`target_task_id`, `intent_relation`, `intent_or_pac_refs`, `evidence`, `required_outcome`, `allowed_scope`, `must_not_change`, `verify_cmd`, `expected_signal`, `feedback_path`), `retry_task_ids[]`, `tasks_created[]`, `follow_up_recommendations[]`(`change_kind: intent | scope | pac | quality`, `rationale`, `suggested_outcome`), `contract_conflicts[]`.
+7. approve 스킬에 수정 지시 + 재실행 대상 태스크를 반환 → approve가 Phase 2 재실행을 이어간다. follow-up은 현재 루프를 중단하지 않는다.
 
 #### (d) 갭 있음 + iteration > max_iterations
 
-- **`--auto` 모드**: `review.json.status = "limit_reached"`, `review_summary.status = "limit_reached"` 기록 후 종료.
-- **일반 모드**: `AskUserQuestion` → `[추가 반복 허용 (+1회)]`(max_iterations 임시 +1 후 (c) 실행) / `[현재 상태로 수락]`(Phase 5, `status="passed"` 강제) / `[중단]`.
+- auto/일반 모드 모두 `review.json.status = "limit_reached"`, `review_summary.status = "correction_limit_reached"`와 마지막 구체적 수정 지시·반복 실패 근거를 기록하고 현재 플로우를 종료한다.
+- 자동 수락하거나 `status="passed"`로 강제하지 않는다. `-a`에서는 질문 없이 `[추가 교정 라운드]` 또는 `[별도 후속 요청]`을 추천한다. 일반 모드는 종료 상태를 저장한 뒤에만 같은 선택지를 한 번 확인한다.
 
 #### (e) Pass A 실패 (MUST AC 실패 감지)
 
@@ -1329,7 +1356,7 @@ approve 루프 밖에서 직접 호출 시 Step 1~4 동일 실행 후 Step 5 결
 | `iteration` | 현재(마지막) 회차 번호. |
 | `status` | `reviewing` \| `gap_fixing` \| `passed` \| `limit_reached` \| `pass_a_failed` |
 
-- `reviewing`: Step 1~4 진행 중. `gap_fixing`: 갭 발견, 태스크 추가됨. `passed`: 갭 없음. `limit_reached`: `--auto` 모드에서 max_iterations 초과. `pass_a_failed`: MUST AC 실패.
+- `reviewing`: Step 1~4 진행 중. `gap_fixing`: 갭 발견, 구체적 수정 지시 실행 중. `passed`: 갭 없음. `limit_reached`: 모드와 무관하게 max_iterations 초과 후 terminal 결과 기록. `pass_a_failed`: MUST AC 실패.
 
 ### review.json
 

@@ -267,7 +267,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
 ### 최종 수락 실행 (Phase 3 → Phase 5)
 
 1. **리뷰 PASS 확인**: PASS 아니면 사용자 알림 후 중단 (먼저 `/mst:feedback` 완료 필요)
-2. **요약 리포트 생성**: 모든 태스크 완료 결과 → `summary.md` 작성
+2. **요약 리포트 생성**: 모든 태스크 완료 결과 → `summary.md` 작성. 최신 review의 `follow_up_recommendations`를 별도 섹션으로 옮기고, 추천만 남아 있으면 결과를 `completed_with_recommendations`로 표시한다. 추천은 현재 완료 판정을 약화하거나 현 REQ 범위에 합치지 않는다.
 2.5. **Evidence Verification Gate (PAC 증거 검증)**:
    - 목적: `source_plan` 기반 PAC 검증 증거가 최신 review 산출물에 모두 첨부되었는지 확인한다.
    - 이 gate는 PAC/objective/evidence-ledger 검증 전용이며, 아래 PO 의도 검증 gate와 서로 대체 관계가 아니다.
@@ -295,6 +295,7 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
         - 누락이 없으면 다음 단계 진행.
      7. **PO 의도 검증 hard gate (source_plan 기반 추가 gate)**:
         - 실행 조건: `request.json.source_plan`이 존재하는 현재 REQ에만 적용한다. `source_plan`이 없으면 위 1번의 `reason=NO_SOURCE_PLAN` skip만 남기고 PO gate로 실패시키지 않는다.
+        - canonical Intent Anchor는 source plan의 `## 사용자 최초 의도`(`original_intent`)와 `## 요청 (Refined)`(`refined_intent`) 두 섹션뿐이다. PAC는 별도 완료 검증 기준이며, 실행 계획·기술 선택·과거 linked intent·리뷰 finding은 사용자 의도 원본으로 승격하지 않는다.
         - 이 gate는 기존 PAC/objective/evidence-ledger 검증을 약화하거나 대체하지 않는다. 위 5번 또는 6번에서 이미 블로킹된 실패는 `po_intent_validation.verdict == PASS`로 상쇄할 수 없다.
         - 최신 review 선택 기준:
           1. `{PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/request.json`의 `review_iterations` 배열만 사용한다.
@@ -306,10 +307,12 @@ AUTO_MODE는 "이 accept 호출의 무정지 실행"만 제어합니다. `depend
           2. `review.json.po_intent_validation` 객체가 없으면 accept를 즉시 블로킹하고 `PO 의도 검증 산출물 없음: po_intent_validation 없음`을 출력한다.
           3. `po_intent_validation.verdict != "PASS"`이면 accept를 즉시 블로킹하고 `PO 의도 검증 verdict 불일치: expected=PASS actual={verdict}`를 출력한다. `FAIL`, `SKIP`, 빈 값, 알 수 없는 값은 모두 불일치다.
           4. `po_intent_validation.compared_sources`가 없거나 빈 배열/빈 문자열이면 accept를 즉시 블로킹하고 `PO 의도 검증 원본 문서 비교 누락: compared_sources 비어 있음`을 출력한다.
+             - `compared_sources`는 `original_intent`와 `refined_intent` 비교를 각각 증명해야 한다. PAC 검증과 별도이며, 과거 intent나 계획 세부만 비교한 결과는 인정하지 않는다.
           5. `po_intent_validation.compared_changes`가 없거나 빈 배열/빈 문자열이면 accept를 즉시 블로킹하고 `PO 의도 검증 변경 내용 비교 누락: compared_changes 비어 있음`을 출력한다.
           6. `po_intent_validation.rationale` 필드는 존재해야 하며, 누락 시 `PO 의도 검증 산출물 없음: rationale 누락`으로 블로킹한다.
           7. `po_intent_validation.missing_or_mismatched_intent` 필드는 존재해야 한다. PASS일 때 빈 배열/빈 문자열은 허용하지만, 필드 자체가 없으면 `PO 의도 검증 산출물 없음: missing_or_mismatched_intent 누락`으로 블로킹한다.
-        - 통과 조건: 현재 REQ의 최신 completed review artifact에 `po_intent_validation.verdict == PASS`가 있고, `compared_sources`와 `compared_changes`가 비어 있지 않으며, `rationale`과 `missing_or_mismatched_intent` 필드가 존재할 때만 다음 단계로 진행한다.
+          8. 최신 review에 `contract_conflicts`가 있거나 미완료 `correction_instructions`가 남아 있으면 accept를 중단하고 terminal 결과 또는 수정 루프로 복귀한다. `follow_up_recommendations`는 accept 차단 사유가 아니다.
+        - 통과 조건: 현재 REQ의 최신 completed review artifact에 `po_intent_validation.verdict == PASS`가 있고, original/refined Intent Anchor 비교와 변경 증거가 있으며, 미해결 contract conflict·교정 지시가 없을 때만 다음 단계로 진행한다.
 2.6. **수락 전략 결정 (source_plan → plan.json.type → type-strategies.json 체인, MANDATORY)**:
    - `request.json.source_plan` 값이 있으면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하고 `type` 필드를 확인한다.
    - `plan_type = plan.json.type` (`type` 누락 또는 Read 실패 시 `"code"` fallback)
@@ -783,6 +786,12 @@ python3 {PLUGIN_ROOT}/scripts/mst.py state set-workflow \
    - `source_plan`(예: `PLN-NNN`) 있으면: `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json` Read → `linked_requests` 내 모든 REQ 상태 확인
    - 전체 `done`/`completed`/아카이브 시: **스크립트 우선** `python3 {PLUGIN_ROOT}/scripts/mst.py plan sync {source_plan}`; 실패 시 fallback으로 `plan.json`의 `status="completed"` + `completed_at` 직접 업데이트
    - 미완료 REQ 존재 시: 스킵; `source_plan` 없으면 스킵
+
+7. **플로우 종료 후 추가 작업 제안**:
+   - 최신 review의 `follow_up_recommendations`가 비어 있으면 skip한다.
+   - 각 추천을 `intent | scope | pac | quality`로 묶어 `summary.md`의 현재 완료 결과와 분리해 표시한다. 현 plan/REQ/Intent Anchor/PAC는 수정하지 않는다.
+   - `AUTO_MODE=true`: 사용자 질문 없이 완료 결과와 추천 목록, 별도 `/mst:plan` 또는 `/mst:request`로 진행할 수 있다는 안내만 출력하고 종료한다.
+   - `AUTO_MODE=false`: Phase 5, dependency/DAG 처리, Plan 동기화까지 모두 끝난 뒤 한 번만 `AskUserQuestion`으로 `[추천 작업을 별도 plan으로 검토]` / `[현재 결과로 종료]`를 확인한다. 선택 전 후속 REQ를 자동 생성하지 않는다.
 
 ## 예시
 

@@ -155,6 +155,8 @@ Provider CLI를 직접 실행하는 허가된 external lane도 마지막 명령�
 
 기능 의도(INTENT) 레지스트리를 관리합니다.
 
+> **책임 경계 (MANDATORY)**: 이 레지스트리는 과거 결정·선호·맥락을 저장해 이후 모호한 부분을 추론하는 보조 기억입니다. 현재 작업의 canonical 사용자 의도는 활성 plan의 `## 사용자 최초 의도`와 사용자가 확인한 `## 요청 (Refined)`이며, INTENT 레코드나 `linked_intent`는 이를 대체·수정·확장하거나 현재 범위의 근거가 될 수 없습니다. 충돌하면 현재 plan의 Intent Anchor를 우선하고, INTENT 레코드는 참고에서 제외합니다.
+
 ## 실행 프로토콜
 
 <!-- @include _shared/path-rules.md -->

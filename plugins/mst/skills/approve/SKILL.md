@@ -856,6 +856,7 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
   - `reference.auto_search != true`이면 자동 WebSearch 없이 기존 REF 캐시 조회 결과만 주입한다.
   - `request.json`에 `linked_designs`가 존재하고 비어있지 않으면, `{{IMPL_CONTEXT}}` 끝에 `"spec.md §10의 Stitch HTML 파일을 참조하되 기술 스택에 맞게 구현하세요."` 자동 추가.
 - `{{SPEC_PATH}}`, `{{WORKTREE_PATH}}`, `{{REQ_ID}}`, `{{TASK_ID}}`: 자동 주입
+- `{{PLAN_INTENT_ORIGINAL}}`, `{{PLAN_INTENT_REFINED}}`: `source_plan`의 `plan.md`에서 각각 `## 사용자 최초 의도`, `## 요청 (Refined)`를 추출해 `[INTENT_ANCHOR]`의 `original_intent`, `refined_intent`에 주입한다. 이 두 값만 canonical Intent Anchor다. legacy plan에 최초 의도 섹션이 없으면 request의 최초 사용자 요청을 fallback으로 쓰고 `LEGACY_ORIGINAL_INTENT_FALLBACK`을 남긴다. source_plan이 없으면 `NO_SOURCE_PLAN_INTENT_ANCHOR`를 주입한다.
 - `{{PLAN_PATH}}`: `request.json.source_plan` 존재 시 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.md`, 미존재 시 `NO_SOURCE_PLAN`
 - `{{PREV_FEEDBACK_PATH}}`: 첫 실행 시 "N/A", 재실행 시 feedback 파일 경로
 - `{{PLAN_JSON_META}}`: resolve 순서 `request.json` → `plan.json` → `plan.ids.json` → `objective.md`. `request.json.source_plan`이 존재하면 `{PROJECT_ROOT}/.gran-maestro/plans/{source_plan}/plan.json`을 Read하여 `cynefin_domain`, `linked_objective`, `linked_intent`, `linked_captures` 필드와 원본 경로를 3~5줄 요약으로 주입한다. `linked_intent`가 있으면 `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`으로 원본 intent를 조회하고, 반환된 원본 경로 또는 `{PROJECT_ROOT}/.gran-maestro/intent/{INTENT_ID}*.md` 조회 패턴과 확인 결과를 함께 주입한다. 미존재 시 warn 로그 + `NO_PLAN_JSON`, `NO_LINKED_INTENT`, `missing_context`, 또는 명시적 skip reason으로 치환한다.
@@ -864,6 +865,7 @@ Write -> {PROJECT_ROOT}/.gran-maestro/requests/{REQ-ID}/tasks/{NN}/prompts/phase
 - `spec_context_manifest`는 항상 `{{SPEC_PATH}}#§0-Context-Manifest`로 전달하고, spec에 해당 섹션이 없으면 `NO_CONTEXT_MANIFEST` 또는 `missing_context`를 남긴다.
 - `previous_feedback`는 첫 실행에만 `N/A` 허용, 그 외 재실행 경로에서는 feedback 파일 경로나 명시적 skip reason을 남긴다.
 - source_plan이 있는 브리프는 PM 작성 요약만 신뢰하지 말고 `plan.md`, `plan.json`, `plan.ids.json`, linked objective/intent 원본, spec `§0 Context Manifest` 원본 파일을 구현 전 직접 Read/inspection하라는 지시와 완료 보고의 `Read/inspection evidence` 기록 요구를 반드시 포함한다. source_plan이 없는 legacy 요청은 이 요구를 hard fail로 적용하지 않고 `NO_SOURCE_PLAN` 또는 동등한 structured skip reason을 남긴다.
+- 구현 에이전트에는 `[INTENT_ANCHOR]`와 실행 계약을 분리해 전달한다. 실행 계획·기술 선택·PAC·과거 `linked_intent`·리뷰 제안은 구현 참고 또는 검증 기준일 뿐 사용자 의도로 승격하지 않으며, Anchor나 PAC에 연결되지 않은 개선은 구현하지 않고 후속 제안으로 남긴다.
 - required context slot 규칙: `plan:`은 path-first required slot이므로 `N/A`로 렌더링하지 않는다. `{{PLAN_PATH}}`는 실제 `plan.md` 절대경로이거나 `NO_SOURCE_PLAN`이어야 하며, `previous_feedback`만 첫 실행에서 `N/A`를 유지할 수 있다.
 
 ##### 4c. 독립 태스크 동시 실행
@@ -1138,8 +1140,8 @@ Step 5 PASS 후 PM이 직접 커밋합니다 (외주 에이전트의 `index.lock
 1. `보완 필요 항목` 목록을 기반으로 단일 보완 태스크를 생성한다.
 2. 기존 구현 태스크와 동일한 에이전트 배정/외주 브리프 패턴을 재사용한다.
 3. 모드 분기:
-   - `AUTO_MODE=true`: PM 자율 판단으로 즉시 보완 디스패치
-   - `AUTO_MODE=false`: AskUserQuestion으로 미반영 목록 제시 → "보완하고 재검증" 또는 "남은 항목 무시하고 진행"
+   - 모드와 무관하게 Intent Anchor/PAC에 연결된 미반영 항목을 구체적 수정 지시로 정규화해 즉시 보완 디스패치한다.
+   - 현재 계약에 연결되지 않은 개선은 `follow_up_recommendations`로 분리하고 이 루프에서 구현하지 않는다. review/approve 중간에는 사용자에게 질문하지 않는다.
 4. 보완 완료 후 PM 커밋은 **Step 5.5와 동일한 절차**(add/build-if-needed/commit/hash 저장)로 수행한다.
 
 ###### (d) 재검증 재진입
@@ -1386,6 +1388,14 @@ Write 실패 시 warn만 출력하고 워크플로우를 차단하지 않는다 
      ```
 
    - **`status: "gap_found"`**:
+     **Intent-guided correction 우선 경로 (MANDATORY)**:
+     1. 최신 `review.json`에 `correction_instructions`, `follow_up_recommendations`, `contract_conflicts` 중 하나라도 있으면 severity-only legacy 분기보다 먼저 이 경로를 사용한다.
+     2. `retry_task_ids`의 기존 책임 태스크와 `tasks_created`의 최소 correction task만 재실행한다. 각 태스크에 연결된 `feedback_path`를 `{{PREV_FEEDBACK_PATH}}`로 주입하고, `required_outcome`, `allowed_scope`, `must_not_change`, `verify_cmd`, `expected_signal`을 수정 브리프에 그대로 전달한다.
+     3. `follow_up_recommendations`는 재외주·PM 직접 수정·새 태스크 생성 대상에서 제외하고 최종 결과까지 전달한다.
+     4. `contract_conflicts`가 있으면 가능한 in-scope 작업과 검증 결과를 보존한 채 현재 플로우를 terminal 상태로 마친다. `-a`에서는 질문 없이 충돌·선택지·권장 후속 작업을 반환한다. 일반 모드는 terminal 상태 기록 후 한 번만 후속 plan/REQ 생성 여부를 확인한다.
+     5. contract conflict가 없으면 재실행 완료 후 Phase 3 review를 다시 호출한다. follow-up recommendation만으로 사용자 응답을 기다리지 않는다.
+     6. 새 필드가 없는 legacy review에만 아래 severity 기반 a~c 분기를 적용한다.
+
      **a. CRITICAL 이슈 존재 시**: CRITICAL은 PM 직접 수정 불가, 항상 재외주.
 
      **a-2. MINOR 이슈**: `review_issues_summary.skipped`에 기록된 대로 스킵, 재외주 대상에 포함하지 않음.
@@ -1439,8 +1449,8 @@ Write 실패 시 warn만 출력하고 워크플로우를 차단하지 않는다 
      3. 재외주 완료 후 → `current_phase` 3 재전환 → `mst:review` 재호출
 
    - **`status: "limit_reached"`**:
-     - 일반 모드: AskUserQuestion → [추가 반복 허용 (+1회)] / [현재 상태로 수락] / [중단]
-     - `--auto` 모드: `review_summary.status = "limit_reached"` 기록 후 `workflow.auto_accept_result` 설정에 따라 즉시 실행
+     - auto/일반 모드 모두 마지막 `correction_instructions`와 반복 실패 근거를 저장하고 현재 플로우를 `correction_limit_reached`로 종료한다. `workflow.auto_accept_result`로 미충족 결과를 자동 수락하지 않는다.
+     - `-a` 모드는 질문 없이 결과와 `[추가 교정 라운드]`/`[별도 후속 요청]` 추천을 반환한다. 일반 모드는 종료 상태를 기록한 뒤에만 같은 선택지를 한 번 확인한다.
 
 단, `--auto` 플래그 맥락: approve가 `--auto`로 실행된 경우 review 호출 시 컨텍스트로 전달됨.
 

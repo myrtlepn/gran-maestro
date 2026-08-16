@@ -660,7 +660,7 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
           10개 이상: 상위 5개만 인라인, "추가 N개 캡처 — captures/ 디렉토리의 capture.json 참조" 안내. 섹션 없으면 전체 skip.
       - **linked_intent 주입** (`plan.json`에 `linked_intent` 필드 존재 시):
         - `python3 {PLUGIN_ROOT}/scripts/mst.py intent get {INTENT_ID} --json`
-        - 반환된 metadata(feature, situation, motivation, goal)를 spec.md `## Intent (JTBD)` 섹션에 주입. 실패 시 warn만 출력, 워크플로우 차단 금지.
+        - 반환된 metadata(feature, situation, motivation, goal)는 과거 결정 기반 추론 힌트로만 보관한다. plan의 `## 사용자 최초 의도`와 `## 요청 (Refined)`를 대체하거나 spec의 canonical Intent Anchor에 섞지 않는다. 실패 시 warn만 출력, 워크플로우 차단 금지.
       - **분리 실행 감지**: plan.md의 `## 분리 실행` 섹션에 2개 이상 단계 시 다중 REQ 생성 모드:
         1. REQ-NNN = 1단계(①), 2단계부터 REQ 채번·생성 (`status: "pending_dependency"`, `blockedBy` 설정). 모든 단계 REQ의 `request.json`에 `source_plan: "PLN-NNN"`을 동일하게 기록.
         2. 1단계 `request.json`에 `dependencies.blocks` 설정, `plan.json`에 모든 REQ ID 추가
@@ -745,11 +745,11 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         역할: {perspective} 관점의 적대적 검토자.
         Read로 context_files 경로를 로드하고 output_schema에 맞게 findings JSON을 반환하시오.
         ```
-      - findings는 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/adversarial-review-findings.md`에 기록한다.
+      - 각 finding을 Intent Anchor와 PAC에 대조해 `intent_relation`을 `ANCHOR_GAP | PAC_GAP | IMPLEMENTATION_NECESSITY | FOLLOW_UP_RECOMMENDATION | CONTRACT_CONFLICT` 중 하나로 분류한 뒤 round별 append 방식으로 `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/adversarial-review-findings.md`에 기록한다.
       - 수렴 조건은 `findings 배열이 비어있음 OR current_round >= max_rounds`이다. `max_rounds` 기본값은 3, `current_round` 초기값은 1이다.
-      - `AUTO_MODE=true`: `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다. `severity=critical` finding은 spec 작성 컨텍스트에 자동 반영하고 `{PROJECT_ROOT}/.gran-maestro/requests/REQ-NNN/auto-decisions.md`에 기록한다.
+      - `AUTO_MODE=true`: `parallel_in_auto_mode=true`이면 enabled perspective를 병렬 실행하고, false이면 순차 실행한다. `ANCHOR_GAP`, `PAC_GAP`, 또는 기존 의도/PAC 달성에 반드시 필요한 `IMPLEMENTATION_NECESSITY`만 spec 작성 컨텍스트에 반영한다. 범위 밖 개선과 의도·범위·PAC 변경을 제안하는 `FOLLOW_UP_RECOMMENDATION`은 severity와 무관하게 최종 추천으로만 기록한다.
       - `AUTO_MODE=false`: 기본 실행은 `edge` + `flow` 2종을 순차 실행한다. critical severity finding만 사용자에게 `[적대적 검토 silent] N개 critical finding 감지` 형식으로 노출하고, 반영이 필요한 critical은 기존 질문 슬롯 안의 `AskUserQuestion` confirm에 통합한다. 별도 질문을 추가해 사용자에게 노출되는 질문 수를 절대 증가시키지 않는다.
-      - critical이 아닌 severity는 사용자에게 노출하지 않고 내부 보강에만 사용한다. 질문 생성 prompt에는 `silent_review_findings` 추가 컨텍스트로 제공하되, 질문 수 한도와 기존 질문 생성 순서를 유지한다.
+      - severity만으로 사용자 의도나 범위를 넓히지 않는다. critical이 아닌 finding도 `intent_relation`이 위 세 in-scope 분류일 때만 내부 보강에 사용하고, 질문 생성 prompt에는 분류 결과와 함께 제공한다.
    1.8. **구현 세부 Q&A Pass** (Step 1g 완료 직후, Step h-0 이전):
       - `AUTO_APPROVE=true`면 이 단계 전체를 완전 skip하고 Step h-0으로 즉시 진행
       - `AUTO_APPROVE=false`면 아래 7개 카테고리를 **고정 순서로 순차 처리**한다:
@@ -823,16 +823,18 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
       - 사용자가 인용 선호를 반박하면 `request_disputed_preferences`에 수집하고 Step 6의 요약 트리거 입력으로 전달한다.
       - `intent_fidelity.enabled` 확인: `config get intent_fidelity.enabled` → `templates/defaults/config.json` → 기본값 `true`. `false`이면 이 단계 전체 skip.
       - `--plan PLN-NNN` 제공 시:
-        - plan.md에서 `## 요청 (Refined)` + `## Intent (JTBD)` + `## 인수 기준 초안`을 Read하여 `intent_context`로 보관한다.
+        - plan.md의 `## 사용자 최초 의도`와 `## 요청 (Refined)`만 추출해 `PLAN_INTENT_ANCHOR`로 보관한다. 이 둘은 각각 `original_intent`, `refined_intent`이며 이후 spec·구현·review·accept까지 동일한 의도 기준으로 전달한다.
+        - `## Intent (JTBD)`, linked intent, 실행 계획, 기술 선택, 리뷰 finding은 추론·실행 보조 컨텍스트다. `PLAN_INTENT_ANCHOR`에 합치거나 사용자 의도로 승격하지 않는다.
+        - `## 인수 기준 초안`은 `pac_preflight_checklist`로 별도 보관한다. PAC는 완료 검증 기준이며 Intent Anchor 자체가 아니다.
         - `{PROJECT_ROOT}/.gran-maestro/plans/PLN-NNN/plan.ids.json`을 Read하여 PAC preflight 수행 (비차단):
           - 파일 존재 시: `[{id,text,grade,tags?}]` 목록을 `pac_preflight_checklist`로 로드. `tags`에서 `TIER-A`/`TIER-B` 인식해 `pac_tier` 결정 (둘 다 없으면 `TIER-B` 기본).
           - 파일 미존재 시: warn 후 plan.md `## 인수 기준 초안`에서 임시 PAC 목록 추론 (비차단).
           - `pac_anchor_list`로 보관하고 이후 spec AC 작성 프롬프트 앞단에 고정 주입.
         - agile-origin objective trace가 있으면 `objective.ids.json` 및 plan의 `anchor_coverage_evidence`를 Read하여 `objective_anchor_list`로 보관한다. MUST objective anchor는 spec AC, `## 3.3 PAC Mapping`, 또는 `## 3.4 Epic DoD Mapping` 중 하나에 매핑되어야 하며 누락 ID는 MAJOR 이상 evidence로 남긴다.
         - docs 후보: plan.md `## 연관 컨텍스트` 표 및 본문 내 `docs/` 경로 수집.
-      - `--plan` 미제공 시: `request.json.original_request`를 `intent_context`로 보관. docs 후보는 Step 1c 탐색 발견 `docs/` 파일 + 사용자 요청 명시 경로만 사용.
+      - `--plan` 미제공 시: `request.json.original_request`를 임시 기준으로 보관하고 `NO_SOURCE_PLAN_INTENT_ANCHOR`를 명시한다. docs·과거 intent·리뷰 finding으로 임시 기준을 확장하지 않는다. docs 후보는 Step 1c 탐색 발견 `docs/` 파일 + 사용자 요청 명시 경로만 사용.
       - `docs_context` 구성: dedupe 후 존재하는 파일만 Read. 각 항목 `path`, `last_modified`, 핵심 요구사항 1~3줄 요약 추출.
-      - 활성화 판정: `--plan` + intent 섹션 확보 또는 `docs_context` 1개 이상 → `intent_context_active=true`; 그 외 → `false`
+      - 활성화 판정: `--plan` + 두 Intent Anchor 섹션 확보 → `intent_context_active=true`. legacy plan에서 `## 사용자 최초 의도`가 없으면 현재 request의 최초 사용자 요청을 original fallback으로 사용하고 사유를 남긴다. docs 존재만으로 intent를 활성화하지 않는다.
    h. **Implementation Spec 작성** (`templates/spec.md` 템플릿 사용); `--plan` 없으면 `## 가정 사항` 섹션 포함
       > ⚠️ **spec.md 작성 원칙**: 포함 = AC(완료 기준), 범위 경계, 제약 조건, 패턴 힌트, 시작점 1~3개, 의존성. 제외 = 수정 파일 exhaustive 목록, 단계별 구현 절차, 에지케이스 사전 열거. 구체적인 구현 방법은 에이전트가 worktree를 직접 탐색하며 결정한다.
       - **UI 관련 DESIGN.md 자동 참조 (MANDATORY, graceful)**:
@@ -866,7 +868,8 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
         - original checkout에서 호출된 경우에는 session worktree 재진입 또는 structured diagnostic 경계로 분류하고, legacy owner/session field를 effective root source로 사용하지 않는다.
         - 최종 목록에서 채울 수 없는 required context는 spec 요약 또는 생성 메모에 `missing_context`/`NO_*`/명시적 skip reason으로 남기고 조용히 생략하지 않는다.
         - 최종 §0 목록은 최소 1개 이상 파일 경로를 포함해야 한다
-      - **`## 3.2 Intent Trace` 작성 규칙 (MANDATORY)**: `intent_context_active=true`일 때만 §3.2 채움. 각 AC마다 최소 1개 의도 근거 연결. 근거를 찾지 못하면 `[INTENT-GAP]` 표기. docs 근거 사용 시 `intent_snapshot`에 `doc_path`, `last_modified`, `spec_generated_at` 기록. `intent_context_active=false`면 §3.2 전체 skip.
+      - **`## 1.1 Intent Anchor` 작성 규칙 (MANDATORY)**: source_plan이 있으면 `PLAN_INTENT_ANCHOR`의 `original_intent`와 `refined_intent`를 원본 경로와 함께 기입한다. 실행 계획·기술 선택·리뷰 finding은 이 섹션에 넣지 않는다. source_plan 없는 legacy 요청은 `NO_SOURCE_PLAN_INTENT_ANCHOR`를 기록한다.
+      - **`## 3.2 Intent Trace` 작성 규칙 (MANDATORY)**: source_plan이 있으면 각 AC를 `original_intent`, `refined_intent`, 또는 별도 PAC에 연결한다. 근거를 찾지 못하면 `[INTENT-GAP]`으로 표시하되 과거 intent나 리뷰 finding으로 빈칸을 메우지 않는다. source_plan 없는 legacy 요청만 임시 기준 또는 명시적 skip을 허용한다.
       - **`## 3.4 Epic DoD Mapping` 작성 규칙 (조건부, MANDATORY)**: `objective_context` 존재 + `project_dod_items[]` 1개 이상일 때 생성한다. agile-origin objective anchor metadata가 있으면 §3.4를 skip하지 말고 objective trace evidence로 DoD/anchor → Spec AC 매핑을 남긴다. 표 형식: `DoD ID(or 항목) | DoD 설명 | Mapped Spec AC IDs | Coverage`. 매핑 가능한 AC 없으면 `[UNMAPPED]`/`Gap`. legacy/non-agile에서 `objective_context` 없거나 비어있으면 §3.4는 N/A 또는 skip 가능.
    h-0.7. **Regression Test 선행 태스크 생성** (Step h-1 이전, MANDATORY):
       - 트리거 조건(모두 충족 시 생성): 기존 파일/함수의 비즈니스 로직 변경 포함; 단순 boilerplate 변경만이 아님
@@ -929,24 +932,25 @@ Bash(`python3 {PLUGIN_ROOT}/scripts/mst.py config get workflow.default_agent aut
 
       에이전트 병렬 dispatch: shared routing protocol로 각 prereview task의 `host context`와 `delegation route`를 확정한다. Same-host `native_candidate`는 Codex collaboration 또는 Claude `Task(run_in_background: true)`로 병렬화하고 lifecycle evidence를 기록한다. `mst.py dispatch build --require-worktree`와 provider CLI background process는 해당 task의 `route=external`일 때만 사용한다.
 
-      결과 수집: 태스크별 결과를 CRITICAL/MAJOR/MINOR로 분류. `NO_ISSUES` → 이슈 없음. 실패 응답 → "[Pre-review skip]" 후 건너뜀.
+      결과 수집: 태스크별 결과를 CRITICAL/MAJOR/MINOR로 분류하고, 동시에 `ANCHOR_GAP | PAC_GAP | IMPLEMENTATION_NECESSITY | FOLLOW_UP_RECOMMENDATION | CONTRACT_CONFLICT`로 판정한다. `NO_ISSUES` → 이슈 없음. 실패 응답 → "[Pre-review skip]" 후 건너뜀.
 
       **escalate 판단**: `"critical"` → CRITICAL 1개 이상; `"major"` → CRITICAL/MAJOR 1개 이상; `"minor"` → 이슈 1개 이상
 
+      **승격 경계 (MANDATORY)**: severity만으로 spec을 확장하지 않는다. `FOLLOW_UP_RECOMMENDATION`은 escalate 계산에서 제외하고 최종 추천에만 남긴다. 자동 반영 후보는 Intent Anchor 또는 PAC에 직접 연결되거나 이를 달성하는 데 반드시 필요한 항목뿐이다.
+
       **[escalate = true]**:
-      - **user 모드**: AskUserQuestion으로 이슈 목록(CRITICAL/MAJOR 우선) 제시 + "반영하고 재리뷰" / "반영 없이 진행". "반영하고 재리뷰" 선택 시: PM이 spec.md에 Edit 반영 후 `current_iteration < max_iterations` → 루프 재진입; `>= max_iterations` → 루프 종료.
-      - **pm-self 모드**: PM이 자체 판단으로 spec.md에 Edit 반영. `current_iteration < max_iterations` → 루프 재진입; `>= max_iterations` → 루프 종료.
+      - `ANCHOR_GAP | PAC_GAP | IMPLEMENTATION_NECESSITY`: user/pm-self 모드 모두 PM이 근거·기대 결과·허용 범위가 명확한 spec 교정으로 반영하고 재리뷰한다. 사용자 확인을 기다리지 않는다.
+      - `FOLLOW_UP_RECOMMENDATION`: Intent Anchor·범위·PAC 변경 제안은 현재 spec에 반영하지 않고 `request.json.follow_up_recommendations`에 저장해 최종 accept까지 전달한다. request/review 중에는 모드와 무관하게 질문하지 않으며, 전체 플로우 종료 후에만 후속 작업 여부를 다룬다.
+      - `CONTRACT_CONFLICT`: 현재 Intent Anchor와 PAC가 서로 충돌해 유효한 spec을 만들 수 없을 때만 `needs_user_decision`으로 플로우를 종료한다. `-a`에서는 질문 없이 충돌 근거와 권장 선택지를 반환하고, 일반 모드는 종료 상태를 기록한 뒤 한 번 질문한다.
 
       **[escalate = false]** (escalation_trigger 미만 이슈만 존재 또는 전체 NO_ISSUES):
 
       **MINOR 임계값 에스컬레이션 체크** (`minor_escalation_threshold != null`인 경우):
       - threshold <= 0이면 1로 치환. MINOR_COUNT 합산.
       - MINOR_COUNT >= minor_escalation_threshold → "[MINOR 임계값 초과]" 안내:
-        - **user 모드**: AskUserQuestion으로 MINOR 이슈 목록 + "반영하고 재리뷰" / "반영 없이 진행". 재리뷰 선택 시 PM이 Edit 반영 후 루프 재진입 (max_iterations 확인).
-        - **pm-self 모드**: PM이 자체 반영 후 루프 재진입 (max_iterations 확인).
+        - in-scope MINOR는 모드와 무관하게 구체적 spec 교정으로 반영 후 루프 재진입한다. `FOLLOW_UP_RECOMMENDATION`은 반영하지 않는다.
       - MINOR_COUNT < threshold 또는 threshold==null:
-        - **user 모드**: MINOR 이슈 목록 AskUserQuestion + "반영하고 재리뷰" / "반영 없이 진행".
-        - **pm-self 모드**: PM이 자체 반영 후 루프 종료.
+        - in-scope MINOR는 PM이 자체 반영하고, `FOLLOW_UP_RECOMMENDATION`은 기록만 한 뒤 루프 종료한다. `CONTRACT_CONFLICT`만 플로우 종료 후 사용자 결정 대상으로 남긴다.
       - 전체 NO_ISSUES: 수정 없이 루프 종료.
 
       **[PREREVIEW LOOP 종료]**

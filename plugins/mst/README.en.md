@@ -93,7 +93,7 @@ Gran Maestro uses the same git repository as the marketplace source for Claude C
 
 **0.54.x** highlights:
 
-- **Intent System**: Store and track feature intents (JTBD) to ensure intent consistency from plan through implementation and verification (`/mst:intent`)
+- **Intent Anchor**: Only the plan's original user intent and user-confirmed refined intent flow through request → implementation → review → accept. Past decisions in `/mst:intent` are inference aids and never override the current plan's intent or scope.
 - **Browser UI Testing**: Automatically link browser tests from plan/request/review on UI changes, with screenshot capture and verification
 - **Q&A Context Capture**: Auto-learn user question/answer patterns to accumulate preferences and reduce repetitive questions
 - **Gardening**: Automatically detect stale plans, requests, and intents and generate reports (`/mst:gardening`)

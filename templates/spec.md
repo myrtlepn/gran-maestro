@@ -58,6 +58,17 @@ Step 3: 에이전트 확정
 
 {태스크의 목적을 1~2문장으로. "무엇을 달성하는가"만 기술, 방법은 기술하지 않음}
 
+## 1.1 Intent Anchor
+
+> source_plan이 있으면 plan의 두 의도 섹션만 전달합니다. 실행 계획이나 리뷰 제안은 이 표에 추가하지 않습니다.
+
+| 구분 | 내용 | 원본 |
+|------|------|------|
+| 사용자 최초 의도 | {plan.md `## 사용자 최초 의도` 요약} | {PLAN_PATH}#사용자-최초-의도 |
+| 정제 의도 | {plan.md `## 요청 (Refined)` 요약} | {PLAN_PATH}#요청-refined |
+
+> source_plan이 없는 legacy 요청은 `NO_SOURCE_PLAN_INTENT_ANCHOR`로 표시하고 `request.json.original_request`를 임시 기준으로 사용하되, 과거 intent나 리뷰 finding으로 이를 확장하지 않습니다.
+
 ## 2. 범위 (Scope)
 
 - **포함**: {이 태스크에서 처리하는 기능/동작}
@@ -137,8 +148,8 @@ Test: `{테스트 실행 명령어}`
 
 ## 3.2 Intent Trace
 
-> 각 AC가 어떤 원본 의도에서 도출되었는지 추적합니다.
-> intent_context가 활성화된 경우에만 채워집니다. 비활성 시 이 섹션 전체 skip.
+> 각 AC가 Intent Anchor 또는 plan의 PAC 중 어디에서 도출되었는지 추적합니다. Intent Anchor와 실행 검증 기준인 PAC를 같은 것으로 취급하지 않습니다.
+> source_plan이 있는 경우 반드시 채우고, 없는 legacy 요청만 임시 의도 기준으로 작성하거나 명시적으로 skip합니다.
 
 | AC-ID | 의도 근거 | 근거 출처 | 신뢰도 |
 |-------|-----------|-----------|--------|
