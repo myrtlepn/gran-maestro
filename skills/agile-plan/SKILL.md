@@ -426,7 +426,7 @@ DELEGATION BOUNDARY (MANDATORY)
 4. 반환값에 따라 분기한다.
    - `mode=claude_tool`: 반환된 `payload`로 `AskUserQuestion`을 호출한다.
    - `mode=codex_tool`: 반환된 `payload`로 `request_user_input`을 호출한다. 도구 응답을 `question answer`로 저장하고 `question consume`으로 저장된 continuation을 queue에 넣은 뒤 기존 resume 흐름을 계속한다.
-   - `mode=pending_artifact`: 반환된 `user_message`를 사용자에게 그대로 보여주고 종료한다. 이 상태는 정상적인 사용자 입력 대기다. 사용자는 안내된 `/mst:resume --answer Q-... --value "..."`로 답하고 재개한다.
+   - `mode=pending_artifact`: 반환된 `user_message`를 사용자에게 그대로 보여주고 종료한다. 이 상태는 정상적인 사용자 입력 대기다. 사용자는 안내된 Codex `$mst:resume --answer Q-... --value "..."` 또는 Claude `/mst:resume ...` 명령으로 답하고 재개한다.
    - `mode=auto_decision`: `AUTO_MODE=true` 경로로 질문 없이 계속하거나 blocker를 기록한다.
 5. Native payload 제약에 맞지 않는 질문은 내용을 자르지 않고 `pending_artifact`로 전환한다. workflow 중 임의 확인 질문이나 self-pause는 계속 금지한다.
 <!-- @end-include -->

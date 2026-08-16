@@ -56,7 +56,7 @@ After installation, both runtimes use the same MST skill source. Claude Code reg
 
 ### Codex questions and the open-source boundary
 
-`/mst:plan` does not ask a ceremonial confirmation when the conversation has already settled the decision; it asks only about material unresolved choices. When `request_user_input` is actually available to the Codex root agent in Plan mode, MST uses the native question UI. Default mode, subagents, headless runs, and payloads outside the native shape use a durable text fallback in `.gran-maestro/questions/`, followed by `/mst:resume --answer Q-... --value "..."`.
+`/mst:plan` does not ask a ceremonial confirmation when the conversation has already settled the decision; it asks only about material unresolved choices. When `request_user_input` is actually available to the Codex root agent in Plan mode, MST uses the native question UI. Default mode, subagents, headless runs, and payloads outside the native shape use a durable text fallback in `.gran-maestro/questions/`, followed by `$mst:resume --answer Q-... --value "..."` in Codex.
 
 OpenAI documents [Codex CLI, the SDK, App Server, Skills, Plugins, and other key components as open source](https://learn.chatgpt.com/docs/open-source). The same official page says that the Codex IDE extension and Codex cloud are not open source. Gran Maestro stays within that published boundary and does not infer that private native-question UI internals are open source.
 

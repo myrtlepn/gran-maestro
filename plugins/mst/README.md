@@ -56,7 +56,7 @@ codex plugin add mst@gran-maestro
 
 ### Codex 질문 동작과 공개 범위
 
-`/mst:plan`은 이미 대화에서 정해진 내용을 의례적으로 다시 묻지 않고, 중요한 미결 선택만 질문합니다. Codex root agent의 Plan mode에서 `request_user_input`이 실제로 제공되면 native 질문 UI를 사용합니다. Default mode, subagent, headless 실행 또는 native payload 제약에 맞지 않는 질문은 `.gran-maestro/questions/`에 저장하고 완전한 선택지를 텍스트로 보여준 뒤 `/mst:resume --answer Q-... --value "..."`로 이어갑니다.
+`/mst:plan`은 이미 대화에서 정해진 내용을 의례적으로 다시 묻지 않고, 중요한 미결 선택만 질문합니다. Codex root agent의 Plan mode에서 `request_user_input`이 실제로 제공되면 native 질문 UI를 사용합니다. Default mode, subagent, headless 실행 또는 native payload 제약에 맞지 않는 질문은 `.gran-maestro/questions/`에 저장하고 완전한 선택지를 텍스트로 보여준 뒤 Codex에서는 `$mst:resume --answer Q-... --value "..."`로 이어갑니다.
 
 OpenAI가 공개한 범위는 [Codex CLI, SDK, App Server, Skills, Plugins 등 주요 구성요소](https://learn.chatgpt.com/docs/open-source)입니다. 같은 공식 문서에 따르면 Codex IDE extension과 Codex cloud는 오픈소스가 아닙니다. Gran Maestro는 이 공개 경계만 설명하며 native 질문 UI의 비공개 내부 구현까지 오픈소스라고 가정하지 않습니다.
 

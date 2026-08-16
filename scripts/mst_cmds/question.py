@@ -377,7 +377,8 @@ def cmd_question_prepare(args) -> int:
             print(_compact_json(result) if args.json else json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
-        resume_command = f'/mst:resume --answer {question_id} --value "<answer>"'
+        resume_skill_command = "$mst:resume" if host_name == "codex" else "/mst:resume"
+        resume_command = f'{resume_skill_command} --answer {question_id} --value "<answer>"'
         path = _write_pending_artifact(
             question_id=question_id,
             payload=payload,

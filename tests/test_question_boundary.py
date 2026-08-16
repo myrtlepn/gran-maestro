@@ -131,7 +131,7 @@ def test_codex_prepare_creates_pending_artifact_and_user_wait_state(tmp_path: Pa
 
     assert prepared["mode"] == "pending_artifact"
     assert prepared["question_id"].startswith("Q-")
-    assert "/mst:resume --answer" in prepared["resume_command"]
+    assert "$mst:resume --answer" in prepared["resume_command"]
     artifact = Path(prepared["path"])
     assert artifact.is_file()
     artifact_payload = json.loads(artifact.read_text(encoding="utf-8"))
@@ -197,8 +197,9 @@ def test_non_root_plan_lanes_render_complete_nested_fallback(
     assert "커밋까지" not in first_block
     assert "커밋까지: 로컬 커밋을 남깁니다." in second_block
     assert "검증만: 테스트 결과만 보고합니다." in second_block
+    resume_skill = "$mst:resume" if host == "codex" else "/mst:resume"
     assert prepared["resume_command"] == (
-        f'/mst:resume --answer {prepared["question_id"]} --value "<answer>"'
+        f'{resume_skill} --answer {prepared["question_id"]} --value "<answer>"'
     )
     assert message.count(prepared["resume_command"]) == 1
 
