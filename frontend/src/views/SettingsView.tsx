@@ -91,6 +91,8 @@ type WorkflowModelProviderRow = {
   premium: string;
   economy: string;
   defaultTier: string;
+  premiumReasoningEffort: string;
+  economyReasoningEffort: string;
   defaultReasoningEffort: string;
 };
 
@@ -869,14 +871,23 @@ function buildModelProviderRows(config: any): WorkflowModelProviderRow[] {
   const source = getNestedValueWithArrays(config, ['models', 'providers']);
   return AGENT_PROVIDERS.map((provider) => {
     const providerConfig = isObject(source?.[provider]) ? source[provider] as Record<string, unknown> : {};
+    const defaultReasoningEffort = typeof providerConfig.default_reasoning_effort === 'string'
+      ? providerConfig.default_reasoning_effort
+      : 'inherit';
     return {
       provider,
       premium: typeof providerConfig.premium === 'string' ? providerConfig.premium : '-',
       economy: typeof providerConfig.economy === 'string' ? providerConfig.economy : '-',
       defaultTier: typeof providerConfig.default_tier === 'string' ? providerConfig.default_tier : '-',
-      defaultReasoningEffort: typeof providerConfig.default_reasoning_effort === 'string'
-        ? providerConfig.default_reasoning_effort
-        : 'inherit',
+      // The tier-specific fields are optional. Display the provider fallback
+      // until a user explicitly configures a tier override.
+      premiumReasoningEffort: typeof providerConfig.premium_reasoning_effort === 'string'
+        ? providerConfig.premium_reasoning_effort
+        : defaultReasoningEffort,
+      economyReasoningEffort: typeof providerConfig.economy_reasoning_effort === 'string'
+        ? providerConfig.economy_reasoning_effort
+        : defaultReasoningEffort,
+      defaultReasoningEffort,
     };
   });
 }
@@ -1195,8 +1206,21 @@ export function SettingsView() {
 
   function getReasoningOptionsForPath(fullPath: string[]): string[] | undefined {
     const field = fullPath[fullPath.length - 1];
-    if (field === 'default_reasoning_effort' && fullPath[0] === 'models' && fullPath[1] === 'providers') {
+    if (
+      (field === 'default_reasoning_effort' || field === 'premium_reasoning_effort' || field === 'economy_reasoning_effort')
+      && fullPath[0] === 'models'
+      && fullPath[1] === 'providers'
+    ) {
       const provider = fullPath[2];
+      if (field === 'premium_reasoning_effort' || field === 'economy_reasoning_effort') {
+        const tier = field === 'premium_reasoning_effort' ? 'premium' : 'economy';
+        return reasoningOptions(
+          reasoningCapabilities,
+          provider,
+          resolveProviderModel(merged, provider, tier),
+          false,
+        );
+      }
       const premium = supportedReasoningEfforts(
         reasoningCapabilities,
         provider,
@@ -1840,15 +1864,17 @@ export function SettingsView() {
                       selectedNode.id === 'models.providers' ? (
                         selectedModelProviderRows.length > 0 ? (
                           <div className="space-y-3">
-                            <div className="rounded-md border overflow-hidden">
-                              <table className="w-full text-sm">
+                            <div className="rounded-md border overflow-x-auto">
+                              <table className="w-full min-w-[980px] text-sm">
                                 <thead className="bg-muted/40">
                                   <tr>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Provider</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Premium</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Economy</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold">Default Tier</th>
-                                    <th className="text-left px-3 py-2 text-xs font-semibold">Default Effort</th>
+                                    <th className="text-left px-3 py-2 text-xs font-semibold">Premium Effort</th>
+                                    <th className="text-left px-3 py-2 text-xs font-semibold">Economy Effort</th>
+                                    <th className="text-left px-3 py-2 text-xs font-semibold">Fallback Effort</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1891,6 +1917,40 @@ export function SettingsView() {
                                       </td>
                                       <td className="px-3 py-2">
                                         <Select
+                                          value={getReasoningOptionsForPath(['models', 'providers', row.provider, 'premium_reasoning_effort'])?.includes(row.premiumReasoningEffort) ? row.premiumReasoningEffort : undefined}
+                                          onValueChange={(value) =>
+                                            handleFieldChange(['models', 'providers', row.provider, 'premium_reasoning_effort'], value)
+                                          }
+                                        >
+                                          <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                            <SelectValue placeholder={`${row.premiumReasoningEffort} (unsupported)`} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {getReasoningOptionsForPath(['models', 'providers', row.provider, 'premium_reasoning_effort'])?.map((effort) => (
+                                              <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Select
+                                          value={getReasoningOptionsForPath(['models', 'providers', row.provider, 'economy_reasoning_effort'])?.includes(row.economyReasoningEffort) ? row.economyReasoningEffort : undefined}
+                                          onValueChange={(value) =>
+                                            handleFieldChange(['models', 'providers', row.provider, 'economy_reasoning_effort'], value)
+                                          }
+                                        >
+                                          <SelectTrigger className="h-8 w-32 font-mono text-xs">
+                                            <SelectValue placeholder={`${row.economyReasoningEffort} (unsupported)`} />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {getReasoningOptionsForPath(['models', 'providers', row.provider, 'economy_reasoning_effort'])?.map((effort) => (
+                                              <SelectItem key={effort} value={effort} className="font-mono">{effort}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Select
                                           value={getReasoningOptionsForPath(['models', 'providers', row.provider, 'default_reasoning_effort'])?.includes(row.defaultReasoningEffort) ? row.defaultReasoningEffort : undefined}
                                           onValueChange={(value) =>
                                             handleFieldChange(['models', 'providers', row.provider, 'default_reasoning_effort'], value)
@@ -1912,7 +1972,7 @@ export function SettingsView() {
                               </table>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              이 노드는 인라인 편집을 지원합니다. 값을 변경한 뒤 Save 버튼으로 저장하세요.
+                              Premium/Economy Effort를 지정하면 해당 모델 tier가 우선하고, 지정하지 않은 tier는 Fallback Effort를 사용합니다. 값을 변경한 뒤 Save 버튼으로 저장하세요.
                             </p>
                           </div>
                         ) : (

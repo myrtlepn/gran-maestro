@@ -100,6 +100,70 @@ def test_default_and_inherit_have_distinct_precedence(tmp_path: Path) -> None:
     assert host_default["reasoning_effort"] is None
 
 
+def test_tier_specific_provider_defaults_follow_the_resolved_model_tier(tmp_path: Path) -> None:
+    base = tmp_path / ".gran-maestro"
+    _write_config(
+        base,
+        {
+            "models": {
+                "providers": {
+                    "codex": {
+                        "premium": "gpt-5.6-sol",
+                        "economy": "gpt-5.6-luna",
+                        "default_tier": "premium",
+                        "default_reasoning_effort": "low",
+                        "premium_reasoning_effort": "xhigh",
+                        "economy_reasoning_effort": "max",
+                    }
+                }
+            },
+            "ideation": {
+                "agents": {
+                    "codex": {
+                        "count": 1,
+                        "tier": "economy",
+                        "reasoning_effort": "default",
+                    }
+                }
+            },
+        },
+    )
+
+    premium = reasoning_effort_mod.resolve_execution("codex", "premium", base_dir=base)
+    economy = reasoning_effort_mod.resolve_execution("codex", "ideation", base_dir=base)
+
+    assert premium["model"] == "gpt-5.6-sol"
+    assert premium["reasoning_effort"] == "xhigh"
+    assert premium["reasoning_effort_source"] == "models.providers.codex.premium_reasoning_effort"
+    assert economy["model"] == "gpt-5.6-luna"
+    assert economy["reasoning_effort"] == "max"
+    assert economy["reasoning_effort_source"] == "models.providers.codex.economy_reasoning_effort"
+
+
+def test_tier_specific_inherit_overrides_provider_fallback(tmp_path: Path) -> None:
+    base = tmp_path / ".gran-maestro"
+    _write_config(
+        base,
+        {
+            "models": {
+                "providers": {
+                    "codex": {
+                        "premium": "gpt-5.6-sol",
+                        "default_tier": "premium",
+                        "default_reasoning_effort": "high",
+                        "premium_reasoning_effort": "inherit",
+                    }
+                }
+            }
+        },
+    )
+
+    resolved = reasoning_effort_mod.resolve_execution("codex", base_dir=base)
+
+    assert resolved["reasoning_effort"] is None
+    assert resolved["reasoning_effort_source"] == "models.providers.codex.premium_reasoning_effort"
+
+
 def test_unsupported_model_effort_fails_before_launch(tmp_path: Path) -> None:
     base = tmp_path / ".gran-maestro"
     _write_config(

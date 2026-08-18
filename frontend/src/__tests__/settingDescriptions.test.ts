@@ -43,6 +43,8 @@ describe('setting descriptions', () => {
 
     expect(SETTING_DESCRIPTIONS).toHaveProperty('models.providers.agy.default_tier')
     expect(SETTING_DESCRIPTIONS).not.toHaveProperty('models.providers.gemini.default_tier')
+    expect(SETTING_DESCRIPTIONS).toHaveProperty('models.providers.codex.premium_reasoning_effort')
+    expect(SETTING_DESCRIPTIONS).toHaveProperty('models.providers.codex.economy_reasoning_effort')
   })
 
   it('exposes canonical native delegation controls and explains legacy aliases', () => {

@@ -342,15 +342,21 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium 모델 |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy 모델 |
 | `models.providers.codex.default_tier` | `"premium"` | Codex 기본 티어 |
-| `models.providers.codex.default_reasoning_effort` | `"inherit"` | Codex 기본 추론 난이도 |
+| `models.providers.codex.premium_reasoning_effort` | 미설정 | Codex premium 모델의 기본 추론 난이도 |
+| `models.providers.codex.economy_reasoning_effort` | 미설정 | Codex economy 모델의 기본 추론 난이도 |
+| `models.providers.codex.default_reasoning_effort` | `"inherit"` | tier별 설정이 없을 때 사용하는 Codex 추론 난이도 |
 | `models.providers.agy.premium` | `"agy-default"` | AGY premium 모델 |
 | `models.providers.agy.economy` | `"agy-default"` | AGY economy 모델 |
 | `models.providers.agy.default_tier` | `"premium"` | AGY 기본 티어 |
-| `models.providers.agy.default_reasoning_effort` | `"inherit"` | AGY 기본 추론 난이도 |
+| `models.providers.agy.premium_reasoning_effort` | 미설정 | AGY premium 모델의 기본 추론 난이도 |
+| `models.providers.agy.economy_reasoning_effort` | 미설정 | AGY economy 모델의 기본 추론 난이도 |
+| `models.providers.agy.default_reasoning_effort` | `"inherit"` | tier별 설정이 없을 때 사용하는 AGY 추론 난이도 |
 | `models.providers.claude.premium` | `"opus"` | Claude premium 모델 |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy 모델 |
 | `models.providers.claude.default_tier` | `"economy"` | Claude 기본 티어 |
-| `models.providers.claude.default_reasoning_effort` | `"inherit"` | Claude 기본 추론 난이도 |
+| `models.providers.claude.premium_reasoning_effort` | 미설정 | Claude premium 모델의 기본 추론 난이도 |
+| `models.providers.claude.economy_reasoning_effort` | 미설정 | Claude economy 모델의 기본 추론 난이도 |
+| `models.providers.claude.default_reasoning_effort` | `"inherit"` | tier별 설정이 없을 때 사용하는 Claude 추론 난이도 |
 
 ### models.roles
 
@@ -372,7 +378,9 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 
 `tier`를 생략하면 해당 프로바이더의 `default_tier`가 적용됩니다.
 
-각 agent/role 객체의 `reasoning_effort`는 `default | inherit | low | medium | high | xhigh | max | ultra`를 사용합니다. `default`는 provider의 `default_reasoning_effort`를 따르고, `inherit`은 native host 또는 CLI 기본값을 사용합니다. concrete 값은 호출별 값이 provider 기본값보다 우선하며, 현재 provider/model이 지원하지 않는 값은 실행 전에 차단됩니다. 동일한 resolved 값이 native, direct external, Orca external에 적용됩니다.
+각 agent/role 객체의 `reasoning_effort`는 `default | inherit | low | medium | high | xhigh | max | ultra`를 사용합니다. `default`는 먼저 선택된 model tier의 `<tier>_reasoning_effort`를 따르고, 해당 키가 없으면 provider의 `default_reasoning_effort`를 fallback으로 사용합니다. `inherit`은 native host 또는 CLI 기본값을 사용합니다. concrete 값은 호출별 값이 tier/provider 기본값보다 우선하며, 현재 provider/model이 지원하지 않는 값은 실행 전에 차단됩니다. 동일한 resolved 값이 native, direct external, Orca external에 적용됩니다.
+
+`premium_reasoning_effort`와 `economy_reasoning_effort`는 선택 사항입니다. 예전 설정처럼 `default_reasoning_effort`만 지정해도 동작하며, tier별 키에 `inherit`을 명시하면 해당 tier는 host/CLI 기본값을 사용합니다.
 
 > **용어 주의: model tier vs preset tier**
 >
@@ -389,7 +397,10 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
     "codex": {
       "premium": "gpt-5.3-codex",
       "economy": "codex-mini",
-      "default_tier": "premium"
+      "default_tier": "premium",
+      "premium_reasoning_effort": "xhigh",
+      "economy_reasoning_effort": "max",
+      "default_reasoning_effort": "inherit"
     },
     "agy": {
       "premium": "agy-default",

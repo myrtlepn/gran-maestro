@@ -297,15 +297,21 @@ Defines model tiers (premium/economy) per provider.
 | `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium model |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy model |
 | `models.providers.codex.default_tier` | `"premium"` | Codex default tier |
-| `models.providers.codex.default_reasoning_effort` | `"inherit"` | Codex default reasoning effort |
+| `models.providers.codex.premium_reasoning_effort` | unset | Default reasoning effort for the Codex premium model |
+| `models.providers.codex.economy_reasoning_effort` | unset | Default reasoning effort for the Codex economy model |
+| `models.providers.codex.default_reasoning_effort` | `"inherit"` | Codex reasoning fallback when no tier setting exists |
 | `models.providers.agy.premium` | `"agy-default"` | AGY premium model |
 | `models.providers.agy.economy` | `"agy-default"` | AGY economy model |
 | `models.providers.agy.default_tier` | `"premium"` | AGY default tier |
-| `models.providers.agy.default_reasoning_effort` | `"inherit"` | AGY default reasoning effort |
+| `models.providers.agy.premium_reasoning_effort` | unset | Default reasoning effort for the AGY premium model |
+| `models.providers.agy.economy_reasoning_effort` | unset | Default reasoning effort for the AGY economy model |
+| `models.providers.agy.default_reasoning_effort` | `"inherit"` | AGY reasoning fallback when no tier setting exists |
 | `models.providers.claude.premium` | `"opus"` | Claude premium model |
 | `models.providers.claude.economy` | `"sonnet"` | Claude economy model |
 | `models.providers.claude.default_tier` | `"economy"` | Claude default tier |
-| `models.providers.claude.default_reasoning_effort` | `"inherit"` | Claude default reasoning effort |
+| `models.providers.claude.premium_reasoning_effort` | unset | Default reasoning effort for the Claude premium model |
+| `models.providers.claude.economy_reasoning_effort` | unset | Default reasoning effort for the Claude economy model |
+| `models.providers.claude.default_reasoning_effort` | `"inherit"` | Claude reasoning fallback when no tier setting exists |
 
 ### models.roles
 
@@ -327,7 +333,9 @@ Example: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` 
 
 If `tier` is omitted, the provider's `default_tier` is used.
 
-Each agent or role object accepts `reasoning_effort` with `default | inherit | low | medium | high | xhigh | max | ultra`. `default` uses the provider's `default_reasoning_effort`; `inherit` leaves the native host or CLI default unchanged. A concrete per-call value overrides the provider default, and unsupported provider/model combinations fail before launch. The same resolved binding is used for native, direct external, and Orca external execution.
+Each agent or role object accepts `reasoning_effort` with `default | inherit | low | medium | high | xhigh | max | ultra`. `default` first uses the selected model tier's `<tier>_reasoning_effort`, then falls back to the provider's `default_reasoning_effort` when the tier key is absent. `inherit` leaves the native host or CLI default unchanged. A concrete per-call value overrides the tier/provider default, and unsupported provider/model combinations fail before launch. The same resolved binding is used for native, direct external, and Orca external execution.
+
+`premium_reasoning_effort` and `economy_reasoning_effort` are optional. Existing configurations that only define `default_reasoning_effort` continue to work; setting a tier key to `inherit` explicitly uses the host/CLI default for that tier.
 
 > **Terminology note: model tier vs preset tier**
 >
@@ -344,7 +352,10 @@ Each agent or role object accepts `reasoning_effort` with `default | inherit | l
     "codex": {
       "premium": "gpt-5.3-codex",
       "economy": "codex-mini",
-      "default_tier": "premium"
+      "default_tier": "premium",
+      "premium_reasoning_effort": "xhigh",
+      "economy_reasoning_effort": "max",
+      "default_reasoning_effort": "inherit"
     },
     "agy": {
       "premium": "agy-default",

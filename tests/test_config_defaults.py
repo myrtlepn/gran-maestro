@@ -111,6 +111,8 @@ def test_native_delegation_setting_options_are_canonical():
     assert "all" in options["delegation.native.scope"]
     assert not any("native_codex_subagents" in key for key in options)
     assert options["models.providers.*.default_reasoning_effort"][0] == "inherit"
+    assert options["models.providers.*.premium_reasoning_effort"][0] == "inherit"
+    assert options["models.providers.*.economy_reasoning_effort"][0] == "inherit"
     assert options["**.reasoning_effort"][:2] == ["default", "inherit"]
 
 

@@ -234,8 +234,20 @@ def resolve_execution(
         f"{entry_path}.reasoning_effort" if entry_path else "default"
     )
     if requested_effort == "default":
-        requested_effort = provider_default
-        effort_source = f"models.providers.{normalized_provider}.default_reasoning_effort"
+        tier_default_key = (
+            f"{tier}_reasoning_effort"
+            if tier in {"premium", "economy"}
+            else None
+        )
+        tier_default = provider_cfg.get(tier_default_key) if tier_default_key else None
+        if isinstance(tier_default, str):
+            requested_effort = tier_default
+            effort_source = f"models.providers.{normalized_provider}.{tier_default_key}"
+        else:
+            # The tier-specific setting is optional so existing configurations
+            # continue to use the provider-wide default.
+            requested_effort = provider_default
+            effort_source = f"models.providers.{normalized_provider}.default_reasoning_effort"
     if requested_effort == "inherit":
         effective_effort = None
     elif requested_effort in CONCRETE_REASONING_EFFORTS:

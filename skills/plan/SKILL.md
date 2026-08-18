@@ -187,11 +187,12 @@ Provider CLI를 직접 실행하는 허가된 external lane도 마지막 명령�
 
 - `plan.md`와 `plan.json`이 생성되고 저장 경로/ID(PLN-NNN)가 확정되어야 종료할 수 있다.
 - `저장하고 /mst:request 실행` 경로는 `plan.md` 디스크 저장 확인 후 1회만 호출한다.
-- 어떤 종료 경로든 사용자에게 보이는 마지막 마무리는 반드시 `다음 단계 실행 명령:` 블록으로 끝난다.
-  - `저장만 하기`: `/mst:request --plan PLN-NNN` 및 `/mst:request --plan PLN-NNN -a`
-  - `mst:request`까지 실행 완료: 생성된 REQ가 있으면 `/mst:approve REQ-NNN`, REQ를 특정하지 못하면 `/mst:list`
-  - 계획 후보 미선택/후보 없음 등 plan 산출물 없이 종료: `/mst:plan "{계획 주제}"`
-  - 마지막 줄 뒤에 추가 설명, 인사, 요약을 붙이지 않는다.
+- 사용자에게 보이는 마지막 마무리는 실제 실행 상태와 일치해야 한다.
+  - `저장만 하기`: `다음 단계 실행 명령:` 블록에 `/mst:request --plan PLN-NNN` 및 `/mst:request --plan PLN-NNN -a`를 안내한다.
+  - `AUTO_MODE=false`에서 `mst:request`까지 실행 완료: 생성된 REQ가 있으면 `다음 단계 실행 명령:` 블록에 `/mst:approve REQ-NNN`, REQ를 특정하지 못하면 `/mst:list`를 안내한다.
+  - `AUTO_MODE=true`에서 `mst:request -a` 호출 완료: 하위 `request → approve → review → accept` 자동 체인의 반환 상태를 authoritative하게 사용한다. 전체 체인이 terminal success이면 `자동 체인 완료:` 블록으로 끝내고 `/mst:approve` 또는 다른 수동 실행 명령을 출력하지 않는다. blocker/failure이면 하위 스킬이 반환한 정확한 복구 명령을 `다음 단계 실행 명령:` 블록으로 전달하고, 명령을 특정하지 못하면 `/mst:list`를 안내한다.
+  - 계획 후보 미선택/후보 없음 등 plan 산출물 없이 종료: `다음 단계 실행 명령:` 블록에 `/mst:plan "{계획 주제}"`를 안내한다.
+  - 마지막 블록 뒤에 추가 설명, 인사, 요약을 붙이지 않는다.
 - 범위 밖 수정 요청은 plan 요구사항으로 흡수 기록하고 코드/설정 파일은 수정하지 않는다.
 
 ### 금지 패턴
@@ -1347,32 +1348,32 @@ AskUserQuestion 선택지: **"A. 위 흐름으로 확정"** / **"B. 흐름 수�
    - `AUTO_MODE=false`, 자율 모드 선택 시: `Skill(skill: "mst:request", args: "--plan PLN-NNN -a {주제}")`
    - `## 분리 실행` 섹션이 있으면 mst:request가 다중 REQ 자동 생성
    - ⚠️ **spec.md 작성 완료 전 plan 스킬 종료 금지**
-   - request 결과에서 생성된 REQ ID를 수집하고, plan 스킬 최종 마무리의 마지막 블록에 다음 명령을 출력한다:
-     ```text
-     다음 단계 실행 명령:
-       /mst:approve REQ-NNN
-     ```
-     REQ ID를 특정하지 못한 경우에는 fallback으로 `다음 단계 실행 명령:\n  /mst:list`를 출력한다.
+   - request 결과에서 생성된 REQ ID와 terminal 상태를 수집한다.
+   - `AUTO_MODE=false`: plan 스킬 최종 마무리의 마지막 블록에 `다음 단계 실행 명령:\n  /mst:approve REQ-NNN`을 출력한다. REQ ID를 특정하지 못한 경우에는 `/mst:list`를 출력한다.
+   - `AUTO_MODE=true`: `request`의 `auto_approve=true` 계약에 따라 `approve -a → review --auto → accept -a`까지 같은 자동 체인으로 완료되어야 한다. 하위 호출의 terminal 결과를 확인하기 전에 plan 스킬을 종료하지 않는다.
+     - 전체 linked REQ가 `done | completed | accepted`이면 수동 `/mst:approve` 안내를 출력하지 않고 Step 7의 `자동 체인 완료:` 블록으로 종료한다.
+     - blocker/failure/limit 상태이면 성공으로 표시하지 않는다. 하위 스킬이 반환한 blocker 근거와 정확한 복구 명령을 그대로 전달한다. 복구 명령을 특정하지 못한 경우에만 `/mst:list`를 fallback으로 사용한다.
 6. Stitch 연계 (`AUTO_MODE=false`에서 선택했거나, `AUTO_MODE=true`에서 UI 감지된 경우):
    1. `Skill(skill: "mst:stitch", args: "--pln PLN-NNN --multi {plan 주제}")` 호출 (⚠️ `mcp__stitch__*` 도구 직접 호출 절대 금지)
    2. 호출 완료 후 Stitch 프로젝트/화면 정보를 plan 초안에 `## 디자인 시안` 섹션으로 추가: DES-NNN ID + 프로젝트 URL, 각 화면: 화면명 + Stitch URL + html_file 경로. html_file이 null이면 해당 행 생략.
    3. `AUTO_MODE=false`면 Step 4 재표시 (저장/수정 선택 가능), `AUTO_MODE=true`면 저장 경로로 계속 진행.
-7. `AUTO_MODE=true`이고 plan.md 저장 완료 후 아래 요약을 반드시 출력:
+7. `AUTO_MODE=true`이고 `mst:request -a`에서 시작된 하위 자동 체인이 terminal success로 완료된 경우 아래 요약을 반드시 출력:
 
    ```text
    [자율 실행 완료]
-   PLN-NNN 플랜이 자율 모드로 완성되었습니다.
+   PLN-NNN 플랜과 연결된 실행 체인이 자율 모드로 완료되었습니다.
    - 총 자율 결정: {AUTO_DECISION_TOTAL}건
    - PM 자율 판단: {AUTO_PM_COUNT}건
    - discussion 사용: {AUTO_DISCUSSION_COUNT}건
    - web-search→discussion 사용: {AUTO_EXPLORE_DISCUSSION_COUNT}건
+   - 완료된 요청: {REQ-NNN, REQ-MMM, ...}
 
    자세한 결정 내역: .gran-maestro/plans/PLN-NNN/auto-decisions.md
 
-   다음 단계 실행 명령:
-     /mst:approve REQ-NNN
+   자동 체인 완료:
+     request → approve → review → accept
    ```
-   생성된 REQ ID를 특정하지 못한 경우 마지막 명령은 `/mst:list`로 대체한다. 위 블록 뒤에 추가 설명을 붙이지 않는다.
+   생성된 REQ ID 또는 terminal success를 확인하지 못한 경우 이 완료 블록을 출력하지 않는다. blocker/failure 분기로 처리하고 `다음 단계 실행 명령:\n  /mst:list`를 fallback으로 출력한다. 위 블록 뒤에 추가 설명을 붙이지 않는다.
 
 ## 출력 형식
 
