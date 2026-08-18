@@ -1,7 +1,7 @@
 {
   "name": "mst",
   "description": "AI 오케스트라의 그랜드마스터 — PM이 코드를 쓰지 않고 AI 에이전트를 지휘하여 개발",
-  "version": "0.65.1",
+  "version": "0.65.2",
   "author": {
     "name": "myrtlepn"
   },

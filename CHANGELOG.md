@@ -8,6 +8,24 @@
 
 ---
 
+## [0.65.2] — 2026-08-19
+
+### 새 기능
+
+- **모델 tier별 추론 난이도 기본값**: Codex·AGY·Claude의 premium/economy 모델에 서로 다른 기본 reasoning effort를 설정하고 대시보드 Settings에서 편집할 수 있습니다.
+
+### 개선
+
+- **자율 plan 체인 완료 안내 정합화**: `plan -a`가 request→approve→review→accept 자동 체인의 실제 terminal 상태를 확인하고, 이미 완료된 요청에 오래된 수동 approve 명령을 안내하지 않습니다.
+- **Reference 저장 진단·가이드 강화**: 병렬 저장의 read-back, crash 후 정상적인 ID gap, 비-idempotent 재시도, 손상 상태 진단 방법을 공통 스킬 안내에 반영했습니다.
+
+### 버그 수정
+
+- **병렬 Reference ID 충돌·JSON 손상 방지**: raw ref counter와 reference add/update/read가 같은 namespace lock을 사용하며, ID를 먼저 영구 예약하고 `content.md`와 `reference.json`을 staging·metadata-last 방식으로 게시합니다.
+- **Reference crash·경로 경쟁 안전성 보강**: 중단된 update의 backup 복구, symlink/기존 target 충돌, counter 손상, filesystem 실패를 구조화된 오류와 `reference doctor --json`으로 확인할 수 있습니다.
+
+---
+
 ## [0.65.1] — 2026-08-16
 
 ### 개선
