@@ -28,6 +28,15 @@ from scripts.mst_cmds._common import (
 )
 
 def cmd_counter_next(args):
+    if args.type == "ref":
+        from scripts.mst_cmds import reference as reference_mod
+
+        try:
+            print(reference_mod.reserve_reference_id_for_counter(args.dir))
+            return 0
+        except reference_mod.ReferenceError as exc:
+            return reference_mod._emit_error(exc.code, exc.message, exc.outcome)
+
     from scripts.mst_cmds import session as session_mod
 
     counter_path = get_counter_path(args.type, args.dir)

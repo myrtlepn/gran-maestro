@@ -895,14 +895,16 @@ def _build_reference_links_payload(agi_id: str) -> dict:
     references = []
     unlinked_count = 0
     for ref_id, linked_paths in sorted(mentions.items()):
-        ref_path = _common.BASE_DIR / "references" / ref_id / "reference.json"
-        ref_payload = load_json(ref_path)
-        if not isinstance(ref_payload, dict):
+        try:
+            ref_payload, _content = _reference.read_reference_strict(ref_id)
+        except (ValueError, _reference.ReferenceError) as exc:
+            diagnostic = getattr(exc, "code", "REFERENCE_NOT_FOUND")
             references.append(
                 {
                     "ref_id": ref_id,
                     "linked_paths": linked_paths,
                     "status": "missing_reference",
+                    "diagnostic": diagnostic,
                 }
             )
             unlinked_count += 1
@@ -912,7 +914,7 @@ def _build_reference_links_payload(agi_id: str) -> dict:
                 "ref_id": ref_id,
                 "topic": str(ref_payload.get("topic") or ""),
                 "url": str(ref_payload.get("url") or ""),
-                "freshness": _reference._check_reference_freshness(ref_payload, config=config),
+                "freshness": str(ref_payload.get("freshness") or "expired"),
                 "linked_paths": linked_paths,
                 "status": "linked",
             }

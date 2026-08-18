@@ -206,6 +206,7 @@ DISPATCH = {
     ("reference", "list"): reference.cmd_reference_list,
     ("reference", "search"): reference.cmd_reference_search,
     ("reference", "update"): reference.cmd_reference_update,
+    ("reference", "doctor"): reference.cmd_reference_doctor,
     ("agile", "init"): agile.cmd_agile_init,
     ("agile", "status"): agile.cmd_agile_status,
     ("agile", "takeover"): agile.cmd_agile_takeover,

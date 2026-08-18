@@ -443,6 +443,10 @@ DELEGATION BOUNDARY (MANDATORY)
    - 예시 C (코드 스니펫): fenced code block(```text)으로 raw 코드와 문서 URL/버전을 남긴다.
    - 신규 REF 품질 체크리스트 (저장 전 점검): Findings: 결론 1~3줄. Quotes: 짧은 원문 인용+URL. Data: 표/버전/날짜/수치. Context: 현재 plan 판단에 필요한 이유.
    - PM lazy-Read 트리거 (`content.md Read` 필수): summary만으로 부족하거나 표/코드/원문 뉘앙스가 결론에 영향을 주면 반드시 `content.md`를 Read한다.
+   - 여러 결과는 병렬 `reference add`로 저장해도 된다. 각 호출은 project+ref namespace lock에서 고유 ID를 먼저 예약하고 완전한 `reference.json`/`content.md` pair만 성공으로 공개한다.
+   - exit 0과 반환된 REF ID를 받은 뒤 `reference get {REF-ID} --json`으로 read-back이 성공해야 저장 완료로 간주한다.
+   - crash 또는 publish 실패가 있으면 예약 ID는 재사용하지 않으므로 번호 gap은 정상이다. `reference add` 재시도는 새 ID를 만드는 비-idempotent 작업이므로 실패 결과의 `outcome=confirmed_failure|unknown_outcome`을 먼저 확인한다.
+   - `REFERENCE_CORRUPT`, `REFERENCE_SCHEMA_INVALID`, `REFERENCE_INCOMPLETE`, `REFERENCE_PATH_UNSAFE`, `REFERENCE_OUTCOME_UNKNOWN`은 선행 ID 부족이 아니라 저장소 상태 진단이다. `reference doctor --json`으로 확인하고 손상 artifact를 자동 덮어쓰거나 삭제하지 않는다.
 5. **프롬프트 주입**: 이후 단계 프롬프트에 `[REFERENCE_CONTEXT]`를 주입한다. 형식: `current_date`, `model_cutoff`, `references: REF-001 (fresh|stale|expired) {topic} | {url}`. 참조가 없으면 `references: none`으로 명시한다.
 <!-- @end-include -->
 
