@@ -397,8 +397,8 @@
   "models": {
     "providers": {
       "codex": {
-        "premium": "gpt-5.4",
-        "economy": "gpt-5.3-codex-spark",
+        "premium": "gpt-5.6-luna",
+        "economy": "gpt-5.6-luna",
         "default_tier": "premium",
         "default_reasoning_effort": "inherit"
       },

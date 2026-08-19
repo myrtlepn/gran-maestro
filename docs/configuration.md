@@ -339,7 +339,7 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium 모델 |
+| `models.providers.codex.premium` | `"gpt-5.6-luna"` | Codex premium 모델 |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy 모델 |
 | `models.providers.codex.default_tier` | `"premium"` | Codex 기본 티어 |
 | `models.providers.codex.premium_reasoning_effort` | 미설정 | Codex premium 모델의 기본 추론 난이도 |
@@ -374,7 +374,7 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 
 역할에서 `tier`를 지정하면, 해당 프로바이더의 `providers` 정의에서 실제 모델명을 resolve합니다.
 
-예: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.3-codex"`
+예: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.6-luna"`
 
 `tier`를 생략하면 해당 프로바이더의 `default_tier`가 적용됩니다.
 
@@ -395,7 +395,7 @@ Migration은 legacy key를 canonical 구조로 치환하며 두 번 실행해도
 "models": {
   "providers": {
     "codex": {
-      "premium": "gpt-5.3-codex",
+      "premium": "gpt-5.6-luna",
       "economy": "codex-mini",
       "default_tier": "premium",
       "premium_reasoning_effort": "xhigh",

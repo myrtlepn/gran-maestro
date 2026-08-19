@@ -294,7 +294,7 @@ Defines model tiers (premium/economy) per provider.
 
 | Key | Default | Description |
 |----|--------|------|
-| `models.providers.codex.premium` | `"gpt-5.3-codex"` | Codex premium model |
+| `models.providers.codex.premium` | `"gpt-5.6-luna"` | Codex premium model |
 | `models.providers.codex.economy` | `"codex-mini"` | Codex economy model |
 | `models.providers.codex.default_tier` | `"premium"` | Codex default tier |
 | `models.providers.codex.premium_reasoning_effort` | unset | Default reasoning effort for the Codex premium model |
@@ -329,7 +329,7 @@ Specifies the provider and tier for each role. Use an array to assign multiple a
 
 When a role specifies a `tier`, the actual model name is resolved from the provider's `providers` definition.
 
-Example: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.3-codex"`
+Example: `{ provider: "codex", tier: "premium" }` → `providers.codex.premium` → `"gpt-5.6-luna"`
 
 If `tier` is omitted, the provider's `default_tier` is used.
 
@@ -350,7 +350,7 @@ Each agent or role object accepts `reasoning_effort` with `default | inherit | l
 "models": {
   "providers": {
     "codex": {
-      "premium": "gpt-5.3-codex",
+      "premium": "gpt-5.6-luna",
       "economy": "codex-mini",
       "default_tier": "premium",
       "premium_reasoning_effort": "xhigh",
