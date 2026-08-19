@@ -48,7 +48,7 @@ def _resolve_provider_default_model(provider, provider_cfg):
                 return default_model
 
     hardcoded = {
-        "codex": "gpt-5.3-codex",
+        "codex": "gpt-5.6-luna",
         "agy": "agy-default",
         "claude": "claude-sonnet-4-6",
     }

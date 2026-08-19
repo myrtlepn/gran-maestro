@@ -984,7 +984,7 @@ Write → {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role}-
 **`codex` 에이전트 — external lane only**:
 ```bash
 Bash(
-  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex {tier} 2>/dev/null || echo "gpt-5.3-codex");
+  MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex {tier} 2>/dev/null || echo "gpt-5.6-luna");
   command: 'MST_SESSION_ID="{CANONICAL_MST_SESSION_ID}" MST_CONTEXT_JSON="$(MST_CONTEXT_B64="{CANONICAL_MST_CONTEXT_B64}" python3 -c '"'"'import base64,os,sys;s=os.environ["MST_CONTEXT_B64"];MAX_CONTEXT_BYTES=262144;sys.exit("encoded MST context exceeds limit") if len(s)>349528 else None;raw=base64.b64decode(s.encode("ascii"),altchars=b"-_",validate=True);sys.exit("decoded MST context is oversized or non-canonical") if len(raw)>MAX_CONTEXT_BYTES or base64.urlsafe_b64encode(raw).decode("ascii")!=s else None;sys.stdout.buffer.write(raw)'"'"')" python3 {PLUGIN_ROOT}/scripts/mst.py run --task-id {REQ_ID}-{RV_ID}-{role} --provider codex --model "$MODEL" --log-dir {PROJECT_ROOT}/.gran-maestro/requests/{REQ_ID}/reviews/{RV_ID}/{role} --trace {REQ_ID}/{RV_ID}/{role}-review --require-worktree --worktree-dir "$REVIEW_WORKTREE" -- codex exec --approve-for-me -m "$MODEL" -C "$REVIEW_WORKTREE" "$(cat {PROMPT_FILE})" < /dev/null',
   run_in_background: true,
   timeout: {config.timeouts.cli_large_task_ms}

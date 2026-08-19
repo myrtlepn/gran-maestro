@@ -370,7 +370,7 @@ DELEGATION BOUNDARY (MANDATORY)
    ```
 7. **External lane only** — `route=external`인 경우에만 Codex CLI adapter 실행:
    ```bash
-   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.3-codex")
+   MODEL=$(python3 {PLUGIN_ROOT}/scripts/mst.py resolve-model codex default 2>/dev/null || echo "gpt-5.6-luna")
    SANDBOX_ARGS="--approve-for-me"
    [ "${NETWORK_MODE:-false}" = "true" ] && SANDBOX_ARGS="--sandbox danger-full-access"
 
